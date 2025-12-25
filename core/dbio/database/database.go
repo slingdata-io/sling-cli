@@ -471,7 +471,7 @@ func (conn *BaseConn) Init() (err error) {
 		}
 	}
 
-	if string(conn.Type) == "" {
+	if string(conn.GetType()) == "" {
 		return g.Error("Could not determine database type.")
 	}
 
@@ -638,7 +638,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	}
 
 	usePool = os.Getenv("USE_POOL") == "TRUE"
-	// g.Trace("conn.Type: %s", conn.Type)
+	// g.Trace("conn.Type: %s", conn.GetType())
 	// g.Trace("conn.URL: " + conn.Self().GetURL())
 	if conn.Type == "" {
 		return g.Error("Invalid URL? conn.Type needs to be specified")
@@ -778,6 +778,14 @@ func reconnectIfClosed(conn Connection) (err error) {
 	return
 }
 
+func (conn *BaseConn) setDb(db *sqlx.DB) {
+	conn.db = db
+}
+
+func (conn *BaseConn) setTx(tx Transaction) {
+	conn.tx = tx
+}
+
 func (conn *BaseConn) postConnect() {
 
 	conn.SetProp("connected", "true")
@@ -826,12 +834,12 @@ func (conn *BaseConn) GetGormConn(config *gorm.Config) (*gorm.DB, error) {
 
 // GetTemplateValue returns the value of the path
 func (conn *BaseConn) GetTemplateValue(path string) (value string) {
-	return conn.Type.GetTemplateValue(path)
+	return conn.Self().GetType().GetTemplateValue(path)
 }
 
 // LoadTemplates loads the appropriate yaml template
 func (conn *BaseConn) LoadTemplates() (err error) {
-	conn.template, err = conn.Type.Template()
+	conn.template, err = conn.Self().GetType().Template()
 	return
 }
 
@@ -855,7 +863,7 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 	// 	return conn.adbc.BulkExportStream(table)
 	// }
 
-	g.Trace("BulkExportStream not implemented for %s", conn.Type)
+	g.Trace("BulkExportStream not implemented for %s", conn.GetType())
 	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
 }
 
@@ -864,7 +872,7 @@ func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (c
 	if conn.UseADBC() {
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
-	g.Trace("BulkImportStream not implemented for %s", conn.Type)
+	g.Trace("BulkImportStream not implemented for %s", conn.GetType())
 	return conn.Self().InsertBatchStream(tableFName, ds)
 }
 
@@ -1256,7 +1264,7 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (resul
 	eG := g.ErrorGroup{}
 	for _, q := range qs {
 		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
-		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+		for _, sql := range ParseSQLMultiStatements(q, conn.GetType()) {
 			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
 				sql = sql + env.NoDebugKey
 			}
@@ -1302,7 +1310,7 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 		return
 	}
 
-	for _, sql := range ParseSQLMultiStatements(sql, conn.Type) {
+	for _, sql := range ParseSQLMultiStatements(sql, conn.GetType()) {
 
 		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
 		if err != nil {
@@ -1488,7 +1496,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
 		if fc := colType.FetchedColumn; fc != nil {
-			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite, dbio.TypeDbD1) && fc.Type != "" {
+			if g.In(conn.Self().GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite, dbio.TypeDbD1) && fc.Type != "" {
 				col.Type = fc.Type
 				col.Sourced = fc.Sourced
 			}
@@ -1517,7 +1525,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		}
 
 		if colType.IsSourced() || col.Sourced {
-			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
+			if col.IsString() && g.In(conn.Self().GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
 				if colType.Length > 0 {
 					col.DbPrecision = colType.Length
@@ -1544,7 +1552,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 
 			// some instances where the precision is returned too small.
 			if col.DbPrecision > env.DdlMinDecLength {
-				if g.In(conn.GetType(), dbio.TypeDbOracle) {
+				if g.In(conn.Self().GetType(), dbio.TypeDbOracle) {
 					// only mark as sourced is scale is specified
 					// https://github.com/slingdata-io/sling-cli/issues/584
 					col.Sourced = col.DbScale > 0
@@ -1570,7 +1578,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 }
 
 func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.ColumnType) {
-	return iop.NativeTypeToGeneral(name, dbType, conn.GetType())
+	return iop.NativeTypeToGeneral(name, dbType, conn.Self().GetType())
 }
 
 // GetSQLColumns return columns from a sql query result
@@ -1637,7 +1645,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 
 	columns = iop.Columns{}
 	colData, err := conn.Self().SubmitTemplate(
-		"single", conn.template.Metadata, "columns",
+		"single", conn.Template().Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
 	if err != nil {
@@ -1667,7 +1675,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 				return
 			}
 
-			if conn.Type == dbio.TypeDbSnowflake {
+			if conn.GetType() == dbio.TypeDbSnowflake {
 				rec["data_type"], rec["precision"], rec["scale"] = parseSnowflakeDataType(rec)
 			}
 
@@ -1683,7 +1691,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	} else {
 		colTypes = lo.Map(colData.Records(), func(rec map[string]interface{}, i int) ColumnType {
 
-			if conn.Type == dbio.TypeDbSnowflake {
+			if conn.GetType() == dbio.TypeDbSnowflake {
 				rec["data_type"], rec["precision"], rec["scale"] = parseSnowflakeDataType(rec)
 			}
 
@@ -1725,7 +1733,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 }
 
 func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns iop.Columns, err error) {
-	table, err := ParseTableName(tableFName, conn.Type)
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
 		return columns, g.Error(err, "could not parse table name: "+tableFName)
 	}
@@ -1737,7 +1745,7 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns i
 // include schema and table, example: `schema1.table2`
 // fields should be `schema_name|table_name|table_type|column_name|data_type|column_id`
 func (conn *BaseConn) GetColumnsFull(tableFName string) (iop.Dataset, error) {
-	table, err := ParseTableName(tableFName, conn.Type)
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
@@ -1750,7 +1758,7 @@ func (conn *BaseConn) GetColumnsFull(tableFName string) (iop.Dataset, error) {
 
 // GetPrimaryKeys returns primark keys for given table.
 func (conn *BaseConn) GetPrimaryKeys(tableFName string) (iop.Dataset, error) {
-	table, err := ParseTableName(tableFName, conn.Type)
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
@@ -1763,7 +1771,7 @@ func (conn *BaseConn) GetPrimaryKeys(tableFName string) (iop.Dataset, error) {
 
 // GetIndexes returns indexes for given table.
 func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
-	table, err := ParseTableName(tableFName, conn.Type)
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
@@ -1813,7 +1821,7 @@ func (conn *BaseConn) GetMaxValue(table Table, colName string) (value any, maxCo
 // GetDDL returns DDL for given table.
 func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
-	table, err := ParseTableName(tableFName, conn.Type)
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
 		return "", g.Error(err, "could not parse table name: "+tableFName)
 	}
@@ -1852,7 +1860,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
 // CreateTemporaryTable creates a temp table based on provided columns
 func (conn *BaseConn) CreateTemporaryTable(tableName string, cols iop.Columns) (err error) {
-	table, err := ParseTableName(tableName, conn.Type)
+	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {
 		return g.Error(err, "Could not parse table name: "+tableName)
 	}
@@ -1876,7 +1884,7 @@ func (conn *BaseConn) CreateTemporaryTable(tableName string, cols iop.Columns) (
 // `tableName` should have 'schema.table' format
 func (conn *BaseConn) CreateTable(tableName string, cols iop.Columns, tableDDL string) (err error) {
 
-	table, err := ParseTableName(tableName, conn.Type)
+	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {
 		return g.Error(err, "Could not parse table name: "+tableName)
 	}
@@ -1976,8 +1984,8 @@ func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableN
 		}
 	}
 
-	currDatabase := conn.Type.String()
-	currDbData, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
+	currDatabase := conn.Self().GetType().String()
+	currDbData, err := conn.SubmitTemplate("single", conn.Template().Metadata, "current_database", g.M())
 	if err == nil {
 		currDatabase = cast.ToString(currDbData.FirstVal())
 	}
@@ -1990,7 +1998,7 @@ func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableN
 		data, err = conn.Self().GetTablesAndViews(schemaName)
 	case SchemataLevelColumn:
 		data, err = conn.SubmitTemplate(
-			"single", conn.template.Metadata, "schemata",
+			"single", conn.Template().Metadata, "schemata",
 			values,
 		)
 	}
@@ -2139,7 +2147,7 @@ func (conn *BaseConn) ProcessTemplate(level, text string, values map[string]inte
 			err = g.Error("missing 'tables' key")
 		} else {
 			for _, tableFName := range cast.ToStringSlice(tableFNames) {
-				table, err := ParseTableName(tableFName, conn.Type)
+				table, err := ParseTableName(tableFName, conn.GetType())
 				if err != nil {
 					return "", g.Error(err, "could not parse table name: "+tableFName)
 				}
@@ -2404,7 +2412,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	if val := conn.GetProp("column_typing"); val != "" {
 		g.Unmarshal(val, &ct)
 	}
-	return col.GetNativeType(conn.GetType(), ct)
+	return col.GetNativeType(conn.Self().GetType(), ct)
 }
 
 // GenerateDDL genrate a DDL based on a dataset
@@ -2420,7 +2428,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	columns := data.Columns
 
 	// re-order columns for starrocks (keys first)
-	if g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+	if g.In(conn.Self().GetType(), dbio.TypeDbStarRocks) {
 		orderedColumns := iop.Columns{}
 
 		for _, col := range columns {
@@ -2439,7 +2447,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 
 	// if temporary, and SQL Server, set factor for nvarchar
-	if temporary && conn.GetType().IsSQLServer() {
+	if temporary && conn.Self().GetType().IsSQLServer() {
 		// modify column typing to increase factor for temp table
 		// see https://github.com/slingdata-io/sling-cli/issues/554
 		origColTyping := conn.GetProp("column_typing")
@@ -2975,7 +2983,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns, isTemp bool) (ok bool, ddlParts []string, err error) {
 	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
 		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1) {
+	} else if g.In(conn.Self().GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1) {
 		return false, ddlParts, nil
 	}
 
@@ -3065,7 +3073,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		if len(pKey) == 0 {
 			pKey = table.Columns.GetKeys(iop.UniqueKey).Names()
 		}
-		if len(pKey) == 0 && g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+		if len(pKey) == 0 && g.In(conn.Self().GetType(), dbio.TypeDbStarRocks) {
 			err = g.Error("unable to modify starrocks schema without primary key or unique key")
 			return
 		}
@@ -3123,7 +3131,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if conn.GetType().IsSQLServer() {
+		if conn.Self().GetType().IsSQLServer() {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
@@ -3187,7 +3195,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	}()
 
 	if g.In(conn.Type, dbio.TypeDbIceberg) {
-		g.Warn("cannot compare checksums for %s", conn.Type)
+		g.Warn("cannot compare checksums for %s", conn.GetType())
 		return nil
 	}
 

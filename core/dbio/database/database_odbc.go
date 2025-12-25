@@ -1,11 +1,12 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 
 	_ "github.com/slingdata-io/godbc"
 )
@@ -13,18 +14,23 @@ import (
 // ODBCConn is an ODBC connection
 type ODBCConn struct {
 	BaseConn
-	URL        string
-	driverType dbio.Type // Underlying database type for templates
+	URL          string
+	templateType dbio.Type // Underlying database type for templates
+	templateConn Connection
 }
 
 // Init initializes the ODBC connection
-func (conn *ODBCConn) Init() error {
+func (conn *ODBCConn) Init() (err error) {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbODBC
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
-	conn.driverType = conn.GetODBCDriverType()
+	conn.templateType = conn.GetODBCTemplateType()
+	conn.templateConn, err = conn.GetODBCTemplateConn()
+	if err != nil && g.IsDebug() {
+		g.Warn("could get template conn instance for %s: %s", conn.GetType(), err.Error())
+	}
 
 	if err := conn.BaseConn.Init(); err != nil {
 		return err
@@ -34,9 +40,9 @@ func (conn *ODBCConn) Init() error {
 	return conn.LoadTemplates()
 }
 
-// GetODBCDriverType detects the underlying database type from DSN or template property
+// GetODBCTemplateType detects the underlying database type from DSN or template property
 // This allows ODBC to use the correct SQL syntax for the underlying database
-func (conn *ODBCConn) GetODBCDriverType() dbio.Type {
+func (conn *ODBCConn) GetODBCTemplateType() dbio.Type {
 
 	// Detect driver type from connection or template property
 	connString := conn.GetProp("conn_string")
@@ -91,6 +97,73 @@ func (conn *ODBCConn) GetODBCDriverType() dbio.Type {
 	return dbio.TypeDbODBC // Fallback to generic ODBC template
 }
 
+// GetODBCTemplateConn is needed for accessing the template connection logic
+// such as GenerateMergeSQL
+func (conn *ODBCConn) GetODBCTemplateConn() (tConn Connection, err error) {
+	if conn.GetType() == dbio.TypeDbODBC {
+		return conn, nil
+	}
+
+	tConn, err = NewConnContext(conn.context.Ctx, g.F("%s://", conn.GetType()))
+	if err != nil {
+		return nil, g.Error(err, "could not create template conn")
+	}
+
+	return tConn, nil
+}
+
+func (conn *ODBCConn) Connect(timeOut ...int) (err error) {
+	if err = conn.BaseConn.Connect(timeOut...); err != nil {
+		return err
+	}
+
+	if conn.templateConn != nil {
+		// set db conn instance
+		conn.templateConn.Base().setDb(conn.db)
+		conn.templateConn.Base().postConnect()
+	}
+
+	return nil
+}
+
+// BeginContext starts a transaction and propagates it to the templateConn
+func (conn *ODBCConn) BeginContext(ctx context.Context, options ...*sql.TxOptions) (err error) {
+	if err = conn.BaseConn.BeginContext(ctx, options...); err != nil {
+		return err
+	}
+
+	// Propagate transaction to templateConn so it uses the same transaction
+	if conn.templateConn != nil && conn.tx != nil {
+		conn.templateConn.Base().setTx(conn.tx)
+	}
+
+	return nil
+}
+
+// Commit commits the transaction and clears it from templateConn
+func (conn *ODBCConn) Commit() (err error) {
+	err = conn.BaseConn.Commit()
+
+	// Clear transaction from templateConn
+	if conn.templateConn != nil {
+		conn.templateConn.Base().setTx(nil)
+	}
+
+	return err
+}
+
+// Rollback rolls back the transaction and clears it from templateConn
+func (conn *ODBCConn) Rollback() (err error) {
+	err = conn.BaseConn.Rollback()
+
+	// Clear transaction from templateConn
+	if conn.templateConn != nil {
+		conn.templateConn.Base().setTx(nil)
+	}
+
+	return err
+}
+
 // LoadTemplates loads the appropriate yaml template
 // For ODBC, it merges the driver-specific template with the ODBC template
 // Driver template is base, ODBC template overrides for ODBC-specific behavior
@@ -102,10 +175,11 @@ func (conn *ODBCConn) LoadTemplates() error {
 	}
 
 	// If we have a driver type, start with driver template as base
-	if conn.driverType != "" {
-		driverTemplate, err := conn.driverType.Template()
+	if conn.templateType != "" {
+		driverTemplate, err := conn.templateType.Template()
 		if err != nil {
-			return g.Error("could not load driver template for %s: %v.", conn.driverType, err)
+			g.Warn("could not load driver template for %s: %s. See https://docs.slingdata.io/ for creating a custom ODBC connection template.", conn.templateType, err.Error())
+			goto loadBase
 		}
 
 		// Start with driver template, then overlay ODBC-specific values
@@ -131,11 +205,12 @@ func (conn *ODBCConn) LoadTemplates() error {
 		// ODBC must keep its type for proper connection handling
 		// We only use the driver template for SQL syntax
 
-		g.Debug("ODBC using %s templates for SQL syntax", conn.driverType)
+		g.Debug("ODBC using %s templates for SQL syntax", conn.templateType)
 		return nil
 	}
 
 	// load with base
+loadBase:
 	conn.template, err = dbio.TypeDbODBC.Template(true)
 	if err != nil {
 		return g.Error(err, "could not load ODBC template")
@@ -148,8 +223,8 @@ func (conn *ODBCConn) LoadTemplates() error {
 // This allows ODBC to use the correct SQL dialect (e.g., TOP for SQL Server)
 // while keeping the actual connection handling as ODBC
 func (conn *ODBCConn) GetType() dbio.Type {
-	if conn.driverType != "" {
-		return conn.driverType
+	if conn.templateType != "" {
+		return conn.templateType
 	}
 	return conn.BaseConn.Type
 }
@@ -193,22 +268,14 @@ func (conn *ODBCConn) GetURL(newURL ...string) string {
 	return conn.GetProp("conn_string")
 }
 
-// BulkImportStream is not supported for ODBC (read-only connector)
-func (conn *ODBCConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	return 0, g.Error("ODBC connector is read-only and does not support bulk import")
+func (conn *ODBCConn) Close() error {
+	conn.templateConn = nil
+	return conn.BaseConn.Close()
 }
 
-// BulkImportFlow is not supported for ODBC (read-only connector)
-func (conn *ODBCConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
-	return 0, g.Error("ODBC connector is read-only and does not support bulk import")
-}
-
-// InsertBatchStream is not supported for ODBC (read-only connector)
-func (conn *ODBCConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	return 0, g.Error("ODBC connector is read-only and does not support insert operations")
-}
-
-// InsertStream is not supported for ODBC (read-only connector)
-func (conn *ODBCConn) InsertStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	return 0, g.Error("ODBC connector is read-only and does not support insert operations")
+func (conn *ODBCConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	if conn.templateConn != nil {
+		return conn.templateConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
+	}
+	return conn.BaseConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
 }
