@@ -1,0 +1,174 @@
+# Test MSSQL BIT type casting to existing target table column types
+# Uses a pipeline with group step to loop through postgres, mysql, mariadb
+# Tests that BIT values are correctly cast to INTEGER, VARCHAR, and BOOLEAN columns
+# Mode: truncate (target tables pre-exist)
+
+steps:
+  # 1. Create source table in MSSQL with BIT column
+  - id: create_source
+    connection: mssql
+    query: |
+      IF OBJECT_ID('dbo.bool_cast_source', 'U') IS NOT NULL DROP TABLE dbo.bool_cast_source;
+      CREATE TABLE dbo.bool_cast_source (
+        id INT PRIMARY KEY,
+        is_active BIT
+      );
+      INSERT INTO dbo.bool_cast_source (id, is_active) VALUES
+        (1, 1),
+        (2, 0),
+        (3, 1),
+        (4, 0),
+        (5, NULL);
+
+  - log: "Created MSSQL source table with BIT column"
+
+  # 2. Loop through target connections
+  - type: group
+    id: target_loop
+    loop: [postgres, mysql, mariadb, starrocks]
+    steps:
+      - log: "Processing target: {loop.value}"
+
+      # Store schema based on target (public for postgres, mysql for mysql/mariadb)
+      - type: store
+        key: schema
+        value: >
+          {
+            loop.value == "mariadb" ? "mariadb" :
+            loop.value == "mysql" ? "mysql" :
+            loop.value == "mssql" ? "dbo" :
+            loop.value == "clickhouse" ? "default" :
+            "public"
+          }
+
+      # 2a. Create target tables with different column types
+      - id: create_targets
+        connection: "{loop.value}"
+        query: |
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_int;
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_varchar;
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_bool;
+          CREATE TABLE {store.schema}.bool_cast_int (id INTEGER, is_active INTEGER);
+          CREATE TABLE {store.schema}.bool_cast_varchar (id INTEGER, is_active VARCHAR(10));
+          CREATE TABLE {store.schema}.bool_cast_bool (id INTEGER, is_active BOOLEAN);
+
+      # 2b. Run replication inline (to use loop.value for target)
+      - replication:
+          source: mssql
+          target: "{loop.value}"
+          defaults:
+            mode: truncate
+          streams:
+            dbo.bool_cast_source:
+              object: "{store.schema}.bool_cast_int"
+            bool_cast_varchar:
+              sql: select * from dbo.bool_cast_source
+              object: "{store.schema}.bool_cast_varchar"
+            bool_cast_bool:
+              sql: select * from dbo.bool_cast_source
+              object: "{store.schema}.bool_cast_bool"
+        on_failure: abort
+
+      # 2c. Verify INTEGER results
+      - connection: "{loop.value}"
+        query: SELECT id, is_active FROM {store.schema}.bool_cast_int ORDER BY id
+        into: result_int
+
+      - log: |
+          bool_cast_int ({loop.value}) data:
+          {pretty_table(store.result_int)}
+
+      # Check INTEGER values
+      - check: length(store.result_int) == 5
+        failure_message: "Expected 5 rows in bool_cast_int but found {length(store.result_int)}"
+
+      - check: int_parse(store.result_int[0].is_active) == 1
+        failure_message: "bool_cast_int row 1 is_active should be 1, got {store.result_int[0].is_active}"
+
+      - check: int_parse(store.result_int[1].is_active) == 0
+        failure_message: "bool_cast_int row 2 is_active should be 0, got {store.result_int[1].is_active}"
+
+      - check: int_parse(store.result_int[2].is_active) == 1
+        failure_message: "bool_cast_int row 3 is_active should be 1, got {store.result_int[2].is_active}"
+
+      - check: int_parse(store.result_int[3].is_active) == 0
+        failure_message: "bool_cast_int row 4 is_active should be 0, got {store.result_int[3].is_active}"
+
+      - check: store.result_int[4].is_active == nil
+        failure_message: "bool_cast_int row 5 is_active should be NULL, got {store.result_int[4].is_active}"
+
+      - log: "SUCCESS: BIT correctly cast to INTEGER for {loop.value}"
+
+      # 2d. Verify VARCHAR results
+      - connection: "{loop.value}"
+        query: SELECT id, is_active FROM {store.schema}.bool_cast_varchar ORDER BY id
+        into: result_varchar
+
+      - log: |
+          bool_cast_varchar ({loop.value}) data:
+          {pretty_table(store.result_varchar)}
+
+      # Check VARCHAR values
+      - check: length(store.result_varchar) == 5
+        failure_message: "Expected 5 rows in bool_cast_varchar but found {length(store.result_varchar)}"
+
+      - check: store.result_varchar[0].is_active == "true"
+        failure_message: "bool_cast_varchar row 1 is_active should be 'true', got '{store.result_varchar[0].is_active}'"
+
+      - check: store.result_varchar[1].is_active == "false"
+        failure_message: "bool_cast_varchar row 2 is_active should be 'false', got '{store.result_varchar[1].is_active}'"
+
+      - check: store.result_varchar[2].is_active == "true"
+        failure_message: "bool_cast_varchar row 3 is_active should be 'true', got '{store.result_varchar[2].is_active}'"
+
+      - check: store.result_varchar[3].is_active == "false"
+        failure_message: "bool_cast_varchar row 4 is_active should be 'false', got '{store.result_varchar[3].is_active}'"
+
+      - check: store.result_varchar[4].is_active == nil
+        failure_message: "bool_cast_varchar row 5 is_active should be NULL, got '{store.result_varchar[4].is_active}'"
+
+      - log: "SUCCESS: BIT correctly cast to VARCHAR for {loop.value}"
+
+      # 2e. Verify BOOLEAN results
+      - connection: "{loop.value}"
+        query: SELECT id, is_active FROM {store.schema}.bool_cast_bool ORDER BY id
+        into: result_bool
+
+      - log: |
+          bool_cast_bool ({loop.value}) data:
+          {pretty_table(store.result_bool)}
+
+      # Check BOOLEAN values
+      - check: length(store.result_bool) == 5
+        failure_message: "Expected 5 rows in bool_cast_bool but found {length(store.result_bool)}"
+
+      - check: bool_parse(store.result_bool[0].is_active) == true
+        failure_message: "bool_cast_bool row 1 is_active should be true, got {store.result_bool[0].is_active}"
+
+      - check: bool_parse(store.result_bool[1].is_active) == false
+        failure_message: "bool_cast_bool row 2 is_active should be false, got {store.result_bool[1].is_active}"
+
+      - check: bool_parse(store.result_bool[2].is_active) == true
+        failure_message: "bool_cast_bool row 3 is_active should be true, got {store.result_bool[2].is_active}"
+
+      - check: bool_parse(store.result_bool[3].is_active) == false
+        failure_message: "bool_cast_bool row 4 is_active should be false, got {store.result_bool[3].is_active}"
+
+      - check: store.result_bool[4].is_active == nil
+        failure_message: "bool_cast_bool row 5 is_active should be NULL, got {store.result_bool[4].is_active}"
+
+      - log: "SUCCESS: BIT correctly cast to BOOLEAN for {loop.value}"
+
+      # 2f. Cleanup target tables
+      - connection: "{loop.value}"
+        query: |
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_int;
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_varchar;
+          DROP TABLE IF EXISTS {store.schema}.bool_cast_bool;
+
+  # 3. Cleanup source table
+  - connection: mssql
+    query: |
+      IF OBJECT_ID('dbo.bool_cast_source', 'U') IS NOT NULL DROP TABLE dbo.bool_cast_source;
+
+  - log: "Pipeline completed successfully"
