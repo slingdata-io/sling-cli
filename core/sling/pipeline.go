@@ -10,7 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type Pipeline struct {
@@ -25,9 +25,10 @@ type Pipeline struct {
 	FileName    string                 `json:"-"`
 	Body        string                 `json:"body,omitempty" yaml:"-"` // raw body of pipeline
 
-	state  *PipelineState
-	steps  Hooks
-	execID string
+	stepYamlNodes []*yaml.Node // to maintain order
+	state         *PipelineState
+	steps         Hooks
+	execID        string
 }
 
 func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) {
@@ -104,18 +105,54 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		return
 	}
 
+	// to maintain order using yaml.Node
+	var rootNode yaml.Node
+	err = yaml.Unmarshal([]byte(content), &rootNode)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
+	// rootNode is a DocumentNode, its Content[0] is the actual mapping
+	if rootNode.Kind == yaml.DocumentNode && len(rootNode.Content) > 0 {
+		docNode := rootNode.Content[0]
+		if docNode.Kind == yaml.MappingNode {
+			// Iterate key-value pairs (alternating in Content)
+			for i := 0; i < len(docNode.Content); i += 2 {
+				keyNode := docNode.Content[i]
+				valueNode := docNode.Content[i+1]
+
+				if keyNode.Value == "steps" {
+					if valueNode.Kind == yaml.SequenceNode {
+						pipeline.stepYamlNodes = make([]*yaml.Node, len(valueNode.Content))
+						for j, stepNode := range valueNode.Content {
+							pipeline.stepYamlNodes[j] = stepNode
+						}
+					} else {
+						return nil, g.Error("steps value is not a sequence")
+					}
+				}
+			}
+		}
+	}
+
 	state, err := pipeline.RuntimeState()
 	if err != nil {
 		return nil, g.Error(err, "could not render runtime state")
 	}
 
 	for i, stepRaw := range pipeline.Steps {
+		var yamlNode *yaml.Node
+		if i < len(pipeline.stepYamlNodes) {
+			yamlNode = pipeline.stepYamlNodes[i]
+		}
 		opts := ParseOptions{
-			index:   i,
-			state:   state,
-			kind:    HookKindStep,
-			md5:     g.MD5(g.Marshal(stepRaw)),
-			context: pipeline.Context,
+			index:    i,
+			state:    state,
+			kind:     HookKindStep,
+			md5:      g.MD5(g.Marshal(stepRaw)),
+			context:  pipeline.Context,
+			yamlNode: yamlNode,
 		}
 		step, err := ParseHook(stepRaw, opts)
 		if err != nil {
