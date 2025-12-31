@@ -89,17 +89,17 @@ hooks:
 
     - type: log
       message: |
-        bool_test1 column types (should be integer):
+        bool_test1 column types (should be smallint):
         {pretty_table(store.test1_column_types)}
 
-    # Verify boolean columns are stored as integer
+    # Verify boolean columns are stored as smallint
     - type: check
-      check: store.test1_column_types[0].data_type == "integer"
-      failure_message: "bool_test1.is_active should be 'integer', got '{store.test1_column_types[0].data_type}'"
+      check: store.test1_column_types[0].data_type == "smallint"
+      failure_message: "bool_test1.is_active should be 'smallint', got '{store.test1_column_types[0].data_type}'"
 
     - type: check
-      check: store.test1_column_types[1].data_type == "integer"
-      failure_message: "bool_test1.is_verified should be 'integer', got '{store.test1_column_types[1].data_type}'"
+      check: store.test1_column_types[1].data_type == "smallint"
+      failure_message: "bool_test1.is_verified should be 'smallint', got '{store.test1_column_types[1].data_type}'"
 
     # Verify data values for bool_test1
     - type: query
