@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
+
+var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*[mGKHJA-Z]`)
 
 type testCase struct {
 	ID      int               `yaml:"id"`
@@ -251,8 +254,8 @@ func TestCLI(t *testing.T) {
 				}
 
 				// check output
-				stderr := p.Stderr.String()
-				stdout := p.Stdout.String()
+				stderr := ansiEscapeRegex.ReplaceAllString(p.Stderr.String(), "")
+				stdout := ansiEscapeRegex.ReplaceAllString(p.Stdout.String(), "")
 				for _, contains := range tt.OutputContains {
 					if contains == "" {
 						continue
