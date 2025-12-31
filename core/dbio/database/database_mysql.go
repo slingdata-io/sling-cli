@@ -592,3 +592,23 @@ func (conn *MySQLConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFiel
 
 	return
 }
+
+func processMySqlLikeInsertRow(columns iop.Columns, row []any) []any {
+	for i := range row {
+		if row[i] == nil {
+			continue
+		}
+
+		col := columns[i]
+		if col.Type == iop.BoolType {
+			// MySQL/MariaDB store booleans as TINYINT, StarRocks uses BOOLEAN
+			// Convert boolean/string values to integer 0/1
+			if cast.ToBool(row[i]) {
+				row[i] = 1
+			} else {
+				row[i] = 0
+			}
+		}
+	}
+	return row
+}

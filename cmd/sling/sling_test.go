@@ -777,9 +777,6 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 
 		failed := false
-		isMySQLLike := func(t dbio.Type) bool {
-			return t == dbio.TypeDbMySQL || t == dbio.TypeDbMariaDB || t == dbio.TypeDbStarRocks
-		}
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
@@ -791,10 +788,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 			// correct correctType
 			switch {
-			case isMySQLLike(srcType) && tgtType == dbio.TypeDbPostgres:
-				if strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // mysql/mariadb doesn't have bool
-				}
+			case srcType.IsMySQLLike() && tgtType == dbio.TypeDbPostgres:
 				if strings.EqualFold(colName, "update_dt") {
 					correctType = iop.TimestampType // mysql/mariadb doesn't have time zone
 				}
@@ -804,13 +798,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if srcType == dbio.TypeDbStarRocks && strings.EqualFold(colName, "json_data") {
 					correctType = iop.TextType // starrocks's `json` type is `varchar(65500)`
 				}
-			case isMySQLLike(tgtType):
-				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // mysql/mariadb doesn't have bool
-				}
-				if correctType == iop.BoolType {
-					correctType = iop.StringType // mysql/mariadb doesn't have bool
-				}
+			case tgtType.IsMySQLLike():
 				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
 					correctType = iop.DatetimeType // mysql/mariadb uses datetime
 				}

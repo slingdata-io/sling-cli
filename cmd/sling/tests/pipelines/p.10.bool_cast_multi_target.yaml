@@ -67,6 +67,13 @@ steps:
             bool_cast_bool:
               sql: select * from dbo.bool_cast_source
               object: "{store.schema}.bool_cast_bool"
+            bool_cast_integer:
+              sql: select * from dbo.bool_cast_source
+              object: "{store.schema}.bool_cast_integer"
+              target_options:
+                column_typing:
+                  boolean:
+                    cast_as: integer
         on_failure: abort
 
       # 2c. Verify INTEGER results

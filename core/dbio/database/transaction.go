@@ -330,6 +330,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processTrinoInsertRow(bColumns, row)
 			case conn.GetType() == dbio.TypeDbProton:
 				row = processProtonInsertRow(bColumns, row)
+			case conn.GetType().IsMySQLLike():
+				row = processMySqlLikeInsertRow(bColumns, row)
 			case conn.GetType().IsSQLServer():
 				// row = processSQLServerInsertRow(bColumns, row)
 			}

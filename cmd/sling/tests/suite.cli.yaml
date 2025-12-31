@@ -1366,6 +1366,11 @@
   run: |
     sling run --debug -p cmd/sling/tests/pipelines/p.10.bool_cast_multi_target.yaml
   output_contains:
+    # verify order of streams
+    - '[1 / 4] running stream dbo.bool_cast_source'
+    - '[2 / 4] running stream bool_cast_varchar'
+    - '[3 / 4] running stream bool_cast_bool'
+    - '[4 / 4] running stream bool_cast_integer'
     - 'SUCCESS: BIT correctly cast to INTEGER for postgres'
     - 'SUCCESS: BIT correctly cast to VARCHAR for postgres'
     - 'SUCCESS: BIT correctly cast to BOOLEAN for postgres'

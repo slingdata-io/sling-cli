@@ -2299,6 +2299,11 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
 		// assume bool, convert from 1/0 to true/false
 		stringType := conn.GetType().GetTemplateValue("general_type_map.string")
+		if g.In(conn.GetType(), dbio.TypeDbMySQL, dbio.TypeDbMariaDB) {
+			// MySQL/MariaDB needs `CAST(column AS CHAR(length))`
+			stringType = strings.ReplaceAll(stringType, "varchar()", "char()")
+		}
+
 		stringType = strings.ReplaceAll(stringType, "()", "(100)")
 		castExpr := g.R(castFunc, "field", qName, "type", stringType)
 		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col_as_string} end`

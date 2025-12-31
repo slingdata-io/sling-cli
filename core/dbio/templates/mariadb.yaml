@@ -432,7 +432,7 @@ native_type_map:
   time: time
   timestamp: timestamp
   tinyblob: text
-  tinyint: smallint
+  tinyint: bool
   tinytext: text
   "unsigned bigint": "decimal(28,0)"
   "unsigned int": bigint
@@ -446,7 +446,7 @@ native_type_map:
 general_type_map:
   bigint: bigint
   binary: varbinary
-  bool: "char(5)"
+  bool: tinyint
   date: date
   datetime: "datetime(6)"
   decimal: "decimal(,)"

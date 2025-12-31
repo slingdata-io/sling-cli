@@ -246,6 +246,11 @@ func (t Type) IsUnknown() bool {
 	return t.Kind() == KindUnknown
 }
 
+// IsMySQLLike returns true is mysql flavor
+func (t Type) IsMySQLLike() bool {
+	return g.In(t, TypeDbMySQL, TypeDbMariaDB, TypeDbStarRocks)
+}
+
 // IsSQLServer returns true is sql server flavor
 func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)
