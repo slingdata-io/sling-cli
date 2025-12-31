@@ -600,7 +600,8 @@ func processMySqlLikeInsertRow(columns iop.Columns, row []any) []any {
 		}
 
 		col := columns[i]
-		if col.Type == iop.BoolType {
+		if col.Type == iop.BoolType &&
+			(strings.Contains(col.DbType, "int") || strings.Contains(col.DbType, "bool")) {
 			// MySQL/MariaDB store booleans as TINYINT, StarRocks uses BOOLEAN
 			// Convert boolean/string values to integer 0/1
 			if cast.ToBool(row[i]) {

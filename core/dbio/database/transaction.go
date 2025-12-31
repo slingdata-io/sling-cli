@@ -389,6 +389,13 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				err = g.Error(err, "could not get column list")
 				return
 			}
+
+			// set db type for casting (especially bools)
+			for i := range batch.Columns {
+				if col := columns.GetColumn(batch.Columns[i].Name); col != nil {
+					batch.Columns[i].DbType = col.DbType
+				}
+			}
 			mux.Unlock()
 
 			// err = batch.Shape(columns)
