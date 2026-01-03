@@ -3833,3 +3833,11 @@ func applyColumnTypingToDf(conn Connection, df *iop.Dataflow) (err error) {
 
 	return nil
 }
+
+// ODBCConn is an ODBC connection
+type ODBCConn struct {
+	BaseConn
+	URL          string
+	templateType dbio.Type // Underlying database type for templates
+	templateConn Connection
+}
