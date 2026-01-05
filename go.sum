@@ -345,8 +345,8 @@ github.com/flarco/bigquery v0.0.9 h1:WfxO6XuuHZTJV+55Bq24FhdHYpmAOzgVk9xOcJpEecY
 github.com/flarco/bigquery v0.0.9/go.mod h1:IpRSw4quaXxHjFyDSXUo7B6v+XcNF2pSmnNfeqXa/gM=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad h1:z5mgsXmNXsgskClg/s6zelILFihJTyK6x7+zX1jUgyU=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad/go.mod h1:mnsep6/uctUEgRONJy1pQdb17s/lRtqgcZZZV/WPdkc=
-github.com/flarco/iceberg-go v0.0.0-20260105144704-8c82a24925a1 h1:UpVt/Mo3ZcAUCWxQ1hc5m+5XGBrlT1ptnZHqsgHUHjY=
-github.com/flarco/iceberg-go v0.0.0-20260105144704-8c82a24925a1/go.mod h1:V32CmlTVGkMYYL3QFpviDP2QsW6u6eqUeQr8KnGiVCY=
+github.com/flarco/iceberg-go v0.0.0-20260105175128-f16b74585ee2 h1:k01grALOonWx3nBt0LfbUqY39kjaIXaiNP+2LHNuJYY=
+github.com/flarco/iceberg-go v0.0.0-20260105175128-f16b74585ee2/go.mod h1:S7rRApCtYThojNe57sOBhV/ZmH7EMfgEyou4TBEdQHU=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/francoispqt/gojay v1.2.13 h1:d2m3sFjloqoIUQU3TsHBgj6qg/BVGlTBeHDUmyJnXKk=
 github.com/francoispqt/gojay v1.2.13/go.mod h1:ehT5mTG4ua4581f1++1WLG0vPdaA9HaiDsoyrBGkyDY=
@@ -942,8 +942,8 @@ github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 h1:JIAuq3EEf9cgbU6AtGPK4CTG3Zf6CKMNqf0MHTggAUA=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966/go.mod h1:sUM3LWHvSMaG192sy56D9F7CNvL7jUJVXoqM1QKLnog=
-github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105171646-c7b804dc77d1 h1:cpNnjyPH/V+1hsaKsHlzK5ICko/POCmUDKTJgu+LVj8=
-github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105171646-c7b804dc77d1/go.mod h1:FxeVw2tiKoUgPdOOXt4pwi2BuuQ17Cop7vnJTQL/z2s=
+github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587 h1:IRiAvb/AGt2qii99UwF8QvhBAs8H+/Udu2GgVWFg3ys=
+github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587/go.mod h1:FxeVw2tiKoUgPdOOXt4pwi2BuuQ17Cop7vnJTQL/z2s=
 github.com/slingdata-io/godbc v0.0.3 h1:yj+Z/E6Hud2a/XKNIxhx3qggHSHpt70WfesgkWn6rj8=
 github.com/slingdata-io/godbc v0.0.3/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
@@ -981,9 +981,6 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/substrait-io/substrait v0.75.0 h1:26l61irh5kQBLeDUcgDLnm+p4s2dJloHU6PPK0RAiB0=
 github.com/substrait-io/substrait v0.75.0/go.mod h1:MPFNw6sToJgpD5Z2rj0rQrdP/Oq8HG7Z2t3CAEHtkHw=
-github.com/substrait-io/substrait-go v0.7.0 h1:53yi73t4wW383+RD1YuhXhbjhP1KzF9GCxPC7SsRlqc=
-github.com/substrait-io/substrait-go/v4 v4.4.0 h1:mFArMNFxlOLyTuhPcaPzZCwYh6kUopTExTy7XOqtYBM=
-github.com/substrait-io/substrait-go/v4 v4.4.0/go.mod h1:GzpaFqO5VRtMkEjATgRxGK5p82OmEtCmszAVYxE+iWc=
 github.com/substrait-io/substrait-go/v7 v7.2.0 h1:49QFXeydO8OZyedzWOwHG0fG4BcXXlOwsbMalPwGWpA=
 github.com/substrait-io/substrait-go/v7 v7.2.0/go.mod h1:4GZ6c+UaojOGEG4ynyHrDFFmWGCVtbKdfzp6LXWdHmc=
 github.com/substrait-io/substrait-protobuf/go v0.75.0 h1:6SjuEESDB8oOhdQMPMGb4uy0tyZOYt1EBwS/Wcr61fs=
