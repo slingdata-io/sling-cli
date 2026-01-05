@@ -345,8 +345,8 @@ github.com/flarco/bigquery v0.0.9 h1:WfxO6XuuHZTJV+55Bq24FhdHYpmAOzgVk9xOcJpEecY
 github.com/flarco/bigquery v0.0.9/go.mod h1:IpRSw4quaXxHjFyDSXUo7B6v+XcNF2pSmnNfeqXa/gM=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad h1:z5mgsXmNXsgskClg/s6zelILFihJTyK6x7+zX1jUgyU=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad/go.mod h1:mnsep6/uctUEgRONJy1pQdb17s/lRtqgcZZZV/WPdkc=
-github.com/flarco/iceberg-go v0.0.0-20260105143024-5819956e8bec h1:SB7rsjYv/rAQZMVyrRiUI3GdYNw0qftV9yaxN+/mQX4=
-github.com/flarco/iceberg-go v0.0.0-20260105143024-5819956e8bec/go.mod h1:V32CmlTVGkMYYL3QFpviDP2QsW6u6eqUeQr8KnGiVCY=
+github.com/flarco/iceberg-go v0.0.0-20260105144704-8c82a24925a1 h1:UpVt/Mo3ZcAUCWxQ1hc5m+5XGBrlT1ptnZHqsgHUHjY=
+github.com/flarco/iceberg-go v0.0.0-20260105144704-8c82a24925a1/go.mod h1:V32CmlTVGkMYYL3QFpviDP2QsW6u6eqUeQr8KnGiVCY=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/francoispqt/gojay v1.2.13 h1:d2m3sFjloqoIUQU3TsHBgj6qg/BVGlTBeHDUmyJnXKk=
 github.com/francoispqt/gojay v1.2.13/go.mod h1:ehT5mTG4ua4581f1++1WLG0vPdaA9HaiDsoyrBGkyDY=
