@@ -443,7 +443,7 @@ native_type_map:
   time: time
   timestamp: timestamp
   tinyblob: text
-  tinyint: smallint
+  tinyint: bool
   tinytext: text
   varbinary: binary
   varchar: text
@@ -452,7 +452,7 @@ native_type_map:
 general_type_map:
   bigint: bigint
   binary: varbinary
-  bool: "char(5)"
+  bool: boolean
   date: date
   datetime: datetime
   decimal: "decimal(,)"

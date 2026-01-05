@@ -1356,6 +1356,31 @@
     - 'SUCCESS: BIT values correctly converted to integers in bool_testing_1'
     - 'SUCCESS: BIT values correctly converted to strings in bool_testing_2'
 
+- id: 153
+  name: 'Test ODBC data extraction from MSSQL_ODBC to PostgreSQL'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.84.mssql_odbc_extraction.yaml
+
+- id: 154
+  name: 'Test MSSQL BIT type casting across multiple targets via pipeline'
+  run: |
+    sling run --debug -p cmd/sling/tests/pipelines/p.10.bool_cast_multi_target.yaml
+  output_contains:
+    # verify order of streams
+    - '[1 / 4] running stream dbo.bool_cast_source'
+    - '[2 / 4] running stream bool_cast_varchar'
+    - '[3 / 4] running stream bool_cast_bool'
+    - '[4 / 4] running stream bool_cast_integer'
+    - 'SUCCESS: BIT correctly cast to INTEGER for postgres'
+    - 'SUCCESS: BIT correctly cast to VARCHAR for postgres'
+    - 'SUCCESS: BIT correctly cast to BOOLEAN for postgres'
+    - 'SUCCESS: BIT correctly cast to INTEGER for mysql'
+    - 'SUCCESS: BIT correctly cast to VARCHAR for mysql'
+    - 'SUCCESS: BIT correctly cast to BOOLEAN for mysql'
+    - 'SUCCESS: BIT correctly cast to INTEGER for mariadb'
+    - 'SUCCESS: BIT correctly cast to VARCHAR for mariadb'
+    - 'SUCCESS: BIT correctly cast to BOOLEAN for mariadb'
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target

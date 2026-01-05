@@ -512,14 +512,14 @@ func TestColumnTypingBoolean(t *testing.T) {
 		col := Column{Name: "test", Type: BoolType}
 		bct := BooleanColumnTyping{CastAs: "integer"}
 		bct.Apply(&col)
-		assert.Equal(t, IntegerType, col.Type)
+		assert.Equal(t, SmallIntType, col.Type)
 	})
 
 	t.Run("boolean_cast_as_integer_uppercase", func(t *testing.T) {
 		col := Column{Name: "test", Type: BoolType}
 		bct := BooleanColumnTyping{CastAs: "INTEGER"}
 		bct.Apply(&col)
-		assert.Equal(t, IntegerType, col.Type)
+		assert.Equal(t, SmallIntType, col.Type)
 	})
 
 	t.Run("boolean_cast_as_string", func(t *testing.T) {

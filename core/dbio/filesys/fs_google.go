@@ -77,9 +77,7 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 			return g.Error(err, "could not decode GCP credentials")
 		}
 		credJsonBody = decodedCredJSON
-		authOption = option.WithCredentialsJSON([]byte(val))
 	} else if val := fs.GetProp("KEY_FILE"); val != "" {
-		authOption = option.WithCredentialsFile(val)
 		b, err := os.ReadFile(val)
 		if err != nil {
 			return g.Error(err, "could not read google cloud key file")
@@ -88,7 +86,6 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	} else if val := fs.GetProp("CRED_API_KEY"); val != "" {
 		authOption = option.WithAPIKey(val)
 	} else if val := fs.GetProp("GOOGLE_APPLICATION_CREDENTIALS"); val != "" {
-		authOption = option.WithCredentialsFile(val)
 		b, err := os.ReadFile(val)
 		if err != nil {
 			return g.Error(err, "could not read google cloud key file")
@@ -107,6 +104,18 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 		m := g.M()
 		g.Unmarshal(credJsonBody, &m)
 		fs.projectID = cast.ToString(m["project_id"])
+
+		// Use WithHTTPClient workaround for service account credentials
+		// This avoids "multiple credential options provided" error in google.golang.org/api >= v0.258.0
+		// See: https://github.com/googleapis/google-cloud-go/blob/main/storage/storage.go
+		// The storage client's NewClient function extracts credentials and appends WithAuthCredentials,
+		// which conflicts with other credential options like WithCredentialsFile or WithCredentialsJSON.
+		conf, err := google.JWTConfigFromJSON([]byte(credJsonBody), gcstorage.ScopeReadWrite)
+		if err != nil {
+			return g.Error(err, "could not create JWT config from credentials")
+		}
+		httpClient := conf.Client(fs.Context().Ctx)
+		authOption = option.WithHTTPClient(httpClient)
 	}
 
 	fs.client, err = gcstorage.NewClient(fs.Context().Ctx, authOption)

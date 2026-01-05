@@ -2079,7 +2079,7 @@ type BooleanColumnTyping struct {
 func (bct *BooleanColumnTyping) Apply(col *Column) {
 	switch strings.ToLower(bct.CastAs) {
 	case "integer":
-		col.Type = IntegerType
+		col.Type = SmallIntType
 	case "string":
 		col.Type = StringType
 		col.Sourced = true

@@ -5,6 +5,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
+	"gopkg.in/yaml.v3"
 )
 
 type HookType string
@@ -47,12 +48,13 @@ func (hm HookMap) IsEmpty() bool {
 }
 
 type ParseOptions struct {
-	stage   HookStage
-	kind    HookKind
-	index   int
-	state   RuntimeState
-	md5     string
-	context *g.Context
+	stage     HookStage
+	kind      HookKind
+	index     int
+	state     RuntimeState
+	md5       string
+	context   *g.Context
+	yamlNode *yaml.Node
 }
 
 type HookStage string

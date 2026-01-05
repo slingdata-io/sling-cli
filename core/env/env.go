@@ -199,13 +199,35 @@ func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
 			Env:         map[string]any{},
 		}, nil
 	}
-	err = yaml.Unmarshal([]byte(body), &ef)
+
+	ef.Body = body
+
+	// expand variables
+	envMap := map[string]any{}
+	for _, tuple := range os.Environ() {
+		key := strings.Split(tuple, "=")[0]
+		val := strings.TrimPrefix(tuple, key+"=")
+		envMap[key] = val
+	}
+	ef.Body = g.Rmd(ef.Body, envMap)
+
+	err = yaml.Unmarshal([]byte(ef.Body), &ef)
+
+	if ef.Connections == nil {
+		ef.Connections = map[string]map[string]any{}
+	}
 
 	if len(ef.Env) == 0 {
 		if len(ef.Variables) == 0 {
 			ef.Env = map[string]any{}
 		} else {
 			ef.Env = ef.Variables // support legacy
+		}
+	}
+
+	for k, v := range ef.Env {
+		if _, found := envMap[k]; !found {
+			os.Setenv(k, g.CastToString(v))
 		}
 	}
 

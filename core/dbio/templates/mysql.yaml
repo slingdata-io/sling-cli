@@ -377,6 +377,7 @@ function:
   replace: replace({string_expr}, {to_replace}, {replacement})
   str_utf8: '{ field }'
   cast_to_text: 'cast({field} as mediumtext)'
+  cast_to_integer: 'cast({field} as signed)'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: select sleep({seconds})
@@ -431,7 +432,7 @@ native_type_map:
   time: time
   timestamp: timestamp
   tinyblob: text
-  tinyint: smallint
+  tinyint: bool
   tinytext: text
   "unsigned bigint": "decimal(28,0)"
   "unsigned int": bigint
@@ -445,7 +446,7 @@ native_type_map:
 general_type_map:
   bigint: bigint
   binary: varbinary
-  bool: "char(5)"
+  bool: tinyint
   date: date
   datetime: "datetime(6)"
   decimal: "decimal(,)"

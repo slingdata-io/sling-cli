@@ -1,0 +1,19 @@
+# Replication for bool_cast_multi_target pipeline
+# Target connection is set via TARGET_CONN env var from the pipeline group step
+source: mssql
+target: ${TARGET_CONN}
+
+defaults:
+  mode: truncate
+
+streams:
+  dbo.bool_cast_source:
+    object: bool_cast_int
+
+  bool_cast_varchar:
+    sql: select * from dbo.bool_cast_source
+    object: bool_cast_varchar
+
+  bool_cast_bool:
+    sql: select * from dbo.bool_cast_source
+    object: bool_cast_bool

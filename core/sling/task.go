@@ -178,8 +178,15 @@ func (t *TaskExecution) setLogDetails() {
 	)))
 }
 
-func (t *TaskExecution) GetSourceTable() (sTable database.Table, err error) {
-	sTable, err = database.ParseTableName(t.Config.Source.Stream, t.Config.SrcConn.Type)
+func (t *TaskExecution) GetSourceTable(srcConn ...database.Connection) (sTable database.Table, err error) {
+	// Use connection's GetType() if available (allows ODBC/ADBC to use driver-specific SQL syntax)
+	// Otherwise fall back to configured connection type
+	dialectType := t.Config.SrcConn.Type
+	if len(srcConn) > 0 && srcConn[0] != nil {
+		dialectType = srcConn[0].GetType()
+	}
+
+	sTable, err = database.ParseTableName(t.Config.Source.Stream, dialectType)
 	if err != nil {
 		err = g.Error(err, "Could not parse source stream text")
 	} else if !sTable.IsQuery() && sTable.Schema == "" {
@@ -645,6 +652,8 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
+		case contains("could not load driver template"):
+			helpString = "See https://docs.slingdata.io/ for creating a custom connection template."
 		case contains("CSV") && contains("encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
 		case contains("Invalid Input Error: CSV Error on Line:"):

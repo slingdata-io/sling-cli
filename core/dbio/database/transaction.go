@@ -330,6 +330,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processTrinoInsertRow(bColumns, row)
 			case conn.GetType() == dbio.TypeDbProton:
 				row = processProtonInsertRow(bColumns, row)
+			case conn.GetType().IsMySQLLike():
+				row = processMySqlLikeInsertRow(bColumns, row)
 			case conn.GetType().IsSQLServer():
 				// row = processSQLServerInsertRow(bColumns, row)
 			}
@@ -386,6 +388,13 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			if err != nil {
 				err = g.Error(err, "could not get column list")
 				return
+			}
+
+			// set db type for casting (especially bools)
+			for i := range batch.Columns {
+				if col := columns.GetColumn(batch.Columns[i].Name); col != nil {
+					batch.Columns[i].DbType = col.DbType
+				}
 			}
 			mux.Unlock()
 

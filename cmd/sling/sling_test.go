@@ -96,6 +96,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.Type("sqlserver_adbc"):  {name: "mssql_adbc", schema: "dbo"},
+	dbio.Type("sqlserver_odbc"):  {name: "mssql_odbc", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
@@ -562,6 +563,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	taskCfg := replicationConfig.Tasks[0]
 
+	srcType := taskCfg.SrcConn.Type
+	tgtType := taskCfg.TgtConn.Type
+
 	var streamCfg *sling.ReplicationStreamConfig
 	for _, streamCfg = range replicationConfig.Streams {
 	}
@@ -584,6 +588,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	// process PostSQL for different drop_view syntax
 	if taskCfg.TgtConn.Type.IsDb() {
 		dbConn, err := taskCfg.TgtConn.AsDatabase()
+		tgtType = dbConn.GetType()
 		if err == nil {
 			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
 			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
@@ -611,6 +616,13 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			}
 		}
 	}
+
+	if taskCfg.SrcConn.Type.IsDb() {
+		if dbConn, err := taskCfg.SrcConn.AsDatabase(); err == nil {
+			srcType = dbConn.GetType()
+		}
+	}
+
 	g.Debug("task config => %s", g.Marshal(taskCfg))
 
 	task := sling.NewTask("exec_test", taskCfg)
@@ -687,6 +699,8 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		if !g.AssertNoError(t, err) {
 			return
 		}
+
+		tgtType = conn.GetType()
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
 
@@ -763,11 +777,6 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 
 		failed := false
-		srcType := taskCfg.SrcConn.Type
-		tgtType := taskCfg.TgtConn.Type
-		isMySQLLike := func(t dbio.Type) bool {
-			return t == dbio.TypeDbMySQL || t == dbio.TypeDbMariaDB || t == dbio.TypeDbStarRocks
-		}
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
@@ -779,10 +788,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 			// correct correctType
 			switch {
-			case isMySQLLike(srcType) && tgtType == dbio.TypeDbPostgres:
-				if strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // mysql/mariadb doesn't have bool
-				}
+			case srcType.IsMySQLLike() && tgtType == dbio.TypeDbPostgres:
 				if strings.EqualFold(colName, "update_dt") {
 					correctType = iop.TimestampType // mysql/mariadb doesn't have time zone
 				}
@@ -792,13 +798,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if srcType == dbio.TypeDbStarRocks && strings.EqualFold(colName, "json_data") {
 					correctType = iop.TextType // starrocks's `json` type is `varchar(65500)`
 				}
-			case isMySQLLike(tgtType):
-				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // mysql/mariadb doesn't have bool
-				}
-				if correctType == iop.BoolType {
-					correctType = iop.StringType // mysql/mariadb doesn't have bool
-				}
+			case tgtType.IsMySQLLike():
 				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
 					correctType = iop.DatetimeType // mysql/mariadb uses datetime
 				}
@@ -1107,6 +1107,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 		t.Fail()
 	}
 	testSuite(t, dbio.Type("sqlserver_adbc"))
+	testSuite(t, dbio.Type("sqlserver_odbc"))
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {

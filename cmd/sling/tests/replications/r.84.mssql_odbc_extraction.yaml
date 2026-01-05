@@ -1,0 +1,90 @@
+# Test ODBC data extraction from MSSQL_ODBC to PostgreSQL
+# Uses MSSQL connection for setup/teardown (DDL) and MSSQL_ODBC for data extraction
+# Note: ODBC requires SQL query (not table reference) since column introspection is not supported
+source: MSSQL_ODBC
+target: POSTGRES
+
+hooks:
+  start:
+    # Use regular MSSQL connection for DDL operations (ODBC has cursor issues with DDL)
+    - type: query
+      connection: MSSQL
+      query: |
+        IF OBJECT_ID('dbo.odbc_test', 'U') IS NOT NULL DROP TABLE dbo.odbc_test;
+        CREATE TABLE dbo.odbc_test (
+          id INT PRIMARY KEY,
+          name NVARCHAR(100),
+          value DECIMAL(10,2),
+          is_active BIT,
+          created_at DATETIME
+        );
+        INSERT INTO dbo.odbc_test VALUES
+        (1, N'Test Row 1', 100.50, 1, '2024-01-15 10:30:00'),
+        (2, N'Test Row 2', 200.75, 0, '2024-02-20 14:45:00'),
+        (3, N'Test Row 3', 300.00, 1, '2024-03-25 09:15:00');
+
+    - type: query
+      connection: MSSQL
+      query: SELECT COUNT(*) as count FROM dbo.odbc_test
+      into: source_count
+
+    - type: log
+      message: |
+        Created MSSQL source table with {store.source_count[0].count} rows (will be read via ODBC)
+
+  end:
+    # Check for errors
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify data in PostgreSQL
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.odbc_test
+      into: target_count
+
+    - type: check
+      check: int_parse(store.target_count[0].count) == 3
+      failure_message: "Expected 3 rows in target, got {store.target_count[0].count}"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, name, value FROM public.odbc_test ORDER BY id
+      into: target_data
+
+    - type: log
+      message: |
+        Target data:
+        {pretty_table(store.target_data)}
+
+    # Verify specific values
+    - type: check
+      check: store.target_data[0].name == "Test Row 1"
+      failure_message: "Row 1 name mismatch"
+
+    - type: check
+      check: float_parse(store.target_data[0].value) == 100.50
+      failure_message: "Row 1 value mismatch"
+
+    - type: log
+      message: "SUCCESS: ODBC data extraction from MSSQL_ODBC to PostgreSQL completed"
+
+    # Cleanup using regular MSSQL connection
+    - type: query
+      connection: MSSQL
+      query: |
+        IF OBJECT_ID('dbo.odbc_test', 'U') IS NOT NULL DROP TABLE dbo.odbc_test;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.odbc_test CASCADE
+
+streams:
+  # Use SQL query instead of table reference for ODBC (column introspection not supported)
+  odbc_extraction:
+    sql: SELECT id, name, value, is_active, created_at FROM dbo.odbc_test
+    object: public.odbc_test
+    mode: full-refresh
+    target_options:
+      column_casing: lower

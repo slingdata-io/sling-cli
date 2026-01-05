@@ -985,6 +985,11 @@ func (c *Connection) setURL() (err error) {
 		// ADBC connections use a driver path and driver-specific properties
 		// Set a simple URL scheme for connection identification
 		template = "adbc://"
+	case dbio.TypeDbODBC:
+		// ODBC connections use driver-specific connection strings or DSN names
+		// The actual URL formatting is handled by ODBCConn.GetURL()
+		setIfMissing("conn_string", "")
+		template = "odbc://"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
