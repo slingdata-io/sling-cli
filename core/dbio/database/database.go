@@ -546,7 +546,7 @@ func (conn *BaseConn) Template() dbio.Template {
 
 // UseADBC returns if connection should use ADBC
 func (conn *BaseConn) UseADBC() bool {
-	return cast.ToBool(conn.GetProp("use_adbc")) && conn.adbc != nil
+	return cast.ToBool(conn.GetProp("use_adbc"))
 }
 
 // GetProp returns the value of a property
@@ -807,7 +807,7 @@ func (conn *BaseConn) Close() error {
 		conn.sshClient.Close()
 		conn.sshClient = nil
 	}
-	if conn.UseADBC() {
+	if conn.UseADBC() && conn.adbc != nil {
 		conn.adbc.Close()
 	}
 	conn.SetProp("connected", "false")

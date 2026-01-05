@@ -93,7 +93,7 @@ func (conn *ArrowDBConn) Init() error {
 
 	db, err := drivermgr.Driver{}.NewDatabase(adbcProps)
 	if err != nil {
-		return g.Error(err, "could not init new ADBC database")
+		return g.Error(err, "could not init new ADBC database. See https://docs.slingdata.io/connections/database-connections/adbc")
 	}
 
 	conn.db = db
