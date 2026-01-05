@@ -115,10 +115,10 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 			return nil, g.Error(err, "could not decode GCP credentials")
 		}
 		credJsonBody = decodedCredJSON
-		authOptions = append(authOptions, option.WithCredentialsJSON([]byte(val)))
+		authOptions = append(authOptions, option.WithAuthCredentialsJSON(option.ServiceAccount, []byte(val)))
 		authOptions = append(authOptions, option.WithScopes(scopes...))
 	} else if val := conn.GetProp("GC_KEY_FILE"); val != "" {
-		authOptions = append(authOptions, option.WithCredentialsFile(val))
+		authOptions = append(authOptions, option.WithAuthCredentialsFile(option.ServiceAccount, val))
 		authOptions = append(authOptions, option.WithScopes(scopes...))
 		b, err := os.ReadFile(val)
 		if err != nil {
@@ -128,7 +128,7 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 	} else if val := conn.GetProp("GC_CRED_API_KEY"); val != "" {
 		authOptions = append(authOptions, option.WithAPIKey(val))
 	} else if val := conn.GetProp("GOOGLE_APPLICATION_CREDENTIALS"); val != "" {
-		authOptions = append(authOptions, option.WithCredentialsFile(val))
+		authOptions = append(authOptions, option.WithAuthCredentialsFile(option.ServiceAccount, val))
 		authOptions = append(authOptions, option.WithScopes(scopes...))
 		b, err := os.ReadFile(val)
 		if err != nil {
