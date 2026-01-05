@@ -546,7 +546,7 @@ func (conn *BaseConn) Template() dbio.Template {
 
 // UseADBC returns if connection should use ADBC
 func (conn *BaseConn) UseADBC() bool {
-	return cast.ToBool(conn.GetProp("use_adbc"))
+	return cast.ToBool(conn.GetProp("use_adbc")) && conn.adbc != nil
 }
 
 // GetProp returns the value of a property
