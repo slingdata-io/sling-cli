@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/flarco/g"
@@ -963,6 +964,7 @@ func GetTablesSchemata(conn Connection, tableNames ...string) (schemata Schemata
 // GetSchemataAll obtains the schemata for all databases detected
 func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 	schemata = Schemata{Databases: map[string]Database{}}
+	var mu sync.Mutex
 
 	connInfo := conn.Info()
 
@@ -1003,7 +1005,8 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 			return
 		}
 
-		// merge all schematas
+		// merge all schematas with mutex protection
+		mu.Lock()
 		for name, database := range newSchemata.Databases {
 			g.Debug(
 				"   collected %d columns, in %d tables/views from database %s",
@@ -1013,6 +1016,7 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 			)
 			schemata.Databases[name] = database
 		}
+		mu.Unlock()
 	}
 
 	// loop an connect to each
