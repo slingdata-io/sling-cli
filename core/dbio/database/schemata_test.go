@@ -6,6 +6,8 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -295,6 +297,34 @@ func TestParseSQLMultiStatements(t *testing.T) {
 			assert.Equal(t, c.expected, result)
 		})
 	}
+}
+
+func TestGetSchemataAll(t *testing.T) {
+	ef := env.LoadSlingEnvFile()
+
+	url := cast.ToStringMap(ef.Connections["POSTGRES"])["url"]
+	if url == nil {
+		t.Skip("POSTGRES env var not set")
+	}
+
+	conn, err := NewConn(cast.ToString(url))
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer conn.Close()
+
+	schemata, err := GetSchemataAll(conn)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	// Count all tables from all databases
+	tableCount := 0
+	for _, db := range schemata.Databases {
+		tableCount += len(db.Tables())
+	}
+
+	assert.Greater(t, tableCount, 0, "expected at least one table across all databases")
 }
 
 func TestTrimSQLComments(t *testing.T) {

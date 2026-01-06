@@ -999,7 +999,7 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 		}
 
 		// pull down schemata
-		newSchemata, err := newConn.GetSchemata("", "")
+		newSchemata, err := newConn.GetSchemata(SchemataLevelColumn, "")
 		if err != nil {
 			g.Warn("could not obtain schemata for database: %s. %s", dbName, err)
 			return
