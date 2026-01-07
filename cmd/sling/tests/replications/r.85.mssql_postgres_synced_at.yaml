@@ -1,0 +1,156 @@
+source: MSSQL
+target: POSTGRES
+
+env:
+  SLING_SYNCED_AT_COLUMN: true
+
+hooks:
+  start:
+    # Create table 1 with 10 rows
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.synced_at_test1', 'U') IS NOT NULL DROP TABLE dbo.synced_at_test1;
+        CREATE TABLE dbo.synced_at_test1 (
+          id INT PRIMARY KEY,
+          name NVARCHAR(100),
+          value DECIMAL(10,2),
+          modified_at DATETIME DEFAULT GETDATE()
+        );
+        INSERT INTO dbo.synced_at_test1 (id, name, value) VALUES
+        (1, 'Row 1', 100.00), (2, 'Row 2', 200.00), (3, 'Row 3', 300.00),
+        (4, 'Row 4', 400.00), (5, 'Row 5', 500.00), (6, 'Row 6', 600.00),
+        (7, 'Row 7', 700.00), (8, 'Row 8', 800.00), (9, 'Row 9', 90.00),
+        (10, 'Row 10', 1000.00);
+
+    # Create table 2 with 8 rows (IDs 1-8), IDs 9 and 10 will be missing for soft delete test
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.synced_at_test2', 'U') IS NOT NULL DROP TABLE dbo.synced_at_test2;
+        CREATE TABLE dbo.synced_at_test2 (
+          id INT PRIMARY KEY,
+          name NVARCHAR(100),
+          value DECIMAL(10,2),
+          modified_at DATETIME DEFAULT GETDATE()
+        );
+        INSERT INTO dbo.synced_at_test2 (id, name, value) VALUES
+        (1, 'Item 1', 10.00), (2, 'Item 2', 20.00), (3, 'Item 3', 30.00),
+        (4, 'Item 4', 40.00), (5, 'Item 5', 50.00), (6, 'Item 6', 60.00),
+        (7, 'Item 7', 70.00), (8, 'Item 8', 80.00);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify _sling_synced_at EXISTS for table1
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as col_exists
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'synced_at_test1'
+          AND column_name = '_sling_synced_at'
+      into: synced_at_exists_t1
+
+    - type: check
+      check: int_parse(store.synced_at_exists_t1[0].col_exists) == 1
+      failure_message: "_sling_synced_at column missing in synced_at_test1"
+
+    - type: log
+      message: "SUCCESS: _sling_synced_at column exists in synced_at_test1"
+
+    # Verify _sling_deleted_at does NOT EXIST for table1
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as col_exists
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'synced_at_test1'
+          AND column_name = '_sling_deleted_at'
+      into: deleted_at_exists_t1
+
+    - type: check
+      check: int_parse(store.deleted_at_exists_t1[0].col_exists) == 0
+      failure_message: "_sling_deleted_at column should NOT exist in synced_at_test1"
+
+    - type: log
+      message: "SUCCESS: _sling_deleted_at column does NOT exist in synced_at_test1"
+
+    # Verify data type is timestamp
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'synced_at_test1'
+          AND column_name = '_sling_synced_at'
+      into: synced_at_type
+
+    - type: check
+      check: contains(store.synced_at_type[0].data_type, "timestamp")
+      failure_message: "_sling_synced_at should be timestamp type, got {store.synced_at_type[0].data_type}"
+
+    # Verify row counts for table1
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.synced_at_test1
+      into: t1_count
+
+    - type: check
+      check: int_parse(store.t1_count[0].count) == 10
+      failure_message: "Expected 10 rows in synced_at_test1, got {store.t1_count[0].count}"
+
+    # Verify synced_at_test1 has different _sling_synced_at values (rows 9,10 should have later timestamp)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(DISTINCT _sling_synced_at) as distinct_synced_at
+        FROM public.synced_at_test1
+      into: distinct_synced_at
+
+    - type: check
+      check: int_parse(store.distinct_synced_at[0].distinct_synced_at) == 2
+      failure_message: "Expected 2 distinct _sling_synced_at values (IDs 1-8 vs 9-10), got {store.distinct_synced_at[0].distinct_synced_at}"
+
+    - type: log
+      message: "SUCCESS: synced_at_test1 has 2 distinct _sling_synced_at values"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.synced_at_test1', 'U') IS NOT NULL DROP TABLE dbo.synced_at_test1;
+        IF OBJECT_ID('dbo.synced_at_test2', 'U') IS NOT NULL DROP TABLE dbo.synced_at_test2;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.synced_at_test1 CASCADE;
+
+streams:
+  dbo.synced_at_test1:
+    object: public.synced_at_test1
+    mode: full-refresh
+    primary_key: [id]
+    target_options:
+      column_casing: lower
+
+    hooks:
+      post:
+        # Sleep 2 seconds to ensure different _sling_synced_at timestamps
+        - type: query
+          connection: '{target.name}'
+          query: SELECT pg_sleep(2)
+
+  dbo.synced_at_test2:
+    object: public.synced_at_test1
+    mode: incremental
+    primary_key: [id]
+    target_options:
+      delete_missing: soft
+      column_casing: lower

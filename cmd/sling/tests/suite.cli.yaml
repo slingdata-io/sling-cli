@@ -1381,6 +1381,16 @@
     - 'SUCCESS: BIT correctly cast to VARCHAR for mariadb'
     - 'SUCCESS: BIT correctly cast to BOOLEAN for mariadb'
 
+- id: 155
+  name: 'Test SLING_SYNCED_AT_COLUMN with soft delete (MSSQL to Postgres)'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.85.mssql_postgres_synced_at.yaml
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: _sling_synced_at column exists'
+    - 'SUCCESS: _sling_deleted_at column does NOT exist'
+    - 'SUCCESS: synced_at_test1 has 2 distinct _sling_synced_at values'
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target

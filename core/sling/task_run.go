@@ -27,6 +27,7 @@ import (
 var (
 	start                time.Time
 	slingLoadedAtColumn  = "_sling_loaded_at"
+	slingSyncedAtColumn  = "_sling_synced_at"
 	slingDeletedAtColumn = "_sling_deleted_at"
 	slingStreamURLColumn = "_sling_stream_url"
 	slingRowNumColumn    = "_sling_row_num"

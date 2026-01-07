@@ -118,7 +118,7 @@ type KeyValue struct {
 
 type Metadata struct {
 	StreamURL KeyValue `json:"stream_url"`
-	LoadedAt  KeyValue `json:"loaded_at"`
+	SyncedAt  KeyValue `json:"loaded_at"`
 	RowNum    KeyValue `json:"row_num"`
 	RowID     KeyValue `json:"row_id"`
 	ExecID    KeyValue `json:"exec_id"`
@@ -804,29 +804,29 @@ skipBuffer:
 			return name
 		}
 
-		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
-			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
+		if ds.Metadata.SyncedAt.Key != "" && ds.Metadata.SyncedAt.Value != nil {
+			ds.Metadata.SyncedAt.Key = ensureName(ds.Metadata.SyncedAt.Key)
 
 			// handle timestamp value
 			isTimestamp := false
-			if tVal, err := cast.ToTimeE(ds.Metadata.LoadedAt.Value); err == nil {
+			if tVal, err := cast.ToTimeE(ds.Metadata.SyncedAt.Value); err == nil {
 				isTimestamp = true
-				ds.Metadata.LoadedAt.Value = tVal
+				ds.Metadata.SyncedAt.Value = tVal
 			} else {
-				ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
+				ds.Metadata.SyncedAt.Value = cast.ToInt64(ds.Metadata.SyncedAt.Value)
 			}
 
 			col := Column{
-				Name:        ds.Metadata.LoadedAt.Key,
+				Name:        ds.Metadata.SyncedAt.Key,
 				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
 				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.LoadedAt",
-				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
+				Description: "Sling.Metadata.SyncedAt",
+				Metadata:    map[string]string{"sling_metadata": "synced_at"},
 				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.LoadedAt.Value
+				return ds.Metadata.SyncedAt.Value
 			}
 		}
 

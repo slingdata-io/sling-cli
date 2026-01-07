@@ -158,7 +158,14 @@ func (cfg *Config) SetDefault() {
 		cfg.Mode = FullRefreshMode
 	}
 
-	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
+	if val := os.Getenv("SLING_SYNCED_AT_COLUMN"); val != "" {
+		if cast.ToBool(val) {
+			cfg.MetadataSyncedAt = g.Bool(true)
+			slingDeletedAtColumn = slingSyncedAtColumn // deleted_at becomes synched_at
+		} else {
+			cfg.MetadataSyncedAt = g.Bool(false)
+		}
+	} else if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
 		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
 			cfg.MetadataLoadedAt = g.Bool(true)
 		} else {
@@ -362,6 +369,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
+		} else if srcFileProvided && cfg.Source.UpdateKey == slingSyncedAtColumn {
+			cfg.MetadataSyncedAt = g.Bool(true)
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
@@ -1227,6 +1236,7 @@ type Config struct {
 	IncrementalGTE    bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
+	MetadataSyncedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`
