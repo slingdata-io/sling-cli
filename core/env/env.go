@@ -47,6 +47,12 @@ var (
 		return path.Join(RuntimeFolder(), g.F("%s.json", name))
 	}
 	setupOtel = func() {}
+
+	ReservedFields = struct {
+		SyncedOp string
+	}{
+		SyncedOp: "_sling_synced_op",
+	}
 )
 
 const (

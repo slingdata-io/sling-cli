@@ -120,6 +120,56 @@ hooks:
     - type: log
       message: "SUCCESS: synced_at_test1 has 2 distinct _sling_synced_at values"
 
+    # Verify _sling_synced_op column EXISTS
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as col_exists
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'synced_at_test1'
+          AND column_name = '_sling_synced_op'
+      into: synced_op_exists
+
+    - type: check
+      check: int_parse(store.synced_op_exists[0].col_exists) == 1
+      failure_message: "_sling_synced_op column missing"
+
+    - type: log
+      message: "SUCCESS: _sling_synced_op column exists"
+
+    # Verify soft-deleted rows (IDs 9-10) have _sling_synced_op = 'D'
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as deleted_count
+        FROM public.synced_at_test1
+        WHERE id IN (9, 10) AND _sling_synced_op = 'D'
+      into: deleted_op_count
+
+    - type: check
+      check: int_parse(store.deleted_op_count[0].deleted_count) == 2
+      failure_message: "Expected 2 rows with _sling_synced_op='D' for IDs 9,10, got {store.deleted_op_count[0].deleted_count}"
+
+    - type: log
+      message: "SUCCESS: IDs 9,10 have _sling_synced_op='D' (soft deleted)"
+
+    # Verify updated rows (IDs 1-8) have _sling_synced_op = 'U'
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as updated_count
+        FROM public.synced_at_test1
+        WHERE id BETWEEN 1 AND 8 AND _sling_synced_op = 'U'
+      into: updated_op_count
+
+    - type: check
+      check: int_parse(store.updated_op_count[0].updated_count) == 8
+      failure_message: "Expected 8 rows with _sling_synced_op='U' for IDs 1-8, got {store.updated_op_count[0].updated_count}"
+
+    - type: log
+      message: "SUCCESS: IDs 1-8 have _sling_synced_op='U' (updated)"
+
     # Cleanup
     - type: query
       connection: '{source.name}'
@@ -142,6 +192,22 @@ streams:
 
     hooks:
       post:
+        # Verify all rows have _sling_synced_op = 'I' after full-refresh insert
+        - type: query
+          connection: '{target.name}'
+          query: |
+            SELECT COUNT(*) as insert_count
+            FROM public.synced_at_test1
+            WHERE _sling_synced_op = 'I'
+          into: insert_op_count
+
+        - type: check
+          check: int_parse(store.insert_op_count[0].insert_count) == 10
+          failure_message: "Expected 10 rows with _sling_synced_op='I' after full-refresh, got {store.insert_op_count[0].insert_count}"
+
+        - type: log
+          message: "SUCCESS: All 10 rows have _sling_synced_op='I' after full-refresh"
+
         # Sleep 2 seconds to ensure different _sling_synced_at timestamps
         - type: query
           connection: '{target.name}'

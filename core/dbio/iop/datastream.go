@@ -118,7 +118,8 @@ type KeyValue struct {
 
 type Metadata struct {
 	StreamURL KeyValue `json:"stream_url"`
-	SyncedAt  KeyValue `json:"loaded_at"`
+	SyncedAt  KeyValue `json:"synced_at"`
+	SyncedOp  KeyValue `json:"synced_op"`
 	RowNum    KeyValue `json:"row_num"`
 	RowID     KeyValue `json:"row_id"`
 	ExecID    KeyValue `json:"exec_id"`
@@ -827,6 +828,24 @@ skipBuffer:
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
 				return ds.Metadata.SyncedAt.Value
+			}
+		}
+
+		if ds.Metadata.SyncedOp.Key != "" && ds.Metadata.SyncedOp.Value != nil {
+			ds.Metadata.SyncedOp.Key = ensureName(ds.Metadata.SyncedOp.Key)
+
+			col := Column{
+				Name:        ds.Metadata.SyncedOp.Key,
+				Type:        StringType,
+				DbPrecision: 4,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.SyncedOp",
+				Metadata:    map[string]string{"sling_metadata": "synced_op"},
+				Sourced:     true,
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.SyncedOp.Value
 			}
 		}
 

@@ -1387,9 +1387,13 @@
     sling run --debug -r cmd/sling/tests/replications/r.85.mssql_postgres_synced_at.yaml
   output_contains:
     - 'execution succeeded'
+    - "SUCCESS: All 10 rows have _sling_synced_op='I' after full-refresh"
     - 'SUCCESS: _sling_synced_at column exists'
     - 'SUCCESS: _sling_deleted_at column does NOT exist'
     - 'SUCCESS: synced_at_test1 has 2 distinct _sling_synced_at values'
+    - 'SUCCESS: _sling_synced_op column exists'
+    - "SUCCESS: IDs 9,10 have _sling_synced_op='D' (soft deleted)"
+    - "SUCCESS: IDs 1-8 have _sling_synced_op='U' (updated)"
 
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150

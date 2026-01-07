@@ -2859,6 +2859,12 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 		placeholderFields = append(placeholderFields, phExpr)
 
 		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+
+		// set sync operation to `U` for update update
+		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
+			setSrcExpr = "'U'"
+		}
+
 		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 		setFieldsAll = append(setFieldsAll, setField)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {

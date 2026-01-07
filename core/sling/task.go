@@ -343,7 +343,9 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 	if t.Config.MetadataSyncedAt != nil && *t.Config.MetadataSyncedAt {
 		metadata.SyncedAt.Key = slingSyncedAtColumn
-		metadata.SyncedAt.Value = *t.StartTime
+		metadata.SyncedAt.Value = *t.StartTime // only timestamp
+		metadata.SyncedOp.Key = env.ReservedFields.SyncedOp
+		metadata.SyncedOp.Value = "I" // default to insert operation
 	} else if t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt {
 		metadata.SyncedAt.Key = slingLoadedAtColumn
 		if os.Getenv("SLING_LOADED_AT_COLUMN") == "timestamp" {
