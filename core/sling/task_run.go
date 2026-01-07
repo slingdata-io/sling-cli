@@ -25,14 +25,7 @@ import (
 )
 
 var (
-	start                time.Time
-	slingLoadedAtColumn  = "_sling_loaded_at"
-	slingSyncedAtColumn  = "_sling_synced_at"
-	slingDeletedAtColumn = "_sling_deleted_at"
-	slingStreamURLColumn = "_sling_stream_url"
-	slingRowNumColumn    = "_sling_row_num"
-	slingRowIDColumn     = "_sling_row_id"
-	slingExecIDColumn    = "_sling_exec_id"
+	start time.Time
 )
 
 var deleteMissing func(*TaskExecution, database.Connection, database.Connection) error = func(_ *TaskExecution, _, _ database.Connection) error {
@@ -484,7 +477,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
 		if t.Config.Source.UpdateKey == "." {
-			t.Config.Source.UpdateKey = slingLoadedAtColumn
+			t.Config.Source.UpdateKey = env.ReservedFields.LoadedAt
 		}
 		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey)
 

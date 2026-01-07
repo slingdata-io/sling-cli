@@ -49,9 +49,23 @@ var (
 	setupOtel = func() {}
 
 	ReservedFields = struct {
-		SyncedOp string
+		SyncedOp  string
+		LoadedAt  string
+		SyncedAt  string
+		DeletedAt string
+		StreamURL string
+		RowNum    string
+		RowID     string
+		ExecID    string
 	}{
-		SyncedOp: "_sling_synced_op",
+		SyncedOp:  "_sling_synced_op",
+		LoadedAt:  "_sling_loaded_at",
+		SyncedAt:  "_sling_synced_at",
+		DeletedAt: "_sling_deleted_at",
+		StreamURL: "_sling_stream_url",
+		RowNum:    "_sling_row_num",
+		RowID:     "_sling_row_id",
+		ExecID:    "_sling_exec_id",
 	}
 )
 

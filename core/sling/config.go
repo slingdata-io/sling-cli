@@ -15,6 +15,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -161,7 +162,7 @@ func (cfg *Config) SetDefault() {
 	if val := os.Getenv("SLING_SYNCED_AT_COLUMN"); val != "" {
 		if cast.ToBool(val) {
 			cfg.MetadataSyncedAt = g.Bool(true)
-			slingDeletedAtColumn = slingSyncedAtColumn // deleted_at becomes synched_at
+			env.ReservedFields.DeletedAt = env.ReservedFields.SyncedAt // deleted_at becomes synched_at
 		} else {
 			cfg.MetadataSyncedAt = g.Bool(false)
 		}
@@ -366,10 +367,10 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			// OK, no need for update key
 		} else if srcApiProvided {
 			// OK, no need for update key/pk, API uses SLING_STATE for tracking
-		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
+		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.LoadedAt {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
-		} else if srcFileProvided && cfg.Source.UpdateKey == slingSyncedAtColumn {
+		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.SyncedAt {
 			cfg.MetadataSyncedAt = g.Bool(true)
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")

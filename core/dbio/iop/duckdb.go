@@ -1426,8 +1426,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	}
 
 	// reserved word to use for timestamp comparison (when listing)
-	const slingLoadedAtColumn = "_sling_loaded_at"
-	if fsc.IncrementalKey != "" && fsc.IncrementalKey != slingLoadedAtColumn &&
+	if fsc.IncrementalKey != "" && fsc.IncrementalKey != env.ReservedFields.LoadedAt &&
 		fsc.IncrementalValue != "" {
 		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
 		where = g.F("where %s", incrementalWhereCond)
