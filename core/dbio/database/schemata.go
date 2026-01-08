@@ -1036,10 +1036,44 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 	if pkCols := columns.GetKeys(iop.PrimaryKey); len(pkCols) > 0 {
 		ddl = strings.TrimSpace(ddl)
 
-		// add pk right before the last parenthesis
-		lastParen := strings.LastIndex(ddl, ")")
-		if lastParen == -1 {
-			return ddl, g.Error("could not find last parenthesis")
+		// Find the closing parenthesis of the column definitions
+		// We need to find the first balanced closing paren that matches the opening
+		// paren of the CREATE TABLE column list, not just the last paren in the DDL
+		// This handles cases like: CREATE TABLE t (col1 int) WITH (data_compression=page)
+
+		// Find "CREATE TABLE" pattern to locate start of statement
+		createTableIdx := strings.Index(strings.ToUpper(ddl), "CREATE TABLE")
+		if createTableIdx == -1 {
+			return ddl, g.Error("could not find CREATE TABLE in DDL")
+		}
+
+		// Find the opening paren after CREATE TABLE (this is the column list)
+		openParen := strings.Index(ddl[createTableIdx:], "(")
+		if openParen == -1 {
+			return ddl, g.Error("could not find opening parenthesis for column list")
+		}
+		openParen += createTableIdx
+
+		// Find the matching closing paren by counting balanced parens
+		depth := 1
+		closeParen := -1
+		for i := openParen + 1; i < len(ddl); i++ {
+			switch ddl[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					closeParen = i
+				}
+			}
+			if closeParen != -1 {
+				break
+			}
+		}
+
+		if closeParen == -1 {
+			return ddl, g.Error("could not find closing parenthesis for column list")
 		}
 
 		prefix := "primary key"
@@ -1049,7 +1083,7 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 		}
 
 		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
-		ddl = ddl[:lastParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[lastParen:]
+		ddl = ddl[:closeParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[closeParen:]
 	}
 
 	return ddl, nil

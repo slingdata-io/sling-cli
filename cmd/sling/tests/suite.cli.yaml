@@ -1436,3 +1436,15 @@
 #     - '"type":"FeatureCollection"'
 #     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
 #     - '"properties":{"id":1,"name":"Point 1"}'
+
+# GitHub Issue #694: table_ddl with user-defined PRIMARY KEY and WITH clause
+- id: 158
+  name: 'Test custom table_ddl with PRIMARY KEY and WITH clause (MSSQL)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.88.table_ddl_with_clause.yaml'
+  streams: 2
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'Primary key columns:'
+    - 'Primary key columns (WITH clause table):'
+    - 'Compression info:'

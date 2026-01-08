@@ -68,7 +68,7 @@ test-dbio-iop:
 test-dbio-database:
     #!/usr/bin/env bash
     echo "TESTING dbio database"
-    cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments' && cd -
+    cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL' && cd -
     cd core/dbio/database && go test -run TestChunkByColumnRange && cd -
 
 # Test dbio filesys
