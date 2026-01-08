@@ -66,41 +66,11 @@ streams:
     mode: full-refresh
     target_options:
       direct_insert: true
-    # transforms:
-    #   - true_changed_at: >
-    #       greatest(
-    #         cast(record.dateadded, "timestamp"),
-    #         cast(record.lastchanged, "timestamp"), 
-    #         cast(record._sling_deleted_at, "timestamp")
-    #       )
-
-    # transforms:
-    #   - true_changed_at: >
-    #       greatest(
-    #         cast(replace(record.dateadded, "\"", ""), "timestamp"),
-    #         cast(replace(record.lastchanged, "\"", ""), "timestamp"), 
-    #         cast(replace(record._sling_deleted_at, "\"", ""), "timestamp")
-    #       )
 
     transforms:
-      # - dateadded: log(greatest(record.dateadded, record.lastchanged))
-        
       - true_changed_at: >
           greatest(
             date_parse(record.dateadded), 
             date_parse(record.lastchanged), 
             date_parse(record._sling_deleted_at)
           )
-        
-      # - true_changed_at: >
-      #     greatest(
-      #       date_parse(replace(record.dateadded, "\"", "")),
-      #       date_parse(replace(record.lastchanged, "\"", "")), 
-      #       date_parse(replace(record._sling_deleted_at, "\"", ""))
-      #     )
-
-    # transforms:
-    #   - true_changed_at: >
-    #       date_parse(
-    #         greatest(record.dateadded, record.lastchanged. record._sling_deleted_at)
-    #       )
