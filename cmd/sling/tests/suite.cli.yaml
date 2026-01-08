@@ -1395,6 +1395,26 @@
     - "SUCCESS: IDs 9,10 have _sling_synced_op='D' (soft deleted)"
     - "SUCCESS: IDs 1-8 have _sling_synced_op='U' (updated)"
 
+- id: 156
+  name: Test mixed-case record key references in transforms (MySQL to local parquet)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.86.record_key_casing.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'SUCCESS: All 3 rows exported successfully with mixed-case column transform'
+    - 'SUCCESS: true_changed_at column was computed correctly'
+    - 'execution succeeded'
+
+- id: 157
+  name: Test mixed-case record key references in transforms (MySQL to BigQuery)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.87.record_key_casing_bigquery.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'SUCCESS: All 3 rows exported successfully with mixed-case column transform (BigQuery)'
+    - 'SUCCESS: true_changed_at column was computed correctly (BigQuery)'
+    - 'execution succeeded'
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target

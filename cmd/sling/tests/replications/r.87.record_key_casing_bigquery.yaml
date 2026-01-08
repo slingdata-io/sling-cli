@@ -1,0 +1,106 @@
+# Test for mixed-case record key references in transforms (MySQL to BigQuery)
+# Uses the same source table created by r.86 test
+
+source: mysql
+target: bigquery
+
+hooks:
+  start:
+    # Create test table with mixed-case column names (MySQL uses backticks for identifiers)
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.test_record_key_casing;
+        CREATE TABLE mysql.test_record_key_casing (
+          id INTEGER,
+          `DateAdded` TIMESTAMP NULL,
+          `LastChanged` TIMESTAMP NULL,
+          `_sling_deleted_at` TIMESTAMP NULL,
+          value TEXT
+        );
+        INSERT INTO mysql.test_record_key_casing (id, `DateAdded`, `LastChanged`, `_sling_deleted_at`, value)
+        VALUES
+          (1, '2024-01-15 10:00:00', '2024-01-20 15:30:00', NULL, 'row1'),
+          (2, '2024-02-10 08:00:00', '2024-02-25 12:00:00', '2024-03-01 09:00:00', NULL),
+          (3, '2024-03-05 09:00:00', '2024-03-10 18:00:00', NULL, 'row3');
+
+  end:
+    # Check if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify BigQuery table has data
+    - type: query
+      connection: '{target.name}'
+      query: "SELECT * FROM public.test_record_key_casing ORDER BY id"
+      into: result
+
+    - type: log
+      message: |
+        BigQuery output: {store.result}
+
+    # Verify row count
+    - type: check
+      check: length(store.result) == 3
+      success_message: "SUCCESS: All 3 rows exported successfully with mixed-case column transform (BigQuery)"
+
+    # Verify the computed column has correct values
+    - type: check
+      check: store.result[0].true_changed_at != nil
+      success_message: "SUCCESS: true_changed_at column was computed correctly (BigQuery)"
+
+    # Cleanup BigQuery table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_record_key_casing
+
+    # Cleanup MySQL table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.test_record_key_casing
+
+streams:
+  mysql.test_record_key_casing:
+    object: public.test_record_key_casing
+    mode: full-refresh
+    target_options:
+      direct_insert: true
+    # transforms:
+    #   - true_changed_at: >
+    #       greatest(
+    #         cast(record.dateadded, "timestamp"),
+    #         cast(record.lastchanged, "timestamp"), 
+    #         cast(record._sling_deleted_at, "timestamp")
+    #       )
+
+    # transforms:
+    #   - true_changed_at: >
+    #       greatest(
+    #         cast(replace(record.dateadded, "\"", ""), "timestamp"),
+    #         cast(replace(record.lastchanged, "\"", ""), "timestamp"), 
+    #         cast(replace(record._sling_deleted_at, "\"", ""), "timestamp")
+    #       )
+
+    transforms:
+      # - dateadded: log(greatest(record.dateadded, record.lastchanged))
+        
+      - true_changed_at: >
+          greatest(
+            date_parse(record.dateadded), 
+            date_parse(record.lastchanged), 
+            date_parse(record._sling_deleted_at)
+          )
+        
+      # - true_changed_at: >
+      #     greatest(
+      #       date_parse(replace(record.dateadded, "\"", "")),
+      #       date_parse(replace(record.lastchanged, "\"", "")), 
+      #       date_parse(replace(record._sling_deleted_at, "\"", ""))
+      #     )
+
+    # transforms:
+    #   - true_changed_at: >
+    #       date_parse(
+    #         greatest(record.dateadded, record.lastchanged. record._sling_deleted_at)
+    #       )
