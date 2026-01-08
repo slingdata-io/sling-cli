@@ -219,6 +219,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		selectFields = []string{"*"}
 	}
 
+	// For definition-only mode, inject WHERE 1=0 to avoid reading data
+	if cfg.Mode == DefinitionOnlyMode {
+		cfg.Source.Where = "1=0"
+	}
+
 	// construct select statement for selected fields or where condition
 	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
 		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() && !strings.Contains(sTable.SQL, "{fields}") {
@@ -304,6 +309,12 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			FileSelect:       cfg.Source.Files,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
+		}
+
+		// limit when definition-only
+		if cfg.Mode == DefinitionOnlyMode {
+			fsCfg.SchemaOnly = true
+			fsCfg.Limit = iop.SampleSize
 		}
 
 		// format the uri if it has placeholders
@@ -419,6 +430,12 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Range:       g.PtrVal(t.Config.Source.Options.Range),
 		DsConfigMap: t.getSourceOptionsMap(),
 	}
+
+	if cfg.Mode == DefinitionOnlyMode {
+		sCfg.SchemaOnly = true
+		sCfg.Limit = iop.SampleSize
+	}
+
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {
 		err = g.Error(err, "Could not ReadDataflow for %s", cfg.SrcConn.Type)

@@ -1448,3 +1448,38 @@
     - 'Primary key columns:'
     - 'Primary key columns (WITH clause table):'
     - 'Compression info:'
+
+# GitHub Issue #678: definition-only mode
+- id: 159
+  name: 'Test definition-only mode creates table without data (Postgres to MSSQL)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.89.definition_only_db.yaml'
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'created table definition'
+    - 'execution succeeded'
+    - 'SUCCESS: Table definition created with correct schema and 0 rows'
+
+- id: 160
+  name: 'Test definition-only mode creates parquet file without data'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.90.definition_only_file.yaml'
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'where 1=0'
+    - 'execution succeeded'
+    - 'SUCCESS: Parquet file definition created with correct schema'
+
+- id: 161
+  name: 'Test definition-only mode fails for CSV file target'
+  run: 'sling run --src-conn POSTGRES --src-stream "select 1 as a" --tgt-object file:///tmp/test_def_only.csv --mode definition-only'
+  err: true
+  output_contains:
+    - 'only supports parquet or arrow formats'
+
+- id: 162
+  name: 'Test definition-only mode from parquet file source to database'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.91.definition_only_file_source.yaml'
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: Table created from parquet file source with schema and 0 rows'

@@ -42,6 +42,8 @@ const (
 	SnapshotMode Mode = "snapshot"
 	// BackfillMode is to backfill
 	BackfillMode Mode = "backfill"
+	// DefinitionOnlyMode is to create table/file definition without data
+	DefinitionOnlyMode Mode = "definition-only"
 )
 
 var AllMode = []struct {
@@ -53,6 +55,7 @@ var AllMode = []struct {
 	{TruncateMode, "TruncateMode"},
 	{SnapshotMode, "SnapshotMode"},
 	{BackfillMode, "BackfillMode"},
+	{DefinitionOnlyMode, "DefinitionOnlyMode"},
 }
 
 // NewConfig return a config object from a YAML / JSON string
@@ -347,9 +350,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	}
 
-	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode)
+	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode, DefinitionOnlyMode)
 	if !validMode {
-		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot or truncate")
+		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot, truncate, or definition-only")
 		return
 	}
 
@@ -396,6 +399,15 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	} else if cfg.Mode == SnapshotMode {
 		cfg.MetadataLoadedAt = g.Bool(true) // needed for snapshot mode
+	} else if cfg.Mode == DefinitionOnlyMode {
+		// For file targets, only parquet and arrow formats are supported
+		if tgtFileProvided {
+			format := cfg.Target.ObjectFileFormat()
+			if !g.In(format, dbio.FileTypeParquet, dbio.FileTypeArrow) {
+				err = g.Error("definition-only mode for file targets only supports parquet or arrow formats, got: %s", format)
+				return
+			}
+		}
 	}
 
 	if srcDbProvided && tgtDbProvided {

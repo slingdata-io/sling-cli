@@ -485,6 +485,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
+	ds.SchemaOnly = Cfg.SchemaOnly
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = uri
 	ds.SetConfig(fs.Props())
@@ -1246,6 +1247,7 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 
 		ds := iop.NewDatastreamContext(fs.Context().Ctx, nil)
 		ds.SafeInference = true
+		ds.SchemaOnly = cfg.SchemaOnly
 		ds.SetMetadata(fs.GetProp("METADATA"))
 		ds.Metadata.StreamURL.Value = uri
 		ds.SetConfig(fs.Props())
@@ -1611,6 +1613,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 	url := fs.GetProp("url")
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
+	ds.SchemaOnly = cfg.SchemaOnly
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = url
 	ds.SetConfig(fs.Client().Props())

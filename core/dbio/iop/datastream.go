@@ -52,6 +52,7 @@ type Datastream struct {
 	Bytes         atomic.Uint64
 	Sp            *StreamProcessor
 	SafeInference bool
+	SchemaOnly    bool
 	NoDebug       bool
 	Inferred      bool
 	deferFuncs    []func()
@@ -87,6 +88,7 @@ type FileStreamConfig struct {
 	IncrementalValue string            `json:"incremental_value"`
 	FileSelect       []string          `json:"file_select"`     // a list of files to include.
 	DuckDBFilename   bool              `json:"duckdb_filename"` // stream URL
+	SchemaOnly       bool              `json:"schema_only"`
 	Props            map[string]string `json:"props"`
 }
 
@@ -974,6 +976,10 @@ skipBuffer:
 
 	loop:
 		for ds.it.next() {
+
+			if ds.SchemaOnly {
+				break // don't push any rows
+			}
 
 		schemaChgLoop:
 			for {

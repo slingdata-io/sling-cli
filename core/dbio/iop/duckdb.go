@@ -1432,6 +1432,11 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		where = g.F("where %s", incrementalWhereCond)
 	}
 
+	// we need only the types
+	if fsc.SchemaOnly {
+		where = "where 1=0"
+	}
+
 	if format == dbio.FileTypeNone {
 		g.Warn("duck.MakeScanQuery: format is empty, cannot determine stream_scanner")
 	}
