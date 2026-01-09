@@ -173,11 +173,19 @@ func (c *Connection) Info() Info {
 	}
 }
 
-func (c *Connection) Hash() string {
+func (c *Connection) Hash(excludeKeys ...string) string {
+	excludeMap := map[string]bool{}
+	for _, key := range excludeKeys {
+		excludeMap[key] = true
+	}
+
 	parts := []string{c.Name, c.Type.Name()}
 	keys := lo.Keys(c.Data)
 	sort.Strings(keys)
 	for _, key := range keys {
+		if excludeMap[key] {
+			continue
+		}
 		value := g.F("%s=%s", key, g.Marshal(c.Data[key]))
 		parts = append(parts, value)
 	}
@@ -387,8 +395,11 @@ func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions
 		opt = options[0]
 	}
 
+	//  exclude url for files so Hash matches for files
+	cacheKey := c.Hash("url")
+
 	// default cache to true
-	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+	if cc, ok := connCache.Get(cacheKey); ok && opt.UseCache {
 		if cc.File != nil {
 			return cc.File, nil
 		}
@@ -402,7 +413,9 @@ func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions
 	if err != nil {
 		return
 	}
-	connCache.Set(c.Hash(), c) // cache
+
+	// set cache
+	connCache.Set(cacheKey, c)
 
 	if opt.Expire > 0 {
 		time.AfterFunc(time.Duration(opt.Expire)*time.Second, func() {
