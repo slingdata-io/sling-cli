@@ -946,6 +946,8 @@ github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587 h1
 github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587/go.mod h1:FxeVw2tiKoUgPdOOXt4pwi2BuuQ17Cop7vnJTQL/z2s=
 github.com/slingdata-io/godbc v0.0.3 h1:yj+Z/E6Hud2a/XKNIxhx3qggHSHpt70WfesgkWn6rj8=
 github.com/slingdata-io/godbc v0.0.3/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
+github.com/slingdata-io/godbc v0.0.4 h1:W39fdWNpBms6PItrSEfocedK1SaGYnofkeXW/xRXsYA=
+github.com/slingdata-io/godbc v0.0.4/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
 github.com/slingdata-io/pocketbase v0.22.136/go.mod h1:RYAdoMZtW+3OIgKqg+YhgWGIiwjtcBHGxRcVF2+1klA=
 github.com/snowflakedb/gosnowflake v1.17.1 h1:sBYExPDRv6hHF7fCqeXMT745L326Byw/cROxvCiEJzo=

@@ -882,8 +882,10 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	cfg.Target.Object = strings.TrimSpace(renderedObject)
 
 	if cfg.TgtConn.Type.IsDb() {
+		dbType := cfg.TgtConn.GetType()
+
 		// normalize casing of object names
-		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		table, err := database.ParseTableName(cfg.Target.Object, dbType)
 		if err != nil {
 			return g.Error(err, "could not parse target table name")
 		} else if table.IsQuery() {
@@ -897,7 +899,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
 			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
 			if tgtOpts.TableTmp != "" {
-				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, cfg.TgtConn.Type)
+				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, dbType)
 				if err != nil {
 					return g.Error(err, "could not parse temp table name")
 				} else if tableTmp.Schema == "" {
@@ -907,17 +909,17 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					}
 				}
 
-				if cfg.TgtConn.Type.DBNameUpperCase() {
+				if dbType.DBNameUpperCase() {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
 				tgtOpts.TableTmp = tableTmp.FullName()
-			} else if g.In(cfg.TgtConn.Type, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
+			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
 				// for duckdb and ducklake, we'll use a temp table, which uses the 'main' schema
-				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
+				tableTmp := makeTempTableName(dbType, table, "_sling_duckdb_tmp")
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else {
-				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_tmp")
+				tableTmp := makeTempTableName(dbType, table, "_tmp")
 				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}

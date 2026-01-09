@@ -113,6 +113,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeFileGoogleDrive: {name: "google_drive"},
 	dbio.TypeFileFtp:         {name: "ftp_test_url"},
 	dbio.TypeFileAzureABFS:   {name: "fabric_lake"},
+	dbio.Type("db2"):         {name: "db2", adjustCol: g.Bool(false)},
 }
 
 func init() {
@@ -782,7 +783,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			// skip those
 			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
 				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
-				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() {
+				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
+				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
+				taskCfg.SrcConn.Type == dbio.TypeDbODBC {
 				continue
 			}
 
@@ -1094,6 +1097,10 @@ func TestSuiteDatabaseIceberg(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8")
 	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
+}
+
+func TestSuiteDatabaseDB2(t *testing.T) {
+	testSuite(t, dbio.Type("db2"), "1-5,7+")
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {

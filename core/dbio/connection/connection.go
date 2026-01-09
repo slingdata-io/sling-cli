@@ -173,6 +173,15 @@ func (c *Connection) Info() Info {
 	}
 }
 
+// GetType returns the more accurate type, especially for ODBC databases
+// a bit gnarly...
+func (c *Connection) GetType() dbio.Type {
+	if t := c.Data["conn_template"]; c.Type == dbio.TypeDbODBC && t != nil {
+		return dbio.Type(cast.ToString(t))
+	}
+	return c.Type
+}
+
 func (c *Connection) Hash(excludeKeys ...string) string {
 	excludeMap := map[string]bool{}
 	for _, key := range excludeKeys {

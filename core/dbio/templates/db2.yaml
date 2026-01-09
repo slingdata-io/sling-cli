@@ -1,0 +1,416 @@
+core:
+  drop_table: |
+    BEGIN
+      DECLARE CONTINUE HANDLER FOR SQLSTATE '42704' BEGIN END;
+      EXECUTE IMMEDIATE 'DROP TABLE {table}';
+    END;
+  drop_view:  |
+    BEGIN
+      DECLARE CONTINUE HANDLER FOR SQLSTATE '42704' BEGIN END;
+      EXECUTE IMMEDIATE 'DROP VIEW {view}';
+    END;
+  drop_index: drop index {schema}.{index}
+  create_table: create table {table} ({col_types})
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
+  insert: insert into {table} ({cols}) values ({values})
+  insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
+  sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) fetch first {n} rows only
+  rename_table: rename table {table} to {new_table}
+  modify_column: alter table {table} alter column {column} set data type {type}
+  use_database: set current schema {schema}
+  delete_where_not_exist: |
+    delete from {target_table}
+    where {where}
+      and {unique_id} not in (
+          select {unique_id}
+          from {temp_table}
+      )
+  update_where_not_exist: |
+    update {target_table}
+    set {set_fields}
+    where {where}
+      and {unique_id} not in (
+          select {unique_id}
+          from {temp_table}
+      )
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING {src_table} src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN
+      UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN
+      INSERT ({insert_fields}) VALUES ({src_insert_fields})
+  merge_delete_insert: |
+    DELETE FROM {tgt_table}
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table}
+  db2import: |
+    IMPORT FROM '{file}' OF DEL
+    MODIFIED BY COLDEL, CODEPAGE=1208
+    METHOD P (1, 2, 3)
+    MESSAGES '{message_file}'
+    INSERT INTO {table} ({columns})
+
+metadata:
+  current_database:
+    select current server from sysibm.sysdummy1
+
+  databases: |
+    select distinct dbname as name
+    from syscat.tables
+    order by dbname
+
+  schemas: |
+    select schemaname as schema_name
+    from syscat.schemata
+    order by schemaname
+
+  tables: |
+    select tabschema as schema_name, tabname as table_name, 'false' as is_view
+    from syscat.tables
+    where type = 'T'
+      {{if .schema -}} and tabschema = '{schema}' {{- end}}
+    order by tabschema, tabname
+
+  views: |
+    select viewschema as schema_name, viewname as table_name, 'true' as is_view
+    from syscat.views
+    {{if .schema -}} where viewschema = '{schema}' {{- end}}
+    order by viewschema, viewname
+
+  columns: |
+    select
+      colname as column_name,
+      typename as data_type,
+      case
+        when typename in ('DECIMAL', 'NUMERIC') then length
+        when typename in ('FLOAT', 'REAL', 'DOUBLE') then length
+        else null
+      end as precision,
+      case
+        when typename in ('DECIMAL', 'NUMERIC') then scale
+        else null
+      end as scale
+    from syscat.columns
+    where tabschema = '{schema}'
+      and tabname = '{table}'
+    order by colno
+
+  primary_keys: |
+    select
+      constname as pk_name,
+      colseq as position,
+      colname as column_name
+    from syscat.keycoluse
+    where tabschema = '{schema}'
+      and tabname = '{table}'
+      and constname in (
+        select constname
+        from syscat.tabconst
+        where tabschema = '{schema}'
+          and tabname = '{table}'
+          and type = 'P'
+      )
+    order by colseq
+
+  indexes: |
+    select
+      indname as index_name,
+      colname as column_name
+    from syscat.indexcoluse
+    where indschema = '{schema}'
+      and tabname = '{table}'
+    order by indname, colseq
+
+  columns_full: |
+    select
+      tabschema as schema_name,
+      tabname as table_name,
+      colname as column_name,
+      typename as data_type,
+      colno as position
+    from syscat.columns
+    where 1=1
+      {{if .schema -}} and tabschema = '{schema}' {{- end}}
+      {{if .table -}} and tabname = '{table}' {{- end}}
+    order by tabschema, tabname, colno
+
+  schemata: |
+    select
+      c.tabschema as schema_name,
+      c.tabname as table_name,
+      case
+        when t.type = 'T' then 'false'
+        else 'true'
+      end as is_view,
+      c.colname as column_name,
+      c.typename as data_type,
+      c.colno as position
+    from syscat.columns c
+    left join syscat.tables t
+      on t.tabschema = c.tabschema
+      and t.tabname = c.tabname
+    where 1=1
+      {{if .schema -}} and c.tabschema = '{schema}' {{- end}}
+      {{if .tables -}} and c.tabname in ({tables}) {{- end}}
+    order by c.tabschema, c.tabname, c.colno
+
+  row_count_estimates: |
+    select
+      tabschema as schema_name,
+      tabname as table_name,
+      card as count
+    from syscat.tables
+    where type = 'T'
+      {{if .schema -}} and tabschema = '{schema}' {{- end}}
+      {{if .table -}} and tabname = '{table}' {{- end}}
+    order by card desc
+
+  ddl_table: |
+    select 'CREATE TABLE "' || tabschema || '"."' || tabname || '" (' ||
+      listagg(
+        '"' || colname || '" ' || typename ||
+        case
+          when typename in ('VARCHAR', 'CHAR', 'GRAPHIC', 'VARGRAPHIC') then '(' || length || ')'
+          when typename in ('DECIMAL', 'NUMERIC') then '(' || length || ',' || scale || ')'
+          else ''
+        end ||
+        case when nulls = 'N' then ' NOT NULL' else '' end,
+        ', '
+      ) within group (order by colno) || ')' as ddl
+    from syscat.columns
+    where tabschema = '{schema}'
+      and tabname = '{table}'
+    group by tabschema, tabname
+
+  ddl_view: |
+    select text as ddl
+    from syscat.views
+    where viewschema = '{schema}'
+      and viewname = '{table}'
+
+  sessions: |
+    select
+      agent_id as sid,
+      application_handle,
+      application_name,
+      authid as username,
+      client_applname as program
+    from table(mon_get_connection(cast(null as bigint), -1))
+    where application_name <> ''
+
+  session_terminate: |
+    call admin_cmd('force application (' || {agent_id} || ')')
+
+analysis:
+  field_chars: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      sum(case when locate(chr(10), {field}) > 0 then 1 else 0 end) as cnt_nline,
+      sum(case when locate(chr(9), {field}) > 0 then 1 else 0 end) as cnt_tab,
+      sum(case when locate(',', {field}) > 0 then 1 else 0 end) as cnt_comma,
+      sum(case when locate('"', {field}) > 0 then 1 else 0 end) as cnt_dquote,
+      min(length({field})) as f_min_len,
+      max(length({field})) as f_max_len
+    from "{schema}"."{table}"
+
+  field_stat_len: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      min(length(varchar({field}))) as f_min_len,
+      max(length(varchar({field}))) as f_max_len
+    from "{schema}"."{table}"
+
+  field_stat_deep: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*), 1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt,
+      cast(min({field}) as varchar(1000)) as f_min,
+      cast(max({field}) as varchar(1000)) as f_max,
+      min(length(varchar({field}))) as f_min_len,
+      max(length(varchar({field}))) as f_max_len
+    from "{schema}"."{table}"
+
+  distro_field: |
+    with t1 as (
+      select
+        '{field}' as field,
+        {field},
+        count(*) as cnt
+      from "{schema}"."{table}"
+      group by {field}
+      order by count(*) desc
+      fetch first 1000 rows only
+    ),
+    t2 as (
+      select
+        '{field}' as field,
+        count(*) as ttl_cnt
+      from "{schema}"."{table}"
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2 on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_group: |
+    with t1 as (
+      select
+        '{field}' as field,
+        {group_expr} as group_exp,
+        {field},
+        count(*) as cnt
+      from "{schema}"."{table}"
+      group by {field}, {group_expr}
+      order by count(*) desc
+      fetch first 1000 rows only
+    ),
+    t2 as (
+      select
+        '{field}' as field,
+        count(*) as ttl_cnt
+      from "{schema}"."{table}"
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      t1.group_exp,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2 on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_date: |
+    with t1 as (
+      select
+        '{field}' as field,
+        year({field}) as year,
+        month({field}) as month,
+        day({field}) as day,
+        count(*) as cnt
+      from "{schema}"."{table}"
+      group by year({field}), month({field}), day({field})
+      order by year({field}), month({field}), day({field})
+    ),
+    t2 as (
+      select '{field}' as field, count(*) as ttl_cnt
+      from "{schema}"."{table}"
+    )
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      t1.field,
+      t1.year,
+      t1.month,
+      t1.day,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2 on t1.field = t2.field
+    order by t1.year, t1.month, t1.day
+
+function:
+  truncate_f: trunc({field}, 0)
+  truncate_datef: date({field})
+  string_type: varchar(32672)
+  cast_to_string: 'varchar({field})'
+  cast_to_text: 'varchar({field}, 32672)'
+  date_to_int: days({field}) - days('1970-01-01')
+  number_to_int: int({field})
+  sleep: call dbms_lock.sleep({seconds})
+  checksum_integer: cast(abs({field}) as bigint)
+  checksum_bigint: cast(abs({field}) as decimal(31,0))
+  checksum_decimal: cast(abs({field}) as decimal(31,0))
+  checksum_date: cast((days({field}) - days('1970-01-01')) as bigint) * 86400
+  checksum_datetime: cast((days({field}) - days('1970-01-01')) as bigint) * 86400 + cast(midnight_seconds({field}) as bigint)
+  checksum_string: cast(length({field}) as bigint)
+  checksum_boolean: cast(length(varchar({field})) as bigint)
+  checksum_json: cast(length(varchar({field})) as bigint)
+  now: current timestamp
+  concat: concat({fields})
+
+variable:
+  tmp_folder: /tmp
+  bind_string: "?"
+  error_filter_table_exists: undefined
+  error_ignore_drop_table: undefined
+  error_ignore_drop_view: undefined
+  max_string_type: varchar(32672)
+  max_string_length: 32672
+  max_column_length: 128
+  column_upper: true
+
+native_type_map:
+  smallint: smallint
+  integer: integer
+  int: integer
+  bigint: bigint
+  decimal: decimal
+  numeric: decimal
+  dec: decimal
+  real: float
+  float: float
+  double: float
+  double precision: float
+  decfloat: float
+  char: string
+  character: string
+  varchar: string
+  character varying: string
+  clob: text
+  blob: binary
+  varbinary: binary
+  binary: binary
+  date: date
+  time: time
+  timestamp: timestamp
+  boolean: bool
+  xml: text
+  graphic: string
+  vargraphic: string
+  dbclob: string
+
+general_type_map:
+  bigint: bigint
+  binary: varbinary(32672)
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  integer: integer
+  json: clob
+  smallint: smallint
+  string: "varchar()"
+  text: clob
+  timestamp: timestamp
+  timestampz: timestamp
+  float: double
+  time: time
+  timez: time
+  uuid: char(36)
