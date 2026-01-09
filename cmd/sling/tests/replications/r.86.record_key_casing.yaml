@@ -72,3 +72,6 @@ streams:
       # This reproduces the customer's exact expression pattern with _sling_deleted_at
       - true_changed_at: >
           greatest(record.dateadded, record.lastchanged, record._sling_deleted_at)
+
+env:
+  output_dir: temp/test_parquet
