@@ -285,9 +285,51 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 
-	// auto convert to json if needed
+	// auto convert complex types as needed
 	{
 		switch t.Dialect {
+		case dbio.TypeDbOracle:
+			// XMLTYPE columns cause the go-ora driver to hang when reading directly.
+			// Cast to CLOB to extract XML content as text.
+			// See: https://github.com/sijms/go-ora/issues/562
+			var xmlTypeCols iop.Columns
+			for _, col := range t.Columns {
+				if strings.EqualFold(col.DbType, "xmltype") {
+					xmlTypeCols = append(xmlTypeCols, col)
+				}
+			}
+
+			if len(xmlTypeCols) > 0 {
+				if len(fields) == 0 || (len(fields) == 1 && fields[0] == "*") {
+					// Need to explicitly list all columns with XMLTYPE casted
+					fieldExprs := []string{}
+					for _, col := range t.Columns {
+						colQ := t.Dialect.Quote(col.Name)
+						if xmlTypeCols.GetColumn(col.Name) != nil {
+							// Cast XMLTYPE to CLOB using getclobval()
+							expr := g.F("(%s).getclobval() as %s", colQ, colQ)
+							fieldExprs = append(fieldExprs, expr)
+						} else {
+							fieldExprs = append(fieldExprs, colQ)
+						}
+					}
+					fieldsStr = strings.Join(fieldExprs, ", ")
+				} else {
+					fieldExprs := []string{}
+					for _, field := range opts.Fields {
+						field = strings.TrimSpace(field)
+						colQ := t.Dialect.Quote(field)
+						if xmlTypeCols.GetColumn(field) != nil {
+							expr := g.F("(%s).getclobval() as %s", colQ, colQ)
+							fieldExprs = append(fieldExprs, expr)
+						} else {
+							fieldExprs = append(fieldExprs, colQ)
+						}
+					}
+					fieldsStr = strings.Join(fieldExprs, ", ")
+				}
+			}
+
 		case dbio.TypeDbBigQuery:
 			var toJsonCols iop.Columns
 

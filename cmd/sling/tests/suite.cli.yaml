@@ -1483,3 +1483,14 @@
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: Table created from parquet file source with schema and 0 rows'
+
+# Test Oracle XMLTYPE column transfer to BigQuery (hang issue)
+- id: 163
+  name: 'Test Oracle XMLTYPE column to BigQuery transfer (hang issue)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.92.oracle_xmltype_bigquery.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - "using text since type 'xmltype' not mapped"
+    - 'execution succeeded'
+    - 'SUCCESS: Oracle XMLTYPE to BigQuery transfer completed without hanging!'
