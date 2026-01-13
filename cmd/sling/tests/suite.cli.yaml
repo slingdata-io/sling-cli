@@ -1494,3 +1494,23 @@
     - "using text since type 'xmltype' not mapped"
     - 'execution succeeded'
     - 'SUCCESS: Oracle XMLTYPE to BigQuery transfer completed without hanging!'
+
+# Test MySQL LoadDataLocal using RegisterReaderHandler pattern
+- id: 164
+  name: 'Test MySQL LoadDataLocal with native Go driver'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.93.mysql_load_data_local.yaml'
+  streams: 1
+  rows: 18
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal test passed'
+
+# Test MySQL LoadDataLocal NULL handling with checksums
+- id: 165
+  name: 'Test MySQL LoadDataLocal NULL handling'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.94.mysql_load_data_local_nulls.yaml'
+  streams: 1
+  rows: 53
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal NULL handling test passed'
