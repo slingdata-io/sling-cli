@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	Marker         = "Sling CLI | https://slingdata.io"
 	HomeDir        = os.Getenv("SLING_HOME_DIR")
 	HomeDirEnvFile = ""
 	Env            = &EnvFile{}

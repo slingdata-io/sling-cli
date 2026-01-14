@@ -248,11 +248,10 @@ runReplication:
 	defer connection.CloseAll()
 
 	if !env.IsThreadChild {
-		text := "Sling CLI | https://slingdata.io"
 		if env.NoColor {
-			g.Info(text)
+			g.Info(env.Marker)
 		} else {
-			g.Info(env.CyanString(text))
+			g.Info(env.CyanString(env.Marker))
 		}
 
 		// check for update, and print note
