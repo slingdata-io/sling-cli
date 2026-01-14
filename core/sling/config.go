@@ -968,8 +968,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
 	}
 
-	if cfg.ReplicationStream != nil && cfg.ReplicationStream.ID != "" {
-		m["stream_run_id"] = cfg.ReplicationStream.ID
+	if cfg.ReplicationStream != nil {
+		if cfg.ReplicationStream.ID != "" {
+			m["stream_run_id"] = cfg.ReplicationStream.ID
+		}
+		if cfg.ReplicationStream.Description != "" {
+			m["stream_description"] = cfg.ReplicationStream.Description
+		}
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
