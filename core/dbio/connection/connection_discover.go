@@ -9,6 +9,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -22,7 +23,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 	switch {
 	case c.Type.IsDb():
-		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: false})
+		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: c.GetType() == dbio.TypeDbDuckDb})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -213,7 +214,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 
 	switch {
 	case c.Type.IsDb():
-		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: false})
+		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: c.GetType() == dbio.TypeDbDuckDb})
 		if err != nil {
 			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}

@@ -22,7 +22,7 @@ var TelProps = g.M(
 func init() {
 	// dev build version is in format => 1.2.2.dev/2024-08-20
 	parts := strings.Split(Version, "/")
-	if len(parts) != 2 {
+	if len(parts) != 2 || os.Getenv("SLING_AGENT_ID") != "" {
 		return
 	}
 

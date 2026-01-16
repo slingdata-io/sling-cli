@@ -29,7 +29,8 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		dateMap := iop.GetISO8601DateMap(time.Now())
 		cfg.TgtConn.Set(g.M("url", g.Rm(uri, dateMap)))
 
-		if len(df.Buffer) == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
+		// Skip empty buffer check for definition-only mode (we intentionally have 0 rows)
+		if len(df.Buffer) == 0 && cfg.Mode != DefinitionOnlyMode && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
 			g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty files, set SLING_ALLOW_EMPTY=TRUE")
 			return
 		}
@@ -205,6 +206,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if directInsert || writeDirectly {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
+		} else if cfg.Mode == DefinitionOnlyMode {
+			// continue as normal, since only definition
 		} else {
 			return t.writeToDbDirectly(cfg, df, tgtConn)
 		}
@@ -243,6 +246,34 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
 	if err != nil {
 		return 0, err
+	}
+
+	// Handle definition-only mode: create final table and exit without data
+	if cfg.Mode == DefinitionOnlyMode {
+		setStage("5 - prepare-final")
+
+		// Set columns and keys on target table
+		targetTable.Columns = sampleData.Columns
+		if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+			err = g.Error(err, "could not set keys for "+targetTable.FullName())
+			return 0, err
+		}
+
+		// Drop existing table if it exists
+		if err := tgtConn.DropTable(targetTable.FullName()); err != nil {
+			g.Debug("could not drop existing table %s: %v", targetTable.FullName(), err)
+		}
+
+		// Create the final table with inferred schema
+		if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+			err = g.Error(err, "could not create table "+targetTable.FullName())
+			return 0, err
+		}
+
+		df.Close()
+		t.SetProgress("created table definition %s with %d columns", targetTable.FullName(), len(sampleData.Columns))
+		setStage("6 - closing")
+		return 0, nil
 	}
 
 	// Set table keys

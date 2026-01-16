@@ -1941,8 +1941,9 @@ func (conn *BaseConn) DropView(viewNames ...string) (err error) {
 		sql := g.R(conn.template.Core["drop_view"], "view", viewName)
 		_, err = conn.Self().Exec(sql)
 		if err != nil {
-			errIgnoreWord := conn.template.Variable["error_ignore_drop_view"]
-			if !(errIgnoreWord != "" && strings.Contains(cast.ToString(err), errIgnoreWord)) {
+			errMsg := strings.ToLower(err.Error())
+			errIgnoreWord := strings.ToLower(conn.Template().Variable["error_ignore_drop_view"])
+			if !(errIgnoreWord != "" && strings.Contains(errMsg, errIgnoreWord)) {
 				return g.Error(err, "Error for "+sql)
 			}
 			g.Debug("view %s does not exist", viewName)
@@ -2228,7 +2229,7 @@ func (conn *BaseConn) GetAnalysis(analysisName string, values map[string]interfa
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *BaseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) string {
-	return conn.Self().Quote(srcCol.Name)
+	return conn.Template().Quote(srcCol.Name)
 }
 
 // CastColumnsForSelect cast the source columns into the target Column types
@@ -2248,7 +2249,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 		}
 
 		// don't normalize name, leave as is
-		selectExpr := conn.Self().Quote(srcCol.Name)
+		selectExpr := conn.Template().Quote(srcCol.Name)
 
 		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
 			g.Debug(
@@ -2272,7 +2273,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 		}
 
 		// add alias
-		qName := conn.Self().Quote(srcCol.Name)
+		qName := conn.Template().Quote(srcCol.Name)
 		selectExprs = append(selectExprs, g.F("%s as %s", selectExpr, qName))
 	}
 
@@ -2281,7 +2282,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 
 func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
 
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Template().Quote(srcCol.Name)
 
 	castFunc := conn.GetType().GetTemplateValue("function.cast_as")
 
@@ -2396,7 +2397,7 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns
 		for i, field := range fields {
 			c++
 			values[i] = conn.bindVar(i+1, field, n, c)
-			qFields[i] = conn.Self().Quote(field)
+			qFields[i] = conn.Template().Quote(field)
 		}
 		valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
 	}
@@ -2420,8 +2421,8 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	return col.GetNativeType(conn.Self().GetType(), ct)
 }
 
-// GenerateDDL genrate a DDL based on a dataset
-func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+// GenerateDDL generate a DDL based on a dataset
+func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
 
 	if !data.Inferred || data.SafeInference {
 		if len(data.Columns) > 0 && data.Columns[0].Stats.TotalCnt == 0 && data.Columns[0].Type == "" {
@@ -2491,7 +2492,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(col.Stats))
 		}
 
-		columnDDL := conn.Self().Quote(col.Name) + " " + nativeType
+		columnDDL := conn.Template().Quote(col.Name) + " " + nativeType
 		columnsDDL = append(columnsDDL, columnDDL)
 	}
 
@@ -2504,11 +2505,49 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		createTemplate = table.DDL
 	}
 
-	ddl := g.R(
+	ddl = g.R(
 		createTemplate,
 		"table", table.FullName(),
 		"col_types", strings.Join(columnsDDL, ",\n  "),
 	)
+
+	partitionBy := ""
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by %s", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
+		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
+	}
+	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
+
+	clusterBy := ""
+	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
+		clusterBy = g.F("cluster by %s", strings.Join(colNames, ", "))
+	}
+	ddl = strings.ReplaceAll(ddl, "{cluster_by}", clusterBy)
+
+	distKey := ""
+	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
+		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
+	}
+	ddl = strings.ReplaceAll(ddl, "{dist_key}", distKey)
+
+	sortKey := ""
+	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
+		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
+	}
+	ddl = strings.ReplaceAll(ddl, "{sort_key}", sortKey)
+
+	primaryKeyExpr := ""
+	if keyCols := columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
+		primaryKeyExpr = g.F("%s", strings.Join(colNames, ", "))
+	}
+	ddl = strings.ReplaceAll(ddl, "{primary_key}", primaryKeyExpr)
 
 	return ddl, nil
 }
@@ -2779,7 +2818,10 @@ func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkField
 		"pk_fields", mc.Map["pk_fields"],
 		"set_fields", mc.Map["set_fields"],
 		"insert_fields", mc.Map["insert_fields"],
+		"src_insert_fields", mc.Map["src_insert_fields"],
 		"src_fields", mc.Map["src_fields"],
+		"tgt_fields", mc.Map["tgt_fields"],
+		"placeholder_fields", mc.Map["placeholder_fields"],
 	)
 
 	return
@@ -2789,6 +2831,10 @@ type MergeConfig struct {
 	Strategy MergeStrategy
 	Template string
 	Map      map[string]string
+}
+
+func (mc MergeConfig) TemplatePath() string {
+	return g.F("core.merge_%s", mc.Strategy)
 }
 
 // GenerateMergeConfig returns the merge config
@@ -2840,6 +2886,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 	setFieldsAll := []string{}
 	insertFields := []string{}
 	placeholderFields := []string{}
+	srcInsertFields := []string{}
 	for _, tgtColName := range tgtCols.Names() {
 		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
 		tgtCol := tgtColumns.GetColumn(tgtColName)
@@ -2858,7 +2905,16 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
 
+		srcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+		srcInsertFields = append(srcInsertFields, srcExpr)
+
 		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+
+		// set sync operation to `U` for update update
+		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
+			setSrcExpr = "'U'"
+		}
+
 		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 		setFieldsAll = append(setFieldsAll, setField)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
@@ -2884,6 +2940,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 			"src_fields":         strings.Join(srcFields, ", "),
 			"tgt_fields":         strings.Join(tgtFields, ", "),
 			"insert_fields":      strings.Join(insertFields, ", "),
+			"src_insert_fields":  strings.Join(srcInsertFields, ", "),
 			"pk_fields":          strings.Join(pkFields, ", "),
 			"src_pk_fields":      strings.Join(srcPkFields, ", "),
 			"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
@@ -2900,11 +2957,10 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 		return mc, g.Error("invalid merge strategy %s", mc.Strategy)
 	}
 
-	key := g.F("core.merge_%s", mc.Strategy)
-	mc.Template = conn.GetTemplateValue(key)
+	mc.Template = conn.GetTemplateValue(mc.TemplatePath())
 
 	if mc.Template == "" {
-		return mc, g.Error("merge strategy `%s` not supported for %s (did not find SQL template key `%s`)", mc.Strategy, conn.GetType(), key)
+		return mc, g.Error("merge strategy `%s` not supported for %s (did not find SQL template key `%s`)", mc.Strategy, conn.GetType(), mc.TemplatePath())
 	}
 
 	return
@@ -3083,23 +3139,23 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return
 		}
 		for i, key := range pKey {
-			pKey[i] = conn.Self().Quote(key)
+			pKey[i] = conn.Template().Quote(key)
 		}
 
 		// add new column with new type
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.add_column"),
 			"table", table.FullName(),
-			"column", conn.Self().Quote(colNameTemp),
+			"column", conn.Template().Quote(colNameTemp),
 			"type", col.DbType,
 		))
 
 		// update set to cast old values
 		oldColCasted := conn.Self().CastColumnForSelect(oldCols[index], col)
-		if oldColCasted == conn.Self().Quote(col.Name) {
+		if oldColCasted == conn.Template().Quote(col.Name) {
 			oldColCasted = g.R(
 				conn.GetTemplateValue("function.cast_as"),
-				"field", conn.Self().Quote(col.Name),
+				"field", conn.Template().Quote(col.Name),
 				"type", col.DbType,
 			)
 		}
@@ -3116,7 +3172,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			"table", table.FullName(),
 			"set_fields", g.R(
 				"{temp_column} = {old_column_casted}",
-				"temp_column", conn.Self().Quote(colNameTemp),
+				"temp_column", conn.Template().Quote(colNameTemp),
 				"old_column_casted", oldColCasted,
 			),
 			"fields", strings.Join(fields, ", "),
@@ -3128,13 +3184,13 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.drop_column"),
 			"table", table.FullName(),
-			"column", conn.Self().Quote(col.Name),
+			"column", conn.Template().Quote(col.Name),
 		))
 
 		// rename new column to old name
 		tableName := table.FullName()
-		oldColName := conn.Self().Quote(colNameTemp)
-		newColName := conn.Self().Quote(col.Name)
+		oldColName := conn.Template().Quote(colNameTemp)
+		newColName := conn.Template().Quote(col.Name)
 
 		if conn.Self().GetType().IsSQLServer() {
 			tableName = conn.Unquote(table.FullName())
@@ -3259,8 +3315,8 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			expr = "0"
 		}
 		colName := fieldsMap[strings.ToLower(col.Name)]
-		expr = g.R(expr, "field", conn.Self().Quote(cast.ToString(colName)))
-		exprs = append(exprs, g.F("sum(%s) as %s", expr, conn.Self().Quote(cast.ToString(colName))))
+		expr = g.R(expr, "field", conn.Template().Quote(cast.ToString(colName)))
+		exprs = append(exprs, g.F("sum(%s) as %s", expr, conn.Template().Quote(cast.ToString(colName))))
 		exprMap[strings.ToLower(col.Name)] = g.F("sum(%s)", expr)
 	}
 
@@ -3464,7 +3520,7 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 		sql := g.R(
 			conn.Template().Core["add_column"],
 			"table", table.FullName(),
-			"column", conn.Self().Quote(col.Name),
+			"column", conn.Template().Quote(col.Name),
 			"type", nativeType,
 		)
 

@@ -599,6 +599,11 @@ func (conn *OracleConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column
 	tgtCol.DbPrecision = lo.Ternary(tgtCol.DbPrecision == 0, 4000, tgtCol.DbPrecision)
 
 	switch {
+	case srcDbType == "xmltype":
+		// XMLTYPE columns cause the go-ora driver to hang when reading directly.
+		// Cast to CLOB to extract XML content as text.
+		// See: https://github.com/sijms/go-ora/issues/562
+		selectStr = g.F("(%s).getclobval()", qName)
 	case srcDbType != "clob" && tgtDbType == "clob":
 		selectStr = g.F("to_clob(%s)", qName)
 	case srcDbType == "clob" && tgtCol.IsString() && tgtDbType != "clob":

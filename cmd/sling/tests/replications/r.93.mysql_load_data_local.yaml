@@ -1,0 +1,54 @@
+# Test MySQL LoadDataLocal using RegisterReaderHandler pattern
+# This validates that LOAD DATA LOCAL INFILE works with the go-sql-driver's
+# native Reader:: handler pattern without requiring external mysql binary.
+source: local
+target: mysql
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify data was loaded
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM mysql.test_load_local
+      into: result
+
+    - type: log
+      message: "Row count: {store.result[0].cnt}"
+
+    # Verify row count matches source file (18 rows in test1.1.csv)
+    - type: check
+      check: int_parse(store.result[0].cnt) == 18
+      failure_message: "Expected 18 rows but found {store.result[0].cnt}"
+
+    # Sample some data to verify correctness
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, first_name, last_name, email FROM mysql.test_load_local WHERE id = 1
+      into: sample_row
+
+    - type: log
+      message: "Sample row: {store.sample_row}"
+
+    - type: check
+      check: int_parse(store.sample_row[0].id) == 1
+      failure_message: "Expected id=1 but found {store.sample_row[0].id}"
+
+    - type: log
+      message: "SUCCESS: MySQL LoadDataLocal test passed"
+
+    # Cleanup target table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS mysql.test_load_local
+
+streams:
+  file://cmd/sling/tests/files/test1.1.csv:
+    object: mysql.test_load_local

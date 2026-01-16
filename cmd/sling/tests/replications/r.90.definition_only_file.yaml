@@ -1,0 +1,108 @@
+source: postgres
+target: LOCAL
+
+defaults:
+  mode: definition-only
+
+env:
+  OUTPUT_PATH: temp/definition_only_test
+
+hooks:
+  start:
+    # Create source table with various column types
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_definition_only_file;
+        CREATE TABLE public.test_definition_only_file (
+          id bigint,
+          name varchar(100),
+          created_at timestamp,
+          amount decimal(12,2),
+          is_active boolean
+        );
+        INSERT INTO public.test_definition_only_file VALUES
+          (1, 'test1', now(), 123.45, true),
+          (2, 'test2', now(), 456.78, false),
+          (3, 'test3', now(), 789.01, true);
+          
+    # Cleanup output file
+    - command: rm -rf temp/definition_only_test
+
+  end:
+    # Check that execution succeeded
+    - check: execution.status.error == 0
+      on_failure: break
+
+    # Verify output file exists by listing it
+    - type: list
+      id: file_list
+      location: 'local/{env.OUTPUT_PATH}'
+      only: files
+
+    - type: log
+      message: "Files found: {state.file_list}"
+
+    - type: check
+      check: length(state.file_list) >= 1
+      failure_message: "Expected output file to be created"
+
+    # Use DuckDB to describe the parquet file schema and verify column types
+    - type: query
+      connection: duckdb
+      query: DESCRIBE SELECT * FROM '{env.OUTPUT_PATH}/test_definition_only.parquet'
+      into: schema_info
+
+    - type: log
+      message: "Schema info: {store.schema_info}"
+
+    # Verify we have 5 columns
+    - type: check
+      check: length(store.schema_info) == 5
+      failure_message: "Expected 5 columns but found {length(store.schema_info)}"
+
+    # Verify column names and types
+    - type: check
+      check: store.schema_info[0].column_name == "id" && store.schema_info[0].column_type == "BIGINT"
+      failure_message: "Expected column 'id' with type BIGINT, got {store.schema_info[0].column_name} / {store.schema_info[0].column_type}"
+
+    - type: check
+      check: store.schema_info[1].column_name == "name" && contains(store.schema_info[1].column_type, "VARCHAR")
+      failure_message: "Expected column 'name' with type VARCHAR, got {store.schema_info[1].column_name} / {store.schema_info[1].column_type}"
+
+    - type: check
+      check: store.schema_info[2].column_name == "created_at" && contains(store.schema_info[2].column_type, "TIMESTAMP")
+      failure_message: "Expected column 'created_at' with type TIMESTAMP, got {store.schema_info[2].column_name} / {store.schema_info[2].column_type}"
+
+    - type: check
+      check: store.schema_info[3].column_name == "amount" && contains(store.schema_info[3].column_type, "DECIMAL")
+      failure_message: "Expected column 'amount' with type DECIMAL, got {store.schema_info[3].column_name} / {store.schema_info[3].column_type}"
+
+    - type: check
+      check: store.schema_info[4].column_name == "is_active" && store.schema_info[4].column_type == "BOOLEAN"
+      failure_message: "Expected column 'is_active' with type BOOLEAN, got {store.schema_info[4].column_name} / {store.schema_info[4].column_type}"
+
+    # Verify file has 0 rows (definition-only should not copy data)
+    - type: query
+      connection: duckdb
+      query: SELECT COUNT(*) as cnt FROM '{env.OUTPUT_PATH}/test_definition_only.parquet'
+      into: row_count
+
+    - type: check
+      check: int_parse(store.row_count[0].cnt) == 0
+      failure_message: "Expected 0 rows but found {store.row_count[0].cnt}"
+
+    - type: log
+      message: "SUCCESS: Parquet file definition created with correct schema (definition-only mode)"
+
+    # Cleanup source
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_definition_only_file
+
+    # Cleanup output file
+    - command: rm -rf temp/definition_only_test
+
+streams:
+  public.test_definition_only_file:
+    object: '{env.OUTPUT_PATH}/test_definition_only.parquet'

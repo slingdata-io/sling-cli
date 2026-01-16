@@ -191,7 +191,7 @@ bulk:
 function:
   add_months: add_months({field}, {num})
   cast: cast({field} as {type})
-  concat: concat({strings})
+  concat: concat({fields})
   date_diff_days: days_between({date1}, {date2})
   date_diff_seconds: seconds_between({date1}, {date2})
   date_parse_format: to_timestamp({string}, {format})
@@ -208,6 +208,7 @@ function:
   uuid: sys_guid()
   
 variable:
+  column_upper: true
   bool_as: string
   duplicates_group_by: false
   handle_null_compare: true

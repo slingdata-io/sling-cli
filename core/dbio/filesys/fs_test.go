@@ -702,7 +702,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 		"ENDPOINT=nyc3.digitaloceanspaces.com",
 		"ACCESS_KEY_ID="+os.Getenv("DOS_ACCESS_KEY_ID"),
 		"SECRET_ACCESS_KEY="+os.Getenv("DOS_SECRET_ACCESS_KEY"),
-		"METADATA="+g.Marshal(iop.Metadata{LoadedAt: iop.KeyValue{"loaded_at", time.Now().Unix()}, StreamURL: iop.KeyValue{"url", ""}}),
+		"METADATA="+g.Marshal(iop.Metadata{SyncedAt: iop.KeyValue{"loaded_at", time.Now().Unix()}, StreamURL: iop.KeyValue{"url", ""}}),
 	)
 	assert.NoError(t, err)
 

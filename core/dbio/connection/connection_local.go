@@ -120,7 +120,7 @@ func GetLocalConns(options ...any) ConnEntries {
 		for _, conn := range dbtConns {
 			c := ConnEntry{
 				Name:        strings.ToUpper(conn.Info().Name),
-				Description: conn.Type.NameLong(),
+				Description: conn.GetType().NameLong(),
 				Source:      "dbt profiles yaml",
 				Connection:  conn,
 			}
@@ -140,7 +140,7 @@ func GetLocalConns(options ...any) ConnEntries {
 				for _, conn := range profileConns {
 					c := ConnEntry{
 						Name:        strings.ToUpper(conn.Info().Name),
-						Description: conn.Type.NameLong(),
+						Description: conn.GetType().NameLong(),
 						Source:      name + " env yaml",
 						Connection:  conn,
 					}
@@ -164,7 +164,7 @@ func GetLocalConns(options ...any) ConnEntries {
 				for _, conn := range profileConns {
 					c := ConnEntry{
 						Name:        strings.ToUpper(conn.Info().Name),
-						Description: conn.Type.NameLong(),
+						Description: conn.GetType().NameLong(),
 						Source:      "env-var env yaml",
 						Connection:  conn,
 					}
@@ -233,7 +233,7 @@ func GetLocalConns(options ...any) ConnEntries {
 
 		c := ConnEntry{
 			Name:        conn.Info().Name,
-			Description: conn.Type.NameLong(),
+			Description: conn.GetType().NameLong(),
 			Source:      "env variable",
 			Connection:  conn,
 		}
@@ -386,7 +386,7 @@ func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {
 	for _, conn := range profileConns {
 		c := ConnEntry{
 			Name:        strings.ToUpper(conn.Info().Name),
-			Description: conn.Type.NameLong(),
+			Description: conn.GetType().NameLong(),
 			Source:      ec.Name,
 			Connection:  conn,
 		}

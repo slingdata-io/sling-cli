@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	cloudsqlmysql "cloud.google.com/go/cloudsqlconn/mysql/mysql"
 	"github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -25,9 +26,10 @@ import (
 // MySQLConn is a MySQL or MariaDB connection
 type MySQLConn struct {
 	BaseConn
-	URL             string
-	isCloudSQL      bool
-	cloudSQLCleanup func()
+	URL                string
+	isCloudSQL         bool
+	localInfileEnabled bool
+	cloudSQLCleanup    func()
 }
 
 // Init initiates the object
@@ -45,15 +47,35 @@ func (conn *MySQLConn) Init() error {
 	// the LoadDataOutFile needs special circumstances
 	conn.BaseConn.SetProp("allow_bulk_export", "false")
 
-	// InsertBatchStream is faster than LoadDataInFile
-	if conn.BaseConn.GetProp("allow_bulk_import") == "" {
-		conn.BaseConn.SetProp("allow_bulk_import", "false")
+	// Enable allowAllFiles for LOAD DATA LOCAL INFILE via RegisterReaderHandler
+	// This is required for the go-sql-driver to use Reader:: syntax
+	if conn.BaseConn.GetProp("allow_all_files") == "" &&
+		conn.BaseConn.GetProp("allowAllFiles") == "" {
+		conn.BaseConn.SetProp("allow_all_files", "true")
 	}
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
+}
+
+// checkLocalInfileEnabled checks if the MySQL server allows LOCAL INFILE
+// and caches the result in the struct field for subsequent calls
+func (conn *MySQLConn) checkLocalInfileEnabled() {
+	// Query the server using raw DB to avoid datastream context issues
+	var varName, varValue string
+	err := conn.db.QueryRow("SHOW GLOBAL VARIABLES LIKE 'local_infile'").Scan(&varName, &varValue)
+	if err != nil {
+		g.Debug("could not check local_infile variable: %v", err)
+		return
+	}
+
+	conn.localInfileEnabled = strings.ToLower(varValue) == "on" || varValue == "1"
+
+	if conn.localInfileEnabled {
+		g.Debug("local_infile is enabled on MySQL server")
+	}
 }
 
 // GetURL returns the processed URL
@@ -142,7 +164,15 @@ func (conn *MySQLConn) Connect(timeOut ...int) (err error) {
 		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
 	}
 
-	return conn.BaseConn.Connect(timeOut...)
+	err = conn.BaseConn.Connect(timeOut...)
+	if err != nil {
+		return err
+	}
+
+	// Check and cache local_infile setting after connect
+	conn.checkLocalInfileEnabled()
+
+	return nil
 }
 
 // connectCloudSQL establishes a connection to Google Cloud SQL MySQL using IAM authentication
@@ -285,6 +315,9 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 
 	conn.postConnect()
 
+	// Check and cache local_infile setting after connect
+	conn.checkLocalInfileEnabled()
+
 	return nil
 }
 
@@ -396,21 +429,13 @@ func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err er
 
 // BulkImportStream bulk import stream
 func (conn *MySQLConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-
+	// Check ADBC first
 	if conn.UseADBC() {
 		conn.Commit()
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 
-	_, err = exec.LookPath("mysql")
-	if err != nil {
-		g.Trace("mysql not found in path. Using cursor...")
-		return conn.BaseConn.InsertBatchStream(tableFName, ds)
-	} else if conn.GetProp("allow_bulk_import") != "true" {
-		return conn.BaseConn.InsertBatchStream(tableFName, ds)
-	}
-
-	// needs to get columns to shape stream
+	// Get columns to shape stream
 	columns, err := conn.GetColumns(tableFName)
 	if err != nil {
 		err = g.Error(err, "could not get column list")
@@ -423,7 +448,29 @@ func (conn *MySQLConn) BulkImportStream(tableFName string, ds *iop.Datastream) (
 		return
 	}
 
-	return conn.LoadDataInFile(tableFName, ds)
+	// Check server capability (cached from connect)
+	// Note: LoadDataLocal keeps the connection busy, so we can't use it when
+	// adjust_column_type is enabled (it requires queries during load)
+	useBulk := conn.GetProp("use_bulk") != "false"
+	adjustColumnType := cast.ToBool(conn.GetProp("adjust_column_type"))
+
+	if conn.localInfileEnabled && useBulk && !adjustColumnType {
+		// Use native Go driver - no external binary needed
+		return conn.LoadDataLocal(tableFName, ds)
+	}
+
+	// Log why we're not using LoadDataLocal
+	if !conn.localInfileEnabled {
+		g.Debug("local_infile is disabled on server, using fallback")
+	} else if !useBulk {
+		g.Debug("use_bulk is false, using InsertBatchStream")
+	} else if adjustColumnType {
+		g.Debug("adjust_column_type enabled, using InsertBatchStream to allow concurrent queries")
+	}
+
+	// Final fallback: InsertBatchStream
+	g.Trace("using InsertBatchStream as fallback")
+	return conn.BaseConn.InsertBatchStream(tableFName, ds)
 }
 
 // LoadDataOutFile Bulk Export
@@ -481,51 +528,32 @@ func (conn *MySQLConn) LoadDataOutFile(ctx *g.Context, sql string) (stdOutReader
 	return stdOutReader, err
 }
 
-// LoadDataInFile Bulk Import
-func (conn *MySQLConn) LoadDataInFile(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	var stderr bytes.Buffer
+// LoadDataLocal uses go-sql-driver/mysql's RegisterReaderHandler for LOAD DATA LOCAL INFILE
+// This allows streaming data directly to MySQL without requiring the external mysql binary
+func (conn *MySQLConn) LoadDataLocal(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	// Generate unique handler name to avoid conflicts in concurrent operations
+	handlerName := "sling_" + uuid.New().String()
 
-	connURL := conn.URL
-	if su := conn.GetProp("ssh_url"); su != "" {
-		connURL = su // use ssh url if specified
-	}
+	// Register the reader handler for streaming CSV with header
+	// The MySQL LOAD DATA template uses IGNORE 1 LINES, so we need the header
+	mysql.RegisterReaderHandler(handlerName, func() io.Reader {
+		return ds.NewCsvReader(iop.LoaderStreamConfig(true))
+	})
+	defer mysql.DeregisterReaderHandler(handlerName)
 
-	url, err := dburl.Parse(connURL)
-	if err != nil {
-		err = g.Error(err, "Error dburl.Parse(conn.URL)")
-		return
-	}
-
-	password, _ := url.User.Password()
-	host := strings.ReplaceAll(url.Host, ":"+url.Port(), "")
-	database := strings.ReplaceAll(url.Path, "/", "")
-
-	loadQuery := g.R(`LOAD DATA LOCAL INFILE '/dev/stdin' INTO TABLE {table} FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"' ESCAPED BY '"' IGNORE 1 LINES;`, "table", tableFName)
-	proc := exec.Command(
-		"mysql",
-		"--local-infile=1",
-		"-h", host,
-		"-P", url.Port(),
-		"-u", url.User.Username(),
-		"-p"+password,
-		database,
-		"-e", loadQuery,
+	// Get the template and build the query
+	tmpl := conn.GetTemplateValue("core.load_data_local_reader")
+	loadQuery := g.R(tmpl,
+		"handler_name", handlerName,
+		"table", tableFName,
 	)
 
-	proc.Stderr = &stderr
-	proc.Stdin = ds.NewCsvReader(iop.DefaultStreamConfig())
+	g.Trace("LoadDataLocal query: %s", loadQuery)
 
-	err = proc.Run()
+	// Execute the LOAD DATA statement
+	_, err = conn.Exec(loadQuery)
 	if err != nil {
-		cmdStr := strings.ReplaceAll(strings.Join(proc.Args, " "), password, "****")
-		err = g.Error(
-			err,
-			fmt.Sprintf(
-				"MySQL Import Command -> %s\nMySQL Import Error  -> %s",
-				cmdStr, stderr.String(),
-			),
-		)
-		return ds.Count, err
+		return 0, g.Error(err, "LoadDataLocal failed for table %s", tableFName)
 	}
 
 	return ds.Count, nil

@@ -9,6 +9,15 @@ core:
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
 
+  load_data_local_reader: |
+    LOAD DATA LOCAL INFILE 'Reader::{handler_name}'
+    INTO TABLE {table}
+    FIELDS TERMINATED BY ','
+    OPTIONALLY ENCLOSED BY '"'
+    ESCAPED BY '\\'
+    LINES TERMINATED BY '\n'
+    IGNORE 1 LINES
+
 metadata:
   current_database: select database() as name from dual
   

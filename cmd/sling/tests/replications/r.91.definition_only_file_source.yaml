@@ -1,0 +1,106 @@
+source: LOCAL
+target: postgres
+
+defaults:
+  mode: definition-only
+
+hooks:
+  start:
+    # Drop target table if exists
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_definition_only_file_source
+
+  end:
+    # Check that execution succeeded
+    - check: execution.status.error == 0
+      on_failure: break
+
+    # Verify table was created in target
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'test_definition_only_file_source'
+      into: table_check
+
+    - type: check
+      check: length(store.table_check) == 1
+      failure_message: "Expected table to be created but it doesn't exist"
+
+    # Verify table has 0 rows (definition-only should not copy data)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM public.test_definition_only_file_source
+      into: row_count
+
+    - type: check
+      check: int_parse(store.row_count[0].cnt) == 0
+      failure_message: "Expected 0 rows but found {store.row_count[0].cnt}"
+
+    # Get column information
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'test_definition_only_file_source'
+        ORDER BY ordinal_position
+      into: schema_info
+
+    - type: log
+      message: "Schema info: {store.schema_info}"
+
+    # Verify we have 10 columns (test1.parquet: id, first_name, last_name, email, target, create_dt, date, rating, code + _sling_loaded_at)
+    - type: check
+      check: length(store.schema_info) == 10
+      failure_message: "Expected 10 columns but found {length(store.schema_info)}"
+
+    # Verify column names and types
+    - type: check
+      check: store.schema_info[0].column_name == "id" && store.schema_info[0].data_type == "bigint"
+      failure_message: "Expected column 'id' with type bigint, got {store.schema_info[0].column_name} / {store.schema_info[0].data_type}"
+
+    - type: check
+      check: store.schema_info[1].column_name == "first_name" && store.schema_info[1].data_type == "text"
+      failure_message: "Expected column 'first_name' with type text, got {store.schema_info[1].column_name} / {store.schema_info[1].data_type}"
+
+    - type: check
+      check: store.schema_info[2].column_name == "last_name" && store.schema_info[2].data_type == "text"
+      failure_message: "Expected column 'last_name' with type text, got {store.schema_info[2].column_name} / {store.schema_info[2].data_type}"
+
+    - type: check
+      check: store.schema_info[3].column_name == "email" && store.schema_info[3].data_type == "text"
+      failure_message: "Expected column 'email' with type text, got {store.schema_info[3].column_name} / {store.schema_info[3].data_type}"
+
+    - type: check
+      check: store.schema_info[4].column_name == "target" && store.schema_info[4].data_type == "boolean"
+      failure_message: "Expected column 'target' with type boolean, got {store.schema_info[4].column_name} / {store.schema_info[4].data_type}"
+
+    - type: check
+      check: store.schema_info[5].column_name == "create_dt" && contains(store.schema_info[5].data_type, "timestamp")
+      failure_message: "Expected column 'create_dt' with type timestamp, got {store.schema_info[5].column_name} / {store.schema_info[5].data_type}"
+
+    - type: check
+      check: store.schema_info[6].column_name == "date" && contains(store.schema_info[6].data_type, "timestamp")
+      failure_message: "Expected column 'date' with type timestamp, got {store.schema_info[6].column_name} / {store.schema_info[6].data_type}"
+
+    - type: check
+      check: store.schema_info[7].column_name == "rating" && store.schema_info[7].data_type == "numeric"
+      failure_message: "Expected column 'rating' with type numeric, got {store.schema_info[7].column_name} / {store.schema_info[7].data_type}"
+
+    - type: check
+      check: store.schema_info[8].column_name == "code" && store.schema_info[8].data_type == "numeric"
+      failure_message: "Expected column 'code' with type numeric, got {store.schema_info[8].column_name} / {store.schema_info[8].data_type}"
+
+    - type: log
+      message: "SUCCESS: Table created from parquet file source with schema and 0 rows (definition-only mode)"
+
+    # Cleanup target
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_definition_only_file_source
+
+streams:
+  cmd/sling/tests/files/test1.parquet:
+    object: public.test_definition_only_file_source

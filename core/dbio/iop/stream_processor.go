@@ -1111,6 +1111,10 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		if err != nil {
 			return "", g.Error(err, "could not cast to string: %#v", v)
 		}
+	case time.Time:
+		valString = v.Format(time.RFC3339Nano)
+	case *time.Time:
+		valString = v.Format(time.RFC3339Nano)
 	case chJSON: // Clickhouse JSON / Variant or any with MarshalJSON()
 		var sBytes []byte
 		sBytes, err = v.MarshalJSON()
@@ -1582,6 +1586,7 @@ func (sp *StreamProcessor) CastRow(row []any, columns Columns) []any {
 	for i, val := range row {
 		col := &columns[i]
 		row[i] = sp.CastVal(i, val, col)
+		// g.Warn("%d | col %s | nVal => %#v", sp.N, col.Name, row[i])
 		if row[i] != nil && row[i] != "" {
 			sp.colStats[i].LastVal = row[i]
 		}

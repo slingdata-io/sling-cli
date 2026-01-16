@@ -6,6 +6,9 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -292,6 +295,127 @@ func TestParseSQLMultiStatements(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			result := ParseSQLMultiStatements(c.input, c.dialect)
+			assert.Equal(t, c.expected, result)
+		})
+	}
+}
+
+func TestGetSchemataAll(t *testing.T) {
+	ef := env.LoadSlingEnvFile()
+
+	url := cast.ToStringMap(ef.Connections["POSTGRES"])["url"]
+	if url == nil {
+		t.Skip("POSTGRES env var not set")
+	}
+
+	conn, err := NewConn(cast.ToString(url))
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer conn.Close()
+
+	schemata, err := GetSchemataAll(conn)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	// Count all tables from all databases
+	tableCount := 0
+	for _, db := range schemata.Databases {
+		tableCount += len(db.Tables())
+	}
+
+	assert.Greater(t, tableCount, 0, "expected at least one table across all databases")
+}
+
+func TestAddPrimaryKeyToDDL(t *testing.T) {
+	// Verifies that primary key is placed correctly in column definitions
+	// when table_ddl contains WITH clause or other suffixes after ({col_types})
+
+	type testCase struct {
+		name     string
+		dialect  dbio.Type
+		ddl      string
+		pkCols   []string
+		expected string
+	}
+
+	cases := []testCase{
+		{
+			name:     "simple DDL without WITH clause",
+			dialect:  dbio.TypeDbSQLServer,
+			ddl:      `create table "dbo"."test" ("col1" nvarchar(10), "col2" nvarchar(6))`,
+			pkCols:   []string{"col1", "col2"},
+			expected: `create table "dbo"."test" ("col1" nvarchar(10), "col2" nvarchar(6), primary key ("col1", "col2"))`,
+		},
+		{
+			name:     "DDL with WITH clause (GitHub issue #694)",
+			dialect:  dbio.TypeDbSQLServer,
+			ddl:      `create table "dbo"."test" ("col1" nvarchar(10), "col2" nvarchar(6)) WITH (data_compression=page)`,
+			pkCols:   []string{"col1", "col2"},
+			expected: `create table "dbo"."test" ("col1" nvarchar(10), "col2" nvarchar(6), primary key ("col1", "col2")) WITH (data_compression=page)`,
+		},
+		{
+			name:     "DDL with multiple WITH options",
+			dialect:  dbio.TypeDbSQLServer,
+			ddl:      `create table "dbo"."test" ("col1" int, "col2" int) WITH (PAD_INDEX = ON, FILLFACTOR = 90)`,
+			pkCols:   []string{"col1"},
+			expected: `create table "dbo"."test" ("col1" int, "col2" int, primary key ("col1")) WITH (PAD_INDEX = ON, FILLFACTOR = 90)`,
+		},
+		{
+			name:     "DDL with nested parentheses in column type",
+			dialect:  dbio.TypeDbSQLServer,
+			ddl:      `create table "dbo"."test" ("col1" decimal(10,2), "col2" varchar(100)) WITH (LOCK_ESCALATION = TABLE)`,
+			pkCols:   []string{"col1"},
+			expected: `create table "dbo"."test" ("col1" decimal(10,2), "col2" varchar(100), primary key ("col1")) WITH (LOCK_ESCALATION = TABLE)`,
+		},
+		{
+			name:     "Postgres DDL without suffix",
+			dialect:  dbio.TypeDbPostgres,
+			ddl:      `create table if not exists "public"."test" ("col1" integer, "col2" text)`,
+			pkCols:   []string{"col1"},
+			expected: `create table if not exists "public"."test" ("col1" integer, "col2" text, primary key ("col1"))`,
+		},
+		{
+			name:     "Postgres DDL with PARTITION BY clause",
+			dialect:  dbio.TypeDbPostgres,
+			ddl:      `create table if not exists "public"."test" ("col1" integer, "col2" date) PARTITION BY RANGE (col2)`,
+			pkCols:   []string{"col1"},
+			expected: `create table if not exists "public"."test" ("col1" integer, "col2" date, primary key ("col1")) PARTITION BY RANGE (col2)`,
+		},
+		{
+			name:     "Oracle DDL with named constraint",
+			dialect:  dbio.TypeDbOracle,
+			ddl:      `create table "SCHEMA"."TEST" ("COL1" NUMBER, "COL2" VARCHAR2(100))`,
+			pkCols:   []string{"COL1"},
+			expected: `create table "SCHEMA"."TEST" ("COL1" NUMBER, "COL2" VARCHAR2(100), constraint test_pkey primary key ("COL1"))`,
+		},
+		{
+			name:     "no primary key columns",
+			dialect:  dbio.TypeDbSQLServer,
+			ddl:      `create table "dbo"."test" ("col1" int, "col2" int) WITH (FILLFACTOR = 90)`,
+			pkCols:   []string{},
+			expected: `create table "dbo"."test" ("col1" int, "col2" int) WITH (FILLFACTOR = 90)`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			table := &Table{
+				Name:    "test",
+				Dialect: c.dialect,
+			}
+
+			// Create columns with primary key flag
+			var cols iop.Columns
+			for _, name := range c.pkCols {
+				col := iop.Column{Name: name}
+				col.SetMetadata(iop.PrimaryKey.MetadataKey(), "true")
+				cols = append(cols, col)
+			}
+
+			result, err := table.AddPrimaryKeyToDDL(c.ddl, cols)
+			assert.NoError(t, err)
 			assert.Equal(t, c.expected, result)
 		})
 	}
