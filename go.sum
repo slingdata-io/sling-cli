@@ -944,8 +944,6 @@ github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 h1:JIAuq3EE
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966/go.mod h1:sUM3LWHvSMaG192sy56D9F7CNvL7jUJVXoqM1QKLnog=
 github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587 h1:IRiAvb/AGt2qii99UwF8QvhBAs8H+/Udu2GgVWFg3ys=
 github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260105180115-72bb86fc9587/go.mod h1:FxeVw2tiKoUgPdOOXt4pwi2BuuQ17Cop7vnJTQL/z2s=
-github.com/slingdata-io/godbc v0.0.3 h1:yj+Z/E6Hud2a/XKNIxhx3qggHSHpt70WfesgkWn6rj8=
-github.com/slingdata-io/godbc v0.0.3/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
 github.com/slingdata-io/godbc v0.0.4 h1:W39fdWNpBms6PItrSEfocedK1SaGYnofkeXW/xRXsYA=
 github.com/slingdata-io/godbc v0.0.4/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
