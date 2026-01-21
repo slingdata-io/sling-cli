@@ -1,0 +1,435 @@
+core:
+  drop_table: |
+    execute block as
+    begin
+      if (exists(select 1 from rdb$relations where (rdb$relation_name) = ('{table}'))) then
+        execute statement 'drop table {table}';
+    end
+  drop_view: |
+    execute block as
+    begin
+      if (exists(select 1 from rdb$relations where rdb$relation_name = ('{view}'))) then
+        execute statement 'drop view {view}';
+    end
+  drop_index: |
+    execute block as
+    begin
+      if (exists(select 1 from rdb$indices where rdb$index_name = ('{index}'))) then
+        execute statement 'drop index {index}';
+    end
+  create_table: create table {table} ({col_types})
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
+  replace: |
+    update or insert into {table} ({fields})
+    values ({values})
+    matching ({pk_fields})
+  replace_temp: |
+    merge into {table} t1
+    using {temp_table} t2
+    on ({pk_fields_equal})
+    when matched then
+      update set {set_fields2}
+    when not matched then
+      insert ({names}) values ({names2})
+  insert: insert into {table} ({fields}) values ({values})
+  insert_temp: insert into {table} ({fields}) select {cols} from {temp_table}
+  insert_ignore: |
+    execute block as
+    begin
+      insert into {table} ({fields}) values ({values});
+    when any do
+      begin
+        -- ignore duplicate key errors
+      end
+    end
+  insert_ignore_temp: |
+    merge into {table} t1
+    using {temp_table} t2
+    on ({pk_fields_equal})
+    when not matched then
+      insert ({names}) values ({names2})
+  update_temp: |
+    merge into {table} t1
+    using {temp_table} t2
+    on ({pk_fields_equal})
+    when matched then
+      update set {set_fields2}
+  sample: select first {n} {fields} from {table}
+  rename_table: alter table {table} rename to {new_table}
+  modify_column: alter table {table} alter column {column} type {type}
+  use_database: -- firebird doesn't support USE DATABASE
+
+metadata:
+
+  current_database: |
+    select MON$DATABASE_NAME as name
+    from MON$DATABASE
+
+  databases: |
+    select MON$DATABASE_NAME as name
+    from MON$DATABASE
+
+  schemas: |
+    select 'main' as schema_name
+    from RDB$DATABASE
+
+  tables: |
+    select 
+      'main' as schema_name,
+      trim(r.RDB$RELATION_NAME) as table_name,
+      'false' as is_view
+    from RDB$RELATIONS r
+    where r.RDB$SYSTEM_FLAG = 0 
+      and r.RDB$VIEW_BLR is null
+    order by r.RDB$RELATION_NAME
+
+  views: |
+    select 
+      'main' as schema_name,
+      trim(r.RDB$RELATION_NAME) as table_name,
+      'true' as is_view
+    from RDB$RELATIONS r
+    where r.RDB$SYSTEM_FLAG = 0
+      and r.RDB$VIEW_BLR is not null
+    order by r.RDB$RELATION_NAME
+
+  columns: |
+    select
+      trim(rf.RDB$FIELD_NAME) as column_name,
+      case f.RDB$FIELD_TYPE
+        when 7 then 'SMALLINT'
+        when 8 then 'INTEGER'
+        when 10 then 'FLOAT'
+        when 12 then 'DATE'
+        when 13 then 'TIME'
+        when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 16 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 0 then 'BIGINT'
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+          end
+        when 27 then 'DOUBLE PRECISION'
+        when 35 then 'TIMESTAMP'
+        when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
+        when 261 then 'BLOB'
+        else 'UNKNOWN'
+      end as data_type,
+      f.RDB$FIELD_PRECISION as "precision",
+      abs(f.RDB$FIELD_SCALE) as scale
+    from RDB$RELATION_FIELDS rf
+    join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
+    where trim(rf.RDB$RELATION_NAME) = '{table}'
+    order by rf.RDB$FIELD_POSITION
+
+  primary_keys: |
+    select
+      trim(rc.RDB$CONSTRAINT_NAME) as pk_name,
+      sg.RDB$FIELD_POSITION + 1 as position,
+      trim(sg.RDB$FIELD_NAME) as column_name
+    from RDB$RELATION_CONSTRAINTS rc
+    join RDB$INDEX_SEGMENTS sg on rc.RDB$INDEX_NAME = sg.RDB$INDEX_NAME
+    where rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY'
+      and (trim(rc.RDB$RELATION_NAME)) = ('{table}')
+    order by sg.RDB$FIELD_POSITION
+
+  indexes: |
+    select
+      trim(i.RDB$INDEX_NAME) as index_name,
+      trim(sg.RDB$FIELD_NAME) as column_name
+    from RDB$INDICES i
+    join RDB$INDEX_SEGMENTS sg on i.RDB$INDEX_NAME = sg.RDB$INDEX_NAME
+    where i.RDB$SYSTEM_FLAG = 0
+      and (trim(i.RDB$RELATION_NAME)) = ('{table}')
+    order by i.RDB$INDEX_NAME, sg.RDB$FIELD_POSITION
+
+  columns_full: |
+    select
+      'main' as schema_name,
+      trim(rf.RDB$RELATION_NAME) as table_name,
+      trim(rf.RDB$FIELD_NAME) as column_name,
+      case f.RDB$FIELD_TYPE
+        when 7 then 'SMALLINT'
+        when 8 then 'INTEGER'
+        when 10 then 'FLOAT'
+        when 12 then 'DATE'
+        when 13 then 'TIME'
+        when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 16 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 0 then 'BIGINT'
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+          end
+        when 27 then 'DOUBLE PRECISION'
+        when 35 then 'TIMESTAMP'
+        when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
+        when 261 then 'BLOB'
+        else 'UNKNOWN'
+      end as data_type,
+      rf.RDB$FIELD_POSITION + 1 as position
+    from RDB$RELATION_FIELDS rf
+    join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
+    join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
+    where r.RDB$SYSTEM_FLAG = 0
+      {{if .table -}} and (trim(rf.RDB$RELATION_NAME)) = ('{table}') {{- end}}
+    order by rf.RDB$RELATION_NAME, rf.RDB$FIELD_POSITION
+
+  schemata: |
+    select
+      'main' as schema_name,
+      trim(rf.RDB$RELATION_NAME) as table_name,
+      case 
+        when r.RDB$VIEW_BLR is null then false
+        else true
+      end as is_view,
+      trim(rf.RDB$FIELD_NAME) as column_name,
+      case f.RDB$FIELD_TYPE
+        when 7 then 'SMALLINT'
+        when 8 then 'INTEGER'
+        when 10 then 'FLOAT'
+        when 12 then 'DATE'
+        when 13 then 'TIME'
+        when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 16 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 0 then 'BIGINT'
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+          end
+        when 27 then 'DOUBLE PRECISION'
+        when 35 then 'TIMESTAMP'
+        when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
+        when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
+        when 261 then 'BLOB'
+        else 'UNKNOWN'
+      end as data_type,
+      rf.RDB$FIELD_POSITION + 1 as position
+    from RDB$RELATION_FIELDS rf
+    join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
+    join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
+    where r.RDB$SYSTEM_FLAG = 0
+      {{if .tables -}} and trim(rf.RDB$RELATION_NAME) in ({tables}) {{- end}}
+    order by rf.RDB$RELATION_NAME, rf.RDB$FIELD_POSITION
+
+  row_count_estimates: |
+    select
+      'main' as schema_name,
+      trim(r.RDB$RELATION_NAME) as table_name,
+      0 as count
+    from RDB$RELATIONS r
+    where r.RDB$SYSTEM_FLAG = 0
+      and r.RDB$VIEW_BLR is null
+      {{if .table -}} and trim(r.RDB$RELATION_NAME) = '{table}' {{- end}}
+
+  ddl_table: |
+    execute block
+    returns (ddl varchar(8000))
+    as
+      declare variable field_name varchar(31);
+      declare variable field_type varchar(100);
+      declare variable field_null varchar(10);
+      declare variable first_field boolean = true;
+    begin
+      ddl = 'CREATE TABLE {table} (';
+      
+      for select
+        trim(rf.RDB$FIELD_NAME),
+        case f.RDB$FIELD_TYPE
+          when 7 then 'SMALLINT'
+          when 8 then 'INTEGER'
+          when 10 then 'FLOAT'
+          when 12 then 'DATE'
+          when 13 then 'TIME'
+          when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
+          when 16 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 0 then 'BIGINT'
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            end
+          when 27 then 'DOUBLE PRECISION'
+          when 35 then 'TIMESTAMP'
+          when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
+          when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
+          when 261 then 'BLOB'
+          else 'UNKNOWN'
+        end,
+        case when rf.RDB$NULL_FLAG = 1 then 'NOT NULL' else '' end
+      from RDB$RELATION_FIELDS rf
+      join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
+      where (trim(rf.RDB$RELATION_NAME)) = ('{table}')
+      order by rf.RDB$FIELD_POSITION
+      into :field_name, :field_type, :field_null
+      do
+      begin
+        if (not first_field) then
+          ddl = ddl || ', ';
+        ddl = ddl || field_name || ' ' || field_type || ' ' || field_null;
+        first_field = false;
+      end
+      
+      ddl = ddl || ')';
+      suspend;
+    end
+
+  ddl_view: |
+    select RDB$VIEW_SOURCE as ddl
+    from RDB$RELATIONS
+    where (trim(RDB$RELATION_NAME)) = ('{table}')
+
+  sessions: |
+    select
+      a.MON$ATTACHMENT_ID as pid,
+      a.MON$USER as username,
+      a.MON$REMOTE_ADDRESS as client_addr,
+      a.MON$STATE as state,
+      s.MON$SQL_TEXT as query
+    from MON$ATTACHMENTS a
+    left join MON$STATEMENTS s on a.MON$ATTACHMENT_ID = s.MON$ATTACHMENT_ID
+    where a.MON$ATTACHMENT_ID <> current_connection
+
+  session_terminate: delete from MON$ATTACHMENTS where MON$ATTACHMENT_ID = {pid}
+
+analysis:
+  field_chars: |
+    select
+      'main' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      sum(case when {field} containing ascii_char(10) then 1 else 0 end) as cnt_nline,
+      sum(case when {field} containing ascii_char(9) then 1 else 0 end) as cnt_tab,
+      sum(case when {field} containing ',' then 1 else 0 end) as cnt_comma,
+      sum(case when {field} containing '"' then 1 else 0 end) as cnt_dquote,
+      min(char_length({field})) as f_min_len,
+      max(char_length({field})) as f_max_len
+    from {table}
+
+  field_stat_len: |
+    select
+      'main' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      min(char_length(cast({field} as varchar(8000)))) as f_min_len,
+      max(char_length(cast({field} as varchar(8000)))) as f_max_len
+    from {table}
+
+  field_stat_deep: |
+    select
+      'main' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      cast(100.0 * (count(*) - count({field})) / count(*) as numeric(5,1)) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      cast(100.0 * count(distinct {field}) / count(*) as numeric(5,1)) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt,
+      cast(min({field}) as varchar(255)) as f_min,
+      cast(max({field}) as varchar(255)) as f_max,
+      min(char_length(cast({field} as varchar(8000)))) as f_min_len,
+      max(char_length(cast({field} as varchar(8000)))) as f_max_len
+    from {table}
+
+  distro_field: |
+    select first 1000
+      '{table}' as table_nm,
+      '{field}' as field,
+      {field} as value,
+      count(*) as cnt,
+      cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
+    from {table}
+    group by {field}
+    order by count(*) desc
+
+  distro_field_group: |
+    select first 1000
+      '{table}' as table_nm,
+      '{field}' as field,
+      {group_expr} as group_exp,
+      {field} as value,
+      count(*) as cnt,
+      cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
+    from {table}
+    group by {field}, {group_expr}
+    order by count(*) desc
+
+  distro_field_date: |
+    select
+      'main' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      extract(year from {field}) as year,
+      extract(month from {field}) as month,
+      extract(day from {field}) as day,
+      count(*) as cnt,
+      cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
+    from {table}
+    group by 1, 2, 3, 4, 5, 6
+    order by 4, 5, 6
+
+function:
+  truncate_f: cast({field} as integer)
+  truncate_datef: cast({field} as date)
+  string_type: varchar(8000)
+  cast_to_string: 'cast({field} as varchar(8000))'
+  cast_to_text: 'cast({field} as varchar(8000))'
+  date_to_int: datediff(day, date '1900-01-01', {field})
+  number_to_int: cast({field} as integer)
+  sleep: -- firebird doesn't have a sleep function
+  checksum_datetime: cast(datediff(second, timestamp '1970-01-01 00:00:00', {field}) * 1000000 as bigint)
+  checksum_string: char_length({field})
+  checksum_boolean: char_length(cast({field} as varchar(10)))
+  checksum_json: char_length(replace({field}, ' ', ''))
+  now: current_timestamp
+
+variable:
+  tmp_folder: /tmp
+  bind_string: '?'
+  error_filter_table_exists: already exists
+  max_string_type: varchar(8000)
+  max_string_length: 8000
+  max_column_length: 31
+
+native_type_map:
+  smallint: smallint
+  short: smallint
+  long: integer
+  integer: integer
+  bigint: bigint
+  float: float
+  double precision: float
+  numeric: decimal
+  decimal: decimal
+  date: date
+  time: time
+  timestamp: timestamp
+  char: string
+  varchar: text
+  blob: text
+  boolean: bool
+  varying: text
+
+general_type_map:
+  bigint: bigint
+  binary: blob
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  integer: integer
+  json: varchar(8000)
+  smallint: smallint
+  string: "varchar()"
+  text: varchar(8000)
+  timestamp: timestamp
+  timestampz: timestamp with local time zone
+  float: double precision
+  time: time
+  timez: time
+  uuid: varchar(36)

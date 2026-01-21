@@ -13,8 +13,8 @@ core:
   create_table: create table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
-  insert: insert into {table} ({cols}) values ({values})
-  insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
+  insert: insert into {table} ({fields}) values ({values})
+  insert_temp: insert into {table} ({fields}) select {cols} from {temp_table}
   sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) fetch first {n} rows only
   rename_table: rename table {table} to {new_table}
   modify_column: alter table {table} alter column {column} set data type {type}

@@ -26,7 +26,7 @@ core:
   # optimize_column: |
   #   alter table {table} rename to {table_old};
   #   create table {table} ( {col_ddl} );
-  #   insert into {table} ({cols})
+  #   insert into {table} ({fields})
   #   select {cols}
   #   from {table_old};
   #   drop table {table_old};

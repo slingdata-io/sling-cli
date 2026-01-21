@@ -9,8 +9,8 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal}
-  insert: insert into {table} ({cols}) values ({values})
-  insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
+  insert: insert into {table} ({fields}) values ({values})
+  insert_temp: insert into {table} ({fields}) select {cols} from {temp_table}
   insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing
   insert_ignore_temp: insert into {table} ({names}) select {names} from {temp_table} on conflict ({pk_fields}) do nothing
   update_temp: |
