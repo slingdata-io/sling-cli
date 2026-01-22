@@ -261,6 +261,13 @@ func (ds *Datastream) processBwRows() {
 	}
 }
 
+// StartBwProcessor starts the bytes-written processor goroutine.
+// This should be called when creating a datastream that pushes rows
+// directly without calling Start() (e.g., chunked streaming).
+func (ds *Datastream) StartBwProcessor() {
+	go ds.processBwRows()
+}
+
 // SetReady sets the ds.ready
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {
