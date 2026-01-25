@@ -767,6 +767,9 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	}
 	ds.SetConfig(props)
 
+	// Start the bytes-written processor to prevent blocking on bwRows channel
+	ds.StartBwProcessor()
+
 	// Process in chunks
 	go func() {
 		defer ds.Close()
