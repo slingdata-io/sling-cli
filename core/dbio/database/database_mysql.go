@@ -536,8 +536,11 @@ func (conn *MySQLConn) LoadDataLocal(tableFName string, ds *iop.Datastream) (cou
 
 	// Register the reader handler for streaming CSV with header
 	// The MySQL LOAD DATA template uses IGNORE 1 LINES, so we need the header
+	// BoolAsInt is required because MySQL's LOAD DATA doesn't convert true/false to 1/0
+	cfg := iop.LoaderStreamConfig(true)
+	cfg.BoolAsInt = true
 	mysql.RegisterReaderHandler(handlerName, func() io.Reader {
-		return ds.NewCsvReader(iop.LoaderStreamConfig(true))
+		return ds.NewCsvReader(cfg)
 	})
 	defer mysql.DeregisterReaderHandler(handlerName)
 
