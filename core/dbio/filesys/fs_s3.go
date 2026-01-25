@@ -98,11 +98,33 @@ func (fs *S3FileSysClient) GetPath(uri string) (path string, err error) {
 		return
 	}
 
-	if fs.bucket != host {
-		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.bucket)
+	// If URI specifies a different bucket, update fs.bucket to use it.
+	// This allows multi-bucket access with a single connection.
+	if fs.bucket != host && host != "" {
+		fs.bucket = host
 	}
 
 	return path, err
+}
+
+// getBucketAndPath extracts the bucket and key from a URI without mutating fs.bucket.
+// This is safe for concurrent use when reading from multiple buckets.
+func (fs *S3FileSysClient) getBucketAndPath(uri string) (bucket, path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = NormalizeURI(fs, uri)
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	// Use the bucket from the URI if specified, otherwise fall back to connection's bucket
+	bucket = host
+	if bucket == "" {
+		bucket = fs.bucket
+	}
+
+	return bucket, path, err
 }
 
 const defaultRegion = "us-east-1"
@@ -255,43 +277,49 @@ func (fs *S3FileSysClient) Connect() (err error) {
 
 // getSession returns the aws config and sets the region based on the bucket
 func (fs *S3FileSysClient) getConfig() aws.Config {
+	return fs.getConfigForBucket(fs.bucket)
+}
+
+// getConfigForBucket returns the aws config with the region set for the specified bucket.
+// This is safe for concurrent use when reading from multiple buckets.
+func (fs *S3FileSysClient) getConfigForBucket(bucket string) aws.Config {
 	fs.mux.Lock()
 	defer fs.mux.Unlock()
 	endpoint := fs.GetProp("ENDPOINT")
 	region := fs.GetProp("REGION")
 
-	if fs.bucket == "" {
+	if bucket == "" {
 		return fs.awsConfig
 	} else if region != "" {
-		fs.RegionMap[fs.bucket] = region
+		fs.RegionMap[bucket] = region
 	} else if strings.HasSuffix(endpoint, ".digitaloceanspaces.com") {
 		region := strings.TrimSuffix(endpoint, ".digitaloceanspaces.com")
 		region = strings.TrimPrefix(region, "https://")
-		fs.RegionMap[fs.bucket] = region
+		fs.RegionMap[bucket] = region
 	} else if strings.HasSuffix(endpoint, ".cloudflarestorage.com") {
-		fs.RegionMap[fs.bucket] = "auto"
-	} else if endpoint == "" && fs.RegionMap[fs.bucket] == "" {
+		fs.RegionMap[bucket] = "auto"
+	} else if endpoint == "" && fs.RegionMap[bucket] == "" {
 		s3Client := s3.NewFromConfig(fs.awsConfig)
-		region, err := manager.GetBucketRegion(fs.Context().Ctx, s3Client, fs.bucket, func(o *s3.Options) {
+		region, err := manager.GetBucketRegion(fs.Context().Ctx, s3Client, bucket, func(o *s3.Options) {
 			o.Region = defaultRegion
 		})
 		if err != nil {
 			var apiErr smithy.APIError
 			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound" {
-				g.Debug("unable to find bucket %s's region not found", fs.bucket)
-				g.Debug("Region not found for " + fs.bucket)
+				g.Debug("unable to find bucket %s's region not found", bucket)
+				g.Debug("Region not found for " + bucket)
 			} else {
-				g.Debug(g.Error(err, "Error getting Region for "+fs.bucket).Error())
+				g.Debug(g.Error(err, "Error getting Region for "+bucket).Error())
 			}
 		} else {
-			fs.RegionMap[fs.bucket] = region
+			fs.RegionMap[bucket] = region
 		}
 	}
 
 	// Create a copy of the config with the appropriate region
 	configCopy := fs.awsConfig.Copy()
-	if fs.RegionMap[fs.bucket] != "" {
-		configCopy.Region = fs.RegionMap[fs.bucket]
+	if fs.RegionMap[bucket] != "" {
+		configCopy.Region = fs.RegionMap[bucket]
 	} else {
 		configCopy.Region = defaultRegion
 	}
@@ -394,16 +422,19 @@ func (r *S3ReaderWrapper) closeOnce() error {
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/file.txt` or `s3://my_bucket/key/to/directory`
 func (fs *S3FileSysClient) GetReader(uri string) (reader io.Reader, err error) {
-	key, err := fs.GetPath(uri)
+	// Use getBucketAndKey to extract bucket and key without mutating fs.bucket.
+	// This is safe for concurrent use when reading from multiple buckets.
+	bucket, key, err := fs.getBucketAndPath(uri)
 	if err != nil {
 		return
 	}
 
-	svc := s3.NewFromConfig(fs.getConfig())
+	// Get config for the specific bucket (handles region lookup)
+	svc := s3.NewFromConfig(fs.getConfigForBucket(bucket))
 
 	// Use GetObject directly for streaming
 	result, err := svc.GetObject(fs.Context().Ctx, &s3.GetObjectInput{
-		Bucket: aws.String(fs.bucket),
+		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {

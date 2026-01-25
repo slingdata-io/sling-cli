@@ -1,0 +1,36 @@
+source: postgres
+target: local
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_rename;
+        CREATE TABLE public.test_select_rename (
+          id INT,
+          name VARCHAR(100),
+          date DATE
+        );
+        INSERT INTO public.test_select_rename (id, name, date) VALUES
+          (1, 'Alice', '2024-01-01'),
+          (2, 'Bob', '2024-01-02'),
+          (3, 'Charlie', '2024-01-03');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # cleanup source table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_select_rename;
+
+streams:
+  public.test_select_rename:
+    object: file:///tmp/test_select_rename.csv
+    select: ['name as full_name']

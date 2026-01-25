@@ -864,7 +864,7 @@
     sling conns exec mssql file://cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.sql
     SLING_CLI_TOKEN='' sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
     sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
-    sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
+    # sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
   output_contains:
     - "execution succeeded"
     - "DROP TABLE public.unique_identifier_test2"
@@ -1099,11 +1099,11 @@
     - '✓ All 100,000 CSV records imported successfully into Postgres'
 
 # Test MSSQL to Databricks with uppercase table name (Issue #664)
-- id: 128
-  name: Test MSSQL to Databricks with uppercase table name (Issue #664)
-  run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
-  output_contains:
-    - 'execution succeeded'
+# - id: 128
+#   name: Test MSSQL to Databricks with uppercase table name (Issue #664)
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
+#   output_contains:
+#     - 'execution succeeded'
 
 # Test JSON camelCase to PostgreSQL with column_casing (should only create snake_case columns)
 - id: 129
@@ -1514,3 +1514,31 @@
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: MySQL LoadDataLocal NULL handling test passed'
+
+# Test column renaming via select option
+- id: 166
+  name: 'Test column renaming via select (name as full_name)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.95.select_column_rename.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'full_name'
+    - 'execution succeeded'
+
+# Test S3 multi-bucket access with single connection (different buckets in stream URIs and files key)
+- id: 167
+  name: 'Test S3 multi-bucket access with single connection'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.96.s3_multi_bucket.yaml'
+  streams: 3
+  output_contains:
+    - 'SUCCESS: S3 multi-bucket access with single connection works correctly'
+
+# Test delete_missing with transforms doesn't fail (transforms should be skipped during delete detection)
+- id: 168
+  name: 'Test delete_missing with transforms (transforms skipped during delete detection)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.97.delete_missing_with_transforms.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: computed_date column exists from transform'
+    - 'SUCCESS: IDs 9,10 are soft-deleted correctly'

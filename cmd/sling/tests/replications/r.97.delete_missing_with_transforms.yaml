@@ -1,0 +1,146 @@
+# Test that transforms don't break delete_missing functionality
+# This tests the bug where transforms are applied during delete detection,
+# causing errors because delete detection only selects PK columns.
+
+source: MSSQL
+target: POSTGRES
+
+hooks:
+  start:
+    # Create source table with 10 rows
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_transform_test', 'U') IS NOT NULL DROP TABLE dbo.delete_transform_test;
+        CREATE TABLE dbo.delete_transform_test (
+          id INT PRIMARY KEY,
+          dateadded DATETIME DEFAULT GETDATE(),
+          lastchanged DATETIME DEFAULT GETDATE(),
+          value NVARCHAR(100)
+        );
+        INSERT INTO dbo.delete_transform_test (id, dateadded, lastchanged, value) VALUES
+        (1, '2024-01-15', '2024-01-20', 'row1'),
+        (2, '2024-02-10', '2024-02-25', 'row2'),
+        (3, '2024-03-05', '2024-03-10', 'row3'),
+        (4, '2024-04-01', '2024-04-05', 'row4'),
+        (5, '2024-05-01', '2024-05-15', 'row5'),
+        (6, '2024-06-01', '2024-06-10', 'row6'),
+        (7, '2024-07-01', '2024-07-20', 'row7'),
+        (8, '2024-08-01', '2024-08-25', 'row8'),
+        (9, '2024-09-01', '2024-09-30', 'row9'),
+        (10, '2024-10-01', '2024-10-15', 'row10');
+
+    # Create second source table with only 8 rows (IDs 1-8)
+    # IDs 9 and 10 will be soft-deleted when this syncs to target
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_transform_test2', 'U') IS NOT NULL DROP TABLE dbo.delete_transform_test2;
+        CREATE TABLE dbo.delete_transform_test2 (
+          id INT PRIMARY KEY,
+          dateadded DATETIME DEFAULT GETDATE(),
+          lastchanged DATETIME DEFAULT GETDATE(),
+          value NVARCHAR(100)
+        );
+        INSERT INTO dbo.delete_transform_test2 (id, dateadded, lastchanged, value) VALUES
+        (1, '2024-01-15', '2024-01-20', 'row1'),
+        (2, '2024-02-10', '2024-02-25', 'row2'),
+        (3, '2024-03-05', '2024-03-10', 'row3'),
+        (4, '2024-04-01', '2024-04-05', 'row4'),
+        (5, '2024-05-01', '2024-05-15', 'row5'),
+        (6, '2024-06-01', '2024-06-10', 'row6'),
+        (7, '2024-07-01', '2024-07-20', 'row7'),
+        (8, '2024-08-01', '2024-08-25', 'row8');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row count (10 rows total, 2 soft-deleted)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.delete_transform_test
+      into: total_count
+
+    - type: check
+      check: int_parse(store.total_count[0].count) == 10
+      failure_message: "Expected 10 total rows, got {store.total_count[0].count}"
+
+    # Verify computed transform column exists
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as col_exists
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'delete_transform_test'
+          AND column_name = 'computed_date'
+      into: computed_col_exists
+
+    - type: check
+      check: int_parse(store.computed_col_exists[0].col_exists) == 1
+      failure_message: "computed_date column should exist from transform"
+
+    - type: log
+      message: "SUCCESS: computed_date column exists from transform"
+
+    # Verify soft-deleted rows (IDs 9-10) have _sling_deleted_at set
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as deleted_count
+        FROM public.delete_transform_test
+        WHERE id IN (9, 10) AND _sling_deleted_at IS NOT NULL
+      into: deleted_count
+
+    - type: check
+      check: int_parse(store.deleted_count[0].deleted_count) == 2
+      failure_message: "Expected 2 soft-deleted rows (IDs 9,10), got {store.deleted_count[0].deleted_count}"
+
+    - type: log
+      message: "SUCCESS: IDs 9,10 are soft-deleted correctly"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_transform_test', 'U') IS NOT NULL DROP TABLE dbo.delete_transform_test;
+        IF OBJECT_ID('dbo.delete_transform_test2', 'U') IS NOT NULL DROP TABLE dbo.delete_transform_test2;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.delete_transform_test CASCADE;
+
+streams:
+  # First stream: full-refresh to create table with all 10 rows and transform
+  dbo.delete_transform_test:
+    object: public.delete_transform_test
+    mode: full-refresh
+    primary_key: [id]
+    target_options:
+      column_casing: lower
+
+    transforms:
+      - computed_date: >
+          greatest(
+            date_parse(record.dateadded),
+            date_parse(record.lastchanged)
+          )
+
+  # Second stream: incremental with delete_missing to soft-delete rows 9,10
+  # This is where the bug manifests - transforms should NOT be applied during delete detection
+  dbo.delete_transform_test2:
+    object: public.delete_transform_test
+    mode: incremental
+    primary_key: [id]
+    target_options:
+      delete_missing: soft
+      column_casing: lower
+
+    transforms:
+      - computed_date: >
+          greatest(
+            date_parse(record.dateadded),
+            date_parse(record.lastchanged)
+          )

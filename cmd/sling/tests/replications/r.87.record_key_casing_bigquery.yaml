@@ -12,9 +12,9 @@ hooks:
       query: |
         DROP TABLE IF EXISTS mysql.test_record_key_casing;
         CREATE TABLE mysql.test_record_key_casing (
-          id INTEGER,
-          `DateAdded` TIMESTAMP NULL,
-          `LastChanged` TIMESTAMP NULL,
+          `id` int unsigned NOT NULL,
+          `DateAdded` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `LastChanged` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           `_sling_deleted_at` TIMESTAMP NULL,
           value TEXT
         );
@@ -68,9 +68,14 @@ streams:
       direct_insert: true
 
     transforms:
+      # - true_changed_at: >
+      #     greatest(
+      #       date_parse(record.dateadded), 
+      #       date_parse(record.lastchanged), 
+      #       date_parse(record._sling_deleted_at)
+      #     )
       - true_changed_at: >
           greatest(
-            date_parse(record.dateadded), 
-            date_parse(record.lastchanged), 
-            date_parse(record._sling_deleted_at)
+            date_parse(replace(record.dateadded, "\"", "")),
+            date_parse(replace(record.lastchanged, "\"", ""))
           )

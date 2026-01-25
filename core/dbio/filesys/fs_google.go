@@ -59,8 +59,10 @@ func (fs *GoogleFileSysClient) GetPath(uri string) (path string, err error) {
 		return
 	}
 
-	if fs.bucket != host {
-		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.bucket)
+	// If URI specifies a different bucket, update fs.bucket to use it.
+	// This allows multi-bucket access with a single connection.
+	if fs.bucket != host && host != "" {
+		fs.bucket = host
 	}
 
 	return path, err

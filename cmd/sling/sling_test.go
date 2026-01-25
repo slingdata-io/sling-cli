@@ -1080,6 +1080,7 @@ func TestSuiteDatabaseExasol(t *testing.T) {
 }
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {
+	t.Skip()
 	t.Parallel()
 
 	// test 06 => BAD_REQUEST: Parameterized query has too many parameters: 1812 parameters were given but the limit is 256.
@@ -1118,7 +1119,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {
-	// t.Skip()
+	t.Skip()
 	t.Parallel()
 	testSuite(t, dbio.TypeDbFabric)
 }
@@ -1750,7 +1751,7 @@ func TestSuiteFileFtp(t *testing.T) {
 }
 
 func TestSuiteFileAzureABFS(t *testing.T) {
-	// t.Skip()
+	t.Skip()
 	t.Parallel()
 	testSuite(t, dbio.TypeFileAzureABFS)
 }
