@@ -46,9 +46,19 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	if len(cfg.Source.Select) > 0 {
 		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
-			// lookup column name
-			col := sTable.Columns.GetColumn(srcConn.Unquote(f))
+			// Parse the expression to extract original column name
+			original, alias, isExclude, _ := iop.ParseSelectExpr(f)
+
+			if isExclude {
+				return f // Pass through exclusion as-is for later handling
+			}
+
+			// Lookup the original column (for case correction)
+			col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 			if col != nil {
+				if alias != "" {
+					return col.Name + " as " + alias
+				}
 				return col.Name
 			}
 			return f
@@ -64,9 +74,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 
 			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
+				colNameLower := strings.ToLower(c.Name)
 				for _, exField := range excluded {
 					exField = srcConn.Unquote(strings.TrimPrefix(exField, "-"))
-					if strings.EqualFold(c.Name, exField) {
+					exFieldLower := strings.ToLower(exField)
+					// Use glob matching to support patterns like "address_*"
+					if iop.MatchesSelectGlob(colNameLower, exFieldLower) {
 						return false
 					}
 				}
@@ -157,8 +170,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			)
 
 			sFields := lo.Map(selectFields, func(sf string, i int) string {
-				col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
+				original, alias, _, _ := iop.ParseSelectExpr(sf)
+				col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 				if col != nil {
+					if alias != "" {
+						return srcConn.Quote(col.Name) + " as " + srcConn.Quote(alias)
+					}
 					return srcConn.Quote(col.Name) // apply quotes if match
 				}
 				return sf
@@ -208,8 +225,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// if {fields} placeholder is used, replace it with selected fields to avoid double wrapping
 	if strings.Contains(sTable.SQL, "{fields}") {
 		sFields := lo.Map(selectFields, func(sf string, i int) string {
-			col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
+			original, alias, _, _ := iop.ParseSelectExpr(sf)
+			col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 			if col != nil {
+				if alias != "" {
+					return srcConn.Quote(col.Name) + " as " + srcConn.Quote(alias)
+				}
 				return srcConn.Quote(col.Name) // apply quotes if match
 			}
 			return sf

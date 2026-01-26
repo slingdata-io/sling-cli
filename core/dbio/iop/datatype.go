@@ -1626,7 +1626,7 @@ func NewSelector(selectExprs []string, casing ColumnCasing) *Selector {
 			continue
 		}
 
-		field, newName, isExclude, _ := parseSelectExpr(expr)
+		field, newName, isExclude, _ := ParseSelectExpr(expr)
 		fieldLower := strings.ToLower(field)
 
 		if isExclude {
@@ -1694,7 +1694,7 @@ func (s *Selector) compute(name, nameLower string) string {
 
 	// 4. Check glob exclusions
 	for _, pattern := range s.excludeGlobs {
-		if matchesSelectGlob(nameLower, pattern) {
+		if MatchesSelectGlob(nameLower, pattern) {
 			return ""
 		}
 	}
@@ -1711,7 +1711,7 @@ func (s *Selector) compute(name, nameLower string) string {
 
 	// 7. Check glob inclusions
 	for _, pattern := range s.includeGlobs {
-		if matchesSelectGlob(nameLower, pattern) {
+		if MatchesSelectGlob(nameLower, pattern) {
 			return name
 		}
 	}
@@ -1774,7 +1774,7 @@ func applySelectAllMode(fields []string, fieldMap map[string]int, selectExprs []
 			continue
 		}
 
-		field, newName, isExclude, err := parseSelectExpr(expr)
+		field, newName, isExclude, err := ParseSelectExpr(expr)
 		if err != nil {
 			return nil, err
 		}
@@ -1784,7 +1784,7 @@ func applySelectAllMode(fields []string, fieldMap map[string]int, selectExprs []
 			if strings.Contains(field, "*") {
 				// Glob exclusion
 				for i, f := range fields {
-					if matchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
+					if MatchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
 						excluded[i] = true
 					}
 				}
@@ -1831,7 +1831,7 @@ func applySelectExplicitMode(fields []string, fieldMap map[string]int, selectExp
 	for _, expr := range selectExprs {
 		expr = strings.TrimSpace(expr)
 
-		field, newName, isExclude, err := parseSelectExpr(expr)
+		field, newName, isExclude, err := ParseSelectExpr(expr)
 		if err != nil {
 			return nil, err
 		}
@@ -1847,7 +1847,7 @@ func applySelectExplicitMode(fields []string, fieldMap map[string]int, selectExp
 				if added[i] {
 					continue
 				}
-				if matchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
+				if MatchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
 					newFields = append(newFields, f)
 					added[i] = true
 				}
@@ -1873,7 +1873,7 @@ func applySelectExplicitMode(fields []string, fieldMap map[string]int, selectExp
 	return newFields, nil
 }
 
-// parseSelectExpr parses a single select expression
+// ParseSelectExpr parses a single select expression
 // Returns: (fieldName, newName, isExclusion, error)
 // Examples:
 //
@@ -1882,7 +1882,7 @@ func applySelectExplicitMode(fields []string, fieldMap map[string]int, selectExp
 //	"field as new"   -> ("field", "new", false, nil)
 //	"prefix*"        -> ("prefix*", "", false, nil)
 //	"-*suffix"       -> ("*suffix", "", true, nil)
-func parseSelectExpr(expr string) (field string, newName string, exclude bool, err error) {
+func ParseSelectExpr(expr string) (field string, newName string, exclude bool, err error) {
 	expr = strings.TrimSpace(expr)
 
 	// Check for exclusion prefix
@@ -1908,9 +1908,9 @@ func parseSelectExpr(expr string) (field string, newName string, exclude bool, e
 	return field, "", exclude, nil
 }
 
-// matchesSelectGlob checks if name matches a simple glob pattern (prefix* or *suffix)
+// MatchesSelectGlob checks if name matches a simple glob pattern (prefix* or *suffix)
 // Both name and pattern should be lowercase for case-insensitive matching
-func matchesSelectGlob(name, pattern string) bool {
+func MatchesSelectGlob(name, pattern string) bool {
 	if !strings.Contains(pattern, "*") {
 		return name == pattern
 	}

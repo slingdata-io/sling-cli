@@ -1,36 +1,322 @@
 source: postgres
-target: local
+target: postgres
 
 defaults:
   mode: full-refresh
 
 hooks:
   start:
+    # Create main test table with many columns
     - type: query
       connection: '{source.name}'
       query: |
-        DROP TABLE IF EXISTS public.test_select_rename;
-        CREATE TABLE public.test_select_rename (
+        DROP TABLE IF EXISTS public.test_select_main;
+        CREATE TABLE public.test_select_main (
           id INT,
-          name VARCHAR(100),
-          date DATE
+          first_name VARCHAR(100),
+          last_name VARCHAR(100),
+          email VARCHAR(100),
+          phone VARCHAR(50),
+          address_line1 VARCHAR(200),
+          address_line2 VARCHAR(200),
+          city VARCHAR(100),
+          state VARCHAR(50),
+          zip_code VARCHAR(20),
+          country VARCHAR(100),
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          is_active BOOLEAN,
+          score DECIMAL(10,2)
         );
-        INSERT INTO public.test_select_rename (id, name, date) VALUES
-          (1, 'Alice', '2024-01-01'),
-          (2, 'Bob', '2024-01-02'),
-          (3, 'Charlie', '2024-01-03');
+        INSERT INTO public.test_select_main VALUES
+          (1, 'Alice', 'Smith', 'alice@example.com', '555-0101', '123 Main St', 'Apt 1', 'New York', 'NY', '10001', 'USA', '2024-01-01 10:00:00', '2024-01-15 12:00:00', true, 95.50),
+          (2, 'Bob', 'Jones', 'bob@example.com', '555-0102', '456 Oak Ave', NULL, 'Los Angeles', 'CA', '90001', 'USA', '2024-01-02 11:00:00', '2024-01-16 13:00:00', true, 87.25),
+          (3, 'Charlie', 'Brown', 'charlie@example.com', '555-0103', '789 Pine Rd', 'Suite 100', 'Chicago', 'IL', '60601', 'USA', '2024-01-03 12:00:00', '2024-01-17 14:00:00', false, 72.00);
 
-  end:
-    - type: check
-      check: execution.status.error == 0
-      on_failure: break
-
-    # cleanup source table
+    # Create copy for exclusion test
     - type: query
       connection: '{source.name}'
-      query: DROP TABLE IF EXISTS public.test_select_rename;
+      query: |
+        DROP TABLE IF EXISTS public.test_select_main_exclude;
+        CREATE TABLE public.test_select_main_exclude AS SELECT * FROM public.test_select_main;
+
+    # Create copy for wildcard test
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_main_wildcard;
+        CREATE TABLE public.test_select_main_wildcard AS SELECT * FROM public.test_select_main;
+
+    # Create secondary test table for custom SQL tests
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_orders;
+        CREATE TABLE public.test_select_orders (
+          order_id INT,
+          customer_id INT,
+          order_date DATE,
+          ship_date DATE,
+          total_amount DECIMAL(12,2),
+          discount_amount DECIMAL(10,2),
+          tax_amount DECIMAL(10,2),
+          status VARCHAR(50)
+        );
+        INSERT INTO public.test_select_orders VALUES
+          (101, 1, '2024-01-10', '2024-01-12', 150.00, 10.00, 12.60, 'delivered'),
+          (102, 2, '2024-01-11', '2024-01-14', 250.00, 25.00, 20.25, 'delivered'),
+          (103, 3, '2024-01-12', NULL, 75.00, 0.00, 6.75, 'pending');
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_rename_basic;
+        DROP TABLE IF EXISTS public.test_select_exclude;
+        DROP TABLE IF EXISTS public.test_select_wildcard;
+        DROP TABLE IF EXISTS public.test_select_mixed;
+        DROP TABLE IF EXISTS public.test_select_sql_rename;
+        DROP TABLE IF EXISTS public.test_select_sql_fields;
+
+  end:
+    # Check for errors first
+    - check: execution.status.error == 0
+      on_failure: break
+
+    #
+    # Test 1: Basic column renaming (table stream)
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_rename_basic' ORDER BY ordinal_position
+      into: basic_cols
+
+    - log: "Test 1 - Basic rename columns: {store.basic_cols}"
+
+    - check: store.basic_cols[0].column_name == "user_id"
+
+    - check: store.basic_cols[1].column_name == "full_name"
+
+    - check: store.basic_cols[2].column_name == "user_email"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_select_rename_basic ORDER BY user_id
+      into: basic_data
+
+    - check: store.basic_data[0].full_name == "Alice"
+
+    - check: store.basic_data[1].user_email == "bob@example.com"
+
+    #
+    # Test 2: Exclusion with - prefix (table stream)
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_exclude' ORDER BY ordinal_position
+      into: exclude_cols
+
+    - log: "Test 2 - Exclude columns: {store.exclude_cols}"
+
+    # Verify excluded columns are not present (address_line1, address_line2, city, state, zip_code, country)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_exclude' AND column_name IN ('address_line1', 'address_line2', 'city', 'state', 'zip_code', 'country')
+      into: excluded_check
+
+    - check: int_parse(store.excluded_check[0].cnt) == 0
+
+    # Verify we have the expected remaining columns (id should exist)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_exclude' AND column_name = 'id'
+      into: id_check
+
+    - check: int_parse(store.id_check[0].cnt) == 1
+
+    #
+    # Test 3: Wildcard exclusion with glob pattern (table stream)
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_wildcard' ORDER BY ordinal_position
+      into: wildcard_cols
+
+    - log: "Test 3 - Wildcard exclude columns: {store.wildcard_cols}"
+
+    # Should NOT have address_line1, address_line2 (excluded by address_*)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_wildcard' AND column_name LIKE 'address%'
+      into: wildcard_check
+
+    - check: int_parse(store.wildcard_check[0].cnt) == 0
+
+    #
+    # Test 4: Mixed - select specific columns with rename (using {fields})
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_mixed' ORDER BY ordinal_position
+      into: mixed_cols
+
+    - log: "Test 4 - Mixed select columns: {store.mixed_cols}"
+
+    # Verify exactly 4 columns
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_mixed'
+      into: mixed_count
+
+    - check: int_parse(store.mixed_count[0].cnt) == 4
+
+    - check: store.mixed_cols[0].column_name == "user_id"
+
+    - check: store.mixed_cols[1].column_name == "name"
+
+    - check: store.mixed_cols[2].column_name == "contact_email"
+
+    - check: store.mixed_cols[3].column_name == "active"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_select_mixed ORDER BY user_id
+      into: mixed_data
+
+    - check: store.mixed_data[0].name == "Alice"
+
+    - check: store.mixed_data[2].contact_email == "charlie@example.com"
+
+    #
+    # Test 5: Table stream with select rename (orders table)
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_sql_rename' ORDER BY ordinal_position
+      into: sql_rename_cols
+
+    - log: "Test 5 - Table with rename columns: {store.sql_rename_cols}"
+
+    - check: store.sql_rename_cols[0].column_name == "order_number"
+
+    - check: store.sql_rename_cols[1].column_name == "customer"
+
+    - check: store.sql_rename_cols[2].column_name == "order_total"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_select_sql_rename ORDER BY order_number
+      into: sql_rename_data
+
+    - check: int_parse(store.sql_rename_data[0].order_number) == 101
+
+    - check: float_parse(store.sql_rename_data[1].order_total) == 250.00
+
+    #
+    # Test 6: Custom SQL with {fields} placeholder and select rename
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_sql_fields' ORDER BY ordinal_position
+      into: sql_fields_cols
+
+    - log: "Test 6 - SQL {fields} placeholder columns: {store.sql_fields_cols}"
+
+    # Verify exactly 3 columns
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_select_sql_fields'
+      into: sql_fields_count
+
+    - check: int_parse(store.sql_fields_count[0].cnt) == 3
+
+    - check: store.sql_fields_cols[0].column_name == "id"
+
+    - check: store.sql_fields_cols[1].column_name == "customer_name"
+
+    - check: store.sql_fields_cols[2].column_name == "customer_score"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_select_sql_fields ORDER BY id
+      into: sql_fields_data
+
+    - check: store.sql_fields_data[0].customer_name == "Alice"
+
+    - check: float_parse(store.sql_fields_data[1].customer_score) == 87.25
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_main;
+        DROP TABLE IF EXISTS public.test_select_main_exclude;
+        DROP TABLE IF EXISTS public.test_select_main_wildcard;
+        DROP TABLE IF EXISTS public.test_select_orders;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_select_rename_basic;
+        DROP TABLE IF EXISTS public.test_select_exclude;
+        DROP TABLE IF EXISTS public.test_select_wildcard;
+        DROP TABLE IF EXISTS public.test_select_mixed;
+        DROP TABLE IF EXISTS public.test_select_sql_rename;
+        DROP TABLE IF EXISTS public.test_select_sql_fields;
 
 streams:
-  public.test_select_rename:
-    object: file:///tmp/test_select_rename.csv
-    select: ['name as full_name']
+  # Test 1: Basic column renaming (table stream - select works directly)
+  public.test_select_main:
+    object: public.test_select_rename_basic
+    select:
+      - 'id as user_id'
+      - 'first_name as full_name'
+      - 'email as user_email'
+
+  # Test 2: Exclusion - exclude all address-related columns (table stream)
+  # Note: When using exclusions, ALL select items must be exclusions (- prefix)
+  public.test_select_main_exclude:
+    object: public.test_select_exclude
+    select:
+      - '-address_line1'
+      - '-address_line2'
+      - '-city'
+      - '-state'
+      - '-zip_code'
+      - '-country'
+
+  # Test 3: Wildcard exclusion - exclude address_* columns (table stream)
+  public.test_select_main_wildcard:
+    object: public.test_select_wildcard
+    select:
+      - '-address_*'
+
+  # Test 4: Mixed - select specific columns with some renamed (using {fields})
+  test_select_mixed:
+    sql: SELECT {fields} FROM public.test_select_main
+    object: public.test_select_mixed
+    select:
+      - 'id as user_id'
+      - 'first_name as name'
+      - 'email as contact_email'
+      - 'is_active as active'
+
+  # Test 5: Table stream with select rename (orders table)
+  public.test_select_orders:
+    object: public.test_select_sql_rename
+    select:
+      - 'order_id as order_number'
+      - 'customer_id as customer'
+      - 'total_amount as order_total'
+
+  # Test 6: Custom SQL with {fields} placeholder and select rename
+  test_select_sql_fields:
+    sql: |
+      SELECT {fields}
+      FROM public.test_select_main
+      WHERE is_active = true
+    object: public.test_select_sql_fields
+    select:
+      - 'id'
+      - 'first_name as customer_name'
+      - 'score as customer_score'

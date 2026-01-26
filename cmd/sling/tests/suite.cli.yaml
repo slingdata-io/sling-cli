@@ -1408,6 +1408,7 @@
 - id: 157
   name: Test mixed-case record key references in transforms (MySQL to BigQuery)
   run: 'sling run -d -r cmd/sling/tests/replications/r.87.record_key_casing_bigquery.yaml'
+  after: [156]
   streams: 1
   rows: 3
   output_contains:
@@ -1515,15 +1516,19 @@
     - 'execution succeeded'
     - 'SUCCESS: MySQL LoadDataLocal NULL handling test passed'
 
-# Test column renaming via select option
+# Test column renaming via select option (comprehensive tests)
 - id: 166
-  name: 'Test column renaming via select (name as full_name)'
+  name: 'Test column renaming via select (comprehensive)'
   run: 'sling run -d -r cmd/sling/tests/replications/r.95.select_column_rename.yaml'
-  streams: 1
-  rows: 3
+  streams: 6
   output_contains:
-    - 'full_name'
     - 'execution succeeded'
+    - 'Test 1 - Basic rename columns'
+    - 'Test 2 - Exclude columns'
+    - 'Test 3 - Wildcard exclude columns'
+    - 'Test 4 - Mixed select columns'
+    - 'Test 5 - Table with rename columns'
+    - 'Test 6 - SQL {fields} placeholder columns'
 
 # Test S3 multi-bucket access with single connection (different buckets in stream URIs and files key)
 - id: 167

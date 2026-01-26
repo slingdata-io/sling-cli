@@ -275,6 +275,15 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if f == "*" || strings.Contains(f, "(") {
 			return f
 		}
+
+		// Parse for "field as alias" syntax
+		original, alias, _, _ := iop.ParseSelectExpr(f)
+		if alias != "" {
+			// Generate: "original_col" AS "alias_name"
+			origQuoted := q + strings.ReplaceAll(original, q, "") + q
+			aliasQuoted := q + strings.ReplaceAll(alias, q, "") + q
+			return origQuoted + " as " + aliasQuoted
+		}
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
