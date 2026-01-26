@@ -30,16 +30,16 @@ test-replication-defaults:
     cd cmd/sling && go test -v -run 'TestReplicationDefaults' && cd -
 
 # Test file connections
-test-connections-file arg1="TestSuiteFile":
+test-connections-file arg1="TestSuiteFile" arg2="" arg3="":
     #!/usr/bin/env bash
-    echo "TESTING file connections {{arg1}}"
-    cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" && cd -
+    echo "TESTING file connections {{arg1}} {{arg2}}"
+    cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
 
 # Test database connections
-test-connections-database arg1="TestSuiteDatabase" arg2="":
+test-connections-database arg1="TestSuiteDatabase" arg2="" arg3="":
     #!/usr/bin/env bash
     echo "TESTING database connections {{arg1}} {{arg2}}"
-    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" && cd -
+    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
 
 # Test core (sling core functionality)
 test-core:
