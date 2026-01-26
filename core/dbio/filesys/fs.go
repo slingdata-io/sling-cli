@@ -275,6 +275,21 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			return fs.Prefix("/") + path
 		}
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	case dbio.TypeFileS3, dbio.TypeFileGoogle:
+		// For S3/GCS, if URI already has the scheme prefix (e.g., s3://bucket/path),
+		// return it as-is to allow accessing different buckets with the same credentials.
+		// This enables multi-bucket access with a single connection.
+		scheme := fs.FsType().String() + "://"
+		if strings.HasPrefix(uri, scheme) {
+			// Ensure there's a trailing slash after the bucket name if no path is specified.
+			// This is required for ParseURL to correctly extract an empty path.
+			// e.g., "s3://bucket" -> "s3://bucket/"
+			if !strings.Contains(strings.TrimPrefix(uri, scheme), "/") {
+				return uri + "/"
+			}
+			return uri
+		}
+		fallthrough
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}
@@ -485,6 +500,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
+	ds.SchemaOnly = Cfg.SchemaOnly
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = uri
 	ds.SetConfig(fs.Props())
@@ -635,16 +651,45 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
 		nodes = FileNodes{FileNode{URI: url}}
 	} else if prefixes := Cfg.FileSelect; len(prefixes) > 0 {
-		rootPath := GetDeepestPartitionParent(url)
-		g.Trace("listing path: %s", rootPath)
-		nodes, err = fs.Self().ListRecursive(rootPath)
-		if err != nil {
-			err = g.Error(err, "Error getting paths")
-			return
+		// Check if any FileSelect entries are full URIs with scheme prefix.
+		// If so, they may reference different buckets (multi-bucket access).
+		fullURIPrefixes := []string{}
+		relativePrefixes := []string{}
+
+		for _, prefix := range prefixes {
+			if strings.Contains(prefix, "://") {
+				fullURIPrefixes = append(fullURIPrefixes, prefix)
+			} else {
+				relativePrefixes = append(relativePrefixes, prefix)
+			}
 		}
 
-		// select only prefixes
-		nodes = nodes.SelectWithPrefix(prefixes...)
+		// Handle full URI prefixes (may be from different buckets)
+		if len(fullURIPrefixes) > 0 {
+			for _, uri := range fullURIPrefixes {
+				g.Trace("listing path (full URI): %s", uri)
+				uriNodes, err := fs.Self().ListRecursive(uri)
+				if err != nil {
+					err = g.Error(err, "Error getting paths for %s", uri)
+					return df, err
+				}
+				nodes = append(nodes, uriNodes...)
+			}
+		}
+
+		// Handle relative prefixes (original behavior)
+		if len(relativePrefixes) > 0 {
+			rootPath := GetDeepestPartitionParent(url)
+			g.Trace("listing path: %s", rootPath)
+			pathNodes, err := fs.Self().ListRecursive(rootPath)
+			if err != nil {
+				err = g.Error(err, "Error getting paths")
+				return df, err
+			}
+			// select only prefixes
+			pathNodes = pathNodes.SelectWithPrefix(relativePrefixes...)
+			nodes = append(nodes, pathNodes...)
+		}
 	} else {
 		g.Trace("listing path: %s", url)
 		nodes, err = fs.Self().ListRecursive(url)
@@ -1246,6 +1291,7 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 
 		ds := iop.NewDatastreamContext(fs.Context().Ctx, nil)
 		ds.SafeInference = true
+		ds.SchemaOnly = cfg.SchemaOnly
 		ds.SetMetadata(fs.GetProp("METADATA"))
 		ds.Metadata.StreamURL.Value = uri
 		ds.SetConfig(fs.Props())
@@ -1611,6 +1657,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 	url := fs.GetProp("url")
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
+	ds.SchemaOnly = cfg.SchemaOnly
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = url
 	ds.SetConfig(fs.Client().Props())

@@ -2,7 +2,7 @@ FROM --platform=linux/arm64 ubuntu:jammy
 
 RUN groupadd -r sling && useradd -r -g sling sling
 
-RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y libaio1 postgresql-client wget curl && apt clean && rm -rf /var/lib/apt/lists /var/cache/apt
+RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y libaio1 postgresql-client wget curl unixodbc odbcinst && apt clean && rm -rf /var/lib/apt/lists /var/cache/apt
   
 # Install Oracle Instant Client
 RUN cd /tmp && \

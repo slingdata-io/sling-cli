@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -45,9 +46,19 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	if len(cfg.Source.Select) > 0 {
 		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
-			// lookup column name
-			col := sTable.Columns.GetColumn(srcConn.Unquote(f))
+			// Parse the expression to extract original column name
+			original, alias, isExclude, _ := iop.ParseSelectExpr(f)
+
+			if isExclude {
+				return f // Pass through exclusion as-is for later handling
+			}
+
+			// Lookup the original column (for case correction)
+			col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 			if col != nil {
+				if alias != "" {
+					return col.Name + " as " + alias
+				}
 				return col.Name
 			}
 			return f
@@ -63,9 +74,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 
 			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
+				colNameLower := strings.ToLower(c.Name)
 				for _, exField := range excluded {
 					exField = srcConn.Unquote(strings.TrimPrefix(exField, "-"))
-					if strings.EqualFold(c.Name, exField) {
+					exFieldLower := strings.ToLower(exField)
+					// Use glob matching to support patterns like "address_*"
+					if iop.MatchesSelectGlob(colNameLower, exFieldLower) {
 						return false
 					}
 				}
@@ -156,8 +170,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			)
 
 			sFields := lo.Map(selectFields, func(sf string, i int) string {
-				col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
+				original, alias, _, _ := iop.ParseSelectExpr(sf)
+				col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 				if col != nil {
+					if alias != "" {
+						return srcConn.Quote(col.Name) + " as " + srcConn.Quote(alias)
+					}
 					return srcConn.Quote(col.Name) // apply quotes if match
 				}
 				return sf
@@ -207,8 +225,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// if {fields} placeholder is used, replace it with selected fields to avoid double wrapping
 	if strings.Contains(sTable.SQL, "{fields}") {
 		sFields := lo.Map(selectFields, func(sf string, i int) string {
-			col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
+			original, alias, _, _ := iop.ParseSelectExpr(sf)
+			col := sTable.Columns.GetColumn(srcConn.Unquote(original))
 			if col != nil {
+				if alias != "" {
+					return srcConn.Quote(col.Name) + " as " + srcConn.Quote(alias)
+				}
 				return srcConn.Quote(col.Name) // apply quotes if match
 			}
 			return sf
@@ -216,6 +238,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.SQL = g.R(sTable.SQL, "fields", strings.Join(sFields, ", "))
 		// Reset selectFields to prevent Select() from wrapping the query
 		selectFields = []string{"*"}
+	}
+
+	// For definition-only mode, inject WHERE 1=0 to avoid reading data
+	if cfg.Mode == DefinitionOnlyMode {
+		cfg.Source.Where = "1=0"
 	}
 
 	// construct select statement for selected fields or where condition
@@ -273,7 +300,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 
 	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 		// file stream incremental mode
-		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
+		if g.In(t.Config.Source.UpdateKey, env.ReservedFields.LoadedAt, env.ReservedFields.SyncedAt) {
 			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalValStr
 			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
 		} else {
@@ -303,6 +330,12 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			FileSelect:       cfg.Source.Files,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
+		}
+
+		// limit when definition-only
+		if cfg.Mode == DefinitionOnlyMode {
+			fsCfg.SchemaOnly = true
+			fsCfg.Limit = iop.SampleSize
 		}
 
 		// format the uri if it has placeholders
@@ -418,6 +451,12 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Range:       g.PtrVal(t.Config.Source.Options.Range),
 		DsConfigMap: t.getSourceOptionsMap(),
 	}
+
+	if cfg.Mode == DefinitionOnlyMode {
+		sCfg.SchemaOnly = true
+		sCfg.Limit = iop.SampleSize
+	}
+
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {
 		err = g.Error(err, "Could not ReadDataflow for %s", cfg.SrcConn.Type)

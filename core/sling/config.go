@@ -15,6 +15,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -41,6 +42,8 @@ const (
 	SnapshotMode Mode = "snapshot"
 	// BackfillMode is to backfill
 	BackfillMode Mode = "backfill"
+	// DefinitionOnlyMode is to create table/file definition without data
+	DefinitionOnlyMode Mode = "definition-only"
 )
 
 var AllMode = []struct {
@@ -52,6 +55,7 @@ var AllMode = []struct {
 	{TruncateMode, "TruncateMode"},
 	{SnapshotMode, "SnapshotMode"},
 	{BackfillMode, "BackfillMode"},
+	{DefinitionOnlyMode, "DefinitionOnlyMode"},
 }
 
 // NewConfig return a config object from a YAML / JSON string
@@ -158,7 +162,14 @@ func (cfg *Config) SetDefault() {
 		cfg.Mode = FullRefreshMode
 	}
 
-	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
+	if val := os.Getenv("SLING_SYNCED_AT_COLUMN"); val != "" {
+		if cast.ToBool(val) {
+			cfg.MetadataSyncedAt = g.Bool(true)
+			env.ReservedFields.DeletedAt = env.ReservedFields.SyncedAt // deleted_at becomes synched_at
+		} else {
+			cfg.MetadataSyncedAt = g.Bool(false)
+		}
+	} else if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
 		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
 			cfg.MetadataLoadedAt = g.Bool(true)
 		} else {
@@ -339,9 +350,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	}
 
-	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode)
+	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode, DefinitionOnlyMode)
 	if !validMode {
-		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot or truncate")
+		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot, truncate, or definition-only")
 		return
 	}
 
@@ -359,9 +370,11 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			// OK, no need for update key
 		} else if srcApiProvided {
 			// OK, no need for update key/pk, API uses SLING_STATE for tracking
-		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
+		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.LoadedAt {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
+		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.SyncedAt {
+			cfg.MetadataSyncedAt = g.Bool(true)
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
@@ -386,6 +399,15 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	} else if cfg.Mode == SnapshotMode {
 		cfg.MetadataLoadedAt = g.Bool(true) // needed for snapshot mode
+	} else if cfg.Mode == DefinitionOnlyMode {
+		// For file targets, only parquet and arrow formats are supported
+		if tgtFileProvided {
+			format := cfg.Target.ObjectFileFormat()
+			if !g.In(format, dbio.FileTypeParquet, dbio.FileTypeArrow) {
+				err = g.Error("definition-only mode for file targets only supports parquet or arrow formats, got: %s", format)
+				return
+			}
+		}
 	}
 
 	if srcDbProvided && tgtDbProvided {
@@ -860,8 +882,10 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	cfg.Target.Object = strings.TrimSpace(renderedObject)
 
 	if cfg.TgtConn.Type.IsDb() {
+		dbType := cfg.TgtConn.GetType()
+
 		// normalize casing of object names
-		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		table, err := database.ParseTableName(cfg.Target.Object, dbType)
 		if err != nil {
 			return g.Error(err, "could not parse target table name")
 		} else if table.IsQuery() {
@@ -875,7 +899,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
 			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
 			if tgtOpts.TableTmp != "" {
-				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, cfg.TgtConn.Type)
+				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, dbType)
 				if err != nil {
 					return g.Error(err, "could not parse temp table name")
 				} else if tableTmp.Schema == "" {
@@ -885,17 +909,17 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					}
 				}
 
-				if cfg.TgtConn.Type.DBNameUpperCase() {
+				if dbType.DBNameUpperCase() {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
 				tgtOpts.TableTmp = tableTmp.FullName()
-			} else if g.In(cfg.TgtConn.Type, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
+			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
 				// for duckdb and ducklake, we'll use a temp table, which uses the 'main' schema
-				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
+				tableTmp := makeTempTableName(dbType, table, "_sling_duckdb_tmp")
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else {
-				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_tmp")
+				tableTmp := makeTempTableName(dbType, table, "_tmp")
 				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}
@@ -944,8 +968,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
 	}
 
-	if cfg.ReplicationStream != nil && cfg.ReplicationStream.ID != "" {
-		m["stream_run_id"] = cfg.ReplicationStream.ID
+	if cfg.ReplicationStream != nil {
+		if cfg.ReplicationStream.ID != "" {
+			m["stream_run_id"] = cfg.ReplicationStream.ID
+		}
+		if cfg.ReplicationStream.Description != "" {
+			m["stream_description"] = cfg.ReplicationStream.Description
+		}
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
@@ -1227,6 +1256,7 @@ type Config struct {
 	IncrementalGTE    bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
+	MetadataSyncedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`

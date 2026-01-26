@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	Marker         = "Sling CLI | https://slingdata.io"
 	HomeDir        = os.Getenv("SLING_HOME_DIR")
 	HomeDirEnvFile = ""
 	Env            = &EnvFile{}
@@ -47,6 +48,26 @@ var (
 		return path.Join(RuntimeFolder(), g.F("%s.json", name))
 	}
 	setupOtel = func() {}
+
+	ReservedFields = struct {
+		LoadedAt  string
+		SyncedAt  string
+		SyncedOp  string
+		DeletedAt string
+		StreamURL string
+		RowNum    string
+		RowID     string
+		ExecID    string
+	}{
+		LoadedAt:  "_sling_loaded_at",
+		SyncedAt:  "_sling_synced_at",
+		SyncedOp:  "_sling_synced_op",
+		DeletedAt: "_sling_deleted_at",
+		StreamURL: "_sling_stream_url",
+		RowNum:    "_sling_row_num",
+		RowID:     "_sling_row_id",
+		ExecID:    "_sling_exec_id",
+	}
 )
 
 const (

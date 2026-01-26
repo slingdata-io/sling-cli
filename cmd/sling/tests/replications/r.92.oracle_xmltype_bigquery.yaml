@@ -1,0 +1,125 @@
+# Test for Oracle XMLTYPE column transfer to BigQuery
+# Issue: Process hangs when Oracle table has XMLTYPE column
+# See: https://github.com/slingdata-io/sling-cli/issues/xxx
+# Debug log shows: "using text since type 'xmltype' not mapped for col 'XMLRECORD'"
+# The process then hangs for extended periods during BulkExportFlow
+
+source: ORACLE
+target: BIGQUERY
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Clean up any existing test table in Oracle
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE ORACLE.TEST_XMLTYPE_TRANSFER PURGE';
+        EXCEPTION
+          WHEN OTHERS THEN
+            IF SQLCODE != -942 THEN
+              RAISE;
+            END IF;
+        END;
+
+    # Create test table with XMLTYPE column
+    - type: query
+      connection: '{source.name}'
+      query: |
+        CREATE TABLE ORACLE.TEST_XMLTYPE_TRANSFER (
+          id NUMBER PRIMARY KEY,
+          name VARCHAR2(100),
+          xmlrecord XMLTYPE,
+          created_at TIMESTAMP DEFAULT SYSTIMESTAMP
+        )
+
+    # Insert test data with XML content
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO ORACLE.TEST_XMLTYPE_TRANSFER (id, name, xmlrecord)
+        VALUES (1, 'Record 1', XMLTYPE('<root><item>Test XML 1</item><value>100</value></root>'))
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO ORACLE.TEST_XMLTYPE_TRANSFER (id, name, xmlrecord)
+        VALUES (2, 'Record 2', XMLTYPE('<root><item>Test XML 2</item><nested><child>Data</child></nested></root>'))
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO ORACLE.TEST_XMLTYPE_TRANSFER (id, name, xmlrecord)
+        VALUES (3, 'Record 3', NULL)
+
+    # Clean up target table in BigQuery
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS `sling_test.test_xmltype_transfer`
+
+  end:
+    # If errored, do not proceed with verification
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify data was transferred
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, name, xmlrecord, created_at
+        FROM `sling_test.test_xmltype_transfer`
+        ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Result from BigQuery:
+        { pretty_table(store.result) }
+
+    # Check row count (use length function)
+    - type: check
+      check: length(store.result) == 3
+      message: "Should have transferred 3 rows"
+
+    # Check that XMLTYPE was converted to text (use content from inner XML to avoid < parsing issues)
+    - type: check
+      check: contains(store.result[0].xmlrecord, "Test XML 1")
+      message: "XMLTYPE content should be preserved as text"
+
+    - type: check
+      check: contains(store.result[1].xmlrecord, "nested")
+      message: "Second XMLTYPE record should contain nested XML"
+
+    # Third record has NULL XML
+    - type: check
+      check: is_null(store.result[2].xmlrecord) || store.result[2].xmlrecord == ""
+      message: "NULL XMLTYPE should transfer as null/empty"
+
+    - type: log
+      message: "SUCCESS: Oracle XMLTYPE to BigQuery transfer completed without hanging!"
+
+    # Cleanup Oracle table
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE ORACLE.TEST_XMLTYPE_TRANSFER PURGE';
+        EXCEPTION
+          WHEN OTHERS THEN
+            IF SQLCODE != -942 THEN
+              RAISE;
+            END IF;
+        END;
+
+    # Cleanup BigQuery table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS `sling_test.test_xmltype_transfer`
+
+streams:
+  ORACLE.TEST_XMLTYPE_TRANSFER:
+    object: sling_test.test_xmltype_transfer

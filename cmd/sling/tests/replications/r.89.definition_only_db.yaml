@@ -1,0 +1,107 @@
+source: postgres
+target: mssql
+
+defaults:
+  mode: definition-only
+
+hooks:
+  start:
+    # Create source table with various column types
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_definition_only_db;
+        CREATE TABLE public.test_definition_only_db (
+          id bigint,
+          name varchar(100),
+          created_at timestamp,
+          amount decimal(12,2),
+          is_active boolean
+        );
+        INSERT INTO public.test_definition_only_db VALUES
+          (1, 'test1', now(), 123.45, true),
+          (2, 'test2', now(), 456.78, false);
+
+  end:
+    # Check that execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify table was created in target
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'test_definition_only_db'
+      into: table_check
+
+    - type: check
+      check: length(store.table_check) == 1
+      failure_message: "Expected table to be created but it doesn't exist"
+
+    # Verify table has 0 rows (definition-only should not copy data)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM dbo.test_definition_only_db
+      into: row_count
+
+    - type: check
+      check: int_parse(store.row_count[0].cnt) == 0
+      failure_message: "Expected 0 rows but found {store.row_count[0].cnt}"
+
+    # Get column information from INFORMATION_SCHEMA
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'test_definition_only_db'
+        ORDER BY ORDINAL_POSITION
+      into: schema_info
+
+    - type: log
+      message: "Schema info: {store.schema_info}"
+
+    # Verify we have 5 columns
+    - type: check
+      check: length(store.schema_info) == 5
+      failure_message: "Expected 5 columns but found {length(store.schema_info)}"
+
+    # Verify column names and types
+    - type: check
+      check: store.schema_info[0].column_name == "id" && store.schema_info[0].data_type == "bigint"
+      failure_message: "Expected column 'id' with type bigint, got {store.schema_info[0].column_name} / {store.schema_info[0].data_type}"
+
+    - type: check
+      check: store.schema_info[1].column_name == "name" && contains(store.schema_info[1].data_type, "varchar")
+      failure_message: "Expected column 'name' with type varchar, got {store.schema_info[1].column_name} / {store.schema_info[1].data_type}"
+
+    - type: check
+      check: store.schema_info[2].column_name == "created_at" && contains(store.schema_info[2].data_type, "datetime")
+      failure_message: "Expected column 'created_at' with type datetime, got {store.schema_info[2].column_name} / {store.schema_info[2].data_type}"
+
+    - type: check
+      check: store.schema_info[3].column_name == "amount" && store.schema_info[3].data_type == "decimal"
+      failure_message: "Expected column 'amount' with type decimal, got {store.schema_info[3].column_name} / {store.schema_info[3].data_type}"
+
+    - type: check
+      check: store.schema_info[4].column_name == "is_active" && store.schema_info[4].data_type == "bit"
+      failure_message: "Expected column 'is_active' with type bit, got {store.schema_info[4].column_name} / {store.schema_info[4].data_type}"
+
+    - type: log
+      message: "SUCCESS: Table definition created with correct schema and 0 rows (definition-only mode)"
+
+    # Cleanup source
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_definition_only_db
+
+    # Cleanup target
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS dbo.test_definition_only_db
+
+streams:
+  public.test_definition_only_db:
+    object: dbo.test_definition_only_db

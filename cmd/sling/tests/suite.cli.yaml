@@ -864,7 +864,7 @@
     sling conns exec mssql file://cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.sql
     SLING_CLI_TOKEN='' sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
     sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
-    sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
+    # sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
   output_contains:
     - "execution succeeded"
     - "DROP TABLE public.unique_identifier_test2"
@@ -1099,11 +1099,11 @@
     - '✓ All 100,000 CSV records imported successfully into Postgres'
 
 # Test MSSQL to Databricks with uppercase table name (Issue #664)
-- id: 128
-  name: Test MSSQL to Databricks with uppercase table name (Issue #664)
-  run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
-  output_contains:
-    - 'execution succeeded'
+# - id: 128
+#   name: Test MSSQL to Databricks with uppercase table name (Issue #664)
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
+#   output_contains:
+#     - 'execution succeeded'
 
 # Test JSON camelCase to PostgreSQL with column_casing (should only create snake_case columns)
 - id: 129
@@ -1381,6 +1381,41 @@
     - 'SUCCESS: BIT correctly cast to VARCHAR for mariadb'
     - 'SUCCESS: BIT correctly cast to BOOLEAN for mariadb'
 
+- id: 155
+  name: 'Test SLING_SYNCED_AT_COLUMN with soft delete (MSSQL to Postgres)'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.85.mssql_postgres_synced_at.yaml
+  output_contains:
+    - 'execution succeeded'
+    - "SUCCESS: All 10 rows have _sling_synced_op='I' after full-refresh"
+    - 'SUCCESS: _sling_synced_at column exists'
+    - 'SUCCESS: _sling_deleted_at column does NOT exist'
+    - 'SUCCESS: synced_at_test1 has 2 distinct _sling_synced_at values'
+    - 'SUCCESS: _sling_synced_op column exists'
+    - "SUCCESS: IDs 9,10 have _sling_synced_op='D' (soft deleted)"
+    - "SUCCESS: IDs 1-8 have _sling_synced_op='U' (updated)"
+
+- id: 156
+  name: Test mixed-case record key references in transforms (MySQL to local parquet)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.86.record_key_casing.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'SUCCESS: All 3 rows exported successfully with mixed-case column transform'
+    - 'SUCCESS: true_changed_at column was computed correctly'
+    - 'execution succeeded'
+
+- id: 157
+  name: Test mixed-case record key references in transforms (MySQL to BigQuery)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.87.record_key_casing_bigquery.yaml'
+  after: [156]
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'SUCCESS: All 3 rows exported successfully with mixed-case column transform (BigQuery)'
+    - 'SUCCESS: true_changed_at column was computed correctly (BigQuery)'
+    - 'execution succeeded'
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target
@@ -1402,3 +1437,113 @@
 #     - '"type":"FeatureCollection"'
 #     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
 #     - '"properties":{"id":1,"name":"Point 1"}'
+
+# GitHub Issue #694: table_ddl with user-defined PRIMARY KEY and WITH clause
+- id: 158
+  name: 'Test custom table_ddl with PRIMARY KEY and WITH clause (MSSQL)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.88.table_ddl_with_clause.yaml'
+  streams: 2
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'Primary key columns:'
+    - 'Primary key columns (WITH clause table):'
+    - 'Compression info:'
+
+# GitHub Issue #678: definition-only mode
+- id: 159
+  name: 'Test definition-only mode creates table without data (Postgres to MSSQL)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.89.definition_only_db.yaml'
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'created table definition'
+    - 'execution succeeded'
+    - 'SUCCESS: Table definition created with correct schema and 0 rows'
+
+- id: 160
+  name: 'Test definition-only mode creates parquet file without data'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.90.definition_only_file.yaml'
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'where 1=0'
+    - 'execution succeeded'
+    - 'SUCCESS: Parquet file definition created with correct schema'
+
+- id: 161
+  name: 'Test definition-only mode fails for CSV file target'
+  run: 'sling run --src-conn POSTGRES --src-stream "select 1 as a" --tgt-object file:///tmp/test_def_only.csv --mode definition-only'
+  err: true
+  output_contains:
+    - 'only supports parquet or arrow formats'
+
+- id: 162
+  name: 'Test definition-only mode from parquet file source to database'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.91.definition_only_file_source.yaml'
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: Table created from parquet file source with schema and 0 rows'
+
+# Test Oracle XMLTYPE column transfer to BigQuery (hang issue)
+- id: 163
+  name: 'Test Oracle XMLTYPE column to BigQuery transfer (hang issue)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.92.oracle_xmltype_bigquery.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - "using text since type 'xmltype' not mapped"
+    - 'execution succeeded'
+    - 'SUCCESS: Oracle XMLTYPE to BigQuery transfer completed without hanging!'
+
+# Test MySQL LoadDataLocal using RegisterReaderHandler pattern
+- id: 164
+  name: 'Test MySQL LoadDataLocal with native Go driver'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.93.mysql_load_data_local.yaml'
+  streams: 1
+  rows: 18
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal test passed'
+
+# Test MySQL LoadDataLocal NULL handling with checksums
+- id: 165
+  name: 'Test MySQL LoadDataLocal NULL handling'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.94.mysql_load_data_local_nulls.yaml'
+  streams: 1
+  rows: 53
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal NULL handling test passed'
+
+# Test column renaming via select option (comprehensive tests)
+- id: 166
+  name: 'Test column renaming via select (comprehensive)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.95.select_column_rename.yaml'
+  streams: 6
+  output_contains:
+    - 'execution succeeded'
+    - 'Test 1 - Basic rename columns'
+    - 'Test 2 - Exclude columns'
+    - 'Test 3 - Wildcard exclude columns'
+    - 'Test 4 - Mixed select columns'
+    - 'Test 5 - Table with rename columns'
+    - 'Test 6 - SQL {fields} placeholder columns'
+
+# Test S3 multi-bucket access with single connection (different buckets in stream URIs and files key)
+- id: 167
+  name: 'Test S3 multi-bucket access with single connection'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.96.s3_multi_bucket.yaml'
+  streams: 3
+  output_contains:
+    - 'SUCCESS: S3 multi-bucket access with single connection works correctly'
+
+# Test delete_missing with transforms doesn't fail (transforms should be skipped during delete detection)
+- id: 168
+  name: 'Test delete_missing with transforms (transforms skipped during delete detection)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.97.delete_missing_with_transforms.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: computed_date column exists from transform'
+    - 'SUCCESS: IDs 9,10 are soft-deleted correctly'

@@ -1,0 +1,211 @@
+# Test MySQL LoadDataLocal NULL handling
+# Validates that NULL values are correctly transmitted via LOAD DATA LOCAL INFILE
+# Uses PostgreSQL as source with generate_data and manual NULL insertions
+source: postgres
+target: mysql
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Generate test data in PostgreSQL
+    - type: query
+      connection: '{source.name}'
+      operation: generate_data
+      params:
+        table: public.mysql_null_test
+        rows: 50
+        columns:
+          col_bigint: bigint
+          col_bool: bool
+          col_date: date
+          col_datetime: datetime
+          col_decimal: decimal
+          col_integer: integer
+          col_smallint: smallint
+          col_string: string
+          col_text: text
+          col_float: float
+
+    # Insert 3 rows with NULL values and special characters
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO public.mysql_null_test
+        (col_bigint, col_bool, col_date, col_datetime, col_decimal, col_integer, col_smallint, col_string, col_text, col_float)
+        VALUES
+        (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL),
+        (999999, NULL, NULL, '2024-01-15 10:30:00', NULL, 12345, NULL, NULL, 'text with value', NULL),
+        (888888, true, '2024-06-20', '2024-06-20 15:45:30', 123.456, 54321, 100, 'string with "double quotes" and ''single quotes''', 'text with	tabs and
+        newlines and "quotes" here', 999.99);
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row count matches (50 generated + 3 manual = 53)
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as cnt FROM public.mysql_null_test
+      into: source_count
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM mysql.mysql_null_test
+      into: target_count
+
+    - type: log
+      message: "Source rows: {store.source_count[0].cnt}, Target rows: {store.target_count[0].cnt}"
+
+    - type: check
+      check: store.source_count[0].cnt == store.target_count[0].cnt
+      failure_message: "Row count mismatch: source={store.source_count[0].cnt}, target={store.target_count[0].cnt}"
+
+    # Count NULL values in source
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT
+          SUM(CASE WHEN col_string IS NULL THEN 1 ELSE 0 END) as null_string_cnt,
+          SUM(CASE WHEN col_integer IS NULL THEN 1 ELSE 0 END) as null_integer_cnt,
+          SUM(CASE WHEN col_decimal IS NULL THEN 1 ELSE 0 END) as null_decimal_cnt,
+          SUM(CASE WHEN col_bool IS NULL THEN 1 ELSE 0 END) as null_bool_cnt,
+          SUM(CASE WHEN col_text IS NULL THEN 1 ELSE 0 END) as null_text_cnt
+        FROM public.mysql_null_test
+      into: source_nulls
+
+    # Count NULL values in target
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          SUM(CASE WHEN col_string IS NULL THEN 1 ELSE 0 END) as null_string_cnt,
+          SUM(CASE WHEN col_integer IS NULL THEN 1 ELSE 0 END) as null_integer_cnt,
+          SUM(CASE WHEN col_decimal IS NULL THEN 1 ELSE 0 END) as null_decimal_cnt,
+          SUM(CASE WHEN col_bool IS NULL THEN 1 ELSE 0 END) as null_bool_cnt,
+          SUM(CASE WHEN col_text IS NULL THEN 1 ELSE 0 END) as null_text_cnt
+        FROM mysql.mysql_null_test
+      into: target_nulls
+
+    - type: log
+      message: |
+        Source NULLs: string={store.source_nulls[0].null_string_cnt}, integer={store.source_nulls[0].null_integer_cnt}, decimal={store.source_nulls[0].null_decimal_cnt}
+        Target NULLs: string={store.target_nulls[0].null_string_cnt}, integer={store.target_nulls[0].null_integer_cnt}, decimal={store.target_nulls[0].null_decimal_cnt}
+
+    # Verify NULL counts match for each column type
+    - type: check
+      check: int_parse(store.source_nulls[0].null_string_cnt) == int_parse(store.target_nulls[0].null_string_cnt)
+      failure_message: "NULL string count mismatch: source={store.source_nulls[0].null_string_cnt}, target={store.target_nulls[0].null_string_cnt}"
+
+    - type: check
+      check: int_parse(store.source_nulls[0].null_integer_cnt) == int_parse(store.target_nulls[0].null_integer_cnt)
+      failure_message: "NULL integer count mismatch: source={store.source_nulls[0].null_integer_cnt}, target={store.target_nulls[0].null_integer_cnt}"
+
+    - type: check
+      check: int_parse(store.source_nulls[0].null_decimal_cnt) == int_parse(store.target_nulls[0].null_decimal_cnt)
+      failure_message: "NULL decimal count mismatch: source={store.source_nulls[0].null_decimal_cnt}, target={store.target_nulls[0].null_decimal_cnt}"
+
+    - type: check
+      check: int_parse(store.source_nulls[0].null_text_cnt) == int_parse(store.target_nulls[0].null_text_cnt)
+      failure_message: "NULL text count mismatch: source={store.source_nulls[0].null_text_cnt}, target={store.target_nulls[0].null_text_cnt}"
+
+    # Calculate checksums on source (PostgreSQL)
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT
+          SUM(COALESCE(col_bigint, 0)) as sum_bigint,
+          SUM(COALESCE(col_integer, 0)) as sum_integer,
+          SUM(COALESCE(col_smallint, 0)) as sum_smallint,
+          SUM(COALESCE(CAST(col_decimal AS NUMERIC), 0)) as sum_decimal,
+          SUM(COALESCE(LENGTH(col_string), 0)) as sum_string_len,
+          SUM(COALESCE(LENGTH(col_text), 0)) as sum_text_len
+        FROM public.mysql_null_test
+      into: source_checksum
+
+    # Calculate checksums on target (MySQL)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          SUM(COALESCE(col_bigint, 0)) as sum_bigint,
+          SUM(COALESCE(col_integer, 0)) as sum_integer,
+          SUM(COALESCE(col_smallint, 0)) as sum_smallint,
+          SUM(COALESCE(CAST(col_decimal AS DECIMAL(30,10)), 0)) as sum_decimal,
+          SUM(COALESCE(LENGTH(col_string), 0)) as sum_string_len,
+          SUM(COALESCE(LENGTH(col_text), 0)) as sum_text_len
+        FROM mysql.mysql_null_test
+      into: target_checksum
+
+    - type: log
+      message: |
+        Checksums:
+        Source: bigint={store.source_checksum[0].sum_bigint}, integer={store.source_checksum[0].sum_integer}, string_len={store.source_checksum[0].sum_string_len}
+        Target: bigint={store.target_checksum[0].sum_bigint}, integer={store.target_checksum[0].sum_integer}, string_len={store.target_checksum[0].sum_string_len}
+
+    # Verify checksums match
+    - type: check
+      check: int_parse(store.source_checksum[0].sum_bigint) == int_parse(store.target_checksum[0].sum_bigint)
+      failure_message: "Bigint checksum mismatch"
+
+    - type: check
+      check: int_parse(store.source_checksum[0].sum_integer) == int_parse(store.target_checksum[0].sum_integer)
+      failure_message: "Integer checksum mismatch"
+
+    - type: check
+      check: int_parse(store.source_checksum[0].sum_string_len) == int_parse(store.target_checksum[0].sum_string_len)
+      failure_message: "String length checksum mismatch"
+
+    - type: check
+      check: int_parse(store.source_checksum[0].sum_text_len) == int_parse(store.target_checksum[0].sum_text_len)
+      failure_message: "Text length checksum mismatch"
+
+    # Verify special characters row (col_bigint = 888888) transferred correctly
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT col_string, col_text
+        FROM mysql.mysql_null_test
+        WHERE col_bigint = 888888
+      into: special_row
+
+    - type: log
+      message: |
+        Special characters row:
+        col_string: {store.special_row[0].col_string}
+        col_text: {store.special_row[0].col_text}
+
+    - type: check
+      check: contains(store.special_row[0].col_string, "\"double quotes\"") && contains(store.special_row[0].col_string, "'single quotes'")
+      failure_message: "col_string should contain both double and single quotes"
+
+    - type: check
+      check: contains(store.special_row[0].col_text, "tabs and")
+      failure_message: "col_text should contain 'tabs and'"
+
+    - type: check
+      check: contains(store.special_row[0].col_text, "newlines and")
+      failure_message: "col_text should contain 'newlines and'"
+
+    - type: check
+      check: contains(store.special_row[0].col_text, "quotes")
+      failure_message: "col_text should contain quotes"
+
+    - type: log
+      message: "SUCCESS: MySQL LoadDataLocal NULL handling test passed"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.mysql_null_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS mysql.mysql_null_test
+
+streams:
+  public.mysql_null_test:
+    object: mysql.mysql_null_test

@@ -120,6 +120,7 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
+	ds.SchemaOnly = Cfg.SchemaOnly
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = path
 	ds.SetConfig(fs.Props())

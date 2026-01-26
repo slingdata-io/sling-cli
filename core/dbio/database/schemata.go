@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/flarco/g"
@@ -274,6 +275,15 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if f == "*" || strings.Contains(f, "(") {
 			return f
 		}
+
+		// Parse for "field as alias" syntax
+		original, alias, _, _ := iop.ParseSelectExpr(f)
+		if alias != "" {
+			// Generate: "original_col" AS "alias_name"
+			origQuoted := q + strings.ReplaceAll(original, q, "") + q
+			aliasQuoted := q + strings.ReplaceAll(alias, q, "") + q
+			return origQuoted + " as " + aliasQuoted
+		}
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
@@ -284,9 +294,51 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 
-	// auto convert to json if needed
+	// auto convert complex types as needed
 	{
 		switch t.Dialect {
+		case dbio.TypeDbOracle:
+			// XMLTYPE columns cause the go-ora driver to hang when reading directly.
+			// Cast to CLOB to extract XML content as text.
+			// See: https://github.com/sijms/go-ora/issues/562
+			var xmlTypeCols iop.Columns
+			for _, col := range t.Columns {
+				if strings.EqualFold(col.DbType, "xmltype") {
+					xmlTypeCols = append(xmlTypeCols, col)
+				}
+			}
+
+			if len(xmlTypeCols) > 0 {
+				if len(fields) == 0 || (len(fields) == 1 && fields[0] == "*") {
+					// Need to explicitly list all columns with XMLTYPE casted
+					fieldExprs := []string{}
+					for _, col := range t.Columns {
+						colQ := t.Dialect.Quote(col.Name)
+						if xmlTypeCols.GetColumn(col.Name) != nil {
+							// Cast XMLTYPE to CLOB using getclobval()
+							expr := g.F("(%s).getclobval() as %s", colQ, colQ)
+							fieldExprs = append(fieldExprs, expr)
+						} else {
+							fieldExprs = append(fieldExprs, colQ)
+						}
+					}
+					fieldsStr = strings.Join(fieldExprs, ", ")
+				} else {
+					fieldExprs := []string{}
+					for _, field := range opts.Fields {
+						field = strings.TrimSpace(field)
+						colQ := t.Dialect.Quote(field)
+						if xmlTypeCols.GetColumn(field) != nil {
+							expr := g.F("(%s).getclobval() as %s", colQ, colQ)
+							fieldExprs = append(fieldExprs, expr)
+						} else {
+							fieldExprs = append(fieldExprs, colQ)
+						}
+					}
+					fieldsStr = strings.Join(fieldExprs, ", ")
+				}
+			}
+
 		case dbio.TypeDbBigQuery:
 			var toJsonCols iop.Columns
 
@@ -963,6 +1015,7 @@ func GetTablesSchemata(conn Connection, tableNames ...string) (schemata Schemata
 // GetSchemataAll obtains the schemata for all databases detected
 func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 	schemata = Schemata{Databases: map[string]Database{}}
+	var mu sync.Mutex
 
 	connInfo := conn.Info()
 
@@ -997,13 +1050,14 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 		}
 
 		// pull down schemata
-		newSchemata, err := newConn.GetSchemata("", "")
+		newSchemata, err := newConn.GetSchemata(SchemataLevelColumn, "")
 		if err != nil {
 			g.Warn("could not obtain schemata for database: %s. %s", dbName, err)
 			return
 		}
 
-		// merge all schematas
+		// merge all schematas with mutex protection
+		mu.Lock()
 		for name, database := range newSchemata.Databases {
 			g.Debug(
 				"   collected %d columns, in %d tables/views from database %s",
@@ -1013,6 +1067,7 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 			)
 			schemata.Databases[name] = database
 		}
+		mu.Unlock()
 	}
 
 	// loop an connect to each
@@ -1032,10 +1087,44 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 	if pkCols := columns.GetKeys(iop.PrimaryKey); len(pkCols) > 0 {
 		ddl = strings.TrimSpace(ddl)
 
-		// add pk right before the last parenthesis
-		lastParen := strings.LastIndex(ddl, ")")
-		if lastParen == -1 {
-			return ddl, g.Error("could not find last parenthesis")
+		// Find the closing parenthesis of the column definitions
+		// We need to find the first balanced closing paren that matches the opening
+		// paren of the CREATE TABLE column list, not just the last paren in the DDL
+		// This handles cases like: CREATE TABLE t (col1 int) WITH (data_compression=page)
+
+		// Find "CREATE TABLE" pattern to locate start of statement
+		createTableIdx := strings.Index(strings.ToUpper(ddl), "CREATE TABLE")
+		if createTableIdx == -1 {
+			return ddl, g.Error("could not find CREATE TABLE in DDL")
+		}
+
+		// Find the opening paren after CREATE TABLE (this is the column list)
+		openParen := strings.Index(ddl[createTableIdx:], "(")
+		if openParen == -1 {
+			return ddl, g.Error("could not find opening parenthesis for column list")
+		}
+		openParen += createTableIdx
+
+		// Find the matching closing paren by counting balanced parens
+		depth := 1
+		closeParen := -1
+		for i := openParen + 1; i < len(ddl); i++ {
+			switch ddl[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					closeParen = i
+				}
+			}
+			if closeParen != -1 {
+				break
+			}
+		}
+
+		if closeParen == -1 {
+			return ddl, g.Error("could not find closing parenthesis for column list")
 		}
 
 		prefix := "primary key"
@@ -1045,7 +1134,7 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 		}
 
 		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
-		ddl = ddl[:lastParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[lastParen:]
+		ddl = ddl[:closeParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[closeParen:]
 	}
 
 	return ddl, nil

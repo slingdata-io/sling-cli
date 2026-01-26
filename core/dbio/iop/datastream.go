@@ -52,6 +52,7 @@ type Datastream struct {
 	Bytes         atomic.Uint64
 	Sp            *StreamProcessor
 	SafeInference bool
+	SchemaOnly    bool
 	NoDebug       bool
 	Inferred      bool
 	deferFuncs    []func()
@@ -87,6 +88,7 @@ type FileStreamConfig struct {
 	IncrementalValue string            `json:"incremental_value"`
 	FileSelect       []string          `json:"file_select"`     // a list of files to include.
 	DuckDBFilename   bool              `json:"duckdb_filename"` // stream URL
+	SchemaOnly       bool              `json:"schema_only"`
 	Props            map[string]string `json:"props"`
 }
 
@@ -118,7 +120,8 @@ type KeyValue struct {
 
 type Metadata struct {
 	StreamURL KeyValue `json:"stream_url"`
-	LoadedAt  KeyValue `json:"loaded_at"`
+	SyncedAt  KeyValue `json:"synced_at"`
+	SyncedOp  KeyValue `json:"synced_op"`
 	RowNum    KeyValue `json:"row_num"`
 	RowID     KeyValue `json:"row_id"`
 	ExecID    KeyValue `json:"exec_id"`
@@ -259,6 +262,13 @@ func (ds *Datastream) processBwRows() {
 			break
 		}
 	}
+}
+
+// StartBwProcessor starts the bytes-written processor goroutine.
+// This should be called when creating a datastream that pushes rows
+// directly without calling Start() (e.g., chunked streaming).
+func (ds *Datastream) StartBwProcessor() {
+	go ds.processBwRows()
 }
 
 // SetReady sets the ds.ready
@@ -804,29 +814,47 @@ skipBuffer:
 			return name
 		}
 
-		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
-			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
+		if ds.Metadata.SyncedAt.Key != "" && ds.Metadata.SyncedAt.Value != nil {
+			ds.Metadata.SyncedAt.Key = ensureName(ds.Metadata.SyncedAt.Key)
 
 			// handle timestamp value
 			isTimestamp := false
-			if tVal, err := cast.ToTimeE(ds.Metadata.LoadedAt.Value); err == nil {
+			if tVal, err := cast.ToTimeE(ds.Metadata.SyncedAt.Value); err == nil {
 				isTimestamp = true
-				ds.Metadata.LoadedAt.Value = tVal
+				ds.Metadata.SyncedAt.Value = tVal
 			} else {
-				ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
+				ds.Metadata.SyncedAt.Value = cast.ToInt64(ds.Metadata.SyncedAt.Value)
 			}
 
 			col := Column{
-				Name:        ds.Metadata.LoadedAt.Key,
+				Name:        ds.Metadata.SyncedAt.Key,
 				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
 				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.LoadedAt",
-				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
+				Description: "Sling.Metadata.SyncedAt",
+				Metadata:    map[string]string{"sling_metadata": "synced_at"},
 				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.LoadedAt.Value
+				return ds.Metadata.SyncedAt.Value
+			}
+		}
+
+		if ds.Metadata.SyncedOp.Key != "" && ds.Metadata.SyncedOp.Value != nil {
+			ds.Metadata.SyncedOp.Key = ensureName(ds.Metadata.SyncedOp.Key)
+
+			col := Column{
+				Name:        ds.Metadata.SyncedOp.Key,
+				Type:        StringType,
+				DbPrecision: 4,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.SyncedOp",
+				Metadata:    map[string]string{"sling_metadata": "synced_op"},
+				Sourced:     true,
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.SyncedOp.Value
 			}
 		}
 
@@ -955,6 +983,10 @@ skipBuffer:
 
 	loop:
 		for ds.it.next() {
+
+			if ds.SchemaOnly {
+				break // don't push any rows
+			}
 
 		schemaChgLoop:
 			for {

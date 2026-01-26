@@ -341,29 +341,34 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	if t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt {
-		metadata.LoadedAt.Key = slingLoadedAtColumn
+	if t.Config.MetadataSyncedAt != nil && *t.Config.MetadataSyncedAt {
+		metadata.SyncedAt.Key = env.ReservedFields.SyncedAt
+		metadata.SyncedAt.Value = *t.StartTime // only timestamp
+		metadata.SyncedOp.Key = env.ReservedFields.SyncedOp
+		metadata.SyncedOp.Value = "I" // default to insert operation
+	} else if t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt {
+		metadata.SyncedAt.Key = env.ReservedFields.LoadedAt
 		if os.Getenv("SLING_LOADED_AT_COLUMN") == "timestamp" {
-			metadata.LoadedAt.Value = *t.StartTime
+			metadata.SyncedAt.Value = *t.StartTime
 		} else {
-			metadata.LoadedAt.Value = t.StartTime.Unix()
+			metadata.SyncedAt.Value = t.StartTime.Unix()
 		}
 	}
 	if t.Config.MetadataStreamURL {
-		metadata.StreamURL.Key = slingStreamURLColumn
+		metadata.StreamURL.Key = env.ReservedFields.StreamURL
 	}
 
 	if t.Config.MetadataRowID {
-		metadata.RowID.Key = slingRowIDColumn
+		metadata.RowID.Key = env.ReservedFields.RowID
 	}
 
 	if t.Config.MetadataExecID {
-		metadata.ExecID.Key = slingExecIDColumn
+		metadata.ExecID.Key = env.ReservedFields.ExecID
 		metadata.ExecID.Value = t.ExecID
 	}
 
 	if t.Config.MetadataRowNum {
-		metadata.RowNum.Key = slingRowNumColumn
+		metadata.RowNum.Key = env.ReservedFields.RowNum
 	}
 
 	// StarRocks: add _sling_row_id column if there is no primary,
@@ -385,8 +390,8 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 		}
 
 		if addRowIDCol {
-			metadata.RowID.Key = slingRowIDColumn
-			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{slingRowIDColumn}
+			metadata.RowID.Key = env.ReservedFields.RowID
+			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{env.ReservedFields.RowID}
 		}
 	}
 
@@ -539,7 +544,7 @@ func (t *TaskExecution) getSourceOptionsMap() (options map[string]any) {
 	}
 
 	// set target type for column casing, name length validation
-	options["target_type"] = string(t.Config.TgtConn.Type)
+	options["target_type"] = string(t.Config.TgtConn.GetType())
 
 	return
 }
@@ -568,7 +573,7 @@ func (t *TaskExecution) getTargetOptionsMap() (options map[string]any) {
 	}
 
 	// set target type for column casing, name length validation
-	options["target_type"] = string(t.Config.TgtConn.Type)
+	options["target_type"] = string(t.Config.TgtConn.GetType())
 
 	// set to delete file/folder
 	options["delete_file"] = true

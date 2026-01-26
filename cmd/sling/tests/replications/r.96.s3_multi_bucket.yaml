@@ -1,0 +1,83 @@
+# Test S3 multi-bucket access with a single connection
+# This test validates that a single S3 connection (with valid AWS credentials)
+# can access files from multiple buckets by specifying full S3 URIs in stream names.
+
+source: aws_s3
+target: postgres
+
+defaults:
+  mode: full-refresh
+  target_options:
+    adjust_column_type: true
+
+hooks:
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from public.s3_multi_bucket_test1
+      into: result1
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from public.s3_multi_bucket_test2
+      into: result2
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from public.s3_multi_bucket_test3
+      into: result3
+
+    - type: log
+      message: |
+        ✓ Stream 1 (test-bucket-west-345141): {store.result1[0].cnt} rows
+        ✓ Stream 2 (ocral-data-1): {store.result2[0].cnt} rows
+        ✓ Stream 3 (multi_bucket with files key): {store.result3[0].cnt} rows
+
+    - type: check
+      check: int_parse(store.result1[0].cnt) > 0
+      on_failure: abort
+      message: "FAIL: Stream 1 should have rows"
+
+    - type: check
+      check: int_parse(store.result2[0].cnt) > 0
+      on_failure: abort
+      message: "FAIL: Stream 2 should have rows"
+
+    - type: check
+      check: int_parse(store.result3[0].cnt) > 0
+      on_failure: abort
+      message: "FAIL: Stream 3 (files key) should have rows"
+
+    # Stream 3 should have rows from both files (2x the rows of stream 1 or 2)
+    - type: check
+      check: int_parse(store.result3[0].cnt) == int_parse(store.result1[0].cnt) + int_parse(store.result2[0].cnt)
+      on_failure: abort
+      message: "FAIL: Stream 3 should have combined rows from both buckets"
+
+    - type: log
+      message: "✅ SUCCESS: S3 multi-bucket access with single connection works correctly"
+
+    # Cleanup
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.s3_multi_bucket_test1;
+        DROP TABLE IF EXISTS public.s3_multi_bucket_test2;
+        DROP TABLE IF EXISTS public.s3_multi_bucket_test3;
+
+streams:
+  's3://test-bucket-west-345141/test1.csv':
+    object: 'public.s3_multi_bucket_test1'
+
+  's3://ocral-data-1/test1.csv':
+    object: 'public.s3_multi_bucket_test2'
+
+  multi_bucket:
+    files:
+      - s3://test-bucket-west-345141/test1.csv
+      - s3://ocral-data-1/test1.csv
+    object: 'public.s3_multi_bucket_test3'

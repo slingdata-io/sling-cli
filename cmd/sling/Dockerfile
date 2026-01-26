@@ -2,7 +2,7 @@ FROM ubuntu:jammy
 
 RUN groupadd -r sling && useradd -r -g sling sling
 
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg2 && \
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg2 unixodbc odbcinst && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
 

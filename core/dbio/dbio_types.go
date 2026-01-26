@@ -10,6 +10,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
@@ -200,6 +201,10 @@ func (t Type) DefPort() int {
 
 // DBNameUpperCase returns true is upper case is default
 func (t Type) DBNameUpperCase() bool {
+	tp, _ := t.Template()
+	if val := tp.Value("variable.column_upper"); val != "" {
+		return cast.ToBool(val)
+	}
 	return g.In(t, TypeDbOracle, TypeDbSnowflake, TypeDbExasol)
 }
 
@@ -283,6 +288,7 @@ func (t Type) NameLong() string {
 		TypeDbDatabricks:    "DB - Databricks",
 		TypeDbExasol:        "DB - Exasol",
 		TypeDbD1:            "DB - D1",
+		Type("db2"):         "DB - DB2",
 		TypeDbSQLite:        "DB - SQLite",
 		TypeDbDuckDb:        "DB - DuckDB",
 		TypeDbDuckLake:      "DB - DuckLake",
@@ -333,6 +339,7 @@ func (t Type) Name() string {
 		TypeDbDatabricks:    "Databricks",
 		TypeDbExasol:        "Exasol",
 		TypeDbD1:            "D1",
+		Type("db2"):         "DB2",
 		TypeDbSQLite:        "SQLite",
 		TypeDbDuckDb:        "DuckDB",
 		TypeDbDuckLake:      "DuckLake",
@@ -539,7 +546,9 @@ func (tp Template) Quote(field string) string {
 
 	// always normalize if case is uniform. Why would you quote and not normalize?
 	if !HasVariedCase(field) && Normalize {
-		if tp.Type.DBNameUpperCase() {
+		if val := tp.Value("variable.column_upper"); val != "" && cast.ToBool(val) {
+			field = strings.ToUpper(field)
+		} else if tp.Type.DBNameUpperCase() {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
@@ -549,6 +558,7 @@ func (tp Template) Quote(field string) string {
 	field = tp.Type.Unquote(field)
 	return q + field + q
 }
+
 func (tp Template) QuoteNames(names ...string) (newNames []string) {
 	newNames = make([]string, len(names))
 	for i := range names {

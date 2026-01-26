@@ -1,0 +1,169 @@
+# Test for GitHub Issue #694
+# Verifies that custom table_ddl with a WITH clause works correctly.
+# The user scenario: specifying table_ddl with PRIMARY KEY and WITH clause.
+#
+# Before the fix, this would generate invalid SQL like:
+#   CREATE TABLE t (col1 int, col2 int) WITH (FILLFACTOR=90, PRIMARY KEY (col1, col2))
+#
+# After the fix, the DDL is valid:
+#   CREATE TABLE t (col1 int, col2 int, PRIMARY KEY (col1, col2)) WITH (FILLFACTOR=90)
+#
+# Note: This test uses user-defined PRIMARY KEY in table_ddl since sling doesn't
+# auto-add PKs for most databases (only StarRocks).
+
+source: mssql
+target: mssql
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_ddl_pk_src_88', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_src_88;
+        CREATE TABLE dbo.test_ddl_pk_src_88 (
+          col1 nvarchar(10),
+          col2 nvarchar(6)
+        );
+        INSERT INTO dbo.test_ddl_pk_src_88 (col1, col2) VALUES ('val1', 'val2');
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_ddl_pk_tgt_88', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_tgt_88;
+        IF OBJECT_ID('dbo.test_ddl_pk_tgt_88_with', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_tgt_88_with;
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify the table was created and has a primary key
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          c.name AS column_name
+        FROM sys.indexes i
+        JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+        JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+        WHERE i.is_primary_key = 1
+          AND i.object_id = OBJECT_ID('dbo.test_ddl_pk_tgt_88')
+        ORDER BY ic.key_ordinal
+      into: pk_columns
+
+    - type: log
+      message: "Primary key columns: {store.pk_columns}"
+
+    # Verify both columns are in the primary key
+    - type: check
+      check: length(store.pk_columns) == 2
+      on_failure: error
+      message: "Expected 2 primary key columns"
+
+    - type: check
+      check: store.pk_columns[0].column_name == "col1"
+      on_failure: error
+      message: "First PK column should be col1"
+
+    - type: check
+      check: store.pk_columns[1].column_name == "col2"
+      on_failure: error
+      message: "Second PK column should be col2"
+
+    # Verify Stream 2: table with WITH clause has primary key
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          c.name AS column_name
+        FROM sys.indexes i
+        JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+        JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+        WHERE i.is_primary_key = 1
+          AND i.object_id = OBJECT_ID('dbo.test_ddl_pk_tgt_88_with')
+        ORDER BY ic.key_ordinal
+      into: pk_columns_with
+
+    - type: log
+      message: "Primary key columns (WITH clause table): {store.pk_columns_with}"
+
+    - type: check
+      check: length(store.pk_columns_with) == 2
+      on_failure: error
+      message: "Expected 2 primary key columns in WITH clause table"
+
+    - type: check
+      check: store.pk_columns_with[0].column_name == "col1"
+      on_failure: error
+      message: "First PK column in WITH clause table should be col1"
+
+    - type: check
+      check: store.pk_columns_with[1].column_name == "col2"
+      on_failure: error
+      message: "Second PK column in WITH clause table should be col2"
+
+    # Verify Stream 2: table has DATA_COMPRESSION enabled
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT data_compression_desc
+        FROM sys.partitions
+        WHERE object_id = OBJECT_ID('dbo.test_ddl_pk_tgt_88_with')
+          AND index_id <= 1
+      into: compression_info
+
+    - type: log
+      message: "Compression info: {store.compression_info}"
+
+    - type: check
+      check: store.compression_info[0].data_compression_desc == "PAGE"
+      on_failure: error
+      message: "Table should have PAGE compression enabled"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_ddl_pk_src_88', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_src_88;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_ddl_pk_tgt_88', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_tgt_88;
+        IF OBJECT_ID('dbo.test_ddl_pk_tgt_88_with', 'U') IS NOT NULL
+          DROP TABLE dbo.test_ddl_pk_tgt_88_with;
+
+streams:
+  # Stream 1: Test custom table_ddl with PRIMARY KEY constraint
+  dbo.test_ddl_pk_src_88:
+    object: dbo.test_ddl_pk_tgt_88
+    target_options:
+      # User-defined table_ddl with PRIMARY KEY constraint
+      table_ddl: |
+        CREATE TABLE {table} (
+          {col_types},
+          PRIMARY KEY ("col1", "col2")
+        )
+
+  # Stream 2: Test custom table_ddl with WITH clause (GitHub #694 scenario)
+  # This tests that table options after ({col_types}) don't break the DDL
+  stream_with_clause:
+    sql: select * from dbo.test_ddl_pk_src_88
+    object: dbo.test_ddl_pk_tgt_88_with
+    target_options:
+      # User-defined table_ddl with PRIMARY KEY and WITH clause
+      # Before fix: PK would incorrectly be placed inside WITH clause
+      # After fix: PK stays inside column definitions, WITH clause follows
+      table_ddl: |
+        CREATE TABLE {table} (
+          {col_types},
+          PRIMARY KEY ("col1", "col2")
+        ) WITH (DATA_COMPRESSION = PAGE)

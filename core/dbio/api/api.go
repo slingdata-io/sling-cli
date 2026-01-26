@@ -222,6 +222,7 @@ type APIStreamConfig struct {
 	Mode        string
 	Range       string
 	DsConfigMap map[string]any // stream processor options
+	SchemaOnly  bool
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {

@@ -2,6 +2,7 @@ package sling
 
 import (
 	"os"
+	"path"
 	"time"
 
 	"github.com/flarco/g"
@@ -106,7 +107,8 @@ func (dts *DateTimeState) Update() {
 
 type ExecutionState struct {
 	ID         string     `json:"id"`
-	FilePath   string     `json:"string"`
+	FilePath   string     `json:"file_path"`
+	FileName   string     `json:"file_name"`
 	TotalBytes uint64     `json:"total_bytes"`
 	TotalRows  uint64     `json:"total_rows"`
 	Status     StatusMap  `json:"status"`
@@ -161,6 +163,7 @@ type StreamState struct {
 	FileExt     string `json:"file_ext,omitempty"`
 	FilePath    string `json:"file_path,omitempty"`
 	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 	Schema      string `json:"schema,omitempty"`
 	SchemaLower string `json:"schema_lower,omitempty"`
 	SchemaUpper string `json:"schema_upper,omitempty"`
@@ -168,6 +171,7 @@ type StreamState struct {
 	TableLower  string `json:"table_lower,omitempty"`
 	TableUpper  string `json:"table_upper,omitempty"`
 	FullName    string `json:"full_name,omitempty"`
+	ID          string `json:"id,omitempty"`
 }
 
 type ObjectState struct {
@@ -193,6 +197,7 @@ func (t *TaskExecution) StateSet() {
 		}
 
 		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
+		state.Execution.FileName = path.Base(state.Execution.FilePath)
 
 		fMap, _ := t.Config.GetFormatMap()
 
@@ -210,11 +215,13 @@ func (t *TaskExecution) StateSet() {
 			}
 		}
 
+		run.ID = runID
 		run.Stream.FileFolder = cast.ToString(fMap["stream_file_folder"])
 		run.Stream.FileName = cast.ToString(fMap["stream_file_name"])
 		run.Stream.FileExt = cast.ToString(fMap["stream_file_ext"])
 		run.Stream.FilePath = cast.ToString(fMap["stream_file_path"])
 		run.Stream.Name = cast.ToString(fMap["stream_name"])
+		run.Stream.Description = cast.ToString(fMap["stream_description"])
 		run.Stream.FullName = cast.ToString(fMap["stream_full_name"])
 		run.Stream.Schema = cast.ToString(fMap["stream_schema"])
 		run.Stream.SchemaLower = cast.ToString(fMap["stream_schema_lower"])
@@ -222,6 +229,7 @@ func (t *TaskExecution) StateSet() {
 		run.Stream.Table = cast.ToString(fMap["stream_table"])
 		run.Stream.TableLower = cast.ToString(fMap["stream_table_lower"])
 		run.Stream.TableUpper = cast.ToString(fMap["stream_table_upper"])
+		run.Stream.ID = t.Config.StreamID()
 
 		run.Object.Name = cast.ToString(fMap["object_name"])
 		run.Object.FullName = cast.ToString(fMap["object_full_name"])

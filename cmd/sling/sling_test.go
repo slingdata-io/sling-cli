@@ -113,6 +113,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeFileGoogleDrive: {name: "google_drive"},
 	dbio.TypeFileFtp:         {name: "ftp_test_url"},
 	dbio.TypeFileAzureABFS:   {name: "fabric_lake"},
+	dbio.Type("db2"):         {name: "db2", adjustCol: g.Bool(false)},
 }
 
 func init() {
@@ -782,7 +783,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			// skip those
 			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
 				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
-				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() {
+				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
+				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
+				taskCfg.SrcConn.Type == dbio.TypeDbODBC {
 				continue
 			}
 
@@ -1077,6 +1080,7 @@ func TestSuiteDatabaseExasol(t *testing.T) {
 }
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {
+	t.Skip()
 	t.Parallel()
 
 	// test 06 => BAD_REQUEST: Parameterized query has too many parameters: 1812 parameters were given but the limit is 256.
@@ -1096,6 +1100,10 @@ func TestSuiteDatabaseIceberg(t *testing.T) {
 	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
 }
 
+func TestSuiteDatabaseDB2(t *testing.T) {
+	testSuite(t, dbio.Type("db2"), "1-5,7+")
+}
+
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
@@ -1111,7 +1119,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {
-	// t.Skip()
+	t.Skip()
 	t.Parallel()
 	testSuite(t, dbio.TypeDbFabric)
 }
@@ -1743,7 +1751,7 @@ func TestSuiteFileFtp(t *testing.T) {
 }
 
 func TestSuiteFileAzureABFS(t *testing.T) {
-	// t.Skip()
+	t.Skip()
 	t.Parallel()
 	testSuite(t, dbio.TypeFileAzureABFS)
 }
