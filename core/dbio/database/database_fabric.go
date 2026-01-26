@@ -113,8 +113,8 @@ func (conn *MsFabricConn) makeABFSClient() (fs filesys.FileSysClient, err error)
 	return fs, nil
 }
 
-// getOneLakePath generates a OneLake path for temporary staging
-func (conn *MsFabricConn) getOneLakePath(tableFName string) string {
+// getStagingPath generates a staging path for file uploads (uses DFS endpoint)
+func (conn *MsFabricConn) getStagingPath(tableFName string) string {
 	endpoint := conn.GetProp("abfs_endpoint")
 	filesystem := conn.GetProp("abfs_filesystem")
 	parent := conn.GetProp("abfs_parent")
@@ -129,6 +129,20 @@ func (conn *MsFabricConn) getOneLakePath(tableFName string) string {
 	// Clean table name to remove quotes and schema prefix
 	cleanTableName := env.CleanTableName(tableFName)
 	return fmt.Sprintf("%s/%s/%s/%s", basePath, tempCloudStorageFolder, cleanTableName, cast.ToString(g.Now()))
+}
+
+// getCopyIntoPath converts a staging path to the appropriate endpoint for COPY INTO
+// Per Microsoft docs, the .blob endpoint yields best performance for COPY INTO
+// See: https://learn.microsoft.com/en-us/sql/t-sql/statements/copy-into-transact-sql
+func (conn *MsFabricConn) getCopyIntoPath(stagingPath string) string {
+	// Check if user explicitly set a copy_into_endpoint override
+	if copyIntoEndpoint := conn.GetProp("copy_into_endpoint"); copyIntoEndpoint != "" {
+		// Replace the endpoint in the path with the user-specified one
+		endpoint := conn.GetProp("abfs_endpoint")
+		return strings.Replace(stagingPath, endpoint, copyIntoEndpoint, 1)
+	}
+
+	return stagingPath
 }
 
 // CopyFromOneLake uses the COPY INTO command to load data from OneLake
@@ -202,8 +216,8 @@ func (conn *MsFabricConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 
 	settingMppBulkImportFlow(conn, iop.GzipCompressorType)
 
-	// Get OneLake path
-	oneLakePath := conn.getOneLakePath(tableFName)
+	// Get staging path (for ABFS uploads - uses DFS endpoint)
+	stagingPath := conn.getStagingPath(tableFName)
 
 	// Create ABFS client
 	abfsFs, err := conn.makeABFSClient()
@@ -212,15 +226,15 @@ func (conn *MsFabricConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	}
 
 	// Delete any existing files at path
-	err = filesys.Delete(abfsFs, oneLakePath)
+	err = filesys.Delete(abfsFs, stagingPath)
 	if err != nil {
-		return df.Count(), g.Error(err, "Could not delete existing files: "+oneLakePath)
+		return df.Count(), g.Error(err, "Could not delete existing files: "+stagingPath)
 	}
 
 	// Set up cleanup
 	df.Defer(func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
-			filesys.Delete(abfsFs, oneLakePath)
+			filesys.Delete(abfsFs, stagingPath)
 		}
 	})
 
@@ -241,21 +255,24 @@ func (conn *MsFabricConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		// Fabric COPY INTO treats empty fields as NULL (no NULL_IF parameter available)
 		abfsFs.SetProp("null_as", ``)
 		abfsFs.SetProp("compression", `gzip`)
-		bw, err = filesys.WriteDataflow(abfsFs, df, oneLakePath)
+		bw, err = filesys.WriteDataflow(abfsFs, df, stagingPath)
 	case dbio.FileTypeParquet:
 		if env.UseDuckDbCompute() {
-			bw, err = filesys.WriteDataflowViaDuckDB(abfsFs, df, oneLakePath)
+			bw, err = filesys.WriteDataflowViaDuckDB(abfsFs, df, stagingPath)
 		} else {
-			bw, err = filesys.WriteDataflow(abfsFs, df, oneLakePath)
+			bw, err = filesys.WriteDataflow(abfsFs, df, stagingPath)
 		}
 	}
 	if err != nil {
 		return df.Count(), g.Error(err, "Error writing to OneLake")
 	}
-	g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), oneLakePath)
+	g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), stagingPath)
+
+	// Get COPY INTO path (may convert DFS to Blob endpoint for better compatibility)
+	copyIntoPath := conn.getCopyIntoPath(stagingPath)
 
 	// Execute COPY INTO
-	err = conn.CopyFromOneLake(tableFName, oneLakePath, df.Columns, fileFormat)
+	err = conn.CopyFromOneLake(tableFName, copyIntoPath, df.Columns, fileFormat)
 	if err != nil {
 		return df.Count(), g.Error(err, "Error copying into Fabric from OneLake")
 	}
