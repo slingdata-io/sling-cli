@@ -14,7 +14,7 @@ core:
     INTO TABLE {table}
     FIELDS TERMINATED BY ','
     OPTIONALLY ENCLOSED BY '"'
-    ESCAPED BY ''
+    ESCAPED BY '\\'
     LINES TERMINATED BY '\n'
     IGNORE 1 LINES
 
