@@ -1,0 +1,152 @@
+# Test MySQL LoadDataLocal escape character handling bug
+# This test validates that strings with backslash sequences are handled correctly
+# The bug: when strings contain backslash sequences (like \N, \", \\), MySQL's
+# LOAD DATA LOCAL INFILE with ESCAPED BY '\\' may misparse the CSV
+# because Go's csv.Writer uses RFC 4180 (double-quote escaping), not backslash escaping.
+
+source: postgres
+target: mysql
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Create test table in PostgreSQL with various escape-problematic strings
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.mysql_escape_test;
+        CREATE TABLE public.mysql_escape_test (
+          id serial PRIMARY KEY,
+          description text,
+          value text
+        );
+
+    # Insert test rows with escape-problematic characters
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO public.mysql_escape_test (description, value) VALUES
+        -- Basic cases
+        ('normal_text', 'hello world'),
+        ('double_quotes', 'say "hello" to me'),
+        ('single_quotes', 'it''s working'),
+
+        -- Backslash cases - these may cause LOAD DATA parsing issues
+        ('backslash_simple', 'path\to\file'),
+        ('backslash_n', 'line1\nline2'),
+        ('backslash_N_uppercase', 'test\Nvalue'),
+        ('backslash_t', 'col1\tcol2'),
+        ('backslash_r', 'line1\rline2'),
+        ('double_backslash', 'escaped\\backslash'),
+        ('backslash_quote', 'say \"quoted\"'),
+        ('backslash_at_end', 'ends with backslash\'),
+
+        -- Combined problematic cases
+        ('backslash_before_comma', 'value\,more'),
+        ('backslash_before_newline', E'line1\\\nline2'),
+        ('null_marker_lookalike', '\N'),
+        ('multiple_null_markers', '\N\N\N'),
+        ('backslash_N_in_middle', 'before\Nafter'),
+
+        -- Embedded newlines (real newlines, not \n)
+        ('real_newline', E'line1\nline2'),
+        ('real_tab', E'col1\tcol2'),
+        ('real_cr', E'line1\rline2'),
+        ('crlf', E'line1\r\nline2'),
+
+        -- Unicode and special chars
+        ('unicode', 'emoji: 🎉 and 中文'),
+        ('mixed_special', E'quote "here", tab\there, newline\nhere'),
+
+        -- Edge cases for the bug
+        ('quote_backslash_quote', '"\"hello\""'),
+        ('backslash_end_quoted', 'test\\'),
+        ('null_in_quoted', '"\\N"');
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Count rows in source
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as cnt FROM public.mysql_escape_test
+      into: source_count
+
+    # Count rows in target
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM mysql.mysql_escape_test
+      into: target_count
+
+    - type: log
+      message: "Source rows: {store.source_count[0].cnt}, Target rows: {store.target_count[0].cnt}"
+
+    # Critical check: row counts must match!
+    - type: check
+      check: int_parse(store.source_count[0].cnt) == int_parse(store.target_count[0].cnt)
+      failure_message: "ROW COUNT MISMATCH: source={store.source_count[0].cnt}, target={store.target_count[0].cnt} - This indicates the escape bug!"
+
+    # Verify specific problematic values transferred correctly
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT description, value FROM mysql.mysql_escape_test
+        WHERE description IN ('backslash_N_uppercase', 'null_marker_lookalike', 'backslash_quote')
+        ORDER BY description
+      into: problematic_rows
+
+    - type: log
+      message: |
+        Problematic rows:
+        {store.problematic_rows}
+
+    # Check that \N was not interpreted as NULL
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as cnt FROM mysql.mysql_escape_test WHERE value IS NULL
+      into: null_count
+
+    - type: log
+      message: "NULL values in target: {store.null_count[0].cnt}"
+
+    # No values should be NULL (we didn't insert any NULLs)
+    - type: check
+      check: int_parse(store.null_count[0].cnt) == 0
+      failure_message: "Found {store.null_count[0].cnt} NULL values - backslash-N was incorrectly interpreted as NULL!"
+
+    # Verify value checksums match (use CHAR_LENGTH for MySQL since LENGTH returns bytes for UTF-8)
+    - type: query
+      connection: '{source.name}'
+      query: SELECT SUM(LENGTH(value)) as total_len FROM public.mysql_escape_test
+      into: source_len
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT SUM(CHAR_LENGTH(value)) as total_len FROM mysql.mysql_escape_test
+      into: target_len
+
+    - type: check
+      check: int_parse(store.source_len[0].total_len) == int_parse(store.target_len[0].total_len)
+      failure_message: "Value length mismatch: source={store.source_len[0].total_len}, target={store.target_len[0].total_len}"
+
+    - type: log
+      message: "SUCCESS: MySQL LoadDataLocal escape handling test passed"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.mysql_escape_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS mysql.mysql_escape_test
+
+streams:
+  public.mysql_escape_test:
+    object: mysql.mysql_escape_test

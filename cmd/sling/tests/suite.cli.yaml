@@ -1557,3 +1557,15 @@
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: chunking with {stream_table} variable works'
+
+# Test MySQL LoadDataLocal escape character handling (backslash bug fix)
+# Issue: LOAD DATA with ESCAPED BY '\\' misparses rows with backslash sequences (\N, \", etc.)
+# Fix: Changed to ESCAPED BY '' to use RFC 4180 double-quote escaping which matches Go's csv.Writer
+- id: 170
+  name: 'Test MySQL LoadDataLocal escape character handling'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.99.mysql_load_data_escape_bug.yaml'
+  streams: 1
+  rows: 25
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal escape handling test passed'
