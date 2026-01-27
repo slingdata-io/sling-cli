@@ -1,0 +1,68 @@
+# Test for bug: {stream_table} not expanded in object field when using chunking + custom SQL
+# The issue is that ProcessChunks() parses stream.config.Object before variable expansion happens,
+# resulting in temp table names like "sling.{stream_table}_new_001" instead of "sling.test_chunk_var_001"
+#
+# This test verifies that the temp table name is correctly expanded when using chunking with
+# the defaults.object using {stream_table} variable.
+#
+# Uses existing test1k_clickhouse_pg table (has ~1000 rows with id column)
+
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+  object: sling.{stream_table}_chunked
+  primary_key: [id]
+  update_key: id
+
+hooks:
+  start:
+    # Cleanup target - drop both the expected table and any malformed tables with literal {stream_table}
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS sling.test1k_clickhouse_pg_chunked;
+        DROP TABLE IF EXISTS "sling"."{stream_table}_chunked_001";
+        DROP TABLE IF EXISTS "sling"."{stream_table}_chunked_002";
+        DROP TABLE IF EXISTS "sling"."{stream_table}_chunked_003";
+
+  end:
+    # Check execution status
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify the target table was created with the correct name (expanded variable)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as cnt FROM sling.test1k_clickhouse_pg_chunked
+      into: result
+
+    - type: log
+      message: |
+        Target table row count: {store.result[0].cnt}
+
+    # Verify we got rows (the table has ~1000 rows)
+    - type: check
+      check: int_parse(store.result[0].cnt) > 900
+      message: "FAIL: expected > 900 rows but got {store.result[0].cnt}"
+
+    - type: log
+      message: "SUCCESS: chunking with {stream_table} variable works - table sling.test1k_clickhouse_pg_chunked has {store.result[0].cnt} rows"
+
+    # Cleanup
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS sling.test1k_clickhouse_pg_chunked;
+
+streams:
+  public.test1k_clickhouse_pg:
+    sql: |
+      select *
+      from public.test1k_clickhouse_pg
+      where {incremental_where_cond}
+    source_options:
+      chunk_count: 3

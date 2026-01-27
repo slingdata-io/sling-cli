@@ -1547,3 +1547,13 @@
     - 'execution succeeded'
     - 'SUCCESS: computed_date column exists from transform'
     - 'SUCCESS: IDs 9,10 are soft-deleted correctly'
+
+# Test chunking with {stream_table} variable in object field (bug fix)
+# Issue: When using chunking + custom SQL, {stream_table} was not expanded in temp table names
+- id: 169
+  name: 'Test chunking with {stream_table} variable expansion'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.98.chunking_stream_table_var.yaml'
+  streams: 3
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: chunking with {stream_table} variable works'
