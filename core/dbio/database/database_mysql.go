@@ -537,8 +537,12 @@ func (conn *MySQLConn) LoadDataLocal(tableFName string, ds *iop.Datastream) (cou
 	// Register the reader handler for streaming CSV with header
 	// The MySQL LOAD DATA template uses IGNORE 1 LINES, so we need the header
 	// BoolAsInt is required because MySQL's LOAD DATA doesn't convert true/false to 1/0
+	// EscapeBackslash is required because MySQL uses backslash as escape character
+	// (e.g., \N = NULL, \" = quote). We need to double backslashes in data so
+	// literal backslashes are preserved and not interpreted as escape sequences.
 	cfg := iop.LoaderStreamConfig(true)
 	cfg.BoolAsInt = true
+	cfg.EscapeBackslash = true
 	mysql.RegisterReaderHandler(handlerName, func() io.Reader {
 		return ds.NewCsvReader(cfg)
 	})
