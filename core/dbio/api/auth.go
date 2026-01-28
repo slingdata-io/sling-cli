@@ -770,11 +770,12 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 // AuthenticatorHMAC
 type AuthenticatorHMAC struct {
 	AuthenticatorBase
-	Algorithm     string            `yaml:"algorithm" json:"algorithm"`
-	Secret        string            `yaml:"secret" json:"secret"`
-	SigningString string            `yaml:"signing_string" json:"signing_string"`
-	ReqHeaders    map[string]string `yaml:"request_headers" json:"request_headers"`
-	NonceLength   int               `yaml:"nonce_length" json:"nonce_length,omitempty"` // Length of random nonce bytes (0 to disable)
+	Algorithm      string            `yaml:"algorithm" json:"algorithm"`
+	Secret         string            `yaml:"secret" json:"secret"`
+	SecretEncoding string            `yaml:"secret_encoding" json:"secret_encoding,omitempty"` // "hex", "base64", or "" (raw)
+	SigningString  string            `yaml:"signing_string" json:"signing_string"`
+	ReqHeaders     map[string]string `yaml:"request_headers" json:"request_headers"`
+	NonceLength    int               `yaml:"nonce_length" json:"nonce_length,omitempty"` // Length of random nonce bytes (0 to disable)
 }
 
 func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
@@ -782,11 +783,29 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		a.Algorithm = "sha256"
 	}
 
-	var secret string
+	var secretBytes []byte
 	if a.Secret != "" {
-		secret, err = a.renderString(a.Secret)
+		secret, err := a.renderString(a.Secret)
 		if err != nil {
 			return g.Error(err, "could not render secret for HMAC authentication")
+		}
+
+		// Decode secret based on encoding
+		switch strings.ToLower(a.SecretEncoding) {
+		case "hex":
+			secretBytes, err = hex.DecodeString(secret)
+			if err != nil {
+				return g.Error(err, "could not decode hex-encoded secret for HMAC authentication")
+			}
+		case "base64":
+			secretBytes, err = base64.StdEncoding.DecodeString(secret)
+			if err != nil {
+				return g.Error(err, "could not decode base64-encoded secret for HMAC authentication")
+			}
+		case "", "raw":
+			secretBytes = []byte(secret)
+		default:
+			return g.Error("invalid secret_encoding '%s', only 'hex', 'base64', or 'raw' are supported", a.SecretEncoding)
 		}
 	}
 
@@ -890,7 +909,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
 
 			// Compute HMAC-SHA256
-			mac := hmac.New(sha256.New, []byte(secret))
+			mac := hmac.New(sha256.New, secretBytes)
 			mac.Write([]byte(stringToSign))
 			signature = hex.EncodeToString(mac.Sum(nil))
 		case "sha512":
@@ -904,7 +923,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
 
 			// Compute HMAC-SHA512
-			mac := hmac.New(sha512.New, []byte(secret))
+			mac := hmac.New(sha512.New, secretBytes)
 			mac.Write([]byte(stringToSign))
 			signature = hex.EncodeToString(mac.Sum(nil))
 		default:
