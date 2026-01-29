@@ -1000,12 +1000,19 @@ func (col *Column) SetLengthPrecisionScale() {
 func (col *Column) EvaluateConstraint(value any, sp *StreamProcessor) (err error) {
 	if c := col.Constraint; c.EvalFunc != nil && !c.EvalFunc(value) {
 		c.FailCnt++
+		errMsg := g.F("constraint failure for column '%s', at row number %d, for value: %s", col.Name, sp.N, cast.ToString(value))
+
+		// Only store first 20 error messages to avoid memory issues
+		// but always return error regardless of count
 		if c.FailCnt <= 20 {
-			errMsg := g.F("constraint failure for column '%s', at row number %d, for value: %s", col.Name, sp.N, cast.ToString(value))
 			g.Warn(errMsg)
 			c.Errors = append(c.Errors, errMsg)
-			return g.Error(errMsg)
+		} else if c.FailCnt == 21 {
+			// Log once when threshold is exceeded
+			g.Warn(g.F("constraint failure for column '%s' (logging limit reached, %d total failures so far)", col.Name, c.FailCnt))
 		}
+
+		return g.Error(errMsg)
 	}
 	return
 }
