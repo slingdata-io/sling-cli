@@ -51,7 +51,7 @@ core:
     WITH (
       FILE_TYPE = 'CSV',
       FIELDTERMINATOR = ',',
-      ROWTERMINATOR = '\n',
+      ROWTERMINATOR = '0x0A',
       FIRSTROW = 2,
       COMPRESSION = 'Gzip',
       ENCODING = 'UTF8'{credential_expr}
