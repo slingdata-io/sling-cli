@@ -1570,6 +1570,19 @@
     - 'execution succeeded'
     - 'SUCCESS: MySQL LoadDataLocal escape handling test passed'
 
+# # Test configurable merge strategies (update_insert, delete_insert, insert, update)
+# # Feature: Allow users to specify merge_strategy in target_options to control how incremental data is merged
+# - id: 171
+#   name: 'Test merge_strategy target option'
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.100.merge_strategy.yaml'
+#   streams: 4
+#   output_contains:
+#     - 'execution succeeded'
+#     - 'update_insert count'
+#     - 'delete_insert count'
+#     - 'update count'
+#     - 'insert count'
+
 # Test constraint validation with value IN expressions
 # Bug: Constraints fail to abort replication when invalid data is present
 # The constraint should detect invalid rating value and abort the replication
@@ -1603,3 +1616,22 @@
     - 'execution succeeded'
     - 'logging limit reached'
     - 'SUCCESS: Constraint validation in WARN mode works correctly'
+
+# Test delete_missing with source_where and target_where for scoped deletion (soft delete)
+# Allows efficient delete detection on large tables by limiting comparisons to a subset of data
+- id: 175
+  name: 'Test delete_missing soft with source_where/target_where (scoped deletion)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.104.delete_missing_where.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: delete_missing with where clause correctly scoped deletion to recent data only'
+
+# Test delete_missing hard delete with source_where and target_where for scoped deletion
+- id: 176
+  name: 'Test delete_missing hard with source_where/target_where (scoped deletion)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.104.delete_missing_where_hard.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: hard delete with target_where correctly scoped deletion to recent data only'

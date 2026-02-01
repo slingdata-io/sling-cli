@@ -1,0 +1,109 @@
+# Test delete_missing hard delete with where clause
+# Verifies that hard delete also respects the target_where clause
+
+source: MSSQL
+target: POSTGRES
+
+hooks:
+  start:
+    # Create source table with 10 rows spanning different date ranges
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_hard_where', 'U') IS NOT NULL DROP TABLE dbo.delete_hard_where;
+        CREATE TABLE dbo.delete_hard_where (
+          id INT PRIMARY KEY,
+          created_at DATETIME,
+          value NVARCHAR(100)
+        );
+        -- "Old" data (more than 30 days ago) - IDs 1-5
+        INSERT INTO dbo.delete_hard_where (id, created_at, value) VALUES
+        (1, DATEADD(day, -60, GETDATE()), 'old1'),
+        (2, DATEADD(day, -90, GETDATE()), 'old2'),
+        (3, DATEADD(day, -120, GETDATE()), 'old3'),
+        (4, DATEADD(day, -150, GETDATE()), 'old4'),
+        (5, DATEADD(day, -180, GETDATE()), 'old5');
+        -- "Recent" data (within 30 days) - IDs 6-10
+        INSERT INTO dbo.delete_hard_where (id, created_at, value) VALUES
+        (6, DATEADD(day, -5, GETDATE()), 'recent1'),
+        (7, DATEADD(day, -10, GETDATE()), 'recent2'),
+        (8, DATEADD(day, -15, GETDATE()), 'recent3'),
+        (9, DATEADD(day, -20, GETDATE()), 'recent4'),
+        (10, DATEADD(day, -25, GETDATE()), 'recent5');
+
+    # Create second source - same but remove IDs 9 and 10
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_hard_where2', 'U') IS NOT NULL DROP TABLE dbo.delete_hard_where2;
+        SELECT * INTO dbo.delete_hard_where2 FROM dbo.delete_hard_where WHERE id NOT IN (9, 10);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify only 8 rows remain (IDs 9 and 10 were hard deleted)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM public.delete_hard_where
+      into: total_count
+
+    - type: check
+      check: int_parse(store.total_count[0].cnt) == 8
+      failure_message: "Expected 8 total rows after hard delete, got {store.total_count[0].cnt}"
+
+    # Verify IDs 9 and 10 are gone (hard deleted)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM public.delete_hard_where WHERE id IN (9, 10)
+      into: deleted_recent
+
+    - type: check
+      check: int_parse(store.deleted_recent[0].cnt) == 0
+      failure_message: "Expected 0 rows for IDs 9,10 (hard deleted), got {store.deleted_recent[0].cnt}"
+
+    # Verify old rows 1-5 still exist (NOT deleted due to target_where)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM public.delete_hard_where WHERE id IN (1, 2, 3, 4, 5)
+      into: old_count
+
+    - type: check
+      check: int_parse(store.old_count[0].cnt) == 5
+      failure_message: "Expected 5 old rows (1-5), got {store.old_count[0].cnt}. The target_where didn't work!"
+
+    - type: log
+      message: "SUCCESS: hard delete with target_where correctly scoped deletion to recent data only"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.delete_hard_where', 'U') IS NOT NULL DROP TABLE dbo.delete_hard_where;
+        IF OBJECT_ID('dbo.delete_hard_where2', 'U') IS NOT NULL DROP TABLE dbo.delete_hard_where2;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.delete_hard_where CASCADE;
+
+streams:
+  # First stream: full-refresh to create table with all 10 rows
+  dbo.delete_hard_where:
+    object: public.delete_hard_where
+    mode: full-refresh
+    primary_key: [id]
+    target_options:
+      column_casing: lower
+
+  # Second stream: incremental with hard delete scoped to recent data only
+  dbo.delete_hard_where2:
+    object: public.delete_hard_where
+    mode: incremental
+    primary_key: [id]
+    target_options:
+      column_casing: lower
+      delete_missing:
+        type: hard
+        source_where: created_at >= DATEADD(day, -30, GETDATE())
+        target_where: created_at >= NOW() - INTERVAL '30 days'

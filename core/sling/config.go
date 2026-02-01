@@ -1579,7 +1579,7 @@ type TargetOptions struct {
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
-	DeleteMissing    *string             `json:"delete_missing,omitempty" yaml:"delete_missing,omitempty"`
+	DeleteMissing    any                 `json:"delete_missing,omitempty" yaml:"delete_missing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
@@ -1594,6 +1594,82 @@ type TargetOptions struct {
 	PostSQL        *string                  `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 	IsolationLevel *database.IsolationLevel `json:"isolation_level,omitempty" yaml:"isolation_level,omitempty"`
 	MergeStrategy  *database.MergeStrategy  `json:"merge_strategy,omitempty" yaml:"merge_strategy,omitempty"`
+}
+
+// DeleteMissingConfig represents extended delete_missing configuration
+type DeleteMissingConfig struct {
+	Type        string `json:"type,omitempty" yaml:"type,omitempty"`                 // "soft" or "hard"
+	Where       string `json:"where,omitempty" yaml:"where,omitempty"`               // applied to both source and target
+	SourceWhere string `json:"source_where,omitempty" yaml:"source_where,omitempty"` // source-specific where clause
+	TargetWhere string `json:"target_where,omitempty" yaml:"target_where,omitempty"` // target-specific where clause
+}
+
+// GetSourceWhere returns the effective source where clause
+func (dmc *DeleteMissingConfig) GetSourceWhere() string {
+	if dmc.SourceWhere != "" {
+		return dmc.SourceWhere
+	}
+	return dmc.Where
+}
+
+// GetTargetWhere returns the effective target where clause
+func (dmc *DeleteMissingConfig) GetTargetWhere() string {
+	if dmc.TargetWhere != "" {
+		return dmc.TargetWhere
+	}
+	return dmc.Where
+}
+
+// GetDeleteMissingConfig parses the delete_missing field into a structured config
+// Returns nil if delete_missing is not set
+func (o *TargetOptions) GetDeleteMissingConfig() *DeleteMissingConfig {
+	if o == nil || o.DeleteMissing == nil {
+		return nil
+	}
+
+	switch v := o.DeleteMissing.(type) {
+	case string:
+		// Simple format: "soft" or "hard"
+		return &DeleteMissingConfig{Type: v}
+	case *string:
+		if v == nil {
+			return nil
+		}
+		return &DeleteMissingConfig{Type: *v}
+	case map[string]any:
+		// Extended format with type, where, source_where, target_where
+		cfg := &DeleteMissingConfig{}
+		if t, ok := v["type"].(string); ok {
+			cfg.Type = t
+		}
+		if w, ok := v["where"].(string); ok {
+			cfg.Where = w
+		}
+		if sw, ok := v["source_where"].(string); ok {
+			cfg.SourceWhere = sw
+		}
+		if tw, ok := v["target_where"].(string); ok {
+			cfg.TargetWhere = tw
+		}
+		return cfg
+	case map[any]any:
+		// YAML unmarshals to map[any]any sometimes
+		cfg := &DeleteMissingConfig{}
+		if t, ok := v["type"].(string); ok {
+			cfg.Type = t
+		}
+		if w, ok := v["where"].(string); ok {
+			cfg.Where = w
+		}
+		if sw, ok := v["source_where"].(string); ok {
+			cfg.SourceWhere = sw
+		}
+		if tw, ok := v["target_where"].(string); ok {
+			cfg.TargetWhere = tw
+		}
+		return cfg
+	}
+	return nil
 }
 
 var SourceFileOptionsDefault = SourceOptions{
