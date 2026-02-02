@@ -1,0 +1,76 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+env:
+  SLING_ON_CONSTRAINT_FAILURE: abort
+
+hooks:
+  start:
+    # Create source table with test data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.constraint_test_table;
+        CREATE TABLE public.constraint_test_table (
+          film_id INT,
+          rating VARCHAR(20)
+        );
+
+        -- Insert 25 rows with invalid rating (more than the 20 error threshold)
+        -- This tests the bug where after 20 constraint failures, errors are silently ignored
+        INSERT INTO public.constraint_test_table VALUES
+        (1, 'INVALID'),
+        (2, 'INVALID'),
+        (3, 'INVALID'),
+        (4, 'INVALID'),
+        (5, 'INVALID'),
+        (6, 'INVALID'),
+        (7, 'INVALID'),
+        (8, 'INVALID'),
+        (9, 'INVALID'),
+        (10, 'INVALID'),
+        (11, 'INVALID'),
+        (12, 'INVALID'),
+        (13, 'INVALID'),
+        (14, 'INVALID'),
+        (15, 'INVALID'),
+        (16, 'INVALID'),
+        (17, 'INVALID'),
+        (18, 'INVALID'),
+        (19, 'INVALID'),
+        (20, 'INVALID'),
+        (21, 'INVALID'),  -- This is the 21st failure, should still abort
+        (22, 'INVALID'),
+        (23, 'INVALID'),
+        (24, 'INVALID'),
+        (25, 'INVALID');
+
+  end:
+    # Verify that replication errored (it should abort on first constraint failure)
+    - type: check
+      name: "Verify replication aborted due to constraint failure"
+      check: execution.status.error != 0
+
+    - type: log
+      message: |
+        SUCCESS: Constraint validation in ABORT mode works correctly!
+        - Replication aborted on first constraint failure as expected
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_table
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_table_output
+
+streams:
+  public.constraint_test_table:
+    object: public.constraint_test_table_output
+    columns:
+      rating: string | value in ('PG', 'PG-13', 'R', 'NC-17')
+      film_id: int | value is not null

@@ -31,11 +31,12 @@ func NewExcelDataset(reader io.Reader, props map[string]string) (data Dataset, e
 	sheetName := props["sheet"]
 	sheetRange := ""
 
-	if sheetName == "" {
-		sheetName = xls.Sheets[0]
-	} else if sheetNameArr := strings.Split(sheetName, "!"); len(sheetNameArr) == 2 {
+	if sheetNameArr := strings.Split(sheetName, "!"); len(sheetNameArr) == 2 {
 		sheetName = sheetNameArr[0]
 		sheetRange = sheetNameArr[1]
+	}
+	if sheetName == "" {
+		sheetName = xls.Sheets[0] // if sheet is blank, use first
 	}
 
 	if sheetRange != "" {
@@ -139,13 +140,27 @@ func (xls *Excel) GetDataset(sheet string) (data Dataset) {
 }
 
 // GetDatasetFromRange returns a dataset of the provided sheet / range
-// cellRange example: `$AH$13:$AI$20` or `AH13:AI20` or `A:E`
+// cellRange examples:
+//   - `$AH$13:$AI$20` or `AH13:AI20` - standard cell range
+//   - `A:E` - column range (all rows)
+//   - `9:15` - row range (detects columns with data)
+//   - `A4:C` - partial range (extends to last row)
 func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, err error) {
 
 	regexAlpha := *regexp.MustCompile(`[^a-zA-Z]`)
 	regexNum := *regexp.MustCompile(`[^0-9]`)
 
-	cellRange = strings.ReplaceAll(cellRange, "$", "")
+	allRows, err := xls.File.GetRows(sheet)
+	if err != nil {
+		return data, g.Error(err, "could not get rows")
+	}
+
+	// Normalize range format (handles row-only and partial ranges)
+	cellRange, err = xls.normalizeRange(cellRange, allRows)
+	if err != nil {
+		return data, g.Error(err, "could not normalize range")
+	}
+
 	rangeArr := strings.Split(cellRange, ":")
 	if len(rangeArr) != 2 {
 		err = g.Error(err, "Invalid range: "+cellRange)
@@ -158,11 +173,6 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 	colEnd := xls.TitleToNumber(RangeEndCol)
 	rowStart := cast.ToInt(regexNum.ReplaceAllString(rangeArr[0], "")) - 1
 	rowEnd := cast.ToInt(regexNum.ReplaceAllString(rangeArr[1], "")) - 1
-
-	allRows, err := xls.File.GetRows(sheet)
-	if err != nil {
-		return data, g.Error(err, "could not get rows")
-	}
 
 	if rowStart == -1 {
 		rowStart = 0
@@ -263,6 +273,117 @@ func (xls *Excel) TitleToNumber(s string) int {
 		weight++
 	}
 	return sum - 1
+}
+
+// NumberToTitle converts a 0-based column index to Excel column letters.
+// For example: 0 -> "A", 25 -> "Z", 26 -> "AA"
+func (xls *Excel) NumberToTitle(n int) string {
+	result := ""
+	for n >= 0 {
+		result = string(rune('A'+n%26)) + result
+		n = n/26 - 1
+	}
+	return result
+}
+
+// normalizeRange normalizes various range formats into standard Excel range notation.
+// Supported formats:
+//   - "9:15" (row-only) -> "A9:<lastCol>15" (detects last column with data)
+//   - "5:" (row-start-only) -> "A5:<lastCol><lastRow>" (from row 5 to end, auto-detect columns)
+//   - "A4:C" (partial) -> "A4:C<lastRow>" (extends to last row)
+//   - "A4:C8" (standard) -> "A4:C8" (no change)
+func (xls *Excel) normalizeRange(cellRange string, allRows [][]string) (string, error) {
+	regexAlpha := regexp.MustCompile(`[^a-zA-Z]`)
+	regexNum := regexp.MustCompile(`[^0-9]`)
+	regexRowOnly := regexp.MustCompile(`^\d+:\d*$`) // matches "9:15" or "5:"
+
+	cellRange = strings.ReplaceAll(cellRange, "$", "")
+	rangeArr := strings.Split(cellRange, ":")
+	if len(rangeArr) != 2 {
+		return "", g.Error("invalid range format: %s", cellRange)
+	}
+
+	startPart := rangeArr[0]
+	endPart := rangeArr[1]
+
+	// Check if it's a row-only range like "9:15" or "5:"
+	if regexRowOnly.MatchString(cellRange) {
+		rowStart := cast.ToInt(startPart)
+		rowEnd := cast.ToInt(endPart) // will be 0 if endPart is empty
+
+		if rowStart <= 0 {
+			return "", g.Error("invalid row number in range: %s", cellRange)
+		}
+
+		// If endPart is empty (e.g., "5:"), extend to last row
+		if endPart == "" {
+			rowEnd = len(allRows)
+		}
+
+		if rowEnd <= 0 {
+			return "", g.Error("invalid row numbers in range: %s", cellRange)
+		}
+		if rowStart > rowEnd {
+			return "", g.Error("row range %d:%d is reversed", rowStart, rowEnd)
+		}
+
+		// Convert to 0-based indices
+		rowStartIdx := rowStart - 1
+		rowEndIdx := rowEnd - 1
+
+		if rowStartIdx >= len(allRows) {
+			return "", g.Error("row range %d:%d exceeds sheet bounds (max row: %d)", rowStart, rowEnd, len(allRows))
+		}
+
+		// Scan rows to find max column with data (limit to SampleSize rows for performance)
+		maxCol := 0
+		scannedRows := 0
+		for r := rowStartIdx; r <= rowEndIdx && r < len(allRows); r++ {
+			if len(allRows[r]) > maxCol {
+				maxCol = len(allRows[r])
+			}
+			scannedRows++
+			if scannedRows >= SampleSize {
+				break
+			}
+		}
+
+		if maxCol == 0 {
+			return "", g.Error("no data found in row range %d:%d", rowStart, rowEnd)
+		}
+
+		// Convert to column letter (maxCol is count, so subtract 1 for 0-based index)
+		endCol := xls.NumberToTitle(maxCol - 1)
+		return g.F("A%d:%s%d", rowStart, endCol, rowEnd), nil
+	}
+
+	// Extract column and row parts
+	_ = regexAlpha.ReplaceAllString(startPart, "") // startCol - not needed for normalization
+	endCol := regexAlpha.ReplaceAllString(endPart, "")
+	startRowStr := regexNum.ReplaceAllString(startPart, "")
+	endRowStr := regexNum.ReplaceAllString(endPart, "")
+
+	// Check for partial range like "A4:C" (has start row but no end row)
+	if startRowStr != "" && endRowStr == "" && endCol != "" {
+		startRow := cast.ToInt(startRowStr)
+		if startRow <= 0 {
+			return "", g.Error("invalid start row in range: %s", cellRange)
+		}
+		// Extend to last row
+		return g.F("%s:%s%d", startPart, endCol, len(allRows)), nil
+	}
+
+	// Validate row order if both rows are specified
+	if startRowStr != "" && endRowStr != "" {
+		startRow := cast.ToInt(startRowStr)
+		endRow := cast.ToInt(endRowStr)
+		if startRow > endRow {
+			return "", g.Error("row range %d:%d is reversed", startRow, endRow)
+		}
+	}
+
+	// Standard format or column-only format (A:E), return as-is
+	return cellRange, nil
 }
 
 // WriteSheet write a datastream into a sheet

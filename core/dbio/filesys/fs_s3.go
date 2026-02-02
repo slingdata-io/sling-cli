@@ -37,6 +37,7 @@ func init() {
 	defaults := map[string]string{
 		"AWS_RESPONSE_CHECKSUM_VALIDATION": "WHEN_REQUIRED",
 		"AWS_REQUEST_CHECKSUM_CALCULATION": "WHEN_REQUIRED",
+		"AWS_EC2_METADATA_DISABLED":        "true",
 	}
 	for key, value := range defaults {
 		if os.Getenv(key) == "" {

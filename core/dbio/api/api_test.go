@@ -1600,6 +1600,7 @@ func TestHMACAuthentication(t *testing.T) {
 		signingString  string
 		requestHeaders map[string]string
 		secret         string
+		secretEncoding string
 		nonceLength    int
 		expectError    bool
 		validateFunc   func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool
@@ -1793,6 +1794,64 @@ func TestHMACAuthentication(t *testing.T) {
 			},
 			description: "HMAC with multiple body hash algorithms",
 		},
+		{
+			name:          "hmac_hex_encoded_secret",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_path}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+			},
+			secret:         "746573745f7365637265745f6b6579", // "test_secret_key" in hex
+			secretEncoding: "hex",
+			nonceLength:    0,
+			expectError:    false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Secret is hex-encoded, decode it first
+				secretBytes, err := hex.DecodeString(secret)
+				if err != nil {
+					t.Logf("Failed to decode hex secret: %v", err)
+					return false
+				}
+				stringToSign := req.Method + req.URL.RequestURI()
+
+				mac := hmac.New(sha256.New, secretBytes)
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with hex-encoded secret",
+		},
+		{
+			name:          "hmac_base64_encoded_secret",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_path}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+			},
+			secret:         "dGVzdF9zZWNyZXRfa2V5", // "test_secret_key" in base64
+			secretEncoding: "base64",
+			nonceLength:    0,
+			expectError:    false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Secret is base64-encoded, decode it first
+				secretBytes, err := base64.StdEncoding.DecodeString(secret)
+				if err != nil {
+					t.Logf("Failed to decode base64 secret: %v", err)
+					return false
+				}
+				stringToSign := req.Method + req.URL.RequestURI()
+
+				mac := hmac.New(sha256.New, secretBytes)
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with base64-encoded secret",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1842,6 +1901,7 @@ func TestHMACAuthentication(t *testing.T) {
 					"signing_string":  tt.signingString,
 					"request_headers": tt.requestHeaders,
 					"secret":          tt.secret,
+					"secret_encoding": tt.secretEncoding,
 					"nonce_length":    tt.nonceLength,
 				},
 				EndpointMap: EndpointMap{
@@ -2004,6 +2064,114 @@ func TestHMACAuthenticationErrors(t *testing.T) {
 					assert.NoError(t, err)
 					assert.NotNil(t, data)
 				}
+			}
+		})
+	}
+}
+
+func TestHMACSecretEncodingErrors(t *testing.T) {
+	tests := []struct {
+		name           string
+		secret         string
+		secretEncoding string
+		expectError    bool
+		errorMsg       string
+	}{
+		{
+			name:           "invalid_secret_encoding",
+			secret:         "test_secret",
+			secretEncoding: "invalid",
+			expectError:    true,
+			errorMsg:       "only 'hex', 'base64', or 'raw' are supported",
+		},
+		{
+			name:           "invalid_hex_secret",
+			secret:         "not_valid_hex!",
+			secretEncoding: "hex",
+			expectError:    true,
+			errorMsg:       "could not decode hex-encoded secret",
+		},
+		{
+			name:           "invalid_base64_secret",
+			secret:         "not_valid_base64!!!",
+			secretEncoding: "base64",
+			expectError:    true,
+			errorMsg:       "could not decode base64-encoded secret",
+		},
+		{
+			name:           "empty_encoding_uses_raw",
+			secret:         "test_secret",
+			secretEncoding: "",
+			expectError:    false,
+			errorMsg:       "",
+		},
+		{
+			name:           "explicit_raw_encoding",
+			secret:         "test_secret",
+			secretEncoding: "raw",
+			expectError:    false,
+			errorMsg:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			spec := Spec{
+				Name: "test_hmac_api",
+				Authentication: Authentication{
+					"type":            AuthTypeHMAC,
+					"algorithm":       "sha256",
+					"signing_string":  "{http_method}",
+					"secret":          tt.secret,
+					"secret_encoding": tt.secretEncoding,
+					"request_headers": map[string]string{
+						"X-Signature": "{signature}",
+					},
+				},
+				EndpointMap: EndpointMap{
+					"test_endpoint": Endpoint{
+						Name: "test_endpoint",
+						Request: Request{
+							URL:    server.URL + "/test",
+							Method: MethodGet,
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data"},
+						},
+					},
+				},
+			}
+
+			// Convert to proper spec
+			specBody, err := yaml.Marshal(spec)
+			if !assert.NoError(t, err) {
+				return
+			}
+			spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			assert.NoError(t, err)
+
+			// Authenticate - secret encoding errors happen here
+			err = ac.Authenticate()
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}

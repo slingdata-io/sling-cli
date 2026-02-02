@@ -758,9 +758,20 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
 		}
 
-		object, err := database.ParseTableName(stream.config.Object, targetConn.Connection.Type)
+		// Get stream table name for variable expansion (always from stream.name, not SQL)
+		streamTable, _ := database.ParseTableName(stream.name, sourceConn.Connection.Type)
+
+		// Expand {stream_table} variables before parsing object
+		expandedObject := stream.config.Object
+		if streamTable.Name != "" && strings.Contains(expandedObject, "{stream_table") {
+			expandedObject = strings.ReplaceAll(expandedObject, "{stream_table}", streamTable.Name)
+			expandedObject = strings.ReplaceAll(expandedObject, "{stream_table_lower}", strings.ToLower(streamTable.Name))
+			expandedObject = strings.ReplaceAll(expandedObject, "{stream_table_upper}", strings.ToUpper(streamTable.Name))
+		}
+
+		object, err := database.ParseTableName(expandedObject, targetConn.Connection.Type)
 		if err != nil {
-			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
+			return g.Error(err, "could not parse target object name: %s", stream.name)
 		}
 
 		if chunkExpr != "" {
@@ -811,12 +822,6 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			continue
 		}
 
-		if table.IsQuery() && strings.Contains(stream.config.Object, "{") {
-			// when using custom SQL + chunking + var, causes issues in cfg.GetFormatMap
-			// must specify object name manually
-			g.Warn("please specify object name without {*} runtime variables when chunking (stream=%s)", stream.name)
-		}
-
 		streamsToChunk[i].chunks = make([]Stream, len(chunks))
 		for j, chunk := range chunks {
 			prefix := lo.Ternary(table.IsQuery(), stream.name, table.FullName())
@@ -824,6 +829,9 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 				name:   prefix + g.F(" (part-%03d)", j+1),
 				config: stream.config,
 			}
+
+			// Use expanded object with {stream_table} variables resolved
+			chunkedStream.config.Object = expandedObject
 
 			// set range in a copy of source options
 			if rangeStr := chunk.Range(); rangeStr != "" {

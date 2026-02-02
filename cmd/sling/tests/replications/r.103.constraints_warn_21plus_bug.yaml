@@ -1,0 +1,108 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+env:
+  SLING_ON_CONSTRAINT_FAILURE: warn
+
+hooks:
+  start:
+    # Create source table with test data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.constraint_test_warn;
+        CREATE TABLE public.constraint_test_warn (
+          film_id INT,
+          rating VARCHAR(20)
+        );
+
+        -- Insert 5 valid rows first
+        INSERT INTO public.constraint_test_warn VALUES
+        (1, 'PG'),
+        (2, 'PG-13'),
+        (3, 'R'),
+        (4, 'NC-17'),
+        (5, 'PG');
+
+        -- Insert 25 rows with INVALID rating (exceeds the 20 threshold)
+        INSERT INTO public.constraint_test_warn VALUES
+        (6, 'BAD1'),
+        (7, 'BAD2'),
+        (8, 'BAD3'),
+        (9, 'BAD4'),
+        (10, 'BAD5'),
+        (11, 'BAD6'),
+        (12, 'BAD7'),
+        (13, 'BAD8'),
+        (14, 'BAD9'),
+        (15, 'BAD10'),
+        (16, 'BAD11'),
+        (17, 'BAD12'),
+        (18, 'BAD13'),
+        (19, 'BAD14'),
+        (20, 'BAD15'),
+        (21, 'BAD16'),
+        (22, 'BAD17'),
+        (23, 'BAD18'),
+        (24, 'BAD19'),
+        (25, 'BAD20'),
+        (26, 'BAD21'),  -- 21st invalid row - after this, errors should still occur
+        (27, 'BAD22'),
+        (28, 'BAD23'),
+        (29, 'BAD24'),
+        (30, 'BAD25');
+
+  end:
+    # Query the target to see what was inserted
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as row_count FROM public.constraint_test_warn_output
+      into: result
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.constraint_test_warn_output WHERE rating NOT IN ('PG', 'PG-13', 'R', 'NC-17') ORDER BY film_id
+      into: invalid_rows
+
+    - type: log
+      message: |
+        ===== Constraint Warn Mode Test Results =====
+        Total rows in target: {store.result[0].row_count}
+        Invalid rows that violated constraint:
+        {pretty_table(store.invalid_rows)}
+
+    # In WARN mode, invalid data IS allowed through (this is by design)
+    # But we need to verify that warnings are logged for ALL failures, not just first 20
+    - type: check
+      name: "Verify all 25 invalid rows were inserted (expected in warn mode)"
+      check: length(store.invalid_rows) == 25
+
+    - type: check
+      name: "Verify execution succeeded with warnings"
+      check: execution.status.error == 0
+
+    - type: log
+      message: |
+        SUCCESS: Constraint validation in WARN mode works correctly!
+        - All {length(store.invalid_rows)} invalid rows were inserted (expected behavior in warn mode)
+        - Warnings were logged for failures (check output for "logging limit reached" message after 20th failure)
+        - Replication completed successfully with warnings
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_warn
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_warn_output
+
+streams:
+  public.constraint_test_warn:
+    object: public.constraint_test_warn_output
+    columns:
+      rating: string | value in ('PG', 'PG-13', 'R', 'NC-17')
+      film_id: int | value is not null

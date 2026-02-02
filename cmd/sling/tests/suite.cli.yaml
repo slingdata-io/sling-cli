@@ -1547,3 +1547,91 @@
     - 'execution succeeded'
     - 'SUCCESS: computed_date column exists from transform'
     - 'SUCCESS: IDs 9,10 are soft-deleted correctly'
+
+# Test chunking with {stream_table} variable in object field (bug fix)
+# Issue: When using chunking + custom SQL, {stream_table} was not expanded in temp table names
+- id: 169
+  name: 'Test chunking with {stream_table} variable expansion'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.98.chunking_stream_table_var.yaml'
+  streams: 3
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: chunking with {stream_table} variable works'
+
+# Test MySQL LoadDataLocal escape character handling (backslash bug fix)
+# Issue: LOAD DATA with ESCAPED BY '\\' misparses rows with backslash sequences (\N, \", etc.)
+# Fix: Changed to ESCAPED BY '' to use RFC 4180 double-quote escaping which matches Go's csv.Writer
+- id: 170
+  name: 'Test MySQL LoadDataLocal escape character handling'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.99.mysql_load_data_escape_bug.yaml'
+  streams: 1
+  rows: 25
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: MySQL LoadDataLocal escape handling test passed'
+
+# # Test configurable merge strategies (update_insert, delete_insert, insert, update)
+# # Feature: Allow users to specify merge_strategy in target_options to control how incremental data is merged
+# - id: 171
+#   name: 'Test merge_strategy target option'
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.100.merge_strategy.yaml'
+#   streams: 4
+#   output_contains:
+#     - 'execution succeeded'
+#     - 'update_insert count'
+#     - 'delete_insert count'
+#     - 'update count'
+#     - 'insert count'
+
+# Test constraint validation with value IN expressions
+# Bug: Constraints fail to abort replication when invalid data is present
+# The constraint should detect invalid rating value and abort the replication
+- id: 172
+  name: 'Test constraint validation with value IN expression (abort mode)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.101.constraints_test.yaml'
+  err: true
+  output_contains:
+    - 'constraint failure'
+    - 'SUCCESS: Constraint validation in ABORT mode works correctly'
+
+# Test constraint validation with 21+ failures in abort mode
+# Bug fix: After 20 constraint failures, errors should still cause abortion
+- id: 173
+  name: 'Test constraint validation with 21+ failures (abort mode)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.102.constraints_21plus_bug.yaml'
+  err: true
+  output_contains:
+    - 'constraint failure'
+    - 'execution failed'
+
+# Test constraint validation with 25+ failures in warn mode
+# Bug fix: After 20 warnings, remaining failures should still be counted and logged
+# In warn mode, invalid data IS allowed through but warnings should continue
+- id: 174
+  name: 'Test constraint validation with 25+ failures (warn mode)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.103.constraints_warn_21plus_bug.yaml'
+  streams: 1
+  rows: 30
+  output_contains:
+    - 'execution succeeded'
+    - 'logging limit reached'
+    - 'SUCCESS: Constraint validation in WARN mode works correctly'
+
+# Test delete_missing with source_where and target_where for scoped deletion (soft delete)
+# Allows efficient delete detection on large tables by limiting comparisons to a subset of data
+- id: 175
+  name: 'Test delete_missing soft with source_where/target_where (scoped deletion)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.104.delete_missing_where.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: delete_missing with where clause correctly scoped deletion to recent data only'
+
+# Test delete_missing hard delete with source_where and target_where for scoped deletion
+- id: 176
+  name: 'Test delete_missing hard with source_where/target_where (scoped deletion)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.104.delete_missing_where_hard.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: hard delete with target_where correctly scoped deletion to recent data only'

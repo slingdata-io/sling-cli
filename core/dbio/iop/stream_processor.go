@@ -49,32 +49,33 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	EmptyAsNull    bool           `json:"empty_as_null"`
-	Header         bool           `json:"header"`
-	Compression    CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf         string         `json:"null_if"`
-	NullAs         string         `json:"null_as"`
-	DatetimeFormat string         `json:"datetime_format"`
-	SkipBlankLines bool           `json:"skip_blank_lines"`
-	Format         dbio.FileType  `json:"format"`
-	Delimiter      string         `json:"delimiter"`
-	Escape         string         `json:"escape"`
-	Quote          string         `json:"quote"`
-	FileMaxRows    int64          `json:"file_max_rows"`
-	FileMaxBytes   int64          `json:"file_max_bytes"`
-	BatchLimit     int64          `json:"batch_limit"`
-	MaxDecimals    int            `json:"max_decimals"`
-	Flatten        int            `json:"flatten"`
-	FieldsPerRec   int            `json:"fields_per_rec"`
-	Jmespath       string         `json:"jmespath"`
-	Sheet          string         `json:"sheet"`
-	ColumnCasing   ColumnCasing   `json:"column_casing"`
-	ColumnTyping   ColumnTyping   `json:"column_typing"`
-	TargetType     dbio.Type      `json:"target_type"`
-	DeleteFile     bool           `json:"delete"` // whether to delete before writing
-	BoolAsInt      bool           `json:"-"`
-	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	Transforms     Transform
+	EmptyAsNull     bool           `json:"empty_as_null"`
+	Header          bool           `json:"header"`
+	Compression     CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf          string         `json:"null_if"`
+	NullAs          string         `json:"null_as"`
+	DatetimeFormat  string         `json:"datetime_format"`
+	SkipBlankLines  bool           `json:"skip_blank_lines"`
+	Format          dbio.FileType  `json:"format"`
+	Delimiter       string         `json:"delimiter"`
+	Escape          string         `json:"escape"`
+	Quote           string         `json:"quote"`
+	FileMaxRows     int64          `json:"file_max_rows"`
+	FileMaxBytes    int64          `json:"file_max_bytes"`
+	BatchLimit      int64          `json:"batch_limit"`
+	MaxDecimals     int            `json:"max_decimals"`
+	Flatten         int            `json:"flatten"`
+	FieldsPerRec    int            `json:"fields_per_rec"`
+	Jmespath        string         `json:"jmespath"`
+	Sheet           string         `json:"sheet"`
+	ColumnCasing    ColumnCasing   `json:"column_casing"`
+	ColumnTyping    ColumnTyping   `json:"column_typing"`
+	TargetType      dbio.Type      `json:"target_type"`
+	DeleteFile      bool           `json:"delete"` // whether to delete before writing
+	BoolAsInt       bool           `json:"-"`
+	EscapeBackslash bool           `json:"-"`       // escape backslashes for MySQL LOAD DATA
+	Columns         Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
+	Transforms      Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -1187,9 +1188,11 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 		strVal := cast.ToString(val)
 		if !utf8.ValidString(strVal) {
 			// Replace invalid chars with Unicode replacement character
-			return strings.ToValidUTF8(strVal, "�")
-			// if not valid utf8, return hex
-			return sp.bytesToHexEscape([]byte(strVal))
+			strVal = strings.ToValidUTF8(strVal, "�")
+		}
+		// Escape backslashes
+		if sp.Config.EscapeBackslash && strings.Contains(strVal, `\`) {
+			strVal = strings.ReplaceAll(strVal, `\`, `\\`)
 		}
 		return strVal
 	}

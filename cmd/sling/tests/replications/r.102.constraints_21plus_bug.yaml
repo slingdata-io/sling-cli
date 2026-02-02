@@ -1,0 +1,86 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+env:
+  SLING_ON_CONSTRAINT_FAILURE: abort
+
+hooks:
+  start:
+    # Create source table with test data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.constraint_test_21;
+        CREATE TABLE public.constraint_test_21 (
+          film_id INT,
+          rating VARCHAR(20)
+        );
+
+        -- Insert 5 valid rows first
+        INSERT INTO public.constraint_test_21 VALUES
+        (1, 'PG'),
+        (2, 'PG-13'),
+        (3, 'R'),
+        (4, 'NC-17'),
+        (5, 'PG');
+
+        -- Insert 21 rows with INVALID rating (exceeds the 20 threshold)
+        -- After row 20, errors should still be caught, not silently ignored
+        INSERT INTO public.constraint_test_21 VALUES
+        (6, 'INVALID'),
+        (7, 'INVALID'),
+        (8, 'INVALID'),
+        (9, 'INVALID'),
+        (10, 'INVALID'),
+        (11, 'INVALID'),
+        (12, 'INVALID'),
+        (13, 'INVALID'),
+        (14, 'INVALID'),
+        (15, 'INVALID'),
+        (16, 'INVALID'),
+        (17, 'INVALID'),
+        (18, 'INVALID'),
+        (19, 'INVALID'),
+        (20, 'INVALID'),
+        (21, 'INVALID'),
+        (22, 'INVALID'),
+        (23, 'INVALID'),
+        (24, 'INVALID'),
+        (25, 'INVALID'),
+        (26, 'INVALID');  -- 21st invalid row
+
+        -- Add one more valid row at the end
+        INSERT INTO public.constraint_test_21 VALUES
+        (27, 'PG');
+
+  end:
+    # Check if replication errored (it should!)
+    - type: check
+      check: execution.status.error != 0
+      on_failure: break
+
+    # If we get here, the test FAILED - constraints did not abort
+    - type: log
+      message: |
+        FAILURE: Constraint validation BUG confirmed!
+        The replication should have aborted due to 21 constraint failures,
+        but it succeeded. This means failures after the 20th are silently ignored!
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_21
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.constraint_test_21_output
+
+streams:
+  public.constraint_test_21:
+    object: public.constraint_test_21_output
+    columns:
+      rating: string | value in ('PG', 'PG-13', 'R', 'NC-17')
+      film_id: int | value is not null

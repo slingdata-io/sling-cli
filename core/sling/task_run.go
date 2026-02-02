@@ -894,7 +894,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// if delete missing is specified with incremental mode
-	if t.Config.Target.Options.DeleteMissing != nil {
+	if t.Config.Target.Options.GetDeleteMissingConfig() != nil {
 		if g.In(t.Config.Mode, IncrementalMode) && len(t.Config.Source.PrimaryKey()) > 0 {
 			if err = deleteMissing(t, srcConn, tgtConn); err != nil {
 				err = g.Error(err, "could not delete missing records")
