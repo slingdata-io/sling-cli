@@ -39,7 +39,7 @@ test-connections-file arg1="TestSuiteFile" arg2="" arg3="":
 test-connections-database arg1="TestSuiteDatabase" arg2="" arg3="":
     #!/usr/bin/env bash
     echo "TESTING database connections {{arg1}} {{arg2}}"
-    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
+    cd cmd/sling && RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
 
 # Test core (sling core functionality)
 test-core:
