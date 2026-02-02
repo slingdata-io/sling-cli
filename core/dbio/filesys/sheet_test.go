@@ -130,6 +130,12 @@ func TestExcelRangeFormats(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Greater(t, len(data.Columns), 0)
 
+	// Test row-start-only range format "5:" - should extend to last row and detect columns
+	data, err = xls.GetDatasetFromRange(xls.Sheets[0], "5:")
+	assert.NoError(t, err)
+	assert.Greater(t, len(data.Columns), 0, "should detect columns with data")
+	assert.Greater(t, len(data.Rows), 100, "should extend to last row")
+
 	// Test error: reversed row range "10:5"
 	_, err = xls.GetDatasetFromRange(xls.Sheets[0], "10:5")
 	assert.Error(t, err, "should error on reversed row range")

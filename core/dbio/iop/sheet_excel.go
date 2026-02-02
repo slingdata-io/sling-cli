@@ -289,12 +289,13 @@ func (xls *Excel) NumberToTitle(n int) string {
 // normalizeRange normalizes various range formats into standard Excel range notation.
 // Supported formats:
 //   - "9:15" (row-only) -> "A9:<lastCol>15" (detects last column with data)
+//   - "5:" (row-start-only) -> "A5:<lastCol><lastRow>" (from row 5 to end, auto-detect columns)
 //   - "A4:C" (partial) -> "A4:C<lastRow>" (extends to last row)
 //   - "A4:C8" (standard) -> "A4:C8" (no change)
 func (xls *Excel) normalizeRange(cellRange string, allRows [][]string) (string, error) {
 	regexAlpha := regexp.MustCompile(`[^a-zA-Z]`)
 	regexNum := regexp.MustCompile(`[^0-9]`)
-	regexRowOnly := regexp.MustCompile(`^\d+:\d+$`)
+	regexRowOnly := regexp.MustCompile(`^\d+:\d*$`) // matches "9:15" or "5:"
 
 	cellRange = strings.ReplaceAll(cellRange, "$", "")
 	rangeArr := strings.Split(cellRange, ":")
@@ -305,12 +306,21 @@ func (xls *Excel) normalizeRange(cellRange string, allRows [][]string) (string, 
 	startPart := rangeArr[0]
 	endPart := rangeArr[1]
 
-	// Check if it's a row-only range like "9:15"
+	// Check if it's a row-only range like "9:15" or "5:"
 	if regexRowOnly.MatchString(cellRange) {
 		rowStart := cast.ToInt(startPart)
-		rowEnd := cast.ToInt(endPart)
+		rowEnd := cast.ToInt(endPart) // will be 0 if endPart is empty
 
-		if rowStart <= 0 || rowEnd <= 0 {
+		if rowStart <= 0 {
+			return "", g.Error("invalid row number in range: %s", cellRange)
+		}
+
+		// If endPart is empty (e.g., "5:"), extend to last row
+		if endPart == "" {
+			rowEnd = len(allRows)
+		}
+
+		if rowEnd <= 0 {
 			return "", g.Error("invalid row numbers in range: %s", cellRange)
 		}
 		if rowStart > rowEnd {
