@@ -99,6 +99,52 @@ func TestExcel(t *testing.T) {
 	os.RemoveAll("test/test.excel6.xlsx")
 }
 
+func TestExcelRangeFormats(t *testing.T) {
+	t.Parallel()
+
+	xls, err := iop.NewExcelFromFile("test/test.excel2.xlsx")
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	// Test standard range format "A1:H29"
+	data, err := xls.GetDatasetFromRange(xls.Sheets[0], "A1:H29")
+	assert.NoError(t, err)
+	assert.Equal(t, 8, len(data.Columns))
+	assert.Equal(t, 28, len(data.Rows))
+
+	// Test row-only range format "1:10" - should detect columns with data
+	data, err = xls.GetDatasetFromRange(xls.Sheets[0], "1:10")
+	assert.NoError(t, err)
+	assert.Greater(t, len(data.Columns), 0, "should detect columns with data")
+	assert.Equal(t, 9, len(data.Rows)) // rows 1-10 = 10 rows, minus header = 9
+
+	// Test partial range format "A1:C" - should extend to last row
+	data, err = xls.GetDatasetFromRange(xls.Sheets[0], "A1:C")
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(data.Columns))
+	assert.Greater(t, len(data.Rows), 100, "should extend to last row")
+
+	// Test single row range "5:5"
+	data, err = xls.GetDatasetFromRange(xls.Sheets[0], "5:5")
+	assert.NoError(t, err)
+	assert.Greater(t, len(data.Columns), 0)
+
+	// Test error: reversed row range "10:5"
+	_, err = xls.GetDatasetFromRange(xls.Sheets[0], "10:5")
+	assert.Error(t, err, "should error on reversed row range")
+	assert.Contains(t, err.Error(), "reversed")
+
+	// Test error: reversed row range in standard format "A10:C5"
+	_, err = xls.GetDatasetFromRange(xls.Sheets[0], "A10:C5")
+	assert.Error(t, err, "should error on reversed row range")
+	assert.Contains(t, err.Error(), "reversed")
+
+	// Test error: invalid range format
+	_, err = xls.GetDatasetFromRange(xls.Sheets[0], "invalid")
+	assert.Error(t, err, "should error on invalid range format")
+}
+
 func TestGoogleSheet(t *testing.T) {
 
 	url := "https://docs.google.com/spreadsheets/d/1Wo7d_2oiYpWy1hYGqHIy0DSPWki24Xif3FnlRjNGzo4/edit#gid=0"
