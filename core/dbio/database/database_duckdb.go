@@ -303,67 +303,15 @@ func (conn *DuckDbConn) generateCsvColumns(columns iop.Columns) (colStr string) 
 	return conn.duck.GenerateCsvColumns(columns)
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy.
 func (conn *DuckDbConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	// _, indexTable := SplitTableFullName(tgtTable)
-
-	// indexSQL := g.R(
-	// 	conn.GetTemplateValue("core.create_unique_index"),
-	// 	"index", strings.Join(pkFields, "_")+"_idx",
-	// 	"table", indexTable,
-	// 	"cols", strings.Join(pkFields, ", "),
-	// )
-
-	// _, err = conn.Exec(indexSQL)
-	// if err != nil {
-	// 	err = g.Error(err, "could not create unique index")
-	// 	return
-	// }
-
-	// V0.7
-	// sqlTempl := `
-	// insert into {tgt_table} as tgt
-	// 	({insert_fields})
-	// select {src_fields}
-	// from {src_table} as src
-	// where true
-	// ON CONFLICT ({tgt_pk_fields})
-	// DO UPDATE
-	// SET {set_fields}
-	// `
-
-	sqlTempl := `
-	delete from {tgt_table} tgt
-	using {src_table} src
-	where {src_tgt_pk_equal}
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"src_fields", upsertMap["src_fields"],
-		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
-		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
-		"insert_fields", upsertMap["insert_fields"],
-	)
-
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// DuckDB supports all four merge strategies.
+func (conn *DuckDbConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 // CastColumnForSelect casts to the correct target column type

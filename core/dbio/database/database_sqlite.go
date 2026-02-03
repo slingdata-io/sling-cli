@@ -250,55 +250,37 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	return ds.Count, nil
 }
 
-// GenerateMergeSQL generates the upsert SQL
-func (conn *SQLiteConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// SQLite supports all four merge strategies.
+// For update_insert strategy, creates a unique index on PK fields to enable ON CONFLICT.
+func (conn *SQLiteConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	// Determine the actual strategy being used
+	actualStrategy := strategy
+	if actualStrategy == nil {
+		defaultStrategy := MergeStrategy(conn.GetTemplateValue("variable.default_merge_strategy"))
+		actualStrategy = &defaultStrategy
 	}
 
-	_, indexTable := SplitTableFullName(tgtTable)
+	// For update_insert strategy, SQLite requires a unique index on PK fields
+	// to make ON CONFLICT work properly
+	if *actualStrategy == MergeStrategyUpdateInsert {
+		_, indexTable := SplitTableFullName(tgtTable)
+		pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
+		indexSQL := g.R(
+			conn.GetTemplateValue("core.create_unique_index"),
+			"index", strings.Join(pkFields, "_")+g.RandSuffix("_", 3)+"_idx",
+			"table", indexTable,
+			"cols", strings.Join(pkFieldsQ, ", "),
+		)
 
-	pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
-	indexSQL := g.R(
-		conn.GetTemplateValue("core.create_unique_index"),
-		"index", strings.Join(pkFields, "_")+g.RandSuffix("_", 3)+"_idx",
-		"table", indexTable,
-		"cols", strings.Join(pkFieldsQ, ", "),
-	)
-
-	_, err = conn.Exec(indexSQL)
-	if err != nil {
-		err = g.Error(err, "could not create unique index")
-		return
+		_, err = conn.Exec(indexSQL)
+		if err != nil {
+			err = g.Error(err, "could not create unique index for SQLite upsert")
+			return
+		}
 	}
 
-	sqlTempl := `
-	insert into {tgt_table} as tgt
-		({insert_fields}) 
-	select {src_fields}
-	from {src_table} as src
-	where true
-	ON CONFLICT ({tgt_pk_fields})
-	DO UPDATE 
-	SET {set_fields}
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"src_fields", upsertMap["src_fields"],
-		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
-		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
-		"insert_fields", upsertMap["insert_fields"],
-	)
-
-	return
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 func (conn *SQLiteConn) setHttpURL() (err error) {

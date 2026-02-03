@@ -26,8 +26,8 @@ core:
         *,
         {partition_expressions}
       from {table}
-    ) TO '{local_path}' 
-    ( 
+    ) TO '{local_path}'
+    (
       format '{format}', {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}',
       overwrite true,
@@ -35,6 +35,29 @@ core:
       partition_by ( {partition_columns} )
     )
 
+  # DuckDB supports 3 merge strategies (update_insert requires PK constraint)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  # DuckDB's INSERT OR REPLACE requires a PRIMARY KEY constraint on the table
+  # Since sling creates tables without explicit PK constraints, this strategy is disabled
+  merge_update_insert: null
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 metadata:
   databases: PRAGMA database_list
@@ -180,6 +203,8 @@ function:
   csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
 
 variable:
+  # DuckDB default is delete_insert as it's more reliable
+  default_merge_strategy: delete_insert
   bool_as: integer
   bind_string: ${c}
   batch_rows: 50

@@ -159,7 +159,12 @@ func getArrowStringValue(arr arrow.Array, idx int) string {
 	}
 }
 
-// resolveDriverPath attempts to find the ADBC driver from dbc CLI installation
+// resolveDriverPath attempts to find the ADBC driver from various locations
+// Search order:
+// 1. Explicit 'driver' property
+// 2. ADBC_DRIVER_PATH environment variable (colon-separated paths on Unix, semicolon on Windows)
+// 3. dbc CLI installation paths (~/Library/Application Support/ADBC/Drivers, ~/.dbc/drivers, etc.)
+// 4. System library paths (/usr/lib, /usr/local/lib, etc.)
 func (conn *ArrowDBConn) resolveDriverPath() string {
 	// Check if explicit 'driver' property is set
 	if driver := conn.GetProp("driver"); driver != "" {
@@ -174,47 +179,88 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		home = ""
 	}
 
 	// Platform-specific extension and paths
 	var ext string
 	var driverPaths []string
+	var pathSeparator string
 
 	switch runtime.GOOS {
 	case "darwin":
 		ext = ".dylib"
+		pathSeparator = ":"
 		// macOS: dbc installs to ~/Library/Application Support/ADBC/Drivers
-		driverPaths = []string{
-			filepath.Join(home, "Library", "Application Support", "ADBC", "Drivers"),
-			filepath.Join(home, ".dbc", "drivers"),
+		if home != "" {
+			driverPaths = []string{
+				filepath.Join(home, "Library", "Application Support", "ADBC", "Drivers"),
+				filepath.Join(home, ".dbc", "drivers"),
+			}
 		}
+		// System paths for Homebrew and standard locations
+		driverPaths = append(driverPaths,
+			"/usr/local/lib",
+			"/opt/homebrew/lib",
+			"/usr/lib",
+		)
 	case "windows":
 		ext = ".dll"
+		pathSeparator = ";"
 		// Windows: %LOCALAPPDATA%\ADBC\Drivers or ~/.dbc/drivers
 		localAppData := os.Getenv("LOCALAPPDATA")
 		if localAppData != "" {
 			driverPaths = append(driverPaths, filepath.Join(localAppData, "ADBC", "Drivers"))
 		}
-		driverPaths = append(driverPaths, filepath.Join(home, ".dbc", "drivers"))
+		if home != "" {
+			driverPaths = append(driverPaths, filepath.Join(home, ".dbc", "drivers"))
+		}
+		// System paths
+		programFiles := os.Getenv("ProgramFiles")
+		if programFiles != "" {
+			driverPaths = append(driverPaths, filepath.Join(programFiles, "ADBC", "lib"))
+		}
 	default:
 		ext = ".so"
-		// Linux: ~/.local/share/ADBC/Drivers or ~/.dbc/drivers
-		driverPaths = []string{
-			filepath.Join(home, ".local", "share", "ADBC", "Drivers"),
-			filepath.Join(home, ".dbc", "drivers"),
+		pathSeparator = ":"
+		// Linux: user paths first
+		if home != "" {
+			driverPaths = []string{
+				filepath.Join(home, ".local", "share", "ADBC", "Drivers"),
+				filepath.Join(home, ".dbc", "drivers"),
+			}
 		}
+		// System paths where apt/deb packages install libraries
+		driverPaths = append(driverPaths,
+			"/usr/lib",
+			"/usr/local/lib",
+			"/usr/lib/x86_64-linux-gnu",  // Debian/Ubuntu amd64
+			"/usr/lib/aarch64-linux-gnu", // Debian/Ubuntu arm64
+			"/lib",
+			"/lib64",
+			"/opt/arrow/lib", // Common Arrow installation path
+		)
+	}
+
+	// Check ADBC_DRIVER_PATH environment variable (takes priority after explicit driver property)
+	if envPath := os.Getenv("ADBC_DRIVER_PATH"); envPath != "" {
+		envPaths := strings.Split(envPath, pathSeparator)
+		// Prepend env paths to search first (after explicit driver property)
+		driverPaths = append(envPaths, driverPaths...)
 	}
 
 	// Look for driver file in each potential location
 	for _, basePath := range driverPaths {
 		// Try multiple patterns to find the driver
 		patterns := []string{
-			// Pattern: basePath/postgresql/libadbc_driver_postgresql.dylib
+			// Direct in path: /usr/lib/libadbc_driver_postgresql.so
+			filepath.Join(basePath, "libadbc_driver_"+driverName+ext),
+			filepath.Join(basePath, "*"+driverName+"*"+ext),
+			// Pattern: basePath/postgresql/libadbc_driver_postgresql.so
 			filepath.Join(basePath, driverName, "*"+driverName+"*"+ext),
-			// Pattern: basePath/postgresql-1.9.0/libadbc_driver_postgresql.dylib
+			// Pattern: basePath/postgresql-1.9.0/libadbc_driver_postgresql.so
 			filepath.Join(basePath, driverName+"-*", "*"+driverName+"*"+ext),
-			// Pattern: basePath/*/libadbc_driver_postgresql.dylib
+			// Pattern: basePath/*/libadbc_driver_postgresql.so
 			filepath.Join(basePath, "*", "*"+driverName+"*"+ext),
 		}
 

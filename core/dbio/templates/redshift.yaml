@@ -44,7 +44,25 @@ core:
   alter_columns: |
     alter table {table} {col_ddl}
   stl_load_errors_check: select colname, line_number, err_reason  from stl_load_errors order by starttime desc limit 1
- 
+
+  # Redshift only supports insert and delete_insert (no native MERGE support)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Redshift does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
+  merge_update: null
+  merge_update_insert: null
+
 metadata:
 
   current_database:
@@ -565,6 +583,8 @@ function:
   now: current_timestamp
 
 variable:
+  # Redshift default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   max_string_type: varchar(65535)
   max_string_length: 65535
   max_column_length: 127

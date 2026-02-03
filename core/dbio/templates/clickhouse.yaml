@@ -25,6 +25,22 @@ core:
         from {temp_table}
       )
 
+  # ClickHouse only supports insert and delete_insert
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    ALTER TABLE {tgt_table} DELETE
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # ClickHouse does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
+  merge_update: null
+  merge_update_insert: null
 
 metadata:
 
@@ -268,6 +284,8 @@ function:
 
 
 variable:
+  # ClickHouse default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   # bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000
@@ -293,9 +311,9 @@ native_type_map:
   float32: float
   float64: float
   int16: smallint
-  int32: bigint
+  int32: integer
   int64: bigint
-  int8: integer
+  int8: smallint
   ipv6: string
   json: json
   lowcardinality: string

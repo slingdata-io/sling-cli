@@ -1572,16 +1572,16 @@
 
 # # Test configurable merge strategies (update_insert, delete_insert, insert, update)
 # # Feature: Allow users to specify merge_strategy in target_options to control how incremental data is merged
-# - id: 171
-#   name: 'Test merge_strategy target option'
-#   run: 'sling run -d -r cmd/sling/tests/replications/r.100.merge_strategy.yaml'
-#   streams: 4
-#   output_contains:
-#     - 'execution succeeded'
-#     - 'update_insert count'
-#     - 'delete_insert count'
-#     - 'update count'
-#     - 'insert count'
+- id: 171
+  name: 'Test merge_strategy target option'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.100.merge_strategy.yaml'
+  streams: 4
+  output_contains:
+    - 'execution succeeded'
+    - 'update_insert count'
+    - 'delete_insert count'
+    - 'update count'
+    - 'insert count'
 
 # Test constraint validation with value IN expressions
 # Bug: Constraints fail to abort replication when invalid data is present

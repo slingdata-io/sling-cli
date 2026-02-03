@@ -13,9 +13,19 @@ core:
     update {set_fields}
     where {where}
       and not exists (
-          select 1 from {temp_table} 
+          select 1 from {temp_table}
           where {join_where}
       )
+
+  # Proton only supports insert (streaming database, no updates or deletes)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM table({src_table}) src
+
+  # Proton does not support update, update_insert, or delete_insert
+  merge_update: null
+  merge_update_insert: null
+  merge_delete_insert: null
 
 metadata:
   current_database: select current_database()
@@ -250,6 +260,8 @@ function:
   now: now()
 
 variable:
+  # Proton is a streaming database and only supports insert (no updates or deletes)
+  default_merge_strategy: insert
   # bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000

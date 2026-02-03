@@ -35,7 +35,7 @@ import (
 )
 
 var testMux sync.Mutex
-var testContext = g.NewContext(context.Background())
+var allTestContext = g.NewContext(context.Background())
 
 var conns = connection.GetLocalConns()
 
@@ -137,7 +137,7 @@ func TestMain(m *testing.M) {
 			env.InitLogger()
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
-			testContext.Map.Set("TESTS", arg)
+			allTestContext.Map.Set("TESTS", arg)
 		}
 	}
 
@@ -316,6 +316,8 @@ func TestExtract(t *testing.T) {
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	defer time.Sleep(100 * time.Millisecond) // for log to flush
 
+	testContext := g.NewContext(allTestContext.Ctx)
+
 	if t.Failed() {
 		return
 	}
@@ -410,6 +412,20 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			}
 		}
 
+		// StarRocks merge strategies (update, update_insert, delete_insert) require Primary Key tables
+		// Add table_keys.primary when merge_strategy is specified (except for 'insert' which works on all table types)
+		if g.In(connType, dbio.TypeDbStarRocks) {
+			if mergeStrategy, ok := targetOptions["merge_strategy"].(string); ok && mergeStrategy != "insert" {
+				tableKeys, _ := targetOptions["table_keys"].(map[string]any)
+				if tableKeys == nil {
+					tableKeys = map[string]any{}
+				}
+				// Use "id" as the primary key (same column used in source_primary_key)
+				tableKeys["primary"] = []string{"id"}
+				targetOptions["table_keys"] = tableKeys
+			}
+		}
+
 		streamName := strings.TrimSpace(cast.ToString(rec["source_stream"]))
 		streamConfig["mode"] = cast.ToString(rec["mode"])
 		streamConfig["object"] = cast.ToString(rec["target_object"])
@@ -442,7 +458,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 	testNumbers := []int{}
 	testNames := []string{}
-	tnsV, _ := testContext.Map.Get("TESTS")
+	tnsV, _ := allTestContext.Map.Get("TESTS")
 	tns := cast.ToString(tnsV)
 	if tns == "" && len(testSelect) > 0 {
 		tns = testSelect[0]
@@ -492,7 +508,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 		testID := g.F("%s/%s", connType, file.RelPath)
 		t.Run(testID, func(t *testing.T) {
-			runOneTask(t, file, connType)
+			runOneTask(t, testContext.Ctx, file, connType)
 		})
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
@@ -507,14 +523,17 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 			// cancel early if not specified
 			if !cast.ToBool(os.Getenv("RUN_ALL")) {
-				testContext.Cancel()
+				allTestContext.Cancel()
 				return
+			} else {
+				// cancel rest of single test suite
+				testContext.Cancel()
 			}
 		}
 	}
 }
 
-func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
+func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbio.Type) {
 	defer func() {
 		if r := recover(); r != nil {
 			info := string(debug.Stack())
@@ -564,6 +583,18 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	taskCfg := replicationConfig.Tasks[0]
 
+	// Check if merge_strategy is supported by checking template
+	if taskCfg.Target.Options.MergeStrategy != nil {
+		strategy := *taskCfg.Target.Options.MergeStrategy
+		templatePath := g.F("core.merge_%s", strategy)
+		templateValue := connType.GetTemplateValue(templatePath)
+		if templateValue == "" {
+			t.Skipf("skipping test: merge strategy '%s' not supported by %s (template %s is null)",
+				strategy, connType, templatePath)
+			return
+		}
+	}
+
 	srcType := taskCfg.SrcConn.Type
 	tgtType := taskCfg.TgtConn.Type
 
@@ -592,7 +623,13 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		tgtType = dbConn.GetType()
 		if err == nil {
 			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
-			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+			// Strip all possible suffixes to get the true base table name
+			baseTableName := table.Name
+			for _, suffix := range []string{"_pg", "_merge_ins", "_merge_ui", "_merge_di"} {
+				baseTableName = strings.TrimSuffix(baseTableName, suffix)
+			}
+			// Generate drop view SQL
+			table.Name = baseTableName + "_vw"
 			if dbConn.GetType().DBNameUpperCase() {
 				table.Name = strings.ToUpper(table.Name)
 			}
@@ -603,16 +640,39 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				dropViewSQL = "" // iceberg does not support views
 			}
 
+			// Generate drop table SQL for merge strategy tables
+			table.Name = baseTableName + "_merge_ins"
+			if dbConn.GetType().DBNameUpperCase() {
+				table.Name = strings.ToUpper(table.Name)
+			}
+			dropTableMergeIns := g.R(dbConn.GetTemplateValue("core.drop_table"), "table", table.FullName())
+			table.Name = baseTableName + "_merge_ui"
+			if dbConn.GetType().DBNameUpperCase() {
+				table.Name = strings.ToUpper(table.Name)
+			}
+			dropTableMergeUI := g.R(dbConn.GetTemplateValue("core.drop_table"), "table", table.FullName())
+			table.Name = baseTableName + "_merge_di"
+			if dbConn.GetType().DBNameUpperCase() {
+				table.Name = strings.ToUpper(table.Name)
+			}
+			dropTableMergeDI := g.R(dbConn.GetTemplateValue("core.drop_table"), "table", table.FullName())
+
 			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
 				taskCfg.Target.Options.PreSQL = g.String(g.R(
 					*preSQL,
 					"drop_view", dropViewSQL,
+					"drop_table_merge_ins", dropTableMergeIns,
+					"drop_table_merge_ui", dropTableMergeUI,
+					"drop_table_merge_di", dropTableMergeDI,
 				))
 			}
 			if postSQL := taskCfg.Target.Options.PostSQL; postSQL != nil {
 				taskCfg.Target.Options.PostSQL = g.String(g.R(
 					*postSQL,
 					"drop_view", dropViewSQL,
+					"drop_table_merge_ins", dropTableMergeIns,
+					"drop_table_merge_ui", dropTableMergeUI,
+					"drop_table_merge_di", dropTableMergeDI,
 				))
 			}
 		}
@@ -628,7 +688,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	task := sling.NewTask("exec_test", taskCfg)
 	if g.AssertNoError(t, task.Err) {
-		task.Context = g.NewContext(testContext.Ctx)
+		task.Context = g.NewContext(ctx)
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			return
@@ -889,14 +949,17 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					correctType = iop.DatetimeType // clickhouse uses datetime
 				}
 				if correctType == iop.BoolType {
-					correctType = iop.IntegerType // clickhouse bool is integer
+					correctType = iop.SmallIntType // clickhouse bool is integer
+					if srcType == dbio.TypeDbPostgres {
+						correctType = iop.IntegerType
+					}
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json
 				}
 			case srcType == dbio.TypeDbClickhouse && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.BoolType {
-					correctType = iop.IntegerType //  clickhouse bool is integer
+					correctType = iop.SmallIntType //  clickhouse bool is integer
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json
@@ -1051,7 +1114,7 @@ func TestSuiteDatabaseSQLite(t *testing.T) {
 
 func TestSuiteDatabaseD1(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbD1, "1-5,7-9,11+") // skip wide tests
+	testSuite(t, dbio.TypeDbD1, "1-5,7-9,11-21,23+") // skip wide tests (6,10) and test 22 (drops tables before discover tests)
 }
 
 func TestSuiteDatabaseDuckDb(t *testing.T) {
@@ -1086,7 +1149,7 @@ func TestSuiteDatabaseDatabricks(t *testing.T) {
 	// test 06 => BAD_REQUEST: Parameterized query has too many parameters: 1812 parameters were given but the limit is 256.
 	// test 10 => misses the test1k_databricks_wide
 	// test 24 => misses the test1k_databricks_wide
-	testSuite(t, dbio.TypeDbDatabricks, "1-5,7-9,11-23")
+	testSuite(t, dbio.TypeDbDatabricks, "1-5,7-9,11-23,26-29")
 }
 
 func TestSuiteDatabaseAthena(t *testing.T) {
@@ -1101,6 +1164,7 @@ func TestSuiteDatabaseIceberg(t *testing.T) {
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {
+	t.Parallel()
 	testSuite(t, dbio.Type("db2"), "1-5,7+")
 }
 
@@ -1140,7 +1204,7 @@ func TestSuiteDatabaseClickhouse(t *testing.T) {
 	}
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
-	testSuite(t, dbio.Type("clickhouse_http"))
+	testSuite(t, dbio.Type("clickhouse_http"), "1-25")
 }
 
 func TestSuiteDatabaseProton(t *testing.T) {

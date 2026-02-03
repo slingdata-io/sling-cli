@@ -43,13 +43,13 @@ core:
     WHEN NOT MATCHED THEN
       INSERT ({insert_fields}) VALUES ({src_insert_fields})
   merge_delete_insert: |
-    DELETE FROM {tgt_table}
+    DELETE FROM {tgt_table} tgt
     WHERE EXISTS (
       SELECT 1 FROM {src_table} src
       WHERE {src_tgt_pk_equal}
     );
     INSERT INTO {tgt_table} ({insert_fields})
-    SELECT {src_fields} FROM {src_table}
+    SELECT {src_fields} FROM {src_table} src
   db2import: |
     IMPORT FROM '{file}' OF DEL
     MODIFIED BY COLDEL, CODEPAGE=1208

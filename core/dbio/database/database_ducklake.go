@@ -201,11 +201,17 @@ func (conn *DuckLakeConn) GetURL(newURL ...string) string {
 	return connURL
 }
 
-// GenerateMergeSQL generates the upsert SQL for DuckLake
+// GenerateMergeSQL generates the upsert SQL for DuckLake using the database default strategy.
 func (conn *DuckLakeConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
+
+// GenerateMergeSQLWithStrategy generates the merge SQL for DuckLake using the specified strategy.
+// DuckLake supports the same strategies as DuckDB.
+func (conn *DuckLakeConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
 	// DuckLake supports transactions and proper ACID operations
-	// For now, use the same approach as DuckDB
-	return conn.DuckDbConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
+	// Use the same approach as DuckDB
+	return conn.DuckDbConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]any) (data iop.Dataset, err error) {

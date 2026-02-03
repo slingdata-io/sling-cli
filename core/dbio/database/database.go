@@ -143,6 +143,9 @@ type Connection interface {
 	Tx() Transaction
 	Unquote(string) string
 	Merge(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
+	MergeWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (rowAffCnt int64, err error)
+	GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error)
+	GenerateMergeConfigWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (mc MergeConfig, err error)
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 	UseADBC() bool
@@ -1590,7 +1593,9 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 	limit := 1
 
 	// we can use limit=0 for certain databases
-	if g.In(conn.GetType(), dbio.TypeDbPostgres, dbio.TypeDbRedshift, dbio.TypeDbClickhouse, dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbBigQuery, dbio.TypeDbStarRocks, dbio.TypeDbSnowflake, dbio.TypeDbOracle) || conn.GetType().IsSQLServer() {
+	// ClickHouse HTTP driver doesn't return column metadata with limit 0, so exclude it
+	isClickhouseHTTP := conn.GetType() == dbio.TypeDbClickhouse && conn.GetProp("http_url") != ""
+	if !isClickhouseHTTP && (g.In(conn.GetType(), dbio.TypeDbPostgres, dbio.TypeDbRedshift, dbio.TypeDbClickhouse, dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbBigQuery, dbio.TypeDbStarRocks, dbio.TypeDbSnowflake, dbio.TypeDbOracle) || conn.GetType().IsSQLServer()) {
 		limit = 0
 	}
 
@@ -2542,13 +2547,6 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 	ddl = strings.ReplaceAll(ddl, "{sort_key}", sortKey)
 
-	primaryKeyExpr := ""
-	if keyCols := columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
-		colNames := conn.Template().QuoteNames(keyCols.Names()...)
-		primaryKeyExpr = g.F("%s", strings.Join(colNames, ", "))
-	}
-	ddl = strings.ReplaceAll(ddl, "{primary_key}", primaryKeyExpr)
-
 	return ddl, nil
 }
 
@@ -2743,12 +2741,19 @@ const (
 
 // Merge inserts / updates from a srcTable into a target table.
 // Assuming the srcTable has some or all of the tgtTable fields with matching types
+// This is a backward-compatible wrapper that calls MergeWithStrategy with nil strategy
 func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
+	return conn.MergeWithStrategy(srcTable, tgtTable, primKeys, nil)
+}
+
+// MergeWithStrategy inserts / updates from a srcTable into a target table using the specified strategy.
+// If strategy is nil, uses the database's default merge strategy from templates.
+func (conn *BaseConn) MergeWithStrategy(srcTable string, tgtTable string, primKeys []string, strategy *MergeStrategy) (rowAffCnt int64, err error) {
 	var cnt int64
 	if conn.tx != nil {
-		cnt, err = Merge(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
+		cnt, err = MergeWithStrategy(conn.Self(), conn.tx, srcTable, tgtTable, primKeys, strategy)
 	} else {
-		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
+		cnt, err = MergeWithStrategy(conn.Self(), nil, srcTable, tgtTable, primKeys, strategy)
 	}
 	if err != nil {
 		err = g.Error(err, "could not merge")
@@ -2795,28 +2800,33 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 	return
 }
 
-// GenerateMergeSQL returns a sql for upsert
+// GenerateMergeSQL returns a sql for upsert using the database's default strategy.
+// This is a backward-compatible wrapper that calls GenerateMergeSQLWithStrategy with nil strategy.
 func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	mc, err := conn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
+// GenerateMergeSQLWithStrategy returns a sql for merge using the specified strategy.
+// If strategy is nil, uses the database's default merge strategy from templates.
+func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+
+	mc, err := conn.Self().GenerateMergeConfigWithStrategy(srcTable, tgtTable, pkFields, strategy)
 	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
+		err = g.Error(err, "could not generate merge variables")
 		return
 	}
 
-	sqlTemplate := conn.Template().Core["upsert"]
-	if sqlTemplate == "" {
-		return "", g.Error("Did not find upsert in template for %s", conn.GetType())
-	}
-
 	sql = g.R(
-		sqlTemplate,
+		mc.Template,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
 		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
 		"pk_fields", mc.Map["pk_fields"],
+		"src_pk_fields", mc.Map["src_pk_fields"],
+		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
+		"set_fields_excluded", mc.Map["set_fields_excluded"],
 		"insert_fields", mc.Map["insert_fields"],
 		"src_insert_fields", mc.Map["src_insert_fields"],
 		"src_fields", mc.Map["src_fields"],
@@ -2837,8 +2847,15 @@ func (mc MergeConfig) TemplatePath() string {
 	return g.F("core.merge_%s", mc.Strategy)
 }
 
-// GenerateMergeConfig returns the merge config
+// GenerateMergeConfig returns the merge config using the database's default strategy.
+// This is a backward-compatible wrapper that calls GenerateMergeConfigWithStrategy with nil strategy.
 func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFields []string) (mc MergeConfig, err error) {
+	return conn.Self().GenerateMergeConfigWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
+
+// GenerateMergeConfigWithStrategy returns the merge config using the specified strategy.
+// If strategy is nil, uses the database's default merge strategy from templates.
+func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (mc MergeConfig, err error) {
 
 	srcColumns, err := conn.GetColumns(srcTable)
 	if err != nil {
@@ -2931,21 +2948,33 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 	// cast into the correct type
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
+	// Determine the merge strategy: use provided strategy if not nil, otherwise use database default
+	var mergeStrategy MergeStrategy
+	if strategy != nil {
+		mergeStrategy = *strategy
+	} else {
+		mergeStrategy = MergeStrategy(conn.GetTemplateValue("variable.default_merge_strategy"))
+	}
+
+	// For SQLite ON CONFLICT syntax, we need "excluded." prefix instead of "src."
+	setFieldsExcluded := strings.ReplaceAll(strings.Join(setFields, ", "), "src.", "excluded.")
+
 	mc = MergeConfig{
-		Strategy: MergeStrategy(conn.GetTemplateValue("variable.merge_strategy")),
+		Strategy: mergeStrategy,
 		Template: "",
 		Map: map[string]string{
-			"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
-			"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
-			"src_fields":         strings.Join(srcFields, ", "),
-			"tgt_fields":         strings.Join(tgtFields, ", "),
-			"insert_fields":      strings.Join(insertFields, ", "),
-			"src_insert_fields":  strings.Join(srcInsertFields, ", "),
-			"pk_fields":          strings.Join(pkFields, ", "),
-			"src_pk_fields":      strings.Join(srcPkFields, ", "),
-			"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
-			"set_fields":         strings.Join(setFields, ", "),
-			"placeholder_fields": strings.Join(placeholderFields, ", "),
+			"src_tgt_pk_equal":    strings.Join(pkEqualFields, " and "),
+			"src_upd_pk_equal":    strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+			"src_fields":          strings.Join(srcFields, ", "),
+			"tgt_fields":          strings.Join(tgtFields, ", "),
+			"insert_fields":       strings.Join(insertFields, ", "),
+			"src_insert_fields":   strings.Join(srcInsertFields, ", "),
+			"pk_fields":           strings.Join(pkFields, ", "),
+			"src_pk_fields":       strings.Join(srcPkFields, ", "),
+			"tgt_pk_fields":       strings.Join(tgtPkFields, ", "),
+			"set_fields":          strings.Join(setFields, ", "),
+			"set_fields_excluded": setFieldsExcluded,
+			"placeholder_fields":  strings.Join(placeholderFields, ", "),
 		},
 	}
 
@@ -2960,7 +2989,8 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 	mc.Template = conn.GetTemplateValue(mc.TemplatePath())
 
 	if mc.Template == "" {
-		return mc, g.Error("merge strategy `%s` not supported for %s (did not find SQL template key `%s`)", mc.Strategy, conn.GetType(), mc.TemplatePath())
+		supported := getSupportedMergeStrategiesFromTemplates(conn)
+		return mc, g.Error("merge strategy `%s` not supported for %s (supported: %s)", mc.Strategy, conn.GetType(), strings.Join(supported, ", "))
 	}
 
 	return
@@ -2973,6 +3003,29 @@ func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string,
 		return nil, err
 	}
 	return mc.Map, nil
+}
+
+// getSupportedMergeStrategiesFromTemplates returns the list of merge strategies supported by a database
+// by checking which core.merge_* templates are defined (non-empty).
+// YAML `null` values become empty strings, so empty template = not supported.
+func getSupportedMergeStrategiesFromTemplates(conn Connection) []string {
+	strategies := []string{}
+
+	allStrategies := []MergeStrategy{
+		MergeStrategyInsert,
+		MergeStrategyUpdate,
+		MergeStrategyUpdateInsert,
+		MergeStrategyDeleteInsert,
+	}
+
+	for _, s := range allStrategies {
+		templatePath := g.F("core.merge_%s", s)
+		if template := conn.GetTemplateValue(templatePath); template != "" {
+			strategies = append(strategies, string(s))
+		}
+	}
+
+	return strategies
 }
 
 // GetColumnStats analyzes the table and returns the column statistics
@@ -3082,6 +3135,19 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.IntegerType
 		case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
 			newCol.Type = iop.IntegerType
+		case col.Type.IsInteger() && newCol.Type.IsBool():
+			// integer and bool are compatible when bool_as is integer
+			// check if the database stores bools as integers
+			if conn.GetTemplateValue("variable.bool_as") == "integer" {
+				continue // no change needed, keep integer type
+			}
+			newCol.Type = iop.StringType // otherwise convert to string
+		case col.Type.IsBool() && newCol.Type.IsInteger():
+			// bool and integer are compatible when bool_as is integer
+			if conn.GetTemplateValue("variable.bool_as") == "integer" {
+				continue // no change needed, keep bool type
+			}
+			newCol.Type = iop.StringType // otherwise convert to string
 		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsDate() || newCol.IsNumber() || newCol.IsBool()):
 			// use new type
 		case col.Type == iop.TextType || newCol.Type == iop.TextType:

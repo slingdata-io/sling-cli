@@ -523,38 +523,6 @@ func (conn *OracleConn) writeCsv(ds *iop.Datastream, writer io.Writer, pu *cmap.
 	return
 }
 
-// GenerateMergeSQL generates the upsert SQL
-func (conn *OracleConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	sqlTempl := `
-	merge into {tgt_table} tgt
-	using (select * from {src_table}) src
-	ON ({src_tgt_pk_equal})
-	WHEN MATCHED THEN
-		UPDATE SET {set_fields}
-	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) values  ({src_fields})
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
-	)
-
-	return
-}
-
 // GenerateInsertStatement returns the proper INSERT statement
 func (conn *OracleConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 	fields := cols.Names()

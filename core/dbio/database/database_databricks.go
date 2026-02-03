@@ -734,39 +734,15 @@ func (conn *DatabricksConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Co
 	return selectStr
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy.
 func (conn *DatabricksConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	// For Databricks MERGE VALUES clause, convert placeholder_fields (ph.) to source references (src.)
-	srcValuesFields := strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src.")
-
-	// Databricks supports MERGE INTO
-	sqlTempl := `
-	MERGE INTO {tgt_table} AS tgt
-	USING {src_table} AS src
-	ON {src_tgt_pk_equal}
-	WHEN MATCHED THEN
-		UPDATE SET {set_fields}
-	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_values_fields})
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_values_fields", srcValuesFields,
-	)
-
-	return sql, nil
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// Databricks supports all four merge strategies via native MERGE support.
+func (conn *DatabricksConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 // getOrCreateVolume creates a volume if it doesn't exist, similar to Snowflake's getOrCreateStage

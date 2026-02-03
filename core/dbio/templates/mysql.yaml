@@ -9,6 +9,25 @@ core:
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
 
+  # MySQL only supports insert and delete_insert (no native MERGE support)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table}
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table}
+      WHERE {src_tgt_pk_equal}
+    );
+
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table}
+
+  # MySQL does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
+  merge_update: null
+  merge_update_insert: null
+
   load_data_local_reader: |
     LOAD DATA LOCAL INFILE 'Reader::{handler_name}'
     INTO TABLE {table}
@@ -395,6 +414,8 @@ function:
   checksum_boolean: '{field}'
 
 variable:
+  # MySQL default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   bind_string: "?"
   quote_char: '`'
   ddl_col: 1

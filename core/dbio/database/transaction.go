@@ -464,8 +464,15 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	return count, nil
 }
 
-// Merge upserts from source table into target table
+// Merge upserts from source table into target table using the database's default strategy.
+// This is a backward-compatible wrapper that calls MergeWithStrategy with nil strategy.
 func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string) (count int64, err error) {
+	return MergeWithStrategy(conn, tx, sourceTable, targetTable, pkFields, nil)
+}
+
+// MergeWithStrategy upserts from source table into target table using the specified merge strategy.
+// If strategy is nil, uses the database's default merge strategy from templates.
+func MergeWithStrategy(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string, strategy *MergeStrategy) (count int64, err error) {
 
 	srcTable, err := ParseTableName(sourceTable, conn.GetType())
 	if err != nil {
@@ -479,7 +486,7 @@ func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkF
 		return
 	}
 
-	q, err := conn.Self().GenerateMergeSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
+	q, err := conn.Self().GenerateMergeSQLWithStrategy(srcTable.FullName(), tgtTable.FullName(), pkFields, strategy)
 	if err != nil {
 		err = g.Error(err, "could not generate merge sql")
 		return

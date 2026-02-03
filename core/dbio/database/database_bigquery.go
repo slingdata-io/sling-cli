@@ -1160,61 +1160,15 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 	return selectStr
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy.
 func (conn *BigQueryConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	// fully qualify src. in DELETE where expressions
-	// see https://github.com/slingdata-io/sling-cli/issues/575
-	projectPrefix := ""
-	if conn.ProjectID != "" {
-		projectPrefix = g.F("`%s`.", conn.ProjectID)
-	}
-
-	sqlTempl := `
-	delete from {tgt_table} tgt
-	where exists (
-			select 1
-			from {project_prefix}{src_table} src
-			where {src_tgt_pk_equal}
-	)
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-
-	// MERGE works fine, but needs to scan the target table?
-	// sqlTempl := `
-	// merge into {tgt_table} tgt
-	// using (select {src_fields} from {src_table}) src
-	// ON ({src_tgt_pk_equal})
-	// WHEN MATCHED THEN
-	// 	UPDATE SET {set_fields}
-	// WHEN NOT MATCHED THEN
-	// 	INSERT ({insert_fields}) values  ({src_fields_values})
-	// `
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"project_prefix", projectPrefix,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
-		"src_fields_values", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
-	)
-
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// BigQuery supports all four merge strategies via native MERGE support.
+func (conn *BigQueryConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 // GetDatabases returns databases

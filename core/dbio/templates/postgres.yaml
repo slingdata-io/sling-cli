@@ -39,6 +39,16 @@ core:
   #   do update 
   #   SET {set_fields}
     
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
   merge_update_insert: |
     create temporary table {temp_table} as
     with src_table as (
@@ -66,8 +76,15 @@ core:
       from {temp_table} upd
       where {src_upd_pk_equal}
     )
-    
-    
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 metadata:
 

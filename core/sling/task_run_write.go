@@ -1079,9 +1079,18 @@ func performMerge(tgtConn database.Connection, tableTmp, targetTable database.Ta
 			tgtPrimaryKey[i] = casing.Apply(pk, tgtConn.GetType())
 		}
 	}
-	g.Debug("merging from temporary table %s to final table %s with primary keys %v",
-		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
-	rowAffCnt, err := tgtConn.Merge(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
+
+	strategyStr := tgtConn.GetTemplateValue("variable.default_merge_strategy")
+
+	// Get merge strategy from config (nil means use database default)
+	strategy := cfg.Target.Options.MergeStrategy
+	if strategy != nil {
+		strategyStr = string(*strategy)
+	}
+	g.Debug("merging from temporary table %s to final table %s with primary keys %v, strategy: %s",
+		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey, strategyStr)
+
+	rowAffCnt, err := tgtConn.MergeWithStrategy(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey, strategy)
 	if err != nil {
 		err = g.Error(err, "could not merge from temp into final")
 		return err
