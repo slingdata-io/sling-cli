@@ -15,11 +15,12 @@ import (
 )
 
 type APIConnection struct {
-	Name      string
-	Spec      Spec
-	State     *APIState
-	Context   *g.Context
-	evaluator *iop.Evaluator `json:"-" yaml:"-"`
+	Name          string
+	Spec          Spec
+	State         *APIState
+	Context       *g.Context
+	evaluator     *iop.Evaluator `json:"-" yaml:"-"`
+	evaluatorSafe *iop.Evaluator `json:"-" yaml:"-"`
 }
 
 // NewAPIConnection creates an
@@ -34,9 +35,12 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Queues: make(map[string]*iop.Queue),
 			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
-		Spec:      spec,
-		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "inputs", "auth", "response", "request", "sync", "context")),
+		Spec:          spec,
+		evaluator:     iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "inputs", "auth", "response", "request", "sync", "context")),
+		evaluatorSafe: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "inputs", "auth", "response", "request", "sync", "context")),
 	}
+
+	ac.evaluatorSafe.KeepMissingExpr = true
 
 	if ac.Name == "" {
 		// use normalized spec name
@@ -460,6 +464,15 @@ func (ac *APIConnection) renderString(val any, extraMaps ...map[string]any) (new
 	return ac.evaluator.RenderString(val, ac.getStateMap(em))
 }
 
+func (ac *APIConnection) renderStringSafe(val any, extraMaps ...map[string]any) (newVal string, err error) {
+	em := g.M()
+	if len(extraMaps) > 0 {
+		em = extraMaps[0]
+	}
+
+	return ac.evaluatorSafe.RenderString(val, ac.getStateMap(em))
+}
+
 func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (output any, err error) {
 	em := g.M()
 	if len(extraMaps) > 0 {
@@ -467,6 +480,15 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 	}
 
 	return ac.evaluator.RenderAny(input, ac.getStateMap(em))
+}
+
+func (ac *APIConnection) renderAnySafe(input any, extraMaps ...map[string]any) (output any, err error) {
+	em := g.M()
+	if len(extraMaps) > 0 {
+		em = extraMaps[0]
+	}
+
+	return ac.evaluatorSafe.RenderAny(input, ac.getStateMap(em))
 }
 
 // GetSyncedState cycles through each endpoint, and collects the values

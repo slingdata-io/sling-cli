@@ -406,6 +406,36 @@ func (ep *Endpoint) renderString(val any, extraMaps ...map[string]any) (newVal s
 	return ep.conn.renderString(val, extra)
 }
 
+func (ep *Endpoint) renderStringSafe(val any, extraMaps ...map[string]any) (newVal string, err error) {
+
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderStringSafe(val, extra)
+}
+
 func (ep *Endpoint) renderAny(val any, extraMaps ...map[string]any) (newVal any, err error) {
 	extra := g.M()
 	if len(extraMaps) > 0 {
@@ -433,6 +463,35 @@ func (ep *Endpoint) renderAny(val any, extraMaps ...map[string]any) (newVal any,
 	extra["context"] = contextCopy
 
 	return ep.conn.renderAny(val, extra)
+}
+
+func (ep *Endpoint) renderAnySafe(val any, extraMaps ...map[string]any) (newVal any, err error) {
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderAnySafe(val, extra)
 }
 
 func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
@@ -898,6 +957,26 @@ func (iter *Iteration) renderString(val any, req ...*SingleRequest) (newVal stri
 	return iter.endpoint.renderString(val, extra)
 }
 
+func (iter *Iteration) renderStringSafe(val any, req ...*SingleRequest) (newVal string, err error) {
+
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	// Copy iteration state (lock iter.context separately)
+	iter.context.Lock()
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+	iter.context.Unlock()
+
+	extra["state"] = stateCopy
+
+	return iter.endpoint.renderStringSafe(val, extra)
+}
+
 func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, err error) {
 	extra := g.M()
 	if len(req) > 0 {
@@ -915,6 +994,25 @@ func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, er
 	extra["state"] = stateCopy
 
 	return iter.endpoint.renderAny(val, extra)
+}
+
+func (iter *Iteration) renderAnySafe(val any, req ...*SingleRequest) (newVal any, err error) {
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	// Copy iteration state (lock iter.context separately)
+	iter.context.Lock()
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+	iter.context.Unlock()
+
+	extra["state"] = stateCopy
+
+	return iter.endpoint.renderAnySafe(val, extra)
 }
 
 // StateMap stores the current state of an endpoint's execution
