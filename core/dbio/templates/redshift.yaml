@@ -123,26 +123,13 @@ metadata:
              kcu.table_name,
              position
 
+  # Redshift doesn't support traditional indexes (uses SORTKEY/DISTKEY instead)
+  # Return empty result set
   indexes: |
-    select
-      i.relname as index_name,
-      a.attname as column_name
-    from
-      pg_class t,
-      pg_class i,
-      pg_index ix,
-      pg_attribute a,
-      pg_namespace n
-    where
-      t.oid = ix.indrelid
-      and i.oid = ix.indexrelid
-      and n.oid = i.relnamespace
-      and a.attrelid = t.oid
-      and a.attnum = ANY(ix.indkey)
-      and n.nspname = '{schema}' and t.relname = '{table}'
-    order by
-      t.relname,
-      i.relname     
+    SELECT
+      NULL::text AS index_name,
+      NULL::text AS column_name
+    WHERE FALSE     
   
   columns_full: |
     with tables as (
@@ -449,17 +436,21 @@ metadata:
     select pg_get_viewdef('"{schema}"."{table}"')::text as ddl
 
   # Extended column attributes for schema migration
+  # Uses pg_attribute.attidentity to detect identity columns ('a' = ALWAYS, 'd' = BY DEFAULT)
   columns_extended: |
     SELECT
       c.column_name,
       CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
       c.column_default AS default_value,
-      CASE WHEN c.column_default LIKE '%identity%' OR c.column_default LIKE '"identity"%' THEN 'true' ELSE 'false' END AS is_auto_increment,
-      '1' AS identity_seed,
-      '1' AS identity_increment,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN 'true' ELSE 'false' END AS is_auto_increment,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN '1' ELSE NULL END AS identity_seed,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN '1' ELSE NULL END AS identity_increment,
       CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
       d.description
     FROM information_schema.columns c
+    JOIN pg_catalog.pg_class t ON t.relname = c.table_name
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace AND n.nspname = c.table_schema
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name AND a.attnum > 0
     LEFT JOIN (
       SELECT kcu.column_name
       FROM information_schema.table_constraints tc
@@ -470,8 +461,6 @@ metadata:
         AND tc.table_schema = '{schema}'
         AND tc.table_name = '{table}'
     ) pk ON pk.column_name = c.column_name
-    LEFT JOIN pg_catalog.pg_class t ON t.relname = c.table_name
-    LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace AND n.nspname = c.table_schema
     LEFT JOIN pg_catalog.pg_description d ON d.objoid = t.oid
       AND d.objsubid = c.ordinal_position
     WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'

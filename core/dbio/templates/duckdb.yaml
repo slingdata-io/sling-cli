@@ -110,12 +110,15 @@ metadata:
       and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
   
+  # Use expressions column cast to array and unnest to extract column names
   indexes: |
-    select index_name as index_name,
-           sql as column_name
-    from duckdb_indexes()
-    where table_schema = '{schema}'
-      and table_name = '{table}'
+    SELECT
+      index_name,
+      unnest(expressions::VARCHAR[]) AS column_name,
+      CASE WHEN is_unique THEN 'true' ELSE 'false' END AS is_unique
+    FROM duckdb_indexes()
+    WHERE schema_name = '{schema}'
+      AND table_name = '{table}'
 
   columns_full: |
     with tables_cte as (
@@ -201,17 +204,20 @@ metadata:
     ORDER BY c.ordinal_position
 
   # Foreign key relationships (DuckDB enforces these!)
+  # Uses native constraint columns instead of regex parsing for reliability
   foreign_keys: |
     SELECT
-      dc.constraint_text AS constraint_name,
-      regexp_extract(dc.constraint_text, 'FOREIGN KEY\(([^)]+)\)', 1) AS column_name,
-      regexp_extract(dc.constraint_text, 'REFERENCES ([^.]+)\.', 1) AS referenced_schema,
-      regexp_extract(dc.constraint_text, 'REFERENCES [^.]+\.([^\(]+)', 1) AS referenced_table,
-      regexp_extract(dc.constraint_text, 'REFERENCES [^(]+\(([^)]+)\)', 1) AS referenced_column,
-      'NO ACTION' AS on_delete,
-      'NO ACTION' AS on_update
+      dc.constraint_name,
+      unnest(dc.constraint_column_names) AS column_name,
+      split_part(dc.constraint_text, 'REFERENCES ', 2)::VARCHAR AS ref_part,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON DELETE ([A-Z ]+)', 1), 'NO ACTION') AS on_delete,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON UPDATE ([A-Z ]+)', 1), 'NO ACTION') AS on_update,
+      unnest(dc.constraint_column_names) AS fk_column,
+      split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 1) AS referenced_schema,
+      split_part(split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 2), '(', 1) AS referenced_table,
+      unnest(regexp_extract_all(dc.constraint_text, 'REFERENCES [^(]+\(([^)]+)\)')) AS referenced_column
     FROM duckdb_constraints() dc
-    WHERE dc.table_schema = '{schema}'
+    WHERE dc.schema_name = '{schema}'
       AND dc.table_name = '{table}'
       AND dc.constraint_type = 'FOREIGN KEY'
 

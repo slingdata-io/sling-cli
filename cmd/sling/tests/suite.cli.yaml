@@ -1814,7 +1814,7 @@
     - 'Column descriptions found'
     - 'execution succeeded'
 
-# Test schema migration - SQL Server identity fix (Phase 1)
+# Test schema migration - SQL Server identity fix
 # Tests: Identity seed/increment only returned for identity columns
 - id: 189
   name: 'Schema migration SQL Server identity fix'
@@ -1825,7 +1825,7 @@
     - 'Non-identity columns found'
     - 'execution succeeded'
 
-# Test schema migration - BigQuery COLUMNS fix (Phase 2)
+# Test schema migration - BigQuery COLUMNS fix
 # Tests: Uses INFORMATION_SCHEMA.COLUMNS instead of COLUMN_FIELD_PATHS
 - id: 190
   name: 'Schema migration BigQuery columns fix'
@@ -1836,7 +1836,7 @@
     - 'Column names'
     - 'execution succeeded'
 
-# Test schema migration - MySQL indexes fix (Phase 7)
+# Test schema migration - MySQL indexes fix
 # Tests: indexes query excludes PRIMARY key and includes uniqueness info
 - id: 191
   name: 'Schema migration MySQL indexes fix'
@@ -1845,4 +1845,50 @@
   output_contains:
     - 'Primary key constraints found: 1'
     - 'Indexes found'
+    - 'execution succeeded'
+
+# Test schema migration - Databricks basic fix
+# Tests: Basic column migration works without identity metadata errors
+# Note: Databricks connection often has timeouts - skipped by default
+# - id: 192
+#   name: 'Schema migration Databricks basic fix'
+#   run: 'sling run -d cmd/sling/tests/pipelines/p.26.sm_databricks_basic_fix.yaml'
+#   streams: 1
+#   output_contains:
+#     - 'Columns migrated: 4'
+#     - 'Migrated rows: 1'
+#     - 'execution succeeded'
+
+# Test schema migration - Redshift identity fix
+# Tests: Identity detection via pg_attribute.attidentity
+# Note: Redshift cluster not always available - skipped by default
+# - id: 193
+#   name: 'Schema migration Redshift identity fix'
+#   run: 'sling run -d cmd/sling/tests/pipelines/p.27.sm_redshift_identity_fix.yaml'
+#   streams: 1
+#   output_contains:
+#     - 'Identity columns found'
+#     - 'Non-identity columns found'
+#     - 'execution succeeded'
+
+# Test schema migration - DuckDB indexes fix
+# Tests: Index extraction using expressions column
+- id: 194
+  name: 'Schema migration DuckDB indexes fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.28.sm_duckdb_fk_indexes_fix.yaml'
+  streams: 1
+  output_contains:
+    - 'PK constraints found'
+    - 'Indexes found'
+    - 'execution succeeded'
+
+# Test schema migration - ClickHouse primary key fix
+# Tests: Primary key detection from system.tables
+- id: 195
+  name: 'Schema migration ClickHouse primary key fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.29.sm_clickhouse_pk_fix.yaml'
+  streams: 1
+  output_contains:
+    - 'Primary key columns found'
+    - 'Migrated rows: 1'
     - 'execution succeeded'

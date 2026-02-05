@@ -88,11 +88,22 @@ metadata:
       and table = '{table}'
     order by position
 
+  # Extract primary key columns from system.tables
   primary_keys: |
-    select 1
+    SELECT
+      'PRIMARY' AS pk_name,
+      arrayJoin(splitByChar(',', replaceRegexpAll(primary_key, ' ', ''))) AS column_name,
+      rowNumberInAllBlocks() + 1 AS position
+    FROM system.tables
+    WHERE database = '{schema}' AND name = '{table}' AND primary_key != ''
 
+  # ClickHouse data-skipping indexes (not traditional B-tree indexes)
+  # Return empty result for now since these are specialized indexes
   indexes: |
-    select 1
+    SELECT
+      '' AS index_name,
+      '' AS column_name
+    WHERE 0
   
   columns_full: |
     with tables as (
@@ -155,19 +166,25 @@ metadata:
 
   # Extended column attributes for schema migration
   # Note: ClickHouse does not support IDENTITY or FK constraints
+  # Uses system.tables to detect primary key columns
   columns_extended: |
     SELECT
-      name AS column_name,
-      CASE WHEN startsWith(type, 'Nullable') THEN 'true' ELSE 'false' END AS is_nullable,
-      default_expression AS default_value,
+      c.name AS column_name,
+      CASE WHEN startsWith(c.type, 'Nullable') THEN 'true' ELSE 'false' END AS is_nullable,
+      c.default_expression AS default_value,
       'false' AS is_auto_increment,
-      '1' AS identity_seed,
-      '1' AS identity_increment,
-      'false' AS is_primary_key,
-      comment AS description
-    FROM system.columns
-    WHERE database = '{schema}' AND table = '{table}'
-    ORDER BY position
+      NULL AS identity_seed,
+      NULL AS identity_increment,
+      CASE
+        WHEN has(splitByChar(',', replaceRegexpAll(t.primary_key, ' ', '')), c.name)
+        THEN 'true'
+        ELSE 'false'
+      END AS is_primary_key,
+      c.comment AS description
+    FROM system.columns c
+    JOIN system.tables t ON t.database = c.database AND t.name = c.table
+    WHERE c.database = '{schema}' AND c.table = '{table}'
+    ORDER BY c.position
 
   # ClickHouse does NOT support foreign keys
   # This query returns no rows, which is the correct behavior

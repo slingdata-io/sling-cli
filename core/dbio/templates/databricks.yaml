@@ -272,14 +272,17 @@ metadata:
     show create table {schema}.{table}
 
   # Extended column attributes for schema migration (Unity Catalog)
+  # Note: Databricks does NOT expose identity metadata through information_schema.columns
+  # (column_default, is_identity, identity_start, identity_increment are always NULL/'NO')
+  # Identity detection would require parsing SHOW CREATE TABLE output
   columns_extended: |
     SELECT
       c.column_name,
       CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
       c.column_default AS default_value,
-      CASE WHEN c.extra_info LIKE '%IDENTITY%' OR c.extra_info LIKE '%GENERATED%' THEN 'true' ELSE 'false' END AS is_auto_increment,
-      '1' AS identity_seed,
-      '1' AS identity_increment,
+      'false' AS is_auto_increment,
+      NULL AS identity_seed,
+      NULL AS identity_increment,
       CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
       c.comment AS description
     FROM information_schema.columns c
