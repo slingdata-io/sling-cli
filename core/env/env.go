@@ -191,12 +191,22 @@ func SetLogger() {
 
 // InitLogger initializes the Logger
 func InitLogger() {
-
-	// set log hook at TraceLevel to capture all log levels for file logging
+	// reset log hook at g.DebugLevel
 	g.SetLogHook(
 		g.NewLogHook(
-			g.TraceLevel,
+			g.DebugLevel,
 			func(ll *g.LogLine) { processLogEntry(ll) },
+		),
+	)
+
+	// add log hook at TraceLevel to capture all log levels for file logging
+	g.AddLogHook(
+		g.NewLogHook(
+			g.TraceLevel,
+			func(ll *g.LogLine) {
+				// Write to log file(s) if configured
+				writeToLogFile(ll)
+			},
 		),
 	)
 
@@ -376,6 +386,7 @@ func writeToLogFile(ll *g.LogLine) {
 func Print(text string) {
 	fmt.Fprintf(os.Stderr, "%s", text)
 	processLogEntry(&g.LogLine{Level: 9, Text: text})
+	writeToLogFile(&g.LogLine{Level: 9, Text: text})
 }
 
 func Println(text string) {
@@ -546,9 +557,6 @@ func CleanWindowsPath(path string) string {
 }
 
 func processLogEntry(ll *g.LogLine) {
-	// Write to log file(s) if configured
-	writeToLogFile(ll)
-
 	// Existing LogSink functionality
 	if LogSink != nil {
 		LogSink(ll)
