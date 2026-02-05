@@ -2882,7 +2882,7 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 // GenerateMergeSQL returns a sql for upsert using the database's default strategy.
 // This is a backward-compatible wrapper that calls GenerateMergeSQLWithStrategy with nil strategy.
 func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+	return conn.Self().GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
 }
 
 // GenerateMergeSQLWithStrategy returns a sql for merge using the specified strategy.
