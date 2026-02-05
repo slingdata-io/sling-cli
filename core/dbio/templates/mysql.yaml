@@ -94,13 +94,16 @@ metadata:
              kcu.table_name,
              position
 
+  # Indexes metadata - excludes PRIMARY key (handled separately by primary_keys)
   indexes: |
     select
       index_name as index_name,
-      column_name as column_name
+      column_name as column_name,
+      CASE WHEN non_unique = 0 THEN 'true' ELSE 'false' END AS is_unique
     from information_schema.statistics
     where table_schema = '{schema}'
       and table_name = '{table}'
+      and index_name != 'PRIMARY'
     order by
       index_name,
       seq_in_index

@@ -1835,3 +1835,14 @@
     - 'Columns found: 6'
     - 'Column names'
     - 'execution succeeded'
+
+# Test schema migration - MySQL indexes fix (Phase 7)
+# Tests: indexes query excludes PRIMARY key and includes uniqueness info
+- id: 191
+  name: 'Schema migration MySQL indexes fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.25.sm_mysql_indexes_fix.yaml'
+  streams: 1
+  output_contains:
+    - 'Primary key constraints found: 1'
+    - 'Indexes found'
+    - 'execution succeeded'
