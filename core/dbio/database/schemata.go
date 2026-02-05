@@ -1501,8 +1501,10 @@ type SchemaMigratorConfig struct {
 
 type SchemaMigrator interface {
 	Apply() error
-	SortStreams([]string) (sortedKeys []string, sorted bool, dependsOn map[string][]string, err error)
-	GetExtendedColumnMetadata(conn Connection, table Table, columns iop.Columns) (iop.Columns, error)
+	SortStreams([]string) ([]string, bool, map[string][]string, error)
+	GetExtendedColumnMetadata(Connection, Table, iop.Columns) (iop.Columns, error)
+	GetAutoIncrementSyntax(Connection, iop.Column) string
+	TranslateDefaultFromGeneral(Connection, string, iop.ColumnType) string
 	HasPrimaryKeyEnabled() bool
 	HasForeignKeyEnabled() bool
 	HasAutoIncrementEnabled() bool
@@ -1524,6 +1526,14 @@ func (d *dummySchemaMigrator) SortStreams(streams []string) (sortedKeys []string
 
 func (d *dummySchemaMigrator) GetExtendedColumnMetadata(conn Connection, table Table, columns iop.Columns) (iop.Columns, error) {
 	return columns, nil
+}
+
+func (d *dummySchemaMigrator) GetAutoIncrementSyntax(conn Connection, col iop.Column) string {
+	return ""
+}
+
+func (d *dummySchemaMigrator) TranslateDefaultFromGeneral(conn Connection, value string, colType iop.ColumnType) string {
+	return ""
 }
 
 func (d *dummySchemaMigrator) HasPrimaryKeyEnabled() bool {

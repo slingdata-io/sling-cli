@@ -2510,7 +2510,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		conn.SetProp("column_typing", g.Marshal(ct))
 	}
 
-	schemaMigrator := NewSchemaMigrator(nil)
+	sm := NewSchemaMigrator(nil)
 
 	for _, col := range columns {
 		// convert from general type to native type
@@ -2526,25 +2526,25 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		columnDDL := conn.Template().Quote(col.Name) + " " + nativeType
 
 		// Add schema migration attributes when enabled and not temporary
-		if schemaMigrator.IsEnabled() && !temporary {
+		if sm.IsEnabled() && !temporary {
 			// Auto-increment (before NOT NULL)
-			if schemaMigrator.HasAutoIncrementEnabled() && col.IsAutoIncrement() {
-				autoIncSyntax := GetAutoIncrementSyntax(conn.Self(), col)
+			if sm.HasAutoIncrementEnabled() && col.IsAutoIncrement() {
+				autoIncSyntax := sm.GetAutoIncrementSyntax(conn.Self(), col)
 				if autoIncSyntax != "" {
 					columnDDL += " " + autoIncSyntax
 				}
 			}
 
 			// NOT NULL for non-nullable columns
-			if schemaMigrator.HasNullableEnabled() && !col.IsNullable() {
+			if sm.HasNullableEnabled() && !col.IsNullable() {
 				columnDDL += " NOT NULL"
 			}
 
 			// DEFAULT value (skip for auto-increment columns)
-			if schemaMigrator.HasDefaultValueEnabled() && !col.IsAutoIncrement() {
+			if sm.HasDefaultValueEnabled() && !col.IsAutoIncrement() {
 				if defaultVal := col.GetDefaultValue(); defaultVal != "" {
 					// Translate from general to native form (pass column type for context-aware translation)
-					nativeDefault := TranslateDefaultFromGeneral(conn.Self(), defaultVal, col.Type)
+					nativeDefault := sm.TranslateDefaultFromGeneral(conn.Self(), defaultVal, col.Type)
 					if nativeDefault != "" {
 						columnDDL += " DEFAULT " + nativeDefault
 					}
@@ -2556,7 +2556,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 
 	// Add PRIMARY KEY constraint for columns marked as primary key (when not temporary)
-	if (schemaMigrator.HasPrimaryKeyEnabled() || schemaMigrator.HasForeignKeyEnabled()) && !temporary {
+	if (sm.HasPrimaryKeyEnabled() || sm.HasForeignKeyEnabled()) && !temporary {
 		var pkCols []string
 		for _, col := range columns {
 			if col.IsPrimaryKey() {
