@@ -1813,3 +1813,14 @@
   output_contains:
     - 'Column descriptions found'
     - 'execution succeeded'
+
+# Test schema migration - SQL Server identity fix (Phase 1)
+# Tests: Identity seed/increment only returned for identity columns
+- id: 189
+  name: 'Schema migration SQL Server identity fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.23.sm_sqlserver_identity_fix.yaml'
+  streams: 1
+  output_contains:
+    - 'Identity columns found'
+    - 'Non-identity columns found'
+    - 'execution succeeded'

@@ -198,10 +198,16 @@ metadata:
     SELECT
       c.name AS column_name,
       CASE WHEN c.is_nullable = 1 THEN 'true' ELSE 'false' END AS is_nullable,
-      OBJECT_DEFINITION(c.default_object_id) AS default_value,
+      CASE
+        WHEN OBJECT_DEFINITION(c.default_object_id) LIKE '((%' AND OBJECT_DEFINITION(c.default_object_id) LIKE '%))'
+        THEN SUBSTRING(OBJECT_DEFINITION(c.default_object_id), 3, LEN(OBJECT_DEFINITION(c.default_object_id)) - 4)
+        WHEN OBJECT_DEFINITION(c.default_object_id) LIKE '(%' AND OBJECT_DEFINITION(c.default_object_id) LIKE '%)'
+        THEN SUBSTRING(OBJECT_DEFINITION(c.default_object_id), 2, LEN(OBJECT_DEFINITION(c.default_object_id)) - 2)
+        ELSE OBJECT_DEFINITION(c.default_object_id)
+      END AS default_value,
       CASE WHEN c.is_identity = 1 THEN 'true' ELSE 'false' END AS is_auto_increment,
-      CAST(IDENT_SEED('{schema}.{table}') AS VARCHAR) AS identity_seed,
-      CAST(IDENT_INCR('{schema}.{table}') AS VARCHAR) AS identity_increment,
+      CASE WHEN c.is_identity = 1 THEN CAST(IDENT_SEED('{schema}.{table}') AS VARCHAR) ELSE NULL END AS identity_seed,
+      CASE WHEN c.is_identity = 1 THEN CAST(IDENT_INCR('{schema}.{table}') AS VARCHAR) ELSE NULL END AS identity_increment,
       CASE WHEN pk.column_id IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
       ep.value AS description
     FROM sys.columns c
