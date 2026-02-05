@@ -150,6 +150,16 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  # Foreign key DDL template (Snowflake supports declarative FKs - not enforced)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
 metadata:
 
   current_database:
@@ -220,6 +230,58 @@ metadata:
 
   ddl_view: |
     select get_ddl('view', '{schema}.{table}')
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.COLUMN_NAME as column_name,
+      CASE WHEN c.IS_NULLABLE = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.COLUMN_DEFAULT AS default_value,
+      CASE WHEN c.IS_IDENTITY = 'YES' THEN 'true' ELSE 'false' END AS is_auto_increment,
+      COALESCE(c.IDENTITY_START::text, '1') AS identity_seed,
+      COALESCE(c.IDENTITY_INCREMENT::text, '1') AS identity_increment,
+      CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      c.COMMENT AS description
+    FROM INFORMATION_SCHEMA.COLUMNS c
+    LEFT JOIN (
+      SELECT kcu.COLUMN_NAME
+      FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+      JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+        ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+      WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+        AND tc.TABLE_SCHEMA = '{schema}'
+        AND tc.TABLE_NAME = '{table}'
+    ) pk ON pk.COLUMN_NAME = c.COLUMN_NAME
+    WHERE c.TABLE_SCHEMA = '{schema}' AND c.TABLE_NAME = '{table}'
+    ORDER BY c.ORDINAL_POSITION
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      rc.CONSTRAINT_NAME as constraint_name,
+      kcu.COLUMN_NAME as column_name,
+      kcu2.TABLE_SCHEMA as referenced_schema,
+      kcu2.TABLE_NAME as referenced_table,
+      kcu2.COLUMN_NAME as referenced_column,
+      rc.DELETE_RULE as on_delete,
+      rc.UPDATE_RULE as on_update
+    FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+      ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+      AND rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu2
+      ON rc.UNIQUE_CONSTRAINT_NAME = kcu2.CONSTRAINT_NAME
+      AND rc.UNIQUE_CONSTRAINT_SCHEMA = kcu2.CONSTRAINT_SCHEMA
+    WHERE kcu.TABLE_SCHEMA = '{schema}'
+      AND kcu.TABLE_NAME = '{table}'
+    ORDER BY rc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT COMMENT AS description
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{table}'
 
 analysis:
   # table level
@@ -594,3 +656,27 @@ general_type_map:
   timestampz: timestamp_tz
   timez: varchar
   uuid: "varchar(36)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP()": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "CURRENT_DATE()": "current_date"
+    "CURRENT_DATE": "current_date"
+    "CURRENT_TIME()": "current_time"
+    "CURRENT_TIME": "current_time"
+    "UUID_STRING()": "uuid()"
+    "true": "true"
+    "false": "false"
+    "TRUE": "true"
+    "FALSE": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP()"
+    "current_timestamp_utc": "CURRENT_TIMESTAMP()"
+    "current_date": "CURRENT_DATE()"
+    "current_time": "CURRENT_TIME()"
+    "uuid()": "UUID_STRING()"
+    "true": "TRUE"
+    "false": "FALSE"
+    "null": "NULL"

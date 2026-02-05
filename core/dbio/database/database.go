@@ -1488,10 +1488,23 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 	columns = make(iop.Columns, len(colTypes))
 
 	for i, colType := range colTypes {
+		// For Oracle NUMBER types, construct full type name with precision/scale
+		// so NativeTypeToGeneral can properly map NUMBER(p,0) to integer types
+		dbTypeName := colType.DatabaseTypeName
+		if conn.Self().GetType() == dbio.TypeDbOracle {
+			if strings.EqualFold(dbTypeName, "NUMBER") && colType.Precision > 0 {
+				if colType.Scale > 0 {
+					dbTypeName = g.F("number(%d,%d)", colType.Precision, colType.Scale)
+				} else {
+					dbTypeName = g.F("number(%d)", colType.Precision)
+				}
+			}
+		}
+
 		col := iop.Column{
 			Name:     strings.ReplaceAll(colType.Name, ".", "_"),
 			Position: i + 1,
-			Type:     NativeTypeToGeneral(colType.Name, colType.DatabaseTypeName, conn),
+			Type:     NativeTypeToGeneral(colType.Name, dbTypeName, conn),
 			DbType:   colType.DatabaseTypeName,
 			Sourced:  colType.IsSourced(),
 		}
@@ -1509,6 +1522,17 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			if col.IsDecimal() && col.DbPrecision == 0 && fc.DbPrecision > 0 {
 				col.DbPrecision = fc.DbPrecision
 				col.DbScale = fc.DbScale
+			}
+
+			// Copy extended metadata (nullable, default_value, auto_increment, etc.)
+			// for schema migration feature
+			if fc.Metadata != nil && len(fc.Metadata) > 0 {
+				if col.Metadata == nil {
+					col.Metadata = make(map[string]string)
+				}
+				for k, v := range fc.Metadata {
+					col.Metadata[k] = v
+				}
 			}
 		}
 
@@ -2486,6 +2510,8 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		conn.SetProp("column_typing", g.Marshal(ct))
 	}
 
+	schemaMigrator := NewSchemaMigrator(nil)
+
 	for _, col := range columns {
 		// convert from general type to native type
 		nativeType, err := conn.Self().GetNativeType(col)
@@ -2498,7 +2524,53 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		}
 
 		columnDDL := conn.Template().Quote(col.Name) + " " + nativeType
+
+		// Add schema migration attributes when enabled and not temporary
+		if schemaMigrator.IsEnabled() && !temporary {
+			// Auto-increment (before NOT NULL)
+			if schemaMigrator.HasAutoIncrementEnabled() && col.IsAutoIncrement() {
+				autoIncSyntax := GetAutoIncrementSyntax(conn.Self(), col)
+				if autoIncSyntax != "" {
+					columnDDL += " " + autoIncSyntax
+				}
+			}
+
+			// NOT NULL for non-nullable columns
+			if schemaMigrator.HasNullableEnabled() && !col.IsNullable() {
+				columnDDL += " NOT NULL"
+			}
+
+			// DEFAULT value (skip for auto-increment columns)
+			if schemaMigrator.HasDefaultValueEnabled() && !col.IsAutoIncrement() {
+				if defaultVal := col.GetDefaultValue(); defaultVal != "" {
+					// Translate from general to native form (pass column type for context-aware translation)
+					nativeDefault := TranslateDefaultFromGeneral(conn.Self(), defaultVal, col.Type)
+					if nativeDefault != "" {
+						columnDDL += " DEFAULT " + nativeDefault
+					}
+				}
+			}
+		}
+
 		columnsDDL = append(columnsDDL, columnDDL)
+	}
+
+	// Add PRIMARY KEY constraint for columns marked as primary key (when not temporary)
+	if (schemaMigrator.HasPrimaryKeyEnabled() || schemaMigrator.HasForeignKeyEnabled()) && !temporary {
+		var pkCols []string
+		for _, col := range columns {
+			if col.IsPrimaryKey() {
+				pkCols = append(pkCols, conn.Template().Quote(col.Name))
+			}
+		}
+		if len(pkCols) > 0 {
+			pkConstraint := g.F("PRIMARY KEY (%s)", strings.Join(pkCols, ", "))
+			// BigQuery requires NOT ENFORCED for primary keys
+			if conn.Self().GetType() == dbio.TypeDbBigQuery {
+				pkConstraint += " NOT ENFORCED"
+			}
+			columnsDDL = append(columnsDDL, pkConstraint)
+		}
 	}
 
 	createTemplate := conn.template.Core["create_table"]
@@ -2510,10 +2582,17 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		createTemplate = table.DDL
 	}
 
+	// For Oracle, the create_table template uses EXECUTE IMMEDIATE '...',
+	// so single quotes in column definitions need to be escaped as ''
+	colTypesStr := strings.Join(columnsDDL, ",\n  ")
+	if conn.Self().GetType() == dbio.TypeDbOracle && strings.Contains(createTemplate, "EXECUTE IMMEDIATE") {
+		colTypesStr = strings.ReplaceAll(colTypesStr, "'", "''")
+	}
+
 	ddl = g.R(
 		createTemplate,
 		"table", table.FullName(),
-		"col_types", strings.Join(columnsDDL, ",\n  "),
+		"col_types", colTypesStr,
 	)
 
 	partitionBy := ""

@@ -37,6 +37,16 @@ core:
     LINES TERMINATED BY '\n'
     IGNORE 1 LINES
 
+  # Foreign key DDL template
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template (MySQL requires column type when modifying)
+  add_column_comment: ALTER TABLE {table} MODIFY COLUMN `{column}` {type} COMMENT {comment}
+
+  # Table comment/description template
+  add_table_comment: ALTER TABLE {table} COMMENT = {comment}
+
 metadata:
   current_database: select database() as name from dual
   
@@ -93,8 +103,63 @@ metadata:
       and table_name = '{table}'
     order by
       index_name,
-      seq_in_index    
-  
+      seq_in_index
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      CASE WHEN c.extra LIKE '%auto_increment%' THEN 'true' ELSE 'false' END AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      c.column_comment AS description
+    FROM information_schema.columns c
+    LEFT JOIN (
+      SELECT kcu.table_schema, kcu.table_name, kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+    ) pk ON pk.table_schema = c.table_schema
+        AND pk.table_name = c.table_name
+        AND pk.column_name = c.column_name
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      kcu.referenced_table_schema AS referenced_schema,
+      kcu.referenced_table_name AS referenced_table,
+      kcu.referenced_column_name AS referenced_column,
+      rc.delete_rule AS on_delete,
+      rc.update_rule AS on_update
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_name = tc.constraint_name
+      AND rc.constraint_schema = tc.constraint_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_schema = '{schema}'
+      AND tc.table_name = '{table}'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT
+      t.TABLE_COMMENT AS description
+    FROM information_schema.tables t
+    WHERE t.table_schema = '{schema}' AND t.table_name = '{table}'
+
   columns_full: |
     with tables as (
       select
@@ -491,3 +556,28 @@ general_type_map:
   timestampz: "datetime(6)"
   timez: "varchar()"
   uuid: "varchar(36)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "current_timestamp()": "current_timestamp"
+    "now()": "current_timestamp"
+    "CURRENT_DATE": "current_date"
+    "curdate()": "current_date"
+    "CURRENT_TIME": "current_time"
+    "curtime()": "current_time"
+    "uuid()": "uuid()"
+    "1": "true"
+    "0": "false"
+    "b'1'": "true"
+    "b'0'": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP(6)"
+    "current_timestamp_utc": "UTC_TIMESTAMP(6)"
+    "current_date": "CURRENT_DATE"
+    "current_time": "CURRENT_TIME"
+    "uuid()": "UUID()"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"

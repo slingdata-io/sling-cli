@@ -211,7 +211,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		}
 	}
 
-	if cast.ToBool(c.Vals["trace"]) {
+	if cast.ToBool(c.Vals["trace"]) || os.Getenv("DEBUG") == "TRACE" {
 		cfg.Options.Debug = true
 		os.Setenv("DEBUG", "TRACE")
 		env.InitLogger()

@@ -1428,7 +1428,8 @@ type Source struct {
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	Data map[string]any `json:"-" yaml:"-"`
+	Data  map[string]any `json:"-" yaml:"-"`
+	table database.Table `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {

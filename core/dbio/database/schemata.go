@@ -19,15 +19,16 @@ import (
 
 // Table represents a schemata table
 type Table struct {
-	Name     string      `json:"name"`
-	Schema   string      `json:"schema"`
-	Database string      `json:"database,omitempty"`
-	IsView   bool        `json:"is_view,omitempty"` // whether is a view
-	SQL      string      `json:"sql,omitempty"`
-	DDL      string      `json:"ddl,omitempty"`
-	Dialect  dbio.Type   `json:"dialect,omitempty"`
-	Columns  iop.Columns `json:"columns,omitempty"`
-	Keys     TableKeys   `json:"keys,omitempty"`
+	Name        string      `json:"name"`
+	Schema      string      `json:"schema"`
+	Database    string      `json:"database,omitempty"`
+	IsView      bool        `json:"is_view,omitempty"` // whether is a view
+	Description string      `json:"description,omitempty"`
+	SQL         string      `json:"sql,omitempty"`
+	DDL         string      `json:"ddl,omitempty"`
+	Dialect     dbio.Type   `json:"dialect,omitempty"`
+	Columns     iop.Columns `json:"columns,omitempty"`
+	Keys        TableKeys   `json:"keys,omitempty"`
 
 	Raw string `json:"raw"`
 
@@ -62,6 +63,13 @@ var ChunkByCount = func(conn Connection, t Table, c string, cc int, min, max str
 
 var ChunkByExpression = func(conn Connection, t Table, e string, cc int) ([]Chunk, error) {
 	return []Chunk{}, g.Error("please use the official sling-cli release for chunking")
+}
+
+func (t Table) Key() string {
+	if t.Schema == "" {
+		return strings.ToLower(t.Name)
+	}
+	return strings.ToLower(t.Schema + "." + t.Name)
 }
 
 func (t *Table) IsQuery() bool {
@@ -187,18 +195,19 @@ func (t *Table) FDQN() string {
 
 func (t *Table) Clone() Table {
 	return Table{
-		Name:     t.Name,
-		Schema:   t.Schema,
-		Database: t.Database,
-		IsView:   t.IsView,
-		SQL:      t.SQL,
-		DDL:      t.DDL,
-		Dialect:  t.Dialect,
-		Columns:  t.Columns,
-		Keys:     t.Keys,
-		Raw:      t.Raw,
-		limit:    t.limit,
-		offset:   t.offset,
+		Name:        t.Name,
+		Schema:      t.Schema,
+		Database:    t.Database,
+		IsView:      t.IsView,
+		Description: t.Description,
+		SQL:         t.SQL,
+		DDL:         t.DDL,
+		Dialect:     t.Dialect,
+		Columns:     t.Columns,
+		Keys:        t.Keys,
+		Raw:         t.Raw,
+		limit:       t.limit,
+		offset:      t.offset,
 	}
 }
 
@@ -1128,13 +1137,17 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 		}
 
 		prefix := "primary key"
+		suffix := ""
 		switch t.Dialect {
 		case dbio.TypeDbOracle:
 			prefix = g.F("constraint %s_pkey primary key", strings.ToLower(t.Name))
+		case dbio.TypeDbBigQuery:
+			// BigQuery requires NOT ENFORCED for primary keys
+			suffix = " not enforced"
 		}
 
 		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
-		ddl = ddl[:closeParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[closeParen:]
+		ddl = ddl[:closeParen] + g.F(", %s (%s)%s", prefix, strings.Join(quotedNames, ", "), suffix) + ddl[closeParen:]
 	}
 
 	return ddl, nil
@@ -1477,4 +1490,66 @@ func GenerateAlterDDL(conn Connection, table Table, newColumns iop.Columns) (boo
 	}
 
 	return true, nil
+}
+
+type SchemaMigratorConfig struct {
+	SourceConn  Connection
+	TargetConn  Connection
+	Sourcetable Table
+	TargetTable Table
+}
+
+type SchemaMigrator interface {
+	Apply() error
+	SortStreams([]string) (sortedKeys []string, sorted bool, dependsOn map[string][]string, err error)
+	GetExtendedColumnMetadata(conn Connection, table Table, columns iop.Columns) (iop.Columns, error)
+	HasPrimaryKeyEnabled() bool
+	HasForeignKeyEnabled() bool
+	HasAutoIncrementEnabled() bool
+	HasNullableEnabled() bool
+	HasDefaultValueEnabled() bool
+	IsEnabled() bool
+}
+
+// dummySchemaMigrator is a no-op implementation of SchemaMigrator
+type dummySchemaMigrator struct{}
+
+func (d *dummySchemaMigrator) Apply() error {
+	return nil
+}
+
+func (d *dummySchemaMigrator) SortStreams(streams []string) (sortedKeys []string, sorted bool, dependsOn map[string][]string, err error) {
+	return streams, false, nil, nil
+}
+
+func (d *dummySchemaMigrator) GetExtendedColumnMetadata(conn Connection, table Table, columns iop.Columns) (iop.Columns, error) {
+	return columns, nil
+}
+
+func (d *dummySchemaMigrator) HasPrimaryKeyEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) HasForeignKeyEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) HasAutoIncrementEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) HasNullableEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) HasDefaultValueEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) IsEnabled() bool {
+	return false
+}
+
+var NewSchemaMigrator = func(cfg *SchemaMigratorConfig) SchemaMigrator {
+	return &dummySchemaMigrator{}
 }

@@ -44,6 +44,16 @@ type MsSQLServerConn struct {
 	cloudSQLCleanup func()
 }
 
+// hasIdentityColumn checks if any column has identity/auto-increment metadata
+func (conn *MsSQLServerConn) hasIdentityColumn(columns iop.Columns) bool {
+	for _, col := range columns {
+		if col.IsAutoIncrement() {
+			return true
+		}
+	}
+	return false
+}
+
 // Init initiates the object
 func (conn *MsSQLServerConn) Init() error {
 
@@ -614,6 +624,13 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		return count, g.Error(err, "columns mismatch")
 	}
 
+	// Check if we're inserting identity column values (schema migration scenario)
+	// If so, we need to enable the -E flag for BCP to keep identity values
+	if conn.hasIdentityColumn(ds.Columns) {
+		conn.SetProp("bcp_identity_insert", "true")
+		defer conn.SetProp("bcp_identity_insert", "")
+	}
+
 	var boolCols []int
 	insColMap := insCols.Map()
 	for i, col := range ds.Columns {
@@ -939,6 +956,11 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 			return
 		}
 		bcpArgs = append(bcpArgs, bcpExtraParts...)
+	}
+
+	// Add -E flag to keep identity values when importing identity columns (schema migration)
+	if cast.ToBool(conn.GetProp("bcp_identity_insert")) {
+		bcpArgs = append(bcpArgs, "-E")
 	}
 
 retry:

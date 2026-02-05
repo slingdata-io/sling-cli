@@ -42,13 +42,16 @@ var (
 	debugLogFile *os.File
 	traceLogFile *os.File
 	logFileMux   sync.Mutex
-	GetOAuthMap    = func() map[string]map[string]any {
+	GetOAuthMap  = func() map[string]map[string]any {
 		return map[string]map[string]any{}
 	}
 	ExecFolder      = func() string { return path.Join(HomeDir, "executions", ExecID) }
 	QueueFolder     = func() string { return path.Join(ExecFolder(), "queues") }
 	RuntimeFolder   = func() string { return path.Join(ExecFolder(), "runtime") }
 	RuntimeFilePath = func(name string) string {
+		name = strings.ReplaceAll(name, "\\", "_")
+		name = strings.ReplaceAll(name, "/", "_")
+		name = strings.ReplaceAll(name, ":", "_")
 		os.MkdirAll(RuntimeFolder(), 0755) // make folder
 		return path.Join(RuntimeFolder(), g.F("%s.json", name))
 	}

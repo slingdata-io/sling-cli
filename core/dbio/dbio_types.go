@@ -376,6 +376,12 @@ type Template struct {
 	NativeTypeMap  map[string]string `yaml:"native_type_map"`
 	Variable       map[string]string `yaml:"variable"`
 	Type           Type              `yaml:"-"`
+
+	// DefaultValueMap translates default expressions between native and generalized forms
+	DefaultValueMap struct {
+		ToGeneral   map[string]string `yaml:"to_general"`
+		FromGeneral map[string]string `yaml:"from_general"`
+	} `yaml:"default_value_map"`
 }
 
 // ToData convert is dataset
@@ -481,6 +487,24 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		template.NativeTypeMap[key] = val
 	}
 
+	// Merge DefaultValueMap
+	if connTemplate.DefaultValueMap.ToGeneral != nil {
+		if template.DefaultValueMap.ToGeneral == nil {
+			template.DefaultValueMap.ToGeneral = map[string]string{}
+		}
+		for key, val := range connTemplate.DefaultValueMap.ToGeneral {
+			template.DefaultValueMap.ToGeneral[key] = val
+		}
+	}
+	if connTemplate.DefaultValueMap.FromGeneral != nil {
+		if template.DefaultValueMap.FromGeneral == nil {
+			template.DefaultValueMap.FromGeneral = map[string]string{}
+		}
+		for key, val := range connTemplate.DefaultValueMap.FromGeneral {
+			template.DefaultValueMap.FromGeneral[key] = val
+		}
+	}
+
 	// Load user template overrides from ~/.sling/templates/{dbType}.yaml
 	userTemplates := path.Join(env.HomeDir, "templates")
 	userTemplatePath := path.Join(userTemplates, t.String()+".yaml")
@@ -515,6 +539,23 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 				}
 				for key, val := range userTemplate.NativeTypeMap {
 					template.NativeTypeMap[key] = val
+				}
+				// Merge user DefaultValueMap
+				if userTemplate.DefaultValueMap.ToGeneral != nil {
+					if template.DefaultValueMap.ToGeneral == nil {
+						template.DefaultValueMap.ToGeneral = map[string]string{}
+					}
+					for key, val := range userTemplate.DefaultValueMap.ToGeneral {
+						template.DefaultValueMap.ToGeneral[key] = val
+					}
+				}
+				if userTemplate.DefaultValueMap.FromGeneral != nil {
+					if template.DefaultValueMap.FromGeneral == nil {
+						template.DefaultValueMap.FromGeneral = map[string]string{}
+					}
+					for key, val := range userTemplate.DefaultValueMap.FromGeneral {
+						template.DefaultValueMap.FromGeneral[key] = val
+					}
 				}
 				g.Debug("applied user template overrides from %s", userTemplatePath)
 			}

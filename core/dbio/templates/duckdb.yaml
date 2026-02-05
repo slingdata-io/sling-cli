@@ -59,6 +59,16 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  # Foreign key DDL template (DuckDB ENFORCES FK constraints)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
 metadata:
   databases: PRAGMA database_list
   
@@ -168,6 +178,48 @@ metadata:
   ddl_view: |
     PRAGMA table_info('{schema}.{table}')
 
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      'false' AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      CAST(NULL AS VARCHAR) AS description
+    FROM information_schema.columns c
+    LEFT JOIN (
+      SELECT replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') AS column_name
+      FROM duckdb_constraints()
+      WHERE table_schema = '{schema}'
+        AND table_name = '{table}'
+        AND constraint_type = 'PRIMARY KEY'
+    ) pk ON lower(pk.column_name) = lower(c.column_name)
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships (DuckDB enforces these!)
+  foreign_keys: |
+    SELECT
+      dc.constraint_text AS constraint_name,
+      regexp_extract(dc.constraint_text, 'FOREIGN KEY\(([^)]+)\)', 1) AS column_name,
+      regexp_extract(dc.constraint_text, 'REFERENCES ([^.]+)\.', 1) AS referenced_schema,
+      regexp_extract(dc.constraint_text, 'REFERENCES [^.]+\.([^\(]+)', 1) AS referenced_table,
+      regexp_extract(dc.constraint_text, 'REFERENCES [^(]+\(([^)]+)\)', 1) AS referenced_column,
+      'NO ACTION' AS on_delete,
+      'NO ACTION' AS on_update
+    FROM duckdb_constraints() dc
+    WHERE dc.table_schema = '{schema}'
+      AND dc.table_name = '{table}'
+      AND dc.constraint_type = 'FOREIGN KEY'
+
+  # Extended table attributes for schema migration
+  # Note: DuckDB comments are retrieved from duckdb_tables()
+  table_extended: |
+    SELECT CAST(NULL AS VARCHAR) AS description
+
 analysis:
   chars: |
     select
@@ -265,3 +317,27 @@ general_type_map:
   timestampz: timestamptz
   timez: time
   uuid: uuid
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "current_timestamp": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "now()": "current_timestamp"
+    "current_date": "current_date"
+    "CURRENT_DATE": "current_date"
+    "current_time": "current_time"
+    "CURRENT_TIME": "current_time"
+    "gen_random_uuid()": "uuid()"
+    "uuid()": "uuid()"
+    "true": "true"
+    "false": "false"
+  from_general:
+    "current_timestamp": "current_timestamp"
+    "current_timestamp_utc": "current_timestamp"
+    "current_date": "current_date"
+    "current_time": "current_time"
+    "uuid()": "gen_random_uuid()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

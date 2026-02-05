@@ -1635,3 +1635,181 @@
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: hard delete with target_where correctly scoped deletion to recent data only'
+
+# Schema Migration Comprehensive Tests (SLING_SCHEMA_MIGRATION feature)
+# These tests verify all schema attributes (identity, FKs, indexes, defaults, nullable, descriptions)
+# are correctly migrated from source to target databases across 6 database pairs.
+# Each test uses 5 tables with streams listed in wrong order to test FK reordering.
+
+# Test schema migration - MSSQL to PostgreSQL
+- id: 177
+  name: 'Schema migration comprehensive (MSSQL to Postgres)'
+  run: sling run -d cmd/sling/tests/pipelines/p.11.sm_mssql_pg.yaml
+  streams: 5
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - MSSQL to MySQL
+- id: 178
+  name: 'Schema migration comprehensive (MSSQL to MySQL)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.12.sm_mssql_mysql.yaml'
+  streams: 5
+  after: [177]
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Auto-increment columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - MSSQL to Oracle
+- id: 179
+  name: 'Schema migration comprehensive (MSSQL to Oracle)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.13.sm_mssql_oracle.yaml'
+  streams: 5
+  after: [178]
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - PostgreSQL to MSSQL (reverse direction)
+- id: 180
+  name: 'Schema migration comprehensive (Postgres to MSSQL)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.14.sm_pg_mssql.yaml'
+  streams: 5
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - Oracle to MSSQL
+- id: 181
+  name: 'Schema migration comprehensive (Oracle to MSSQL)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.15.sm_oracle_mssql.yaml'
+  streams: 5
+  after: [179]
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - MySQL to PostgreSQL
+- id: 182
+  name: 'Schema migration comprehensive (MySQL to Postgres)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.16.sm_mysql_pg.yaml'
+  streams: 5
+  after: [178]
+  output_contains:
+    - 'FK constraints found'
+    - 'Indexes found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Schema Migration Tests for Warehouse/Analytical Databases
+# These tests verify schema attributes (identity, FKs, descriptions) migration
+# to warehouse databases: Snowflake, Databricks, Redshift, BigQuery, DuckDB, ClickHouse
+
+# Test schema migration - PostgreSQL to Snowflake
+- id: 183
+  name: 'Schema migration comprehensive (Postgres to Snowflake)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.17.sm_pg_snowflake.yaml'
+  streams: 5
+  output_contains:
+    - 'FK constraints found'
+    - 'Identity columns found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - PostgreSQL to Databricks
+# - id: 184
+#   name: 'Schema migration comprehensive (Postgres to Databricks)'
+#   run: 'sling run -d cmd/sling/tests/pipelines/p.18.sm_pg_databricks.yaml'
+#   streams: 5
+#   output_contains:
+#     - 'FK constraints found'
+#     - 'Column descriptions found'
+#     - 'Table descriptions found'
+#     - 'execution succeeded'
+#   output_does_not_contain:
+#     - 'could not create foreign key'
+
+# Test schema migration - PostgreSQL to Redshift
+# - id: 185
+#   name: 'Schema migration comprehensive (Postgres to Redshift)'
+#   run: 'sling run -d cmd/sling/tests/pipelines/p.19.sm_pg_redshift.yaml'
+#   streams: 5
+#   output_contains:
+#     - 'FK constraints found'
+#     - 'Identity columns found'
+#     - 'Column descriptions found'
+#     - 'Table descriptions found'
+#     - 'execution succeeded'
+#   output_does_not_contain:
+#     - 'could not create foreign key'
+
+# Test schema migration - PostgreSQL to BigQuery
+- id: 186
+  name: 'Schema migration comprehensive (Postgres to BigQuery)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.20.sm_pg_bigquery.yaml'
+  streams: 5
+  after: [183]
+  output_contains:
+    - 'FK constraints found'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not create foreign key'
+
+# Test schema migration - PostgreSQL to DuckDB
+# Note: DuckDB doesn't support ALTER TABLE ADD FOREIGN KEY, so FK migration is not tested
+- id: 187
+  name: 'Schema migration comprehensive (Postgres to DuckDB)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.21.sm_pg_duckdb.yaml'
+  streams: 5
+  output_contains:
+    - 'PK constraints found'
+    - 'execution succeeded'
+
+# Test schema migration - PostgreSQL to ClickHouse (column comments only)
+# Note: ClickHouse doesn't support ALTER TABLE for table comments
+- id: 188
+  name: 'Schema migration comprehensive (Postgres to ClickHouse)'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.22.sm_pg_clickhouse.yaml'
+  streams: 5
+  output_contains:
+    - 'Column descriptions found'
+    - 'execution succeeded'

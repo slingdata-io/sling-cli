@@ -44,6 +44,17 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
+	// Fetch extended column metadata when schema migration is enabled
+	if sm := database.NewSchemaMigrator(nil); sm.IsEnabled() {
+		sTable.Columns, err = sm.GetExtendedColumnMetadata(srcConn, sTable, sTable.Columns)
+		if err != nil {
+			err = g.Error(err, "Could not get extended column metadata for schema migration")
+			return
+		}
+	}
+
+	cfg.Source.table = sTable
+
 	if len(cfg.Source.Select) > 0 {
 		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
 			// Parse the expression to extract original column name

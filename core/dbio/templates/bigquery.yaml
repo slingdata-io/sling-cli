@@ -64,6 +64,16 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  # Foreign key DDL template (BigQuery - declarative, NOT ENFORCED required)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}) NOT ENFORCED
+
+  # Column comment/description template (BigQuery uses ALTER COLUMN SET OPTIONS)
+  add_column_comment: ALTER TABLE {table} ALTER COLUMN `{column}` SET OPTIONS (description={comment})
+
+  # Table comment/description template (BigQuery uses ALTER TABLE SET OPTIONS)
+  add_table_comment: ALTER TABLE {table} SET OPTIONS (description={comment})
+
 metadata:
 
   current_database:
@@ -157,7 +167,56 @@ metadata:
 
   session_terminate:
     select pg_terminate_backend({pid})
-  
+
+  # Extended column attributes for schema migration
+  # Note: BigQuery does not support IDENTITY columns
+  columns_extended: |
+    SELECT
+      column_name,
+      CASE WHEN is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      CAST(NULL AS STRING) AS default_value,
+      'false' AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      c.description
+    FROM `{schema}`.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS c
+    LEFT JOIN (
+      SELECT kcu.column_name
+      FROM `{schema}`.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+      JOIN `{schema}`.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+        ON tc.constraint_name = kcu.constraint_name
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_name = '{table}'
+    ) pk ON pk.column_name = c.column_name
+    WHERE c.table_name = '{table}' AND c.data_type NOT LIKE 'STRUCT%' AND c.data_type NOT LIKE 'ARRAY%'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table,
+      ccu.column_name AS referenced_column,
+      'NO ACTION' AS on_delete,
+      'NO ACTION' AS on_update
+    FROM `{schema}`.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+    JOIN `{schema}`.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+      ON tc.constraint_name = kcu.constraint_name
+    JOIN `{schema}`.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
+      ON tc.constraint_name = ccu.constraint_name
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_name = '{table}'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT option_value AS description
+    FROM `{schema}`.INFORMATION_SCHEMA.TABLE_OPTIONS
+    WHERE table_name = '{table}' AND option_name = 'description'
+
 analysis:
   # table level
   table_count: |
@@ -487,3 +546,28 @@ general_type_map:
   timestampz: timestamp
   timez: string
   uuid: string
+
+# Schema migration: default value translation between native and generalized forms
+# Note: BigQuery has limited default value support
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP()": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "CURRENT_DATE()": "current_date"
+    "CURRENT_DATE": "current_date"
+    "CURRENT_TIME()": "current_time"
+    "CURRENT_TIME": "current_time"
+    "GENERATE_UUID()": "uuid()"
+    "true": "true"
+    "false": "false"
+    "TRUE": "true"
+    "FALSE": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP()"
+    "current_timestamp_utc": "CURRENT_TIMESTAMP()"
+    "current_date": "CURRENT_DATE()"
+    "current_time": "CURRENT_TIME()"
+    "uuid()": "GENERATE_UUID()"
+    "true": "TRUE"
+    "false": "FALSE"
+    "null": "NULL"

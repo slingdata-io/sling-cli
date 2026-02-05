@@ -270,6 +270,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return 0, err
 		}
 
+		// Apply schema migration attributes (foreign keys, indexes)
+		applySchemaAttributes(cfg, tgtConn, targetTable, df.Columns)
+
 		df.Close()
 		t.SetProgress("created table definition %s with %d columns", targetTable.FullName(), len(sampleData.Columns))
 		setStage("6 - closing")
@@ -451,6 +454,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	}
 
+	// Apply schema migration attributes (foreign keys, indexes) after commit
+	applySchemaAttributes(cfg, tgtConn, targetTable, df.Columns)
+
 	// Execute post-SQL (legacy)
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
 		err = g.Error(err, "error executing %s-sql", "post")
@@ -606,6 +612,9 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
+	// Apply schema migration attributes (foreign keys, indexes) after commit
+	applySchemaAttributes(cfg, tgtConn, targetTable, df.Columns)
+
 	// Handle empty data case
 	if cnt == 0 {
 		g.Warn("no data or records found in stream. Nothing to insert.")
@@ -624,6 +633,27 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 
 	setStage("6 - closing")
 	return cnt, nil
+}
+
+// applySchemaAttributes applies foreign keys and indexes when schema migration is enabled
+// dfColumns should contain the source columns with FK/index metadata from the dataflow
+func applySchemaAttributes(cfg *Config, tgtConn database.Connection, targetTable database.Table, dfColumns iop.Columns) (err error) {
+
+	targetTable.Columns = dfColumns // sync source metadata
+
+	schemaMigrator := database.NewSchemaMigrator(&database.SchemaMigratorConfig{
+		SourceConn:  cfg.SrcConn.Database,
+		TargetConn:  tgtConn,
+		Sourcetable: cfg.Source.table,
+		TargetTable: targetTable,
+	})
+	if !schemaMigrator.IsEnabled() {
+		return
+	}
+
+	err = schemaMigrator.Apply()
+
+	return
 }
 
 func determineTxOptions(cfg *Config, dbType dbio.Type) sql.TxOptions {

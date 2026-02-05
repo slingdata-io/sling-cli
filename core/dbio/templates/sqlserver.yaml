@@ -75,6 +75,24 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  # Foreign key DDL template
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template (SQL Server uses extended properties)
+  add_column_comment: |
+    IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE major_id = OBJECT_ID('{schema}.{table_name}') AND minor_id = (SELECT column_id FROM sys.columns WHERE object_id = OBJECT_ID('{schema}.{table_name}') AND name = '{column}') AND name = 'MS_Description')
+      EXEC sp_updateextendedproperty @name = N'MS_Description', @value = {comment}, @level0type = N'SCHEMA', @level0name = N'{schema}', @level1type = N'TABLE', @level1name = N'{table_name}', @level2type = N'COLUMN', @level2name = N'{column}'
+    ELSE
+      EXEC sp_addextendedproperty @name = N'MS_Description', @value = {comment}, @level0type = N'SCHEMA', @level0name = N'{schema}', @level1type = N'TABLE', @level1name = N'{table_name}', @level2type = N'COLUMN', @level2name = N'{column}'
+
+  # Table comment/description template (SQL Server uses extended properties)
+  add_table_comment: |
+    IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE major_id = OBJECT_ID('{schema}.{table_name}') AND minor_id = 0 AND name = 'MS_Description')
+      EXEC sp_updateextendedproperty @name = N'MS_Description', @value = {comment}, @level0type = N'SCHEMA', @level0name = N'{schema}', @level1type = N'TABLE', @level1name = N'{table_name}'
+    ELSE
+      EXEC sp_addextendedproperty @name = N'MS_Description', @value = {comment}, @level0type = N'SCHEMA', @level0name = N'{schema}', @level1type = N'TABLE', @level1name = N'{table_name}'
+
 metadata:
   databases: select db_name() as name
   
@@ -174,7 +192,61 @@ metadata:
       ind.name,
       ind.index_id,
       ic.index_column_id
-  
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.name AS column_name,
+      CASE WHEN c.is_nullable = 1 THEN 'true' ELSE 'false' END AS is_nullable,
+      OBJECT_DEFINITION(c.default_object_id) AS default_value,
+      CASE WHEN c.is_identity = 1 THEN 'true' ELSE 'false' END AS is_auto_increment,
+      CAST(IDENT_SEED('{schema}.{table}') AS VARCHAR) AS identity_seed,
+      CAST(IDENT_INCR('{schema}.{table}') AS VARCHAR) AS identity_increment,
+      CASE WHEN pk.column_id IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      ep.value AS description
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    LEFT JOIN sys.extended_properties ep ON ep.major_id = c.object_id AND ep.minor_id = c.column_id AND ep.name = 'MS_Description'
+    LEFT JOIN (
+      SELECT ic.object_id, ic.column_id
+      FROM sys.indexes i
+      JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+      WHERE i.is_primary_key = 1
+    ) pk ON pk.object_id = c.object_id AND pk.column_id = c.column_id
+    WHERE s.name = '{schema}' AND t.name = '{table}'
+    ORDER BY c.column_id
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      fk.name AS constraint_name,
+      COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS column_name,
+      SCHEMA_NAME(rt.schema_id) AS referenced_schema,
+      rt.name AS referenced_table,
+      COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS referenced_column,
+      fk.delete_referential_action_desc AS on_delete,
+      fk.update_referential_action_desc AS on_update
+    FROM sys.foreign_keys fk
+    JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+    JOIN sys.tables t ON fk.parent_object_id = t.object_id
+    JOIN sys.tables rt ON fk.referenced_object_id = rt.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE s.name = '{schema}' AND t.name = '{table}'
+    ORDER BY fk.name, fkc.constraint_column_id
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT
+      CAST(ep.value AS NVARCHAR(MAX)) AS description
+    FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    LEFT JOIN sys.extended_properties ep
+      ON ep.major_id = t.object_id
+      AND ep.minor_id = 0
+      AND ep.name = 'MS_Description'
+    WHERE s.name = '{schema}' AND t.name = '{table}'
+
   columns_full: |
     with tables as (
       select
@@ -455,3 +527,36 @@ general_type_map:
   timestampz: datetimeoffset
   timez: "varchar()"
   uuid: uniqueidentifier
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "getdate()": "current_timestamp"
+    "(getdate())": "current_timestamp"
+    "GETDATE()": "current_timestamp"
+    "(GETDATE())": "current_timestamp"
+    "sysdatetime()": "current_timestamp"
+    "(sysdatetime())": "current_timestamp"
+    "getutcdate()": "current_timestamp_utc"
+    "(getutcdate())": "current_timestamp_utc"
+    "GETUTCDATE()": "current_timestamp_utc"
+    "(GETUTCDATE())": "current_timestamp_utc"
+    "newid()": "uuid()"
+    "(newid())": "uuid()"
+    "NEWID()": "uuid()"
+    "(NEWID())": "uuid()"
+    "newsequentialid()": "uuid()"
+    "(newsequentialid())": "uuid()"
+    "((1))": "true"
+    "((0))": "false"
+    "(1)": "true"
+    "(0)": "false"
+  from_general:
+    "current_timestamp": "GETDATE()"
+    "current_timestamp_utc": "GETUTCDATE()"
+    "current_date": "CAST(GETDATE() AS DATE)"
+    "current_time": "CAST(GETDATE() AS TIME)"
+    "uuid()": "NEWID()"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"

@@ -292,6 +292,30 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	}
 	_ = mux
 
+	// Check for identity columns when target is SQL Server (schema migration scenario)
+	// If inserting explicit values into identity columns, we need IDENTITY_INSERT ON
+	if conn.GetType().IsSQLServer() {
+		hasIdentity := false
+		for _, col := range ds.Columns {
+			if col.IsAutoIncrement() {
+				hasIdentity = true
+				break
+			}
+		}
+		if hasIdentity {
+			_, err = conn.Exec(g.F("SET IDENTITY_INSERT %s ON", tableFName))
+			if err != nil {
+				g.Debug("could not enable IDENTITY_INSERT: %v", err)
+				// Don't fail - the insert might still work if the identity column isn't in the insert list
+				err = nil
+			} else {
+				defer func() {
+					conn.Exec(g.F("SET IDENTITY_INSERT %s OFF", tableFName))
+				}()
+			}
+		}
+	}
+
 	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) {
 		var err error
 		defer context.Wg.Write.Done()

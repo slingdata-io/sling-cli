@@ -277,24 +277,10 @@ type Wildcard struct {
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
-	// get local connections
-	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
-		return strings.ToLower(c.Connection.Name)
-	})
 
-	conn, ok := connsMap[strings.ToLower(rd.Source)]
-	if !ok {
-		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
-			conn = connection.LocalFileConnEntry()
-		} else if strings.Contains(rd.Source, "://") {
-			conn.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
-			if err != nil {
-				return
-			}
-		} else {
-			g.Error("did not find connection for wildcards: %s", rd.Source)
-			return
-		}
+	conn, err := rd.getSourceConnection()
+	if err != nil {
+		return g.Error(err, "could not get connection for wildcards: %s", rd.Source)
 	}
 
 	hasWildcard := func(name string) bool {
@@ -921,6 +907,35 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 	})
 }
 
+// getSourceConnection returns a database connection to the source
+func (rd *ReplicationConfig) getSourceConnection() (conn connection.ConnEntry, err error) {
+	if rd.Source == "" {
+		return conn, g.Error("no source specified")
+	}
+
+	// Get local connections (same approach as ProcessWildcards)
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+
+	var ok bool
+	conn, ok = connsMap[strings.ToLower(rd.Source)]
+	if !ok {
+		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
+			conn = connection.LocalFileConnEntry()
+		} else if strings.Contains(rd.Source, "://") {
+			conn.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
+			if err != nil {
+				return conn, g.Error(err, "could not create source connection from URL")
+			}
+		} else {
+			return conn, g.Error("could not find source connection: %s", rd.Source)
+		}
+	}
+
+	return conn, nil
+}
+
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 
 	g.Debug("processing database wildcards for %s: %s", rd.Source, g.Marshal(patterns))
@@ -1097,6 +1112,11 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 	err = rd.ProcessChunks()
 	if err != nil {
 		return g.Error(err, "could not process chunks when compiling")
+	}
+
+	// Reorder streams by foreign key dependencies when schema migration is enabled
+	if err = rd.resolveStreamOrderByFK(); err != nil {
+		return g.Error(err, "could not resolve stream order by foreign key dependencies")
 	}
 
 	// clean up selectStreams
@@ -1731,5 +1751,109 @@ func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
 			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
 		}
 	}
+	return nil
+}
+
+// resolveStreamOrderByFK reorders streams by foreign key dependencies when schema migration is enabled
+// Ensures parent tables are processed before child tables that reference them
+// Also populates DependsOn for each stream to support parallel execution with SLING_THREADS
+func (rd *ReplicationConfig) resolveStreamOrderByFK() error {
+	if val := rd.Env["SLING_SCHEMA_MIGRATION"]; val != nil {
+		os.Setenv("SLING_SCHEMA_MIGRATION", cast.ToString(val))
+	}
+
+	// check if we're migrating forieng keys
+	if sm := database.NewSchemaMigrator(nil); !sm.HasForeignKeyEnabled() {
+		return nil
+	}
+
+	// Get source connection
+	conn, err := rd.getSourceConnection()
+	if err != nil {
+		return g.Error(err, "could not get source connection for FK ordering: %v")
+	}
+
+	// Check if it's a database connection
+	if !conn.Connection.Type.IsDb() {
+		return g.Error("source is not a database connection type for FK ordering: %s", conn.Connection.Type)
+	}
+
+	dbConn, err := conn.Connection.AsDatabase(connection.AsConnOptions{UseCache: true})
+	if err != nil {
+		return g.Error(err, "could not create connection for FK ordering")
+	}
+
+	// Connect
+	if err := dbConn.Connect(); err != nil {
+		return g.Error(err, "could not connect to source for FK ordering")
+	}
+	defer dbConn.Close()
+
+	// recreate with connection
+	schemaMigrator := database.NewSchemaMigrator(&database.SchemaMigratorConfig{SourceConn: dbConn})
+	sortedStreams, sorted, dependsOnMap, err := schemaMigrator.SortStreams(rd.streamsOrdered)
+	if err != nil {
+		return err
+	} else if !sorted {
+		return nil // continue with original order
+	}
+
+	// Map sorted keys back to original stream names (preserving case)
+	streamNameMap := make(map[string]string)
+	for _, name := range rd.streamsOrdered {
+		streamNameMap[strings.ToLower(name)] = name
+	}
+
+	newOrder := make([]string, 0, len(sortedStreams))
+	for _, key := range sortedStreams {
+		if origName, ok := streamNameMap[key]; ok {
+			newOrder = append(newOrder, origName)
+		}
+	}
+
+	// Add any streams not in the graph (unlikely, but for safety)
+	for _, name := range rd.streamsOrdered {
+		found := false
+		for _, sorted := range newOrder {
+			if strings.EqualFold(name, sorted) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			newOrder = append(newOrder, name)
+		}
+	}
+
+	if len(newOrder) != len(rd.streamsOrdered) {
+		g.Warn("FK ordering: stream count mismatch, keeping original order")
+		return nil
+	}
+
+	// Populate dependsOn for each stream to support parallel execution with SLING_THREADS
+	for _, name := range rd.streamsOrdered {
+		normalizedName := strings.ToLower(name)
+		if deps, ok := dependsOnMap[normalizedName]; ok && len(deps) > 0 {
+			// Convert dependency keys back to original stream names
+			var depNames []string
+			for _, depKey := range deps {
+				if origName, ok := streamNameMap[depKey]; ok {
+					depNames = append(depNames, origName)
+				}
+			}
+			if len(depNames) > 0 {
+				stream := rd.Streams[name]
+				if stream == nil {
+					stream = &ReplicationStreamConfig{}
+					rd.Streams[name] = stream
+				}
+				stream.dependsOn = depNames
+			}
+		}
+	}
+
+	g.Debug("FK ordering: original order: %v", rd.streamsOrdered)
+	g.Debug("FK ordering: reordered %d streams by dependencies: %v", len(newOrder), newOrder)
+	rd.streamsOrdered = newOrder
 	return nil
 }

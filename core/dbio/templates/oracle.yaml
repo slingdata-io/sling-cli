@@ -111,6 +111,16 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  # Foreign key DDL template (Oracle does not support ON UPDATE actions)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
 metadata:
   current_database: select name from V$database
   
@@ -176,6 +186,63 @@ metadata:
     where index_owner = '{schema}'
       and table_name = '{table}'
     order by index_name, column_position
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      col.column_name AS column_name,
+      CASE WHEN col.nullable = 'Y' THEN 'true' ELSE 'false' END AS is_nullable,
+      col.data_default AS default_value,
+      CASE WHEN ic.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_auto_increment,
+      NVL(TO_CHAR(seq.min_value), '1') AS identity_seed,
+      NVL(TO_CHAR(seq.increment_by), '1') AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      cmt.comments AS description
+    FROM sys.all_tab_columns col
+    LEFT JOIN sys.all_col_comments cmt
+      ON cmt.owner = col.owner AND cmt.table_name = col.table_name AND cmt.column_name = col.column_name
+    LEFT JOIN sys.all_tab_identity_cols ic
+      ON ic.owner = col.owner AND ic.table_name = col.table_name AND ic.column_name = col.column_name
+    LEFT JOIN sys.all_sequences seq
+      ON seq.sequence_owner = ic.owner AND seq.sequence_name = ic.sequence_name
+    LEFT JOIN (
+      SELECT cc.owner, cc.table_name, cc.column_name
+      FROM sys.all_constraints c
+      JOIN sys.all_cons_columns cc ON c.constraint_name = cc.constraint_name AND c.owner = cc.owner
+      WHERE c.constraint_type = 'P'
+    ) pk ON pk.owner = col.owner AND pk.table_name = col.table_name AND pk.column_name = col.column_name
+    WHERE col.owner = '{schema}' AND col.table_name = '{table}'
+    ORDER BY col.column_id
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      cons.constraint_name AS constraint_name,
+      cols.column_name AS column_name,
+      rcons.owner AS referenced_schema,
+      rcols.table_name AS referenced_table,
+      rcols.column_name AS referenced_column,
+      cons.delete_rule AS on_delete,
+      NULL AS on_update
+    FROM sys.all_constraints cons
+    JOIN sys.all_cons_columns cols
+      ON cons.constraint_name = cols.constraint_name AND cons.owner = cols.owner
+    JOIN sys.all_constraints rcons
+      ON cons.r_constraint_name = rcons.constraint_name AND cons.r_owner = rcons.owner
+    JOIN sys.all_cons_columns rcols
+      ON rcons.constraint_name = rcols.constraint_name AND rcons.owner = rcols.owner
+      AND cols.position = rcols.position
+    WHERE cons.constraint_type = 'R'
+      AND cons.owner = '{schema}'
+      AND cols.table_name = '{table}'
+    ORDER BY cons.constraint_name, cols.position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT
+      tc.comments AS description
+    FROM sys.all_tab_comments tc
+    WHERE tc.owner = '{schema}' AND tc.table_name = '{table}'
 
   ddl_view: |
     select text as ddl
@@ -394,3 +461,29 @@ general_type_map:
   timestampz: "timestamp(9) with time zone"
   timez: "varchar()"
   uuid: "varchar(36)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "SYSDATE": "current_timestamp"
+    "sysdate": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "SYSTIMESTAMP": "current_timestamp"
+    "systimestamp": "current_timestamp"
+    "SYS_GUID()": "uuid()"
+    "sys_guid()": "uuid()"
+    "TRUNC(SYSDATE)": "current_date"
+    "trunc(sysdate)": "current_date"
+    "'true'": "true"
+    "'false'": "false"
+    "'1'": "true"
+    "'0'": "false"
+  from_general:
+    "current_timestamp": "SYSTIMESTAMP"
+    "current_timestamp_utc": "SYS_EXTRACT_UTC(SYSTIMESTAMP)"
+    "current_date": "TRUNC(SYSDATE)"
+    "current_time": "TO_CHAR(SYSDATE, 'HH24:MI:SS')"
+    "uuid()": "SYS_GUID()"
+    "true": "'true'"
+    "false": "'false'"
+    "null": "NULL"

@@ -42,6 +42,15 @@ core:
   merge_update: null
   merge_update_insert: null
 
+  # ClickHouse does NOT support foreign keys - this template will not be used
+  # add_foreign_key: null
+
+  # Column comment/description template (ClickHouse uses COMMENT COLUMN syntax)
+  add_column_comment: ALTER TABLE {table} COMMENT COLUMN `{column}` {comment}
+
+  # Table comment/description template (ClickHouse uses MODIFY COMMENT)
+  add_table_comment: ALTER TABLE {table} MODIFY COMMENT {comment}
+
 metadata:
 
   current_database:
@@ -143,6 +152,41 @@ metadata:
 
   session_terminate:
     select pg_terminate_backend({pid})
+
+  # Extended column attributes for schema migration
+  # Note: ClickHouse does not support IDENTITY or FK constraints
+  columns_extended: |
+    SELECT
+      name AS column_name,
+      CASE WHEN startsWith(type, 'Nullable') THEN 'true' ELSE 'false' END AS is_nullable,
+      default_expression AS default_value,
+      'false' AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      'false' AS is_primary_key,
+      comment AS description
+    FROM system.columns
+    WHERE database = '{schema}' AND table = '{table}'
+    ORDER BY position
+
+  # ClickHouse does NOT support foreign keys
+  # This query returns no rows, which is the correct behavior
+  foreign_keys: |
+    SELECT
+      '' AS constraint_name,
+      '' AS column_name,
+      '' AS referenced_schema,
+      '' AS referenced_table,
+      '' AS referenced_column,
+      '' AS on_delete,
+      '' AS on_update
+    WHERE 1=0
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT comment AS description
+    FROM system.tables
+    WHERE database = '{schema}' AND name = '{table}'
 
 analysis:
   field_chars: |
@@ -345,3 +389,23 @@ general_type_map:
   timestampz: "Nullable(DateTime64(6))"
   timez: "Nullable(String)"
   uuid: "Nullable(UUID)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "now()": "current_timestamp"
+    "NOW()": "current_timestamp"
+    "today()": "current_date"
+    "TODAY()": "current_date"
+    "generateUUIDv4()": "uuid()"
+    "1": "true"
+    "0": "false"
+  from_general:
+    "current_timestamp": "now()"
+    "current_timestamp_utc": "now()"
+    "current_date": "today()"
+    "current_time": "now()"
+    "uuid()": "generateUUIDv4()"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"
