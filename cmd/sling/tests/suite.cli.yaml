@@ -1643,6 +1643,7 @@
   name: 'Schema migration comprehensive (MSSQL to Postgres)'
   run: sling run -d cmd/sling/tests/pipelines/schema_migration/p.11.sm_mssql_pg.yaml
   streams: 5
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1658,7 +1659,7 @@
   name: 'Schema migration comprehensive (MSSQL to MySQL)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.12.sm_mssql_mysql.yaml'
   streams: 5
-  after: [177]
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1674,7 +1675,7 @@
   name: 'Schema migration comprehensive (MSSQL to Oracle)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.13.sm_mssql_oracle.yaml'
   streams: 5
-  after: [178]
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1690,6 +1691,7 @@
   name: 'Schema migration comprehensive (Postgres to MSSQL)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.14.sm_pg_mssql.yaml'
   streams: 5
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1705,7 +1707,7 @@
   name: 'Schema migration comprehensive (Oracle to MSSQL)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.15.sm_oracle_mssql.yaml'
   streams: 5
-  after: [179]
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1721,7 +1723,7 @@
   name: 'Schema migration comprehensive (MySQL to Postgres)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.16.sm_mysql_pg.yaml'
   streams: 5
-  after: [178]
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Indexes found'
@@ -1741,6 +1743,7 @@
   name: 'Schema migration comprehensive (Postgres to Snowflake)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.17.sm_pg_snowflake.yaml'
   streams: 5
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Identity columns found'
@@ -1782,7 +1785,7 @@
   name: 'Schema migration comprehensive (Postgres to BigQuery)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.20.sm_pg_bigquery.yaml'
   streams: 5
-  after: [183]
+  group: schema_migration
   output_contains:
     - 'FK constraints found'
     - 'Column descriptions found'
@@ -1797,6 +1800,7 @@
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
+  group: schema_migration
   output_contains:
     - 'PK constraints found'
     - 'execution succeeded'
@@ -1807,6 +1811,7 @@
   name: 'Schema migration comprehensive (Postgres to ClickHouse)'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.22.sm_pg_clickhouse.yaml'
   streams: 5
+  group: schema_migration
   output_contains:
     - 'Column descriptions found'
     - 'execution succeeded'
@@ -1817,6 +1822,7 @@
   name: 'Schema migration SQL Server identity fix'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.23.sm_sqlserver_identity_fix.yaml'
   streams: 1
+  group: schema_migration
   output_contains:
     - 'Identity columns found'
     - 'Non-identity columns found'
@@ -1828,6 +1834,7 @@
   name: 'Schema migration BigQuery columns fix'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.24.sm_bigquery_columns_fix.yaml'
   streams: 1
+  group: schema_migration
   output_contains:
     - 'Columns found: 6'
     - 'Column names'
@@ -1839,6 +1846,7 @@
   name: 'Schema migration MySQL indexes fix'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.25.sm_mysql_indexes_fix.yaml'
   streams: 1
+  group: schema_migration
   output_contains:
     - 'Primary key constraints found: 1'
     - 'Indexes found'
@@ -1874,6 +1882,7 @@
   name: 'Schema migration DuckDB indexes fix'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.28.sm_duckdb_fk_indexes_fix.yaml'
   streams: 1
+  group: schema_migration
   output_contains:
     - 'PK constraints found'
     - 'Indexes found'
@@ -1885,6 +1894,7 @@
   name: 'Schema migration ClickHouse primary key fix'
   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.29.sm_clickhouse_pk_fix.yaml'
   streams: 1
+  group: schema_migration
   output_contains:
     - 'Primary key columns found'
     - 'Migrated rows: 1'
