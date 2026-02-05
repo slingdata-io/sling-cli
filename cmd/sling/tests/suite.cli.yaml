@@ -1824,3 +1824,14 @@
     - 'Identity columns found'
     - 'Non-identity columns found'
     - 'execution succeeded'
+
+# Test schema migration - BigQuery COLUMNS fix (Phase 2)
+# Tests: Uses INFORMATION_SCHEMA.COLUMNS instead of COLUMN_FIELD_PATHS
+- id: 190
+  name: 'Schema migration BigQuery columns fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/p.24.sm_bigquery_columns_fix.yaml'
+  streams: 1
+  output_contains:
+    - 'Columns found: 6'
+    - 'Column names'
+    - 'execution succeeded'

@@ -170,17 +170,20 @@ metadata:
 
   # Extended column attributes for schema migration
   # Note: BigQuery does not support IDENTITY columns
+  # Uses INFORMATION_SCHEMA.COLUMNS (not COLUMN_FIELD_PATHS which expands nested types)
   columns_extended: |
     SELECT
-      column_name,
-      CASE WHEN is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
       CAST(NULL AS STRING) AS default_value,
       'false' AS is_auto_increment,
-      '1' AS identity_seed,
-      '1' AS identity_increment,
+      CAST(NULL AS STRING) AS identity_seed,
+      CAST(NULL AS STRING) AS identity_increment,
       CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
-      c.description
-    FROM `{schema}`.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS c
+      cf.description
+    FROM `{schema}`.INFORMATION_SCHEMA.COLUMNS c
+    LEFT JOIN `{schema}`.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS cf
+      ON cf.table_name = c.table_name AND cf.column_name = c.column_name
     LEFT JOIN (
       SELECT kcu.column_name
       FROM `{schema}`.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
@@ -189,8 +192,15 @@ metadata:
       WHERE tc.constraint_type = 'PRIMARY KEY'
         AND tc.table_name = '{table}'
     ) pk ON pk.column_name = c.column_name
-    WHERE c.table_name = '{table}' AND c.data_type NOT LIKE 'STRUCT%' AND c.data_type NOT LIKE 'ARRAY%'
+    WHERE c.table_name = '{table}'
     ORDER BY c.ordinal_position
+
+  # Indexes metadata - BigQuery doesn't support traditional indexes
+  indexes: |
+    SELECT
+      CAST(NULL AS STRING) AS index_name,
+      CAST(NULL AS STRING) AS column_name
+    WHERE FALSE
 
   # Foreign key relationships
   foreign_keys: |
