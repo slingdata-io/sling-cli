@@ -1644,7 +1644,7 @@
 # Test schema migration - MSSQL to PostgreSQL
 - id: 177
   name: 'Schema migration comprehensive (MSSQL to Postgres)'
-  run: sling run -d cmd/sling/tests/pipelines/p.11.sm_mssql_pg.yaml
+  run: sling run -d cmd/sling/tests/pipelines/schema_migration/p.11.sm_mssql_pg.yaml
   streams: 5
   output_contains:
     - 'FK constraints found'
@@ -1659,7 +1659,7 @@
 # Test schema migration - MSSQL to MySQL
 - id: 178
   name: 'Schema migration comprehensive (MSSQL to MySQL)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.12.sm_mssql_mysql.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.12.sm_mssql_mysql.yaml'
   streams: 5
   after: [177]
   output_contains:
@@ -1675,7 +1675,7 @@
 # Test schema migration - MSSQL to Oracle
 - id: 179
   name: 'Schema migration comprehensive (MSSQL to Oracle)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.13.sm_mssql_oracle.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.13.sm_mssql_oracle.yaml'
   streams: 5
   after: [178]
   output_contains:
@@ -1691,7 +1691,7 @@
 # Test schema migration - PostgreSQL to MSSQL (reverse direction)
 - id: 180
   name: 'Schema migration comprehensive (Postgres to MSSQL)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.14.sm_pg_mssql.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.14.sm_pg_mssql.yaml'
   streams: 5
   output_contains:
     - 'FK constraints found'
@@ -1706,7 +1706,7 @@
 # Test schema migration - Oracle to MSSQL
 - id: 181
   name: 'Schema migration comprehensive (Oracle to MSSQL)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.15.sm_oracle_mssql.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.15.sm_oracle_mssql.yaml'
   streams: 5
   after: [179]
   output_contains:
@@ -1722,7 +1722,7 @@
 # Test schema migration - MySQL to PostgreSQL
 - id: 182
   name: 'Schema migration comprehensive (MySQL to Postgres)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.16.sm_mysql_pg.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.16.sm_mysql_pg.yaml'
   streams: 5
   after: [178]
   output_contains:
@@ -1742,7 +1742,7 @@
 # Test schema migration - PostgreSQL to Snowflake
 - id: 183
   name: 'Schema migration comprehensive (Postgres to Snowflake)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.17.sm_pg_snowflake.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.17.sm_pg_snowflake.yaml'
   streams: 5
   output_contains:
     - 'FK constraints found'
@@ -1756,7 +1756,7 @@
 # Test schema migration - PostgreSQL to Databricks
 # - id: 184
 #   name: 'Schema migration comprehensive (Postgres to Databricks)'
-#   run: 'sling run -d cmd/sling/tests/pipelines/p.18.sm_pg_databricks.yaml'
+#   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.18.sm_pg_databricks.yaml'
 #   streams: 5
 #   output_contains:
 #     - 'FK constraints found'
@@ -1769,7 +1769,7 @@
 # Test schema migration - PostgreSQL to Redshift
 # - id: 185
 #   name: 'Schema migration comprehensive (Postgres to Redshift)'
-#   run: 'sling run -d cmd/sling/tests/pipelines/p.19.sm_pg_redshift.yaml'
+#   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.19.sm_pg_redshift.yaml'
 #   streams: 5
 #   output_contains:
 #     - 'FK constraints found'
@@ -1783,7 +1783,7 @@
 # Test schema migration - PostgreSQL to BigQuery
 - id: 186
   name: 'Schema migration comprehensive (Postgres to BigQuery)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.20.sm_pg_bigquery.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.20.sm_pg_bigquery.yaml'
   streams: 5
   after: [183]
   output_contains:
@@ -1798,7 +1798,7 @@
 # Note: DuckDB doesn't support ALTER TABLE ADD FOREIGN KEY, so FK migration is not tested
 - id: 187
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.21.sm_pg_duckdb.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
   output_contains:
     - 'PK constraints found'
@@ -1808,7 +1808,7 @@
 # Note: ClickHouse doesn't support ALTER TABLE for table comments
 - id: 188
   name: 'Schema migration comprehensive (Postgres to ClickHouse)'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.22.sm_pg_clickhouse.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.22.sm_pg_clickhouse.yaml'
   streams: 5
   output_contains:
     - 'Column descriptions found'
@@ -1818,7 +1818,7 @@
 # Tests: Identity seed/increment only returned for identity columns
 - id: 189
   name: 'Schema migration SQL Server identity fix'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.23.sm_sqlserver_identity_fix.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.23.sm_sqlserver_identity_fix.yaml'
   streams: 1
   output_contains:
     - 'Identity columns found'
@@ -1829,7 +1829,7 @@
 # Tests: Uses INFORMATION_SCHEMA.COLUMNS instead of COLUMN_FIELD_PATHS
 - id: 190
   name: 'Schema migration BigQuery columns fix'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.24.sm_bigquery_columns_fix.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.24.sm_bigquery_columns_fix.yaml'
   streams: 1
   output_contains:
     - 'Columns found: 6'
@@ -1840,7 +1840,7 @@
 # Tests: indexes query excludes PRIMARY key and includes uniqueness info
 - id: 191
   name: 'Schema migration MySQL indexes fix'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.25.sm_mysql_indexes_fix.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.25.sm_mysql_indexes_fix.yaml'
   streams: 1
   output_contains:
     - 'Primary key constraints found: 1'
@@ -1852,7 +1852,7 @@
 # Note: Databricks connection often has timeouts - skipped by default
 # - id: 192
 #   name: 'Schema migration Databricks basic fix'
-#   run: 'sling run -d cmd/sling/tests/pipelines/p.26.sm_databricks_basic_fix.yaml'
+#   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.26.sm_databricks_basic_fix.yaml'
 #   streams: 1
 #   output_contains:
 #     - 'Columns migrated: 4'
@@ -1864,7 +1864,7 @@
 # Note: Redshift cluster not always available - skipped by default
 # - id: 193
 #   name: 'Schema migration Redshift identity fix'
-#   run: 'sling run -d cmd/sling/tests/pipelines/p.27.sm_redshift_identity_fix.yaml'
+#   run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.27.sm_redshift_identity_fix.yaml'
 #   streams: 1
 #   output_contains:
 #     - 'Identity columns found'
@@ -1875,7 +1875,7 @@
 # Tests: Index extraction using expressions column
 - id: 194
   name: 'Schema migration DuckDB indexes fix'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.28.sm_duckdb_fk_indexes_fix.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.28.sm_duckdb_fk_indexes_fix.yaml'
   streams: 1
   output_contains:
     - 'PK constraints found'
@@ -1886,7 +1886,7 @@
 # Tests: Primary key detection from system.tables
 - id: 195
   name: 'Schema migration ClickHouse primary key fix'
-  run: 'sling run -d cmd/sling/tests/pipelines/p.29.sm_clickhouse_pk_fix.yaml'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.29.sm_clickhouse_pk_fix.yaml'
   streams: 1
   output_contains:
     - 'Primary key columns found'
