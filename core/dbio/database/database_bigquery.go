@@ -379,6 +379,12 @@ func (conn *BigQueryConn) getItColumns(itSchema bigquery.Schema) (cols iop.Colum
 }
 
 func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
+	if conn.Client == nil {
+		if err := conn.Connect(); err != nil {
+			return nil, err
+		}
+	}
+
 	bQTC := bQTypeCols{}
 	opts := getQueryOptions(options)
 	Limit := uint64(0) // infinite
@@ -1182,6 +1188,11 @@ func (conn *BigQueryConn) GetDatabases() (iop.Dataset, error) {
 // GetSchemas returns schemas
 func (conn *BigQueryConn) GetSchemas() (iop.Dataset, error) {
 	// fields: [schema_name]
+	if conn.Client == nil {
+		if err := conn.Connect(); err != nil {
+			return iop.Dataset{}, err
+		}
+	}
 
 	// get list of datasets
 	it := conn.Client.Datasets(conn.Context().Ctx)

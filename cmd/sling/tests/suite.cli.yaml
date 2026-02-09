@@ -1899,3 +1899,11 @@
     - 'Primary key columns found'
     - 'Migrated rows: 1'
     - 'execution succeeded'
+
+- id: 196
+  name: Test SLING_STATE with BigQuery as state database
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.11.bigquery_state.yaml'
+  output_contains:
+    - 'setting incremental state'
+    - 'execution succeeded'
+    - 'BigQuery state_result =>'
