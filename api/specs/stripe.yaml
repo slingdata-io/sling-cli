@@ -3,27 +3,59 @@ description: "API for extracting data from Stripe payment processing platform. S
 
 # we declare queues for pass values between endpoints
 queues: 
+  - credit_note_ids
   - customer_ids
   - invoice_ids
-  - credit_note_ids
   - subscription_ids
+  - setup_intent_ids
+  
+  # updates from events
+  - customer_update_records
+  - charge_update_records
+  - coupon_update_records
+  - credit_note_update_records
+  - invoice_update_records
+  - payment_method_update_records
+  - payout_update_records
+  - refund_update_records
+  - customer_subscription_update_records
+  - customer_discount_update_records
 
 defaults:
   state:
-    base_url: "https://api.stripe.com/v1"
+    base_url: https://api.stripe.com/v1
     limit: 100
+    anchor_date: '{coalesce(date_parse(inputs.anchor_date), date_add(now(), -1, "year"))}'
+    anchor_unix: '{date_format(state.anchor_date, "%s")}'
   
   request:
     method: "GET"
+
     headers:
       Accept: "application/json"
       Authorization: Bearer {secrets.api_key}
       Content-Type: "application/json"
-      Stripe-Version: "2023-10-16"  # Can be overridden through secrets.api_version
+      Stripe-Version: '{ coalesce(secrets.api_version, "2023-10-16") }'  # Can be overridden through secrets.api_version
+
     parameters:
       limit: '{state.limit}'
+      starting_after: '{state.starting_after}'
+      created[gt]: '{state.created_gt}'
+    
     rate: 20        # Default rate limit of 20 requests per second to avoid hitting rate limits
     concurrency: 5  # Default concurrency of 5
+  
+  # Default response structure and primary key
+  response:
+    records:
+      jmespath: "data[]"
+      primary_key: ["id"]
+
+  # Use starting_after cursor pagination with created[gt] time filter
+  pagination:
+    next_state:
+      starting_after: '{ jmespath(response.records, "[-1].id") }'
+    stop_condition: jmespath(response.json, "has_more") == false || length(response.records) == 0
 
 endpoints:
 
@@ -33,62 +65,99 @@ endpoints:
     
     request:
       url: '{state.base_url}/accounts'
+      parameters: {}
     
-    response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
+    overrides:
+      mode: full-refresh
 
 
   charge:
     description: "Retrieve list of charges"
     docs: https://docs.stripe.com/api/charges
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/charges'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
 
 
   coupon:
     description: "Retrieve list of coupons"
     docs: https://docs.stripe.com/api/coupons
-    
+
+    state:
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/coupons'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
+        update_key: "created"
+
+      processors:
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "date_parse(record.redeem_by)"
+          output: "record.redeem_by_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+
+  dispute:
+    description: "Retrieve list of issuing disputes"
+    docs: https://docs.stripe.com/api/issuing/disputes
+
+    state:
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
+    request:
+      url: '{state.base_url}/issuing/disputes'
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+        update_key: "created"
+
+      processors:
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+      rules:
+        # ignore if account is not setup for disputes
+        - action: stop
+          condition: contains(response.text, "Your account is not set up to use Issuing.")
 
 
   credit_note:
@@ -97,16 +166,8 @@ endpoints:
     
     request:
       url: '{state.base_url}/credit_notes'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
 
       processors:
         - expression: "record.id"
@@ -126,10 +187,6 @@ endpoints:
       url: '{state.base_url}/credit_notes/{state.credit_note_id}/lines'
     
     response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
-      
       processors:
         - expression: "state.credit_note_id"
           output: "record.credit_note_id"
@@ -139,34 +196,28 @@ endpoints:
   customer:
     description: "Retrieve list of customers"
     docs: https://docs.stripe.com/api/customers
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
-      url: '{state.base_url}/customers'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+      url: '{state.base_url}/customers?expand[]=data.discount'
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
 
         - expression: "record.id"
           output: "queue.customer_ids"
@@ -184,46 +235,68 @@ endpoints:
       url: '{state.base_url}/customers/{state.customer_id}/balance_transactions'
     
     response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
-      
       processors:
         - expression: "state.customer_id"
           output: "record.customer_id"
 
-
   invoice:
     description: "Retrieve list of invoices"
     docs: https://docs.stripe.com/api/invoices
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
-      url: '{state.base_url}/invoices'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+      url: '{state.base_url}/invoices?expand[]=data.discounts'
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "date_parse(record.due_date)"
+          output: "record.due_date_date"
+
+        - expression: "date_parse(record.period_start)"
+          output: "record.period_start_date"
+
+        - expression: "date_parse(record.period_end)"
+          output: "record.period_end_date"
+
+        - expression: "date_parse(record.effective_at)"
+          output: "record.effective_at_date"
+
+        - expression: "date_parse(record.automatically_finalizes_at)"
+          output: "record.automatically_finalizes_at_date"
+
+        - expression: "date_parse(record.next_payment_attempt)"
+          output: "record.next_payment_attempt_date"
+
+        - expression: "date_parse(record.webhooks_delivered_at)"
+          output: "record.webhooks_delivered_at_date"
+
+        - expression: "date_parse(record.status_transitions.finalized_at)"
+          output: "record.status_transitions_finalized_at_date"
+
+        - expression: "date_parse(record.status_transitions.paid_at)"
+          output: "record.status_transitions_paid_at_date"
+
+        - expression: "date_parse(record.status_transitions.marked_uncollectible_at)"
+          output: "record.status_transitions_marked_uncollectible_at_date"
+
+        - expression: "date_parse(record.status_transitions.voided_at)"
+          output: "record.status_transitions_voided_at_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
 
         - expression: "record.id"
           output: "queue.invoice_ids"
@@ -233,34 +306,28 @@ endpoints:
   invoice_item:
     description: "Retrieve list of invoice items"
     docs: https://docs.stripe.com/api/invoiceitems
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/invoiceitems'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "date"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.date)"
+          output: "record.date_date"
+
+        - expression: "record.date"
+          output: "state.last_created"
+          aggregation: "maximum"
 
 
   invoice_line_item:
@@ -274,77 +341,88 @@ endpoints:
     
     request:
       url: '{state.base_url}/invoices/{state.invoice_id}/lines'
-    
-    response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
 
 
   payment_intent:
     description: "Retrieve list of payment intents"
     docs: https://docs.stripe.com/api/payment_intents
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/payment_intents'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "date_parse(record.canceled_at)"
+          output: "record.canceled_at_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+  payment_method:
+    description: "Retrieve list of payment methods"
+    docs: https://docs.stripe.com/api/payment_methods
+
+    # Note: This endpoint does NOT support created filtering
+    # Only supports: customer, type, limit, starting_after, ending_before
+
+    request:
+      url: '{state.base_url}/payment_methods'
+      parameters:
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
 
 
   payout:
     description: "Retrieve list of payouts"
     docs: https://docs.stripe.com/api/payouts
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/payouts'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "date_parse(record.arrival_date)"
+          output: "record.arrival_date_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
 
 
   plan:
@@ -354,138 +432,164 @@ endpoints:
     request:
       url: '{state.base_url}/plans'
     
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
-    response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
+    overrides:
+      mode: full-refresh
 
 
   price:
     description: "Retrieve list of prices"
     docs: https://docs.stripe.com/api/prices
     
-    state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-    
-    sync: [ last_id ]
-    
     request:
       url: '{state.base_url}/prices'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
     
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
-    response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
-      
-      processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+    overrides:
+      mode: full-refresh
 
 
   product:
     description: "Retrieve list of products"
     docs: https://docs.stripe.com/api/products
     
-    state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-    
-    sync: [ last_id ]
-    
     request:
       url: '{state.base_url}/products'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
     
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
-    response:
-      records:
-        jmespath: "data[]"
-        primary_key: ["id"]
-      
-      processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+    overrides:
+      mode: full-refresh
 
 
   refund:
     description: "Retrieve list of refunds"
     docs: https://docs.stripe.com/api/refunds
-    
+
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/refunds'
-      parameters:
-        limit: '{state.limit}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
 
 
+  setup_intent:
+    description: "Retrieve list of setup intents"
+    docs: https://docs.stripe.com/api/setup_intents
 
-  subscriptions:
-    description: "Retrieve subscriptions"
-    docs: https://docs.stripe.com/api/subscriptions
-    
     state:
-      limit: 100
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
+    request:
+      url: '{state.base_url}/setup_intents'
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+        update_key: "created"
+
+      processors:
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+        - expression: "record.id"
+          output: "queue.setup_intent_ids"
+
+
+  setup_attempt:
+    description: "Retrieve setup attempts for each setup intent"
+    docs: https://docs.stripe.com/api/setup_attempts
+
+    iterate:
+      over: "queue.setup_intent_ids"
+      into: "state.setup_intent_id"
     
     request:
-      url: '{state.base_url}/subscriptions'
-
+      url: '{state.base_url}/setup_attempts'
       parameters:
         limit: '{state.limit}'
+        ending_before: '{state.ending_before}'
         starting_after: '{state.starting_after}'
-    
-    pagination:
-      next_state:
-        starting_after: '{response.records[-1].id}'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+        setup_intent: '{state.setup_intent_id}'
+
+    response:
+      processors:
+        - expression: "state.setup_intent_id"
+          output: "record.setup_intent_id"
+
+
+  subscription:
+    description: "Retrieve subscriptions"
+    docs: https://docs.stripe.com/api/subscriptions
+
+    state:
+      created_gt: '{coalesce(sync.last_created, state.anchor_unix)}'
+
+    sync: [last_created]
+
+    request:
+      url: '{state.base_url}/subscriptions?status=all&expand[]=data.discounts'
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "date_parse(record.billing_cycle_anchor)"
+          output: "record.billing_cycle_anchor_date"
+
+        - expression: "date_parse(record.cancel_at)"
+          output: "record.cancel_at_date"
+
+        - expression: "date_parse(record.canceled_at)"
+          output: "record.canceled_at_date"
+
+        - expression: "date_parse(record.current_period_start)"
+          output: "record.current_period_start_date"
+
+        - expression: "date_parse(record.current_period_end)"
+          output: "record.current_period_end_date"
+
+        - expression: "date_parse(record.ended_at)"
+          output: "record.ended_at_date"
+
+        - expression: "date_parse(record.start_date)"
+          output: "record.start_date_date"
+
+        - expression: "date_parse(record.trial_start)"
+          output: "record.trial_start_date"
+
+        - expression: "date_parse(record.trial_end)"
+          output: "record.trial_end_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
         - expression: record.id
           output: queue.subscription_ids
 
@@ -502,13 +606,11 @@ endpoints:
       url: '{state.base_url}/subscription_items'
 
       parameters:
-        limit: null # remove default
         subscription: '{state.subscription_id}'
         
     
     response:
       records:
-        jmespath: "data[]"
         primary_key: [ subscription_id, id ]
       
       processors:
@@ -516,42 +618,393 @@ endpoints:
           output: "record.subscription_id"
 
 
-  events:
+  event:
     description: "Retrieve events"
     docs: https://docs.stripe.com/api/events
-    
+
+    # since we're using queues below to process updates
+    # we need the end tables to be loaded prior
+    depends_on: [
+      customer, charge, coupon,
+      credit_note, invoice, payment_method,
+      payout, refund, subscription,
+      discount,
+    ]
+
     state:
-      ending_before: '{ sync.last_id }'  # will be null on first run
-      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
-    
-    sync: [ last_id ]
-    
+      # Events only available for 30 days, so use 30-day lookback instead of anchor_date
+      created_gt: '{coalesce(sync.last_created, date_format(date_add(now(), -30, "day"), "%s"))}'
+
+    sync: [last_created]
+
     request:
       url: '{state.base_url}/events'
-      parameters:
-        limit: '{state.limit}'
-        ending_before: '{state.ending_before}'
-        starting_after: '{state.starting_after}'
-        # created[gte]: '{state.created_gte}'
-        # types: customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
-    
-    # Strange pagination logic:
-    # on first run (no `sync.last_id` value), the most recent event is first,
-    # so we have to use `starting_after` to paginate through all the records.
-    # on incremental run (with a `sync.last_id` value), in order to get the
-    # records created after the last known event ID, we have to use `ending_before`
-    pagination:
-      next_state:
-        starting_after: '{ is_null(sync.last_id) ? response.records[length(response.records)-1].id : nil }'
-        ending_before: '{ !is_null(sync.last_id) ? response.records[0].id : nil }'
-      stop_condition: "response.json.has_more == false || length(response.records) < 1"
-    
+
+    overrides:
+      mode: incremental # never delete old records, stripe only allows export 30 days of events.
+
     response:
       records:
         jmespath: "data[]"
         primary_key: ["id"]
-      
+        update_key: "created"
+
       processors:
-        - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "first"
+        - expression: "date_parse(record.created)"
+          output: "record.created_date"
+
+        - expression: "record.created"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+        - if: record.type == "customer.updated"
+          expression: record.data.object
+          output: "queue.customer_update_records"
+
+        - if: record.type == "charge.updated"
+          expression: record.data.object
+          output: "queue.charge_update_records"
+
+        - if: record.type == "coupon.updated"
+          expression: record.data.object
+          output: "queue.coupon_update_records"
+
+        - if: record.type == "credit_note.updated"
+          expression: record.data.object
+          output: "queue.credit_note_update_records"
+
+        - if: record.type == "invoice.updated"
+          expression: record.data.object
+          output: "queue.invoice_update_records"
+
+        - if: record.type == "payment_method.updated"
+          expression: record.data.object
+          output: "queue.payment_method_update_records"
+
+        - if: record.type == "payout.updated"
+          expression: record.data.object
+          output: "queue.payout_update_records"
+
+        - if: record.type == "refund.updated"
+          expression: record.data.object
+          output: "queue.refund_update_records"
+
+        - if: record.type == "customer.subscription.updated"
+          expression: record.data.object
+          output: "queue.customer_subscription_update_records"
+
+        - if: record.type == "customer.discount.updated"
+          expression: record.data.object
+          output: "queue.customer_discount_update_records"
+
+  customer_update:
+    description: "Retrieve customer updates via events"
+
+    iterate:
+      over: "queue.customer_update_records"
+      into: "response.records"
+
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["customer"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            id: customer-update-merge
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["customer"].object.full_name }'
+              primary_key: [ id ]
+          
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+  
+  charge_update:
+    description: "Retrieve charge updates via events"
+    iterate:
+      over: queue.charge_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["charge"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["charge"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  coupon_update:
+    description: "Retrieve coupon updates via events"
+    iterate:
+      over: queue.coupon_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["coupon"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["coupon"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  credit_note_update:
+    description: "Retrieve credit note updates via events"
+    iterate:
+      over: queue.credit_note_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["credit_note"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["credit_note"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  invoice_update:
+    description: "Retrieve invoice updates via events"
+    iterate:
+      over: queue.invoice_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["invoice"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["invoice"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  payment_method_update:
+    description: "Retrieve payment_method updates via events"
+    iterate:
+      over: queue.payment_method_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["payment_method"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["payment_method"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  payout_update:
+    description: "Retrieve payout updates via events"
+    iterate:
+      over: queue.payout_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["payout"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["payout"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  refund_update:
+    description: "Retrieve refund updates via events"
+    iterate:
+      over: queue.refund_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["refund"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["refund"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  customer_subscription_update:
+    description: "Retrieve subscription updates via events"
+    iterate:
+      over: queue.customer_subscription_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["subscription"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["subscription"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
+
+  customer_discount_update:
+    description: "Retrieve discount updates via events"
+    iterate:
+      over: queue.customer_discount_update_records
+      into: response.records
+    
+    overrides:
+      mode: full-refresh
+      hooks:
+        post:
+          - type: check
+            check: '!is_null(runs["discount"]) && run.total_rows > 0'
+            failure_message: no records to merge
+            on_failure: break
+
+          - type: query
+            connection: '{target.name}'
+            operation: merge
+            on_failure: abort
+            params:
+              strategy: update
+              source_table: '{ run.object.full_name }'
+              target_table: '{ runs["discount"].object.full_name }'
+              primary_key: [ id ]
+
+          - type: query
+            connection: '{target.name}'
+            operation: drop_table
+            params:
+              table: '{ run.object.full_name }'
