@@ -391,7 +391,7 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 	}
 
 	// Create JSON stream iterator
-	js := iop.NewJSONStream(ds, decoder, flatten, conn.GetProp("jmespath"))
+	js := iop.NewJSONStream(ds, decoder, flatten, conn.GetProp("jmespath"), conn.GetProp("jq"))
 	js.HasMapPayload = true
 
 	// Set up the iterator

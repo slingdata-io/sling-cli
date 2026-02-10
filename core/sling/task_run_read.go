@@ -454,6 +454,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 	sCfg := api.APIStreamConfig{
 		Flatten:     cfg.Source.Flatten(),
 		JmesPath:    g.PtrVal(cfg.Source.Options.JmesPath),
+		Jq:          g.PtrVal(cfg.Source.Options.Jq),
 		Select:      cfg.Source.Select,
 		PrimaryKey:  cfg.Source.PrimaryKey(),
 		Limit:       cfg.Source.Limit(),

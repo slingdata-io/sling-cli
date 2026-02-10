@@ -67,6 +67,7 @@ type StreamConfig struct {
 	Flatten         int            `json:"flatten"`
 	FieldsPerRec    int            `json:"fields_per_rec"`
 	Jmespath        string         `json:"jmespath"`
+	Jq              string         `json:"jq"`
 	Sheet           string         `json:"sheet"`
 	ColumnCasing    ColumnCasing   `json:"column_casing"`
 	ColumnTyping    ColumnTyping   `json:"column_typing"`
@@ -384,6 +385,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["jmespath"]; ok {
 		sp.Config.Jmespath = cast.ToString(val)
+	}
+
+	if val, ok := configMap["jq"]; ok {
+		sp.Config.Jq = cast.ToString(val)
 	}
 
 	if val, ok := configMap["sheet"]; ok {

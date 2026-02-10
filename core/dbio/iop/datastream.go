@@ -1124,7 +1124,7 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 	}
 
 	decoder := json.NewDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath, ds.Sp.Config.Jq)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -1149,7 +1149,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	}
 
 	decoder := NewXMLDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath, ds.Sp.Config.Jq)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -1188,7 +1188,7 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 		} else {
 			decoder = json.NewDecoder(reader2)
 		}
-		jsNew := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
+		jsNew := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath, ds.Sp.Config.Jq)
 
 		return jsNew, nil
 	}

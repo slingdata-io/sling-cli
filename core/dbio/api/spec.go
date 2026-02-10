@@ -1170,6 +1170,7 @@ func parseSequenceFromInterface(v interface{}) Sequence {
 // Records configures how to extract and process data records from a response
 type Records struct {
 	JmesPath   string   `yaml:"jmespath" json:"jmespath,omitempty"` // for json or xml
+	Jq         string   `yaml:"jq" json:"jq,omitempty"`
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
 	UpdateKey  string   `yaml:"update_key" json:"update_key,omitempty"`
 	Limit      int      `yaml:"limit" json:"limit,omitempty"`   // to limit the records, useful for testing

@@ -1907,3 +1907,12 @@
     - 'setting incremental state'
     - 'execution succeeded'
     - 'BigQuery state_result =>'
+
+- id: 197
+  name: Test jq source option and jq() transform function
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.12.jq.yaml'
+  output_contains:
+    - 'jq replication row count =>'
+    - 'jq source option line count =>'
+    - 'jq() function result =>'
+    - 'execution succeeded'

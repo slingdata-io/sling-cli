@@ -219,6 +219,7 @@ func (ac *APIConnection) CompileEndpoints() (compiledEndpoints Endpoints, err er
 type APIStreamConfig struct {
 	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
+	Jq          string
 	Select      []string // select specific columns
 	PrimaryKey  []string
 	Limit       int

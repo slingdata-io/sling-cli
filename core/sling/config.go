@@ -1541,6 +1541,7 @@ type SourceOptions struct {
 	Quote          string              `json:"quote,omitempty" yaml:"quote,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
+	Jq             *string             `json:"jq,omitempty" yaml:"jq,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
@@ -1759,6 +1760,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.JmesPath == nil {
 		o.JmesPath = sourceOptions.JmesPath
+	}
+	if o.Jq == nil {
+		o.Jq = sourceOptions.Jq
 	}
 	if o.Sheet == nil {
 		o.Sheet = sourceOptions.Sheet
