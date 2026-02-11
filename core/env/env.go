@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
@@ -120,6 +123,14 @@ func init() {
 	}
 
 	TelMap["parent"] = g.Marshal(process.GetParent())
+
+	// we need a webserver to get the pprof webserver
+	if cast.ToBool(os.Getenv("SLING_PPROF")) {
+		go func() {
+			g.Debug("Starting pprof webserver @ localhost:6060")
+			g.LogError(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
 }
 
 func HomeBinDir() string {
