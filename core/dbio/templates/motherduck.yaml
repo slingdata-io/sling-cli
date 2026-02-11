@@ -14,17 +14,19 @@ core:
 metadata:
   databases: PRAGMA database_list
   
-  current_database: PRAGMA database_list
+  current_database: select current_database()
 
   schemas: |
     select distinct schema_name
     from information_schema.schemata
+    where catalog_name = current_database()
     order by schema_name
 
   tables: |
     select table_schema as schema_name, table_name, 'false' as is_view
     from information_schema.tables
-    where table_type = 'BASE TABLE'
+    where table_catalog = current_database()
+      and table_type = 'BASE TABLE'
       {{if .schema -}} and table_schema = '{schema}' {{- end}}
     order by table_schema, table_name
 
@@ -32,14 +34,16 @@ metadata:
   views: |
     select table_schema as schema_name, table_name, 'true' as is_view
     from information_schema.tables
-    where table_type in ('VIEW')
+    where table_catalog = current_database()
+      and table_type in ('VIEW')
       {{if .schema -}} and table_schema = '{schema}' {{- end}}
     order by table_schema, table_name
 
   columns: |
     select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
     from information_schema.columns
-    where table_schema = '{schema}'
+    where table_catalog = current_database()
+      and table_schema = '{schema}'
       and table_name = '{table}'
     order by ordinal_position
 
@@ -48,15 +52,17 @@ metadata:
            constraint_index as position,
            replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
     from duckdb_constraints()
-    where table_schema = '{schema}'
+    where database_name = current_database()
+      and table_schema = '{schema}'
       and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
-  
+
   indexes: |
     select index_name as index_name,
            sql as column_name
     from duckdb_indexes()
-    where table_schema = '{schema}'
+    where database_name = current_database()
+      and table_schema = '{schema}'
       and table_name = '{table}'
 
   columns_full: |
@@ -71,7 +77,8 @@ metadata:
           else false
         end as is_view
       from information_schema.tables
-      where table_schema = '{schema}'
+      where table_catalog = current_database()
+        and table_schema = '{schema}'
         and table_name = '{table}'
     )
     select
@@ -82,10 +89,11 @@ metadata:
       cols.ordinal_position as position
     from information_schema.columns cols
     join tables_cte
-      on tables_cte.table_schema = cols.table_schema
+      on tables_cte.table_catalog = cols.table_catalog
+      and tables_cte.table_schema = cols.table_schema
       and tables_cte.table_name = cols.table_name
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
-  
+
   schemata: |
     with tables_cte as (
       select
@@ -97,7 +105,7 @@ metadata:
           else false
         end as is_view
       from information_schema.tables
-      where 1=1
+      where table_catalog = current_database()
         {{if .schema -}} and table_schema = '{schema}' {{- end}}
         {{if .tables -}} and table_name in ({tables}) {{- end}}
     )
@@ -110,7 +118,8 @@ metadata:
       cols.ordinal_position as position
     from information_schema.columns cols
     join tables_cte
-      on tables_cte.table_schema = cols.table_schema
+      on tables_cte.table_catalog = cols.table_catalog
+      and tables_cte.table_schema = cols.table_schema
       and tables_cte.table_name = cols.table_name
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
   
