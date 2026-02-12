@@ -1298,13 +1298,16 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	// wait for local server startup
 	importContext.Wg.Read.Wait()
 	time.Sleep(100 * time.Millisecond)
-	df.Defer(func() { server.Shutdown(importContext.Ctx) })
-
 	df.SetBatchLimit(sc.BatchLimit)
 	ds := MergeDataflow(df)
 
 	go func() {
 		defer close(streamPartChn)
+		defer func() {
+			// Shut down HTTP server immediately after all batches are processed
+			// to prevent interference with subsequent DuckDB queries
+			server.Shutdown(importContext.Ctx)
+		}()
 		var partIndex int
 
 		if format == dbio.FileTypeArrow {
