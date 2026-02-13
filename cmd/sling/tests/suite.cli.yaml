@@ -1922,3 +1922,12 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.13.duckdb_s3_secret.yaml'
   output_contains:
     - 'wrote 3 rows'
+
+- id: 199
+  name: Test ClickHouse backfill with 0 matching rows (issue 701)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.105.clickhouse_empty_backfill.yaml'
+  streams: 1
+  output_contains:
+    - 'no new data found in source stream'
+    - 'execution succeeded'
+    - 'SUCCESS: backfill with 0 rows did not error'

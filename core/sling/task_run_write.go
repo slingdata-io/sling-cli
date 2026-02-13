@@ -165,6 +165,16 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Detect empty columns
 	if len(df.Columns) == 0 {
+		df.Collect()
+
+		// When source is a database, zero columns typically means the query returned
+		// zero rows and the driver did not provide column metadata (e.g. ClickHouse HTTP).
+		// This is a normal condition for backfill/incremental with no matching data.
+		if cfg.SrcConn.Type.IsDb() {
+			g.Info("no new data found in source stream.")
+			return 0, nil
+		}
+
 		err = g.Error("no stream columns detected")
 		return 0, err
 	} else if df.Columns[0].Name == "_sling_api_stream_no_data_" {
