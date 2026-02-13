@@ -642,6 +642,8 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
+		state.Store["_replication_total_rows"] = state.Execution.TotalRows
+		state.Store["_replication_total_bytes"] = state.Execution.TotalBytes
 		sling.SetPipelineStoreEnv(state.Store)
 	}
 
