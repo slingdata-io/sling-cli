@@ -210,7 +210,6 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 	var secretKeyMap map[string]string
 	var secretType DuckDbSecretType
-	secretProps := []string{}
 	scopeScheme := scheme.String()
 
 	switch scheme {
@@ -232,8 +231,6 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
 			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
-			secretProps = append(secretProps, g.F("ACCOUNT_ID '%s'", accountID))
-			// Add ACCOUNT_ID to fsProps so it gets picked up later
 			fsProps["ACCOUNT_ID"] = accountID
 			secretKeyMap["ACCOUNT_ID"] = "ACCOUNT_ID"
 			scopeScheme = "r2"
@@ -253,12 +250,25 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "http://")
 		}
 
-		// add default provider chain (https://duckdb.org/docs/extensions/httpfs/s3api.html#credential_chain-provider)
-		s3DefaultSecret := NewDuckDbSecret(
-			"s3_default", DuckDbSecretTypeS3,
-			map[string]string{"provider": "credential_chain", "chain": "env;config"},
-		)
-		duck.AddSecret(s3DefaultSecret)
+		// default region to us-east-1 if not set (matches S3 client behavior)
+		if fsProps["REGION"] == "" {
+			fsProps["REGION"] = "us-east-1"
+		}
+
+		// Only add default credential chain if no explicit credentials are provided.
+		// When explicit creds exist, they'll be used via the named secret below.
+		hasExplicitCreds := fsProps["ACCESS_KEY_ID"] != "" && fsProps["SECRET_ACCESS_KEY"] != ""
+		if !hasExplicitCreds {
+			chain := "env;config"
+			if strings.EqualFold(fsProps["USE_ENVIRONMENT"], "false") {
+				chain = "config"
+			}
+			s3DefaultSecret := NewDuckDbSecret(
+				"s3_default", DuckDbSecretTypeS3,
+				map[string]string{"provider": "credential_chain", "chain": chain},
+			)
+			duck.AddSecret(s3DefaultSecret)
+		}
 
 	case dbio.TypeFileGoogle:
 		secretKeyMap = map[string]string{
@@ -311,7 +321,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 	}
 
 	// populate secret props and make secret sql
-	if len(secretProps) > 0 {
+	if secretKeyMap != nil {
 		props := map[string]string{}
 		for slingKey, duckdbKey := range secretKeyMap {
 			if val := fsProps[slingKey]; val != "" {
@@ -321,8 +331,10 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 				props[duckdbKey] = val
 			}
 		}
-		secret := NewDuckDbSecret(g.F("%s_secret", secretType), secretType, props)
-		duck.AddSecret(secret)
+		if len(props) > 0 {
+			secret := NewDuckDbSecret(g.F("%s_secret", secretType), secretType, props)
+			duck.AddSecret(secret)
+		}
 	}
 
 	return uri

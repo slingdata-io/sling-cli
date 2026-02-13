@@ -1916,3 +1916,9 @@
     - 'jq source option line count =>'
     - 'jq() function result =>'
     - 'execution succeeded'
+
+- id: 198
+  name: Test DuckDB S3 secret with explicit credentials (issue 705)
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.13.duckdb_s3_secret.yaml'
+  output_contains:
+    - 'wrote 3 rows'
