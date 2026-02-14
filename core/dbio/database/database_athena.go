@@ -841,46 +841,11 @@ func (conn *AthenaConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	return conn.BulkImportFlow(tableFName, df)
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the merge SQL using the database default strategy.
+// Standard Athena tables only support insert strategy (no DELETE/UPDATE/MERGE support).
+// Use Iceberg tables (TypeDbIceberg) for full merge support including delete_insert.
 func (conn *AthenaConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	srcTgtPkEqual := strings.ReplaceAll(
-		upsertMap["src_tgt_pk_equal"], "src.", srcTable+".",
-	)
-	srcTgtPkEqual = strings.ReplaceAll(
-		srcTgtPkEqual, "tgt.", tgtTable+".",
-	)
-
-	// Athena doesn't support MERGE statement
-	// Instead we'll use DELETE + INSERT pattern
-	sqlTempl := `
-	DELETE FROM {tgt_table}
-	WHERE EXISTS (
-		SELECT 1
-		FROM {src_table}
-		WHERE {src_tgt_pk_equal}
-	);
-
-	INSERT INTO {tgt_table}
-		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table}
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
-		"src_tgt_pk_equal", srcTgtPkEqual,
-	)
-	return
+	return conn.BaseConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
 }
 
 // LoadFromS3 creates a temporary external table pointing to S3, then inserts into the target table

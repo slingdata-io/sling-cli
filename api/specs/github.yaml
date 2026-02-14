@@ -1,0 +1,1182 @@
+name: "GitHub API"
+description: "API for extracting data from GitHub repositories. See https://docs.github.com/en/rest."
+
+# Queues for parent-child relationships
+queues:
+  - issue_keys           # {repo, number} for issue children
+  - issue_comment_ids    # {repo, id} for comment reactions
+  - commit_keys          # {repo, sha} for commit comments
+  - commit_comment_ids   # {repo, id} for commit comment reactions
+  - pull_keys            # {repo, number} for PR children
+  - review_comment_ids   # {repo, id} for PR comment reactions
+  - project_ids          # For project columns
+  - column_ids           # For project cards
+
+authentication:
+  headers:
+    Authorization: 'Bearer {require(secrets.access_token, "access_token required in secrets")}'
+    
+defaults:
+  state:
+    base_url: "https://api.github.com"
+    owner: '{require(inputs.owner, "owner required in inputs (org or username)")}'
+    anchor_date: '{coalesce(date_parse(inputs.anchor_date), date_format(date_add(now(), -1, "year"), "%Y-%m-%dT%H:%M:%SZ"))}'
+    per_page: 100
+    page: 1
+
+  request:
+    method: "GET"
+    headers:
+      Accept: "application/vnd.github+json"
+      X-GitHub-Api-Version: "2022-11-28"
+    rate: 10
+    concurrency: 3
+
+  response:
+    records:
+      jmespath: "[]"
+      primary_key: ["id"]
+
+    rules:
+      - action: "retry"
+        condition: "response.status == 429"
+        max_attempts: 5
+        backoff: "exponential"
+        backoff_base: 2
+
+      - action: break
+        condition: response.status == 422
+        message: "stopping iteration due to code 422 (Unprocessable Content)"
+
+      - action: "stop"
+        condition: response.status == 403 && request.attempts > 5
+
+      - action: "retry"
+        condition: 'response.status == 403 && contains(response.text, "rate limit")'
+        max_attempts: 5
+        backoff: linear
+        backoff_base: 60
+
+      - action: "retry"
+        condition: "response.status >= 500"
+        max_attempts: 3
+        backoff: "exponential"
+        backoff_base: 2
+
+  pagination:
+    next_state:
+      page: "{state.page + 1}"
+    stop_condition: "length(response.records) < state.per_page"
+  
+  setup:
+    - request:
+        url: '{state.base_url}/rate_limit'
+      
+      response:
+        records:
+          jmespath: rate
+        
+        processors:
+          - expression: log(record)
+
+          - expression: record.remaining
+            output: state.quota_remaining
+            aggregation: last
+        
+        rules:
+          - action: stop
+            condition: state.quota_remaining < 500
+            message: Stopping due to low quota
+
+endpoints:
+
+  # =============================================================================
+  # TIER 1: PARENT ENDPOINTS (No Dependencies)
+  # =============================================================================
+
+  organizations:
+    description: "Retrieve organizations for the authenticated user"
+    docs: "https://docs.github.com/en/rest/orgs/orgs#list-organizations-for-the-authenticated-user"
+
+    request:
+      url: "{state.base_url}/user/orgs"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+
+  users:
+    description: "Retrieve user information for the owner"
+    docs: "https://docs.github.com/en/rest/users/users#get-a-user"
+
+    request:
+      url: "{state.base_url}/users/{state.owner}"
+      parameters: {}
+
+    pagination: {}
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[{id: id, login: login, name: name, email: email, type: type, company: company, blog: blog, location: location, bio: bio, public_repos: public_repos, public_gists: public_gists, followers: followers, following: following, created_at: created_at, updated_at: updated_at}]"
+        primary_key: ["id"]
+
+
+  repositories:
+    description: "Retrieve repository information for configured repositories"
+    docs: "https://docs.github.com/en/rest/repos/repos#get-a-repository"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}"
+      parameters: {}
+
+    pagination: {}
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[{id: id, name: name, full_name: full_name, owner_login: owner.login, private: private, description: description, fork: fork, created_at: created_at, updated_at: updated_at, pushed_at: pushed_at, homepage: homepage, size: size, stargazers_count: stargazers_count, watchers_count: watchers_count, language: language, forks_count: forks_count, archived: archived, disabled: disabled, open_issues_count: open_issues_count, license_name: license.name, topics: topics, visibility: visibility, default_branch: default_branch}]"
+        primary_key: ["id"]
+
+
+  # =============================================================================
+  # TIER 2: REPOSITORY-SCOPED FULL REFRESH
+  # =============================================================================
+
+  assignees:
+    description: "Retrieve available assignees for issues in each repository"
+    docs: "https://docs.github.com/en/rest/issues/assignees#list-assignees"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/assignees"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  branches:
+    description: "Retrieve branches for each repository"
+    docs: "https://docs.github.com/en/rest/branches/branches#list-branches"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/branches"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["name"]
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  collaborators:
+    description: "Retrieve collaborators for each repository"
+    docs: "https://docs.github.com/en/rest/collaborators/collaborators#list-repository-collaborators"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/collaborators"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  issue_labels:
+    description: "Retrieve labels for issues in each repository"
+    docs: "https://docs.github.com/en/rest/issues/labels#list-labels-for-a-repository"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/labels"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  tags:
+    description: "Retrieve tags for each repository"
+    docs: "https://docs.github.com/en/rest/repos/repos#list-repository-tags"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/tags"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["name"]
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  teams:
+    description: "Retrieve teams for the organization"
+    docs: "https://docs.github.com/en/rest/teams/teams#list-teams"
+
+    request:
+      url: "{state.base_url}/orgs/{state.owner}/teams"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      rules:
+        # Ignore if owner is not an organization
+        - action: stop
+          condition: 'response.status == 404'
+
+
+  # =============================================================================
+  # TIER 2: REPOSITORY-SCOPED INCREMENTAL
+  # =============================================================================
+
+  commits:
+    description: "Retrieve commits for each repository"
+    docs: "https://docs.github.com/en/rest/commits/commits#list-commits"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/commits"
+      parameters:
+        since: "{state.since}"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["sha"]
+        update_key: "commit.committer.date"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.commit.committer.date"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: 'object("repo", trim(state.repo), "sha", record.sha)'
+          output: "queue.commit_keys"
+
+
+  issues:
+    description: "Retrieve issues for each repository (includes pull requests)"
+    docs: "https://docs.github.com/en/rest/issues/issues#list-repository-issues"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/issues"
+      parameters:
+        state: "all"
+        since: "{state.since}"
+        sort: "updated"
+        direction: "asc"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: 'object("repo", trim(state.repo), "number", record.number)'
+          output: "queue.issue_keys"
+
+
+  pull_requests:
+    description: "Retrieve pull requests for each repository"
+    docs: "https://docs.github.com/en/rest/pulls/pulls#list-pull-requests"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/pulls"
+      parameters:
+        state: "all"
+        sort: "updated"
+        direction: "asc"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: 'object("repo", trim(state.repo), "number", record.number)'
+          output: "queue.pull_keys"
+
+
+  releases:
+    description: "Retrieve releases for each repository"
+    docs: "https://docs.github.com/en/rest/releases/releases#list-releases"
+
+    state:
+      since: '{coalesce(sync.last_published, date_format(date_add(now(), -365, "day"), "%Y-%m-%dT%H:%M:%SZ"))}'
+
+    sync: [last_published]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/releases"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "published_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.published_at"
+          output: "state.last_published"
+          aggregation: "maximum"
+
+
+  deployments:
+    description: "Retrieve deployments for each repository"
+    docs: "https://docs.github.com/en/rest/deployments/deployments#list-deployments"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/deployments"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+
+  events:
+    description: "Retrieve events for each repository"
+    docs: "https://docs.github.com/en/rest/activity/events#list-repository-events"
+
+    state:
+      since: '{coalesce(sync.last_created, state.anchor_date)}'
+
+    sync: [last_created]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/events"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "created_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.created_at"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+
+  issue_milestones:
+    description: "Retrieve milestones for each repository"
+    docs: "https://docs.github.com/en/rest/issues/milestones#list-milestones"
+
+    state:
+      since: '{coalesce(sync.last_updated, date_format(date_add(now(), -365, "day"), "%Y-%m-%dT%H:%M:%SZ"))}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/milestones"
+      parameters:
+        state: "all"
+        sort: "updated_at"
+        direction: "asc"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+
+  projects:
+    description: "Retrieve projects for each repository"
+    docs: "https://docs.github.com/en/rest/projects/projects#list-repository-projects"
+
+    state:
+      since: '{coalesce(sync.last_updated, date_format(date_add(now(), -365, "day"), "%Y-%m-%dT%H:%M:%SZ"))}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/projects"
+      headers:
+        Accept: "application/vnd.github.inertia-preview+json"
+      parameters:
+        state: "all"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: "record.id"
+          output: "queue.project_ids"
+
+      rules:
+        # Projects API may be disabled or return 404
+        - action: stop
+          condition: "response.status == 410 || response.status == 404"
+
+
+  stargazers:
+    description: "Retrieve stargazers for each repository with timestamps"
+    docs: "https://docs.github.com/en/rest/activity/starring#list-stargazers"
+
+    # Note: GitHub stargazers API does not support filtering by date,
+    # so this endpoint is full-refresh only
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/stargazers"
+      headers:
+        Accept: "application/vnd.github.star+json"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[].{starred_at: starred_at, user_id: user.id, user_login: user.login, user_avatar_url: user.avatar_url, user_type: user.type}"
+        primary_key: ["user_id"]
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+      rules:
+        # May return 404 if repo is not accessible or private
+        - action: stop
+          condition: "response.status == 404"
+
+
+  workflows:
+    description: "Retrieve workflow definitions for each repository"
+    docs: "https://docs.github.com/en/rest/actions/workflows#list-repository-workflows"
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/actions/workflows"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "workflows[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+
+  workflow_runs:
+    description: "Retrieve workflow runs for each repository"
+    docs: "https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository"
+
+    state:
+      since: '{coalesce(sync.last_created, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%SZ"))}'
+
+    sync: [last_created]
+
+    iterate:
+      over: 'require(inputs.repositories, "inputs.repositories required")'
+      into: "state.repo"
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{trim(state.repo)}/actions/runs"
+      parameters:
+        created: ">={state.since}"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "workflow_runs[]"
+        primary_key: ["id"]
+        update_key: "created_at"
+
+      processors:
+        - expression: "trim(state.repo)"
+          output: "record.repository"
+
+        - expression: "record.created_at"
+          output: "state.last_created"
+          aggregation: "maximum"
+
+
+  # =============================================================================
+  # TIER 3: CHILD ENDPOINTS (Queue-based iteration)
+  # =============================================================================
+
+  comments:
+    description: "Retrieve comments for issues"
+    docs: "https://docs.github.com/en/rest/issues/comments#list-issue-comments"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: "queue.issue_keys"
+      into: "state.issue"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.issue.repo}/issues/{state.issue.number}/comments"
+      parameters:
+        since: "{state.since}"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "state.issue.repo"
+          output: "record.repository"
+
+        - expression: "state.issue.number"
+          output: "record.issue_number"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: 'object("repo", state.issue.repo, "id", record.id)'
+          output: "queue.issue_comment_ids"
+
+
+  issue_events:
+    description: "Retrieve events for issues"
+    docs: "https://docs.github.com/en/rest/issues/events#list-issue-events"
+
+    iterate:
+      over: "queue.issue_keys"
+      into: "state.issue"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.issue.repo}/issues/{state.issue.number}/events"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.issue.repo"
+          output: "record.repository"
+
+        - expression: "state.issue.number"
+          output: "record.issue_number"
+
+
+  issue_reactions:
+    description: "Retrieve reactions for issues"
+    docs: "https://docs.github.com/en/rest/reactions/reactions#list-reactions-for-an-issue"
+
+    iterate:
+      over: "queue.issue_keys"
+      into: "state.issue"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.issue.repo}/issues/{state.issue.number}/reactions"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.issue.repo"
+          output: "record.repository"
+
+        - expression: "state.issue.number"
+          output: "record.issue_number"
+      
+      +rules:
+        - action: break
+          condition: response.status == 403
+
+
+  issue_timeline:
+    description: "Retrieve timeline events for issues"
+    docs: "https://docs.github.com/en/rest/issues/timeline#list-timeline-events-for-an-issue"
+
+    iterate:
+      over: "coalesce(context.store.issue_timeline_records, queue.issue_keys)"
+      into: "state.issue"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.issue.repo}/issues/{state.issue.number}/timeline"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    # need to full refresh since issue_timeline has no time filters
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: [] # no primary key
+
+      processors:
+        - expression: "state.issue.repo"
+          output: "record.repository"
+
+        - expression: "state.issue.number"
+          output: "record.issue_number"
+      
+      +rules:
+        - action: break
+          condition: response.status == 403     
+
+
+  commit_comments:
+    description: "Retrieve comments for commits"
+    docs: "https://docs.github.com/en/rest/commits/comments#list-commit-comments"
+
+    iterate:
+      over: "queue.commit_keys"
+      into: "state.commit"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.commit.repo}/commits/{state.commit.sha}/comments"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.commit.repo"
+          output: "record.repository"
+
+        - expression: "state.commit.sha"
+          output: "record.commit_sha"
+
+        - expression: 'object("repo", state.commit.repo, "id", record.id)'
+          output: "queue.commit_comment_ids"
+
+
+  pull_request_commits:
+    description: "Retrieve commits for pull requests"
+    docs: "https://docs.github.com/en/rest/pulls/pulls#list-commits-on-a-pull-request"
+
+    iterate:
+      over: "queue.pull_keys"
+      into: "state.pull"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.pull.repo}/pulls/{state.pull.number}/commits"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["sha"]
+
+      processors:
+        - expression: "state.pull.repo"
+          output: "record.repository"
+
+        - expression: "state.pull.number"
+          output: "record.pull_number"
+
+
+  pull_request_stats:
+    description: "Retrieve detailed statistics for each pull request"
+    docs: "https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request"
+
+    iterate:
+      over: "queue.pull_keys"
+      into: "state.pull"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.pull.repo}/pulls/{state.pull.number}"
+      parameters: {}
+
+    pagination: {}
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[{id: id, number: number, additions: additions, deletions: deletions, changed_files: changed_files, commits: commits, comments: comments, review_comments: review_comments, mergeable: mergeable, mergeable_state: mergeable_state, merged: merged, merged_by_login: merged_by.login, merged_at: merged_at}]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.pull.repo"
+          output: "record.repository"
+
+
+  reviews:
+    description: "Retrieve reviews for pull requests"
+    docs: "https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request"
+
+    iterate:
+      over: "queue.pull_keys"
+      into: "state.pull"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.pull.repo}/pulls/{state.pull.number}/reviews"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.pull.repo"
+          output: "record.repository"
+
+        - expression: "state.pull.number"
+          output: "record.pull_number"
+
+
+  review_comments:
+    description: "Retrieve review comments for pull requests"
+    docs: "https://docs.github.com/en/rest/pulls/comments#list-review-comments-on-a-pull-request"
+
+    state:
+      since: '{coalesce(sync.last_updated, state.anchor_date)}'
+
+    sync: [last_updated]
+
+    iterate:
+      over: "queue.pull_keys"
+      into: "state.pull"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.pull.repo}/pulls/{state.pull.number}/comments"
+      parameters:
+        since: "{state.since}"
+        sort: "updated"
+        direction: "asc"
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+
+      processors:
+        - expression: "state.pull.repo"
+          output: "record.repository"
+
+        - expression: "state.pull.number"
+          output: "record.pull_number"
+
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+
+        - expression: 'object("repo", state.pull.repo, "id", record.id)'
+          output: "queue.review_comment_ids"
+
+
+  project_columns:
+    description: "Retrieve columns for projects"
+    docs: "https://docs.github.com/en/rest/projects/columns#list-project-columns"
+
+    iterate:
+      over: "queue.project_ids"
+      into: "state.project_id"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/projects/{state.project_id}/columns"
+      headers:
+        Accept: "application/vnd.github.inertia-preview+json"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.project_id"
+          output: "record.project_id"
+
+        - expression: "record.id"
+          output: "queue.column_ids"
+
+      rules:
+        - action: stop
+          condition: "response.status == 410"
+
+
+  project_cards:
+    description: "Retrieve cards for project columns"
+    docs: "https://docs.github.com/en/rest/projects/cards#list-project-cards"
+
+    iterate:
+      over: "queue.column_ids"
+      into: "state.column_id"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/projects/columns/{state.column_id}/cards"
+      headers:
+        Accept: "application/vnd.github.inertia-preview+json"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.column_id"
+          output: "record.column_id"
+
+      rules:
+        - action: stop
+          condition: "response.status == 410"
+
+
+  # =============================================================================
+  # TIER 4: DEEP CHILD ENDPOINTS (Reaction endpoints)
+  # =============================================================================
+
+  issue_comment_reactions:
+    description: "Retrieve reactions for issue comments"
+    docs: "https://docs.github.com/en/rest/reactions/reactions#list-reactions-for-an-issue-comment"
+
+    iterate:
+      over: "queue.issue_comment_ids"
+      into: "state.comment"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.comment.repo}/issues/comments/{state.comment.id}/reactions"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.comment.repo"
+          output: "record.repository"
+
+        - expression: "state.comment.id"
+          output: "record.comment_id"
+
+
+  commit_comment_reactions:
+    description: "Retrieve reactions for commit comments"
+    docs: "https://docs.github.com/en/rest/reactions/reactions#list-reactions-for-a-commit-comment"
+
+    iterate:
+      over: "queue.commit_comment_ids"
+      into: "state.comment"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.comment.repo}/comments/{state.comment.id}/reactions"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.comment.repo"
+          output: "record.repository"
+
+        - expression: "state.comment.id"
+          output: "record.comment_id"
+
+
+  pull_request_comment_reactions:
+    description: "Retrieve reactions for pull request review comments"
+    docs: "https://docs.github.com/en/rest/reactions/reactions#list-reactions-for-a-pull-request-review-comment"
+
+    iterate:
+      over: "queue.review_comment_ids"
+      into: "state.comment"
+      concurrency: 5
+
+    request:
+      url: "{state.base_url}/repos/{state.owner}/{state.comment.repo}/pulls/comments/{state.comment.id}/reactions"
+      parameters:
+        per_page: "{state.per_page}"
+        page: "{state.page}"
+
+    overrides:
+      mode: full-refresh
+
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "state.comment.repo"
+          output: "record.repository"
+
+        - expression: "state.comment.id"
+          output: "record.comment_id"

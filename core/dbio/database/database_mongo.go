@@ -394,7 +394,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	if val := conn.GetProp("flatten"); val != "" {
 		flatten = cast.ToInt(val)
 	}
-	js := iop.NewJSONStream(ds, cur, flatten, conn.GetProp("jmespath"))
+	js := iop.NewJSONStream(ds, cur, flatten, conn.GetProp("jmespath"), conn.GetProp("jq"))
 	js.HasMapPayload = true
 
 	limit := cast.ToUint64(Limit)

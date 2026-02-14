@@ -44,6 +44,16 @@ type MsSQLServerConn struct {
 	cloudSQLCleanup func()
 }
 
+// hasIdentityColumn checks if any column has identity/auto-increment metadata
+func (conn *MsSQLServerConn) hasIdentityColumn(columns iop.Columns) bool {
+	for _, col := range columns {
+		if col.IsAutoIncrement() {
+			return true
+		}
+	}
+	return false
+}
+
 // Init initiates the object
 func (conn *MsSQLServerConn) Init() error {
 
@@ -614,6 +624,13 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		return count, g.Error(err, "columns mismatch")
 	}
 
+	// Check if we're inserting identity column values (schema migration scenario)
+	// If so, we need to enable the -E flag for BCP to keep identity values
+	if conn.hasIdentityColumn(ds.Columns) {
+		conn.SetProp("bcp_identity_insert", "true")
+		defer conn.SetProp("bcp_identity_insert", "")
+	}
+
 	var boolCols []int
 	insColMap := insCols.Map()
 	for i, col := range ds.Columns {
@@ -941,6 +958,11 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		bcpArgs = append(bcpArgs, bcpExtraParts...)
 	}
 
+	// Add -E flag to keep identity values when importing identity columns (schema migration)
+	if cast.ToBool(conn.GetProp("bcp_identity_insert")) {
+		bcpArgs = append(bcpArgs, "-E")
+	}
+
 retry:
 	proc := exec.Command(conn.bcpPath(), bcpArgs...)
 	proc.Stderr = &stderr
@@ -1037,38 +1059,6 @@ func (conn *MsSQLServerConn) BcpExport() (err error) {
 
 //UPSERT
 // https://vladmihalcea.com/how-do-upsert-and-merge-work-in-oracle-sql-server-postgresql-and-mysql/
-
-// GenerateMergeSQL generates the upsert SQL
-func (conn *MsSQLServerConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	sqlTempl := `
-	merge into {tgt_table} tgt
-	using (select *	from {src_table}) src
-	ON ({src_tgt_pk_equal})
-	WHEN MATCHED THEN
-		UPDATE SET {set_fields}
-	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) values  ({src_fields});
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
-	)
-
-	return
-}
 
 // CopyViaAzure uses the Azure DWH COPY INTO Table command
 func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (count uint64, err error) {

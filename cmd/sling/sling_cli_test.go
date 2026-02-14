@@ -62,7 +62,7 @@ func TestCLI(t *testing.T) {
 			os.Setenv("RUN_ALL", "true") // runs all test, don't fail earlys
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
-			testContext.Map.Set("TESTS", arg)
+			allTestContext.Map.Set("TESTS", arg)
 		}
 	}
 
@@ -94,7 +94,7 @@ func TestCLI(t *testing.T) {
 
 	// get test numbers from env
 	testNumbers := []int{}
-	tnsV, ok := testContext.Map.Get("TESTS")
+	tnsV, ok := allTestContext.Map.Get("TESTS")
 	if tns := cast.ToString(tnsV); ok && tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
@@ -160,10 +160,10 @@ func TestCLI(t *testing.T) {
 		}
 	}()
 
-	testContext.SetConcurrencyLimit(1)
+	allTestContext.SetConcurrencyLimit(1)
 	if parallelMode {
 		g.Warn("using parallel mode")
-		testContext.SetConcurrencyLimit(8)
+		allTestContext.SetConcurrencyLimit(8)
 	}
 
 	for _, tt := range tests {
@@ -173,10 +173,10 @@ func TestCLI(t *testing.T) {
 
 		testID := g.F("%d/%s", tt.ID, tt.Name)
 
-		testContext.Wg.Read.Add()
+		allTestContext.Wg.Read.Add()
 
 		go func(tt testCase) {
-			defer testContext.Wg.Read.Done()
+			defer allTestContext.Wg.Read.Done()
 
 			if tt.Group != "" {
 			retryGroup:
@@ -302,14 +302,14 @@ func TestCLI(t *testing.T) {
 
 		// cancel early if not specified (check parent test failure status)
 		if t.Failed() && !cast.ToBool(os.Getenv("RUN_ALL")) {
-			testContext.Cancel()
+			allTestContext.Cancel()
 			return
 		}
 
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	testContext.Wg.Read.Wait()
+	allTestContext.Wg.Read.Wait()
 }
 
 func TestBase64(t *testing.T) {

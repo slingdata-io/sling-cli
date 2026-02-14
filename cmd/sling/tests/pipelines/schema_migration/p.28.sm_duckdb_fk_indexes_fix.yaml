@@ -1,0 +1,97 @@
+# Schema Migration Test: DuckDB Indexes Fix
+# Tests: Index extraction using expressions column
+# Phase 5: DuckDB uses expressions column to get index column names
+# Note: Uses PostgreSQL as source to create data, then tests DuckDB index metadata extraction
+
+env:
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_duckdb_idx_fix CASCADE;
+
+  # Create source table in PostgreSQL
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      CREATE TABLE public.sm_duckdb_idx_fix (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        email VARCHAR,
+        status INTEGER DEFAULT 1
+      );
+      CREATE INDEX idx_email_fix ON public.sm_duckdb_idx_fix(email);
+      CREATE INDEX idx_status_fix ON public.sm_duckdb_idx_fix(status);
+      INSERT INTO public.sm_duckdb_idx_fix (name, email, status) VALUES ('Test1', 'test@example.com', 1);
+
+  # Replicate PostgreSQL -> DuckDB with indexes
+  - replication:
+      source: postgres
+      target: duckdb
+
+      env:
+        SLING_SCHEMA_MIGRATION: primary_key,indexes
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        public.sm_duckdb_idx_fix:
+          object: main.sm_duckdb_idx_fix
+
+  # Validate data arrived in DuckDB
+  - type: query
+    connection: duckdb
+    query: SELECT count(*) as cnt FROM main.sm_duckdb_idx_fix
+    into: duck_count
+
+  - type: log
+    message: "DuckDB rows: {store.duck_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.duck_count[0].cnt) == 1
+    message: "Expected 1 row in DuckDB"
+
+  # Validate indexes were migrated to DuckDB (includes PK + 2 indexes = 3 total)
+  - type: query
+    connection: duckdb
+    query: |
+      SELECT index_name, unnest(expressions::VARCHAR[]) AS column_name
+      FROM duckdb_indexes()
+      WHERE table_name = 'sm_duckdb_idx_fix'
+    into: idx_result
+
+  - type: log
+    message: "Indexes found in DuckDB: {store.idx_result}"
+
+  # Should have at least 2 indexes (email and status) - PK may add another
+  - type: check
+    check: length(store.idx_result) >= 2
+    message: "Expected at least 2 indexes in DuckDB, got {length(store.idx_result)}"
+
+  # Validate PK constraint exists in DuckDB
+  - type: query
+    connection: duckdb
+    query: |
+      SELECT count(*) as cnt FROM duckdb_constraints()
+      WHERE table_name = 'sm_duckdb_idx_fix'
+        AND constraint_type = 'PRIMARY KEY'
+    into: pk_result
+
+  - type: log
+    message: "PK constraints found: {store.pk_result[0].cnt}"
+
+  - type: check
+    check: int_parse(store.pk_result[0].cnt) >= 1
+    message: "Expected at least 1 PK constraint"
+
+  # Clean up
+  - type: query
+    connection: duckdb
+    query: DROP TABLE IF EXISTS main.sm_duckdb_idx_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_duckdb_idx_fix CASCADE;

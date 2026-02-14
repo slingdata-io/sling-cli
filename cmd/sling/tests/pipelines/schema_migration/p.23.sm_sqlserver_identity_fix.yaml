@@ -1,0 +1,137 @@
+# Schema Migration Test: SQL Server Identity Column Fix
+# Tests: Identity seed/increment only returned for identity columns (not all columns)
+
+env:
+  SOURCE: mssql
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_test_identity_fix CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: IF OBJECT_ID('dbo.sm_test_identity_fix', 'U') IS NOT NULL DROP TABLE dbo.sm_test_identity_fix;
+
+  # Create source table with identity and non-identity columns
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE dbo.sm_test_identity_fix (
+        id INT IDENTITY(100, 5) PRIMARY KEY,
+        name NVARCHAR(100) NOT NULL,
+        created_at DATETIME DEFAULT GETDATE(),
+        status INT DEFAULT 1,
+        non_identity_col INT,
+        price DECIMAL(10,2) DEFAULT 0.00
+      );
+      INSERT INTO dbo.sm_test_identity_fix (name, status, non_identity_col, price)
+      VALUES ('Test1', 1, 42, 99.99), ('Test2', 2, 84, 199.99);
+
+  # Run replication with schema migration
+  - replication:
+      source: mssql
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: auto_increment,primary_key,default_value,nullable
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        dbo.sm_test_identity_fix:
+          object: public.sm_test_identity_fix
+
+  # Validate identity columns count - only 'id' should be identity
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_test_identity_fix'
+        AND is_identity = 'YES'
+    into: identity_count
+
+  - type: log
+    message: "Identity columns found: {store.identity_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.identity_count[0].cnt) == 1
+    message: "Expected exactly 1 identity column, got {store.identity_count[0].cnt}"
+
+  # Validate specific identity column is 'id'
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_test_identity_fix'
+        AND is_identity = 'YES'
+    into: identity_result
+
+  - type: check
+    check: store.identity_result[0].column_name == "id"
+    message: "Expected 'id' to be identity column, got {store.identity_result[0].column_name}"
+
+  # Validate non-identity columns count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_test_identity_fix'
+        AND is_identity = 'NO'
+        AND column_name IN ('name', 'created_at', 'status', 'non_identity_col', 'price')
+    into: non_identity_count
+
+  - type: log
+    message: "Non-identity columns found: {store.non_identity_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.non_identity_count[0].cnt) == 5
+    message: "Expected 5 non-identity columns, got {store.non_identity_count[0].cnt}"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_test_identity_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 2
+    message: "Expected 2 rows, got {store.data_count[0].cnt}"
+
+  # Validate identity values were preserved
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT id FROM public.sm_test_identity_fix ORDER BY id
+    into: id_result
+
+  - type: check
+    check: int_parse(store.id_result[0].id) == 100
+    message: "Expected first id to be 100 (identity seed), got {store.id_result[0].id}"
+
+  - type: check
+    check: int_parse(store.id_result[1].id) == 105
+    message: "Expected second id to be 105 (100 + 5 increment), got {store.id_result[1].id}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: IF OBJECT_ID('dbo.sm_test_identity_fix', 'U') IS NOT NULL DROP TABLE dbo.sm_test_identity_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_test_identity_fix CASCADE;

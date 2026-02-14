@@ -25,6 +25,17 @@ core:
   sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   modify_column: alter column {column} type {type}
+
+  # Foreign key DDL template
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
   use_database: SET search_path TO {database}
   
   # in order to use on conflict, the target table needs
@@ -39,6 +50,16 @@ core:
   #   do update 
   #   SET {set_fields}
     
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
   merge_update_insert: |
     create temporary table {temp_table} as
     with src_table as (
@@ -66,8 +87,15 @@ core:
       from {temp_table} upd
       where {src_upd_pk_equal}
     )
-    
-    
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 metadata:
 
@@ -179,6 +207,70 @@ metadata:
     order by
       t.relname,
       i.relname
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      CASE
+        WHEN a.attidentity IN ('a', 'd') THEN 'true'
+        WHEN c.column_default LIKE 'nextval%' THEN 'true'
+        ELSE 'false'
+      END AS is_auto_increment,
+      COALESCE(seq.seqstart::text, '1') AS identity_seed,
+      COALESCE(seq.seqincrement::text, '1') AS identity_increment,
+      CASE WHEN pk.conname IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      pd.description
+    FROM information_schema.columns c
+    JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
+    JOIN pg_catalog.pg_class t ON t.relnamespace = n.oid AND t.relname = c.table_name
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name
+    LEFT JOIN pg_catalog.pg_depend dep ON dep.refobjid = t.oid AND dep.refobjsubid = a.attnum
+    LEFT JOIN pg_catalog.pg_class seq_class ON seq_class.oid = dep.objid AND seq_class.relkind = 'S'
+    LEFT JOIN pg_catalog.pg_sequence seq ON seq.seqrelid = seq_class.oid
+    LEFT JOIN pg_catalog.pg_description pd ON pd.objoid = t.oid AND pd.objsubid = a.attnum
+    LEFT JOIN (
+      SELECT con.conname, unnest(con.conkey) as attnum, con.conrelid
+      FROM pg_catalog.pg_constraint con
+      WHERE con.contype = 'p'
+    ) pk ON pk.conrelid = t.oid AND pk.attnum = a.attnum
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table,
+      ccu.column_name AS referenced_column,
+      rc.delete_rule AS on_delete,
+      rc.update_rule AS on_update
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_name = tc.constraint_name
+      AND ccu.table_schema = tc.table_schema
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_name = tc.constraint_name
+      AND rc.constraint_schema = tc.constraint_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_schema = '{schema}'
+      AND tc.table_name = '{table}'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT
+      obj_description(c.oid, 'pg_class') AS description
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '{schema}' AND c.relname = '{table}'
 
   columns_full: |
     select
@@ -539,3 +631,29 @@ general_type_map:
   timestampz: timestamptz
   timez: "time with time zone"
   uuid: uuid
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "now()": "current_timestamp"
+    "NOW()": "current_timestamp"
+    "CURRENT_DATE": "current_date"
+    "current_date": "current_date"
+    "CURRENT_TIME": "current_time"
+    "current_time": "current_time"
+    "gen_random_uuid()": "uuid()"
+    "uuid_generate_v4()": "uuid()"
+    "true": "true"
+    "false": "false"
+    "'t'::boolean": "true"
+    "'f'::boolean": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP"
+    "current_timestamp_utc": "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'"
+    "current_date": "CURRENT_DATE"
+    "current_time": "CURRENT_TIME"
+    "uuid()": "gen_random_uuid()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

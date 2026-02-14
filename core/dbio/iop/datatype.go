@@ -104,6 +104,108 @@ func (kt KeyType) MetadataKey() string {
 
 var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, IndexKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
+// ColMetaKey represents a standardized column metadata key for schema migration
+type ColMetaKey string
+
+const (
+	// Auto-increment/Identity
+	ColMetaAutoIncrement ColMetaKey = "auto_increment"     // "true" if column is auto-increment
+	ColMetaIdentitySeed  ColMetaKey = "identity_seed"      // Starting value (e.g., "1")
+	ColMetaIdentityIncr  ColMetaKey = "identity_increment" // Increment step (e.g., "1")
+
+	// Nullable
+	ColMetaNullable ColMetaKey = "nullable" // "true" or "false"
+
+	// Default Value (stores generalized form)
+	ColMetaDefaultValue ColMetaKey = "default_value"
+
+	// Primary Key
+	ColMetaIsPrimaryKey ColMetaKey = "is_primary_key" // "true" if column is part of primary key
+
+	// Foreign Keys (JSON struct)
+	ColMetaForeignKey ColMetaKey = "foreign_key"
+
+	// Check Constraints (native syntax, future AI translation)
+	ColMetaCheckConstraint ColMetaKey = "check_constraint"
+
+	// Column Description/Comment
+	ColMetaDescription ColMetaKey = "description"
+)
+
+func (cmk ColMetaKey) String() string {
+	return string(cmk)
+}
+
+// ColMetaKeys is a list of all column metadata keys
+var ColMetaKeys = []ColMetaKey{
+	ColMetaAutoIncrement, ColMetaIdentitySeed, ColMetaIdentityIncr,
+	ColMetaNullable, ColMetaDefaultValue, ColMetaIsPrimaryKey, ColMetaForeignKey,
+	ColMetaCheckConstraint, ColMetaDescription,
+}
+
+// DefaultExpr represents a generalized default expression
+// These are database-agnostic representations translated to native syntax
+type DefaultExpr string
+
+const (
+	// Timestamp/DateTime defaults
+	DefaultExprCurrentTimestamp    DefaultExpr = "current_timestamp"
+	DefaultExprCurrentTimestampUTC DefaultExpr = "current_timestamp_utc"
+	DefaultExprCurrentDate         DefaultExpr = "current_date"
+	DefaultExprCurrentTime         DefaultExpr = "current_time"
+
+	// UUID defaults
+	DefaultExprUUID           DefaultExpr = "uuid()"
+	DefaultExprUUIDSequential DefaultExpr = "uuid_sequential()"
+
+	// Boolean defaults
+	DefaultExprTrue  DefaultExpr = "true"
+	DefaultExprFalse DefaultExpr = "false"
+
+	// Null
+	DefaultExprNull DefaultExpr = "null"
+)
+
+func (de DefaultExpr) String() string {
+	return string(de)
+}
+
+// DefaultExprs is a list of all standard default expressions
+var DefaultExprs = []DefaultExpr{
+	DefaultExprCurrentTimestamp, DefaultExprCurrentTimestampUTC,
+	DefaultExprCurrentDate, DefaultExprCurrentTime,
+	DefaultExprUUID, DefaultExprUUIDSequential,
+	DefaultExprTrue, DefaultExprFalse, DefaultExprNull,
+}
+
+// IsStandardDefault checks if a value matches a known generalized default
+func IsStandardDefault(value string) bool {
+	for _, de := range DefaultExprs {
+		if strings.ToLower(value) == de.String() {
+			return true
+		}
+	}
+	return false
+}
+
+// ForeignKeyInfo represents a foreign key relationship
+type ForeignKeyInfo struct {
+	ConstraintName   string `json:"constraint_name"`
+	ColumnName       string `json:"column_name,omitempty"`
+	ReferencedSchema string `json:"referenced_schema"`
+	ReferencedTable  string `json:"referenced_table"`
+	ReferencedColumn string `json:"referenced_column"`
+	OnDelete         string `json:"on_delete,omitempty"`
+	OnUpdate         string `json:"on_update,omitempty"`
+}
+
+// IndexInfo represents an index
+type IndexInfo struct {
+	Name     string   `json:"name"`
+	Columns  []string `json:"columns"`
+	IsUnique bool     `json:"is_unique"`
+}
+
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
 	MinLen       int    `json:"min_len,omitempty"`
@@ -1031,6 +1133,54 @@ func (col *Column) IsKeyType(keyType KeyType) bool {
 	return cast.ToBool(col.Metadata[keyType.MetadataKey()])
 }
 
+// IsAutoIncrement returns true if the column is auto-increment/identity
+func (col *Column) IsAutoIncrement() bool {
+	if col.Metadata == nil {
+		return false
+	}
+	return col.Metadata[ColMetaAutoIncrement.String()] == "true"
+}
+
+// GetDefaultValue returns the default value metadata
+func (col *Column) GetDefaultValue() string {
+	if col.Metadata == nil {
+		return ""
+	}
+	return col.Metadata[ColMetaDefaultValue.String()]
+}
+
+// IsNullable returns true if the column allows NULL values
+// Defaults to true if not explicitly set
+func (col *Column) IsNullable() bool {
+	if col.Metadata == nil {
+		return true
+	}
+	val := col.Metadata[ColMetaNullable.String()]
+	return val == "" || val == "true"
+}
+
+// IsPrimaryKey returns true if the column is part of the primary key
+func (col *Column) IsPrimaryKey() bool {
+	if col.Metadata == nil {
+		return false
+	}
+	return col.Metadata[ColMetaIsPrimaryKey.String()] == "true"
+}
+
+// GetForeignKey returns the foreign key info if present
+func (col *Column) GetForeignKey() (*ForeignKeyInfo, error) {
+	if col.Metadata == nil {
+		return nil, nil
+	}
+	fkJSON := col.Metadata[ColMetaForeignKey.String()]
+	if fkJSON == "" {
+		return nil, nil
+	}
+	var fk ForeignKeyInfo
+	err := g.Unmarshal(fkJSON, &fk)
+	return &fk, err
+}
+
 func (col *Column) Key() string {
 	parts := []string{}
 	if col.Database != "" {
@@ -1412,6 +1562,31 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck:
 		if strings.HasSuffix(dbType, "[]") {
 			dbType = "list"
+		}
+	case dbio.TypeDbOracle:
+		// Oracle NUMBER(p,s) with scale=0 should map to integer types
+		if strings.HasPrefix(dbType, "number") && strings.Contains(dbType, "(") {
+			// Extract precision and scale from NUMBER(p,s) or NUMBER(p)
+			re := regexp.MustCompile(`number\s*\(\s*(\d+)\s*(?:,\s*(\d+))?\s*\)`)
+			matches := re.FindStringSubmatch(dbType)
+			if len(matches) >= 2 {
+				precision := cast.ToInt(matches[1])
+				scale := 0
+				if len(matches) >= 3 && matches[2] != "" {
+					scale = cast.ToInt(matches[2])
+				}
+				// If scale is 0, use integer types based on precision
+				if scale == 0 {
+					if precision <= 5 {
+						return SmallIntType
+					} else if precision <= 10 {
+						return IntegerType
+					} else if precision <= 19 {
+						return BigIntType
+					}
+					// For precision > 19 with scale=0, fall through to decimal
+				}
+			}
 		}
 	}
 

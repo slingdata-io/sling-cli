@@ -9,6 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
@@ -37,13 +40,21 @@ var (
 	ExecID         = os.Getenv("SLING_EXEC_ID")
 	AgentID        = os.Getenv("SLING_AGENT_ID")
 	IsAgentMode    = AgentID != ""
-	GetOAuthMap    = func() map[string]map[string]any {
+
+	// File logging
+	debugLogFile *os.File
+	traceLogFile *os.File
+	logFileMux   sync.Mutex
+	GetOAuthMap  = func() map[string]map[string]any {
 		return map[string]map[string]any{}
 	}
 	ExecFolder      = func() string { return path.Join(HomeDir, "executions", ExecID) }
 	QueueFolder     = func() string { return path.Join(ExecFolder(), "queues") }
 	RuntimeFolder   = func() string { return path.Join(ExecFolder(), "runtime") }
 	RuntimeFilePath = func(name string) string {
+		name = strings.ReplaceAll(name, "\\", "_")
+		name = strings.ReplaceAll(name, "/", "_")
+		name = strings.ReplaceAll(name, ":", "_")
 		os.MkdirAll(RuntimeFolder(), 0755) // make folder
 		return path.Join(RuntimeFolder(), g.F("%s.json", name))
 	}
@@ -112,6 +123,14 @@ func init() {
 	}
 
 	TelMap["parent"] = g.Marshal(process.GetParent())
+
+	// we need a webserver to get the pprof webserver
+	if cast.ToBool(os.Getenv("SLING_PPROF")) {
+		go func() {
+			g.Debug("Starting pprof webserver @ localhost:6060")
+			g.LogError(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
 }
 
 func HomeBinDir() string {
@@ -183,8 +202,7 @@ func SetLogger() {
 
 // InitLogger initializes the Logger
 func InitLogger() {
-
-	// set log hook
+	// reset log hook at g.DebugLevel
 	g.SetLogHook(
 		g.NewLogHook(
 			g.DebugLevel,
@@ -192,13 +210,194 @@ func InitLogger() {
 		),
 	)
 
+	// add log hook at TraceLevel to capture all log levels for file logging
+	g.AddLogHook(
+		g.NewLogHook(
+			g.TraceLevel,
+			func(ll *g.LogLine) {
+				// Write to log file(s) if configured
+				writeToLogFile(ll)
+			},
+		),
+	)
+
 	SetLogger()
+	setupFileLogging()
 	setupOtel()
+}
+
+// setupFileLogging initializes file logging based on SLING_DEBUG_FILE and SLING_TRACE_FILE env vars
+func setupFileLogging() {
+	logFileMux.Lock()
+	defer logFileMux.Unlock()
+
+	// Close existing files if any (for re-initialization)
+	if debugLogFile != nil {
+		debugLogFile.Close()
+		debugLogFile = nil
+	}
+	if traceLogFile != nil {
+		traceLogFile.Close()
+		traceLogFile = nil
+	}
+
+	// Open debug log file
+	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {
+		f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			g.Warn("could not open debug log file: %s", err.Error())
+		} else {
+			debugLogFile = f
+		}
+	}
+
+	// Open trace log file
+	if tracePath := os.Getenv("SLING_TRACE_FILE"); tracePath != "" {
+		f, err := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			g.Warn("could not open trace log file: %s", err.Error())
+		} else {
+			traceLogFile = f
+		}
+	}
+}
+
+// CloseFileLogging closes any open log files
+func CloseFileLogging() {
+	logFileMux.Lock()
+	defer logFileMux.Unlock()
+
+	if debugLogFile != nil {
+		debugLogFile.Close()
+		debugLogFile = nil
+	}
+	if traceLogFile != nil {
+		traceLogFile.Close()
+		traceLogFile = nil
+	}
+}
+
+// stripANSI removes ANSI escape codes from a string
+func stripANSI(text string) string {
+	// Match ANSI escape sequences: ESC[ followed by any number of params and a letter
+	// This handles color codes like \x1b[32m, \x1b[0m, \x1b[90m, etc.
+	result := strings.Builder{}
+	i := 0
+	for i < len(text) {
+		if i+1 < len(text) && text[i] == '\x1b' && text[i+1] == '[' {
+			// Skip the escape sequence
+			j := i + 2
+			for j < len(text) && ((text[j] >= '0' && text[j] <= '9') || text[j] == ';') {
+				j++
+			}
+			if j < len(text) && text[j] >= 'A' && text[j] <= 'z' {
+				j++ // Skip the final letter
+			}
+			i = j
+		} else {
+			result.WriteByte(text[i])
+			i++
+		}
+	}
+	return result.String()
+}
+
+// formatLogLine formats a log line for file output (no colors)
+func formatLogLine(ll *g.LogLine) string {
+	var levelPrefix string
+
+	switch zerolog.Level(ll.Level) {
+	case zerolog.TraceLevel:
+		levelPrefix = "TRC "
+	case zerolog.DebugLevel:
+		levelPrefix = "DBG "
+	case zerolog.InfoLevel:
+		levelPrefix = "INF "
+	case zerolog.WarnLevel:
+		levelPrefix = "WRN "
+	case zerolog.ErrorLevel:
+		levelPrefix = "ERR "
+	default:
+		levelPrefix = ""
+	}
+
+	timeText := ll.Time.Format("2006-01-02 15:04:05")
+
+	// Filter out map arguments and special strings (used internally by g library for context logging)
+	filteredArgs := []any{}
+	for _, arg := range ll.Args {
+		switch arg.(type) {
+		case map[string]any:
+			// Skip map arguments - they're context fields, not format args
+			continue
+		default:
+			if s, ok := arg.(string); ok && strings.HasPrefix(s, "_DEBUG_CALLER_START=") {
+				// Skip internal caller tracking string
+				continue
+			}
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+
+	text := g.F(ll.Text, filteredArgs...)
+
+	// Strip any ANSI codes from the text
+	text = stripANSI(text)
+
+	return fmt.Sprintf("%s %s%s\n", timeText, levelPrefix, text)
+}
+
+// writeToLogFile writes the log entry to configured log file(s)
+func writeToLogFile(ll *g.LogLine) {
+	logFileMux.Lock()
+	defer logFileMux.Unlock()
+
+	// Skip if no log files configured
+	if debugLogFile == nil && traceLogFile == nil {
+		return
+	}
+
+	level := zerolog.Level(ll.Level)
+
+	// Handle Print/Println entries (level 9) - these are raw output from child processes
+	// Write them directly with ANSI codes stripped, but only if they have content
+	if ll.Level == 9 {
+		text := stripANSI(ll.Text)
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		// Ensure text ends with newline
+		if !strings.HasSuffix(text, "\n") {
+			text = text + "\n"
+		}
+		// Write to both files (Print output is considered important)
+		if traceLogFile != nil {
+			traceLogFile.WriteString(text)
+		}
+		if debugLogFile != nil {
+			debugLogFile.WriteString(text)
+		}
+		return
+	}
+
+	line := formatLogLine(ll)
+
+	// Write to trace file (all levels)
+	if traceLogFile != nil {
+		traceLogFile.WriteString(line)
+	}
+
+	// Write to debug file (debug level and above)
+	// zerolog levels: Trace=-1, Debug=0, Info=1, Warn=2, Error=3
+	if debugLogFile != nil && level >= zerolog.DebugLevel {
+		debugLogFile.WriteString(line)
+	}
 }
 
 func Print(text string) {
 	fmt.Fprintf(os.Stderr, "%s", text)
 	processLogEntry(&g.LogLine{Level: 9, Text: text})
+	writeToLogFile(&g.LogLine{Level: 9, Text: text})
 }
 
 func Println(text string) {
@@ -369,6 +568,7 @@ func CleanWindowsPath(path string) string {
 }
 
 func processLogEntry(ll *g.LogLine) {
+	// Existing LogSink functionality
 	if LogSink != nil {
 		LogSink(ll)
 	}

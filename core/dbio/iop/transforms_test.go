@@ -1923,6 +1923,45 @@ func TestEvaluatorKeepMissingExpr(t *testing.T) {
 			state:           nil,
 			keepMissingExpr: true,
 		},
+
+		// GraphQL syntax - nested braces should be recursed, template vars rendered,
+		// and unknown identifiers kept intact with KeepMissingExpr=true
+		{
+			name: "graphql_query_with_template_vars",
+			input: `{
+  repository(owner: "{state.owner}", name: "{state.repo}") {
+    stargazers(first: 100) {
+      totalCount
+    }
+  }
+}`,
+			expected: `{
+  repository(owner: "octocat", name: "hello-world") {
+    stargazers(first: 100) {
+      totalCount
+    }
+  }
+}`,
+			state: map[string]any{
+				"state": map[string]any{
+					"owner": "octocat",
+					"repo":  "hello-world",
+				},
+			},
+			keepMissingExpr: true,
+		},
+		{
+			name:  "graphql_inline_query",
+			input: `{ repository(owner: "{state.owner}") { name } }`,
+			// The { name } will be extracted but "name" is unknown, so kept as { name }
+			expected: `{ repository(owner: "myowner") { name } }`,
+			state: map[string]any{
+				"state": map[string]any{
+					"owner": "myowner",
+				},
+			},
+			keepMissingExpr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2449,6 +2488,25 @@ func TestEvaluatorFindMatches(t *testing.T) {
 			expected: []string{`format("{{nested}}")`},
 		},
 
+		// Nested braces inside quotes are allowed (they're string literals, not structure)
+		{
+			name:     "braces_in_quotes_simple",
+			input:    `{"{" + state.var + "}"}`,
+			expected: []string{`"{" + state.var + "}"`},
+		},
+		{
+			name:     "braces_in_quotes_json_build",
+			input:    `{"{\"key\": \"" + state.value + "\"}"}`,
+			expected: []string{`"{\"key\": \"" + state.value + "\"}"`},
+		},
+		{
+			name:     "mixed_quoted_and_unquoted_braces",
+			input:    `{ repository(owner: "{state.owner}") { name } }`,
+			// The outer has unquoted nested braces, so recurse. Inner "{state.owner}" has braces in quotes - ok.
+			// { name } has no nested braces inside it.
+			expected: []string{"state.owner", " name "},
+		},
+
 		// JSON object detection - should skip JSON braces and find template expressions inside
 		{
 			name:     "json_object_with_template_vars",
@@ -2474,6 +2532,48 @@ func TestEvaluatorFindMatches(t *testing.T) {
 			name:     "pure_template_expression_not_json",
 			input:    `{state.limit}`,
 			expected: []string{"state.limit"},
+		},
+
+		// GraphQL syntax - nested braces are recursively scanned
+		// Non-template expressions like "totalCount" or "name" will be extracted but
+		// will be kept intact during rendering with KeepMissingExpr=true
+		{
+			name: "graphql_simple_query",
+			input: `{
+  repository(owner: "{state.owner}", name: "{state.repo}") {
+    stargazers(first: 100) {
+      totalCount
+    }
+  }
+}`,
+			expected: []string{"state.owner", "state.repo", "\n      totalCount\n    "},
+		},
+		{
+			name: "graphql_with_cursor_param",
+			input: `{
+  repository(owner: "{state.owner}", name: "{state.repo}") {
+    stargazers(first: 100, after: {state.cursor_param}) {
+      edges {
+        starredAt
+        node {
+          login
+        }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+}`,
+			// edges { ... } has nested braces, so it recurses. node { login } also has nested braces.
+			// Only leaf expressions without nested braces are extracted.
+			expected: []string{"state.owner", "state.repo", "state.cursor_param", "\n          login\n        ", "\n        endCursor\n        hasNextPage\n      "},
+		},
+		{
+			name:     "graphql_inline",
+			input:    `{ repository(owner: "{state.owner}") { name } }`,
+			expected: []string{"state.owner", " name "},
 		},
 	}
 

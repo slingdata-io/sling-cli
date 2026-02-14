@@ -584,55 +584,16 @@ func (conn *D1Conn) GetSchemata(level SchemataLevel, schemaName string, tableNam
 	return schemata, nil
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy (update_insert).
 func (conn *D1Conn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	_, indexTable := SplitTableFullName(tgtTable)
-
-	pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
-	indexSQL := g.R(
-		conn.GetTemplateValue("core.create_unique_index"),
-		"index", strings.Join(pkFields, "_")+g.RandSuffix("_", 3)+"_idx",
-		"table", indexTable,
-		"cols", strings.Join(pkFieldsQ, ", "),
-	)
-
-	_, err = conn.Exec(indexSQL)
-	if err != nil {
-		err = g.Error(err, "could not create unique index")
-		return
-	}
-
-	sqlTempl := `
-	insert into {tgt_table} as tgt
-		({insert_fields}) 
-	select {src_fields}
-	from {src_table} as src
-	where true
-	ON CONFLICT ({tgt_pk_fields})
-	DO UPDATE 
-	SET {set_fields}
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"src_fields", upsertMap["src_fields"],
-		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
-		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
-		"insert_fields", upsertMap["insert_fields"],
-	)
-
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// D1 (SQLite-based) supports all four merge strategies.
+// For update_insert strategy, creates a unique index on PK fields to enable ON CONFLICT.
+func (conn *D1Conn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.SQLiteConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 func (conn *D1Conn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {

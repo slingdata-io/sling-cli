@@ -194,8 +194,45 @@ retry:
 			time.Sleep(5 * time.Second)
 			goto retry
 		}
+
+		// Provide helpful error message for merge strategy failures on non-Primary Key tables
+		err = conn.handleMergeStrategyError(q, err)
 	}
 	return
+}
+
+// handleMergeStrategyError checks if the error is related to merge strategies failing on
+// non-Primary Key tables and provides a helpful error message
+func (conn *StarRocksConn) handleMergeStrategyError(q string, err error) error {
+	errStr := err.Error()
+
+	// Check for DELETE/UPDATE with subquery errors on Duplicate Key tables
+	// These errors indicate the user is trying to use merge strategies that require Primary Key tables
+	isDuplicateKeyError := strings.Contains(errStr, "Where clause only supports compound predicate, binary predicate, is_null predicate and in predicate") ||
+		strings.Contains(errStr, "Child of in predicate should be value") ||
+		(strings.Contains(errStr, "DELETE") && strings.Contains(errStr, "subquery")) ||
+		(strings.Contains(errStr, "UPDATE") && strings.Contains(errStr, "subquery"))
+
+	// Check if the query is a merge-related operation (DELETE or UPDATE with subquery/FROM)
+	qLower := strings.ToLower(q)
+	isMergeQuery := (strings.Contains(qLower, "delete from") && (strings.Contains(qLower, "where") && (strings.Contains(qLower, " in (") || strings.Contains(qLower, "exists")))) ||
+		(strings.Contains(qLower, "update") && strings.Contains(qLower, "from"))
+
+	if isDuplicateKeyError && isMergeQuery {
+		return g.Error(err, `StarRocks merge strategies (update, update_insert, delete_insert) require Primary Key tables.
+Your target table appears to be a Duplicate Key table which does not support DELETE/UPDATE with subqueries.
+
+To fix this, specify 'table_keys.primary' in your target_options to create a Primary Key table:
+
+  target_options:
+    table_keys:
+      primary: [your_pk_column]
+
+Alternatively, use 'merge_strategy: insert' or modes like 'full-refresh' or 'truncate' which work with all table types.
+See: https://docs.starrocks.io/docs/table_design/table_types/primary_key_table/`)
+	}
+
+	return err
 }
 
 // InsertBatchStream inserts a stream into a table in batch

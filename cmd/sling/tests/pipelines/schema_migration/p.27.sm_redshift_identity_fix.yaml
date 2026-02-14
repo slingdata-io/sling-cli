@@ -1,0 +1,108 @@
+# Schema Migration Test: Redshift Identity Columns
+# Tests: Identity detection via pg_attribute.attidentity
+# Phase 4: Redshift uses pg_attribute.attidentity ('a'=ALWAYS, 'd'=BY DEFAULT)
+
+env:
+  SOURCE: redshift
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_redshift_identity_fix CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS public.sm_redshift_identity_fix;
+
+  # Create source table with identity column
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE public.sm_redshift_identity_fix (
+        id INT IDENTITY(100, 10),
+        name VARCHAR(100) NOT NULL,
+        non_identity_col INT,
+        created_at TIMESTAMP DEFAULT GETDATE()
+      );
+      INSERT INTO public.sm_redshift_identity_fix (name, non_identity_col) VALUES ('Test1', 42);
+
+  # Run replication with schema migration
+  - replication:
+      source: redshift
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: auto_increment,nullable,default_value
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        public.sm_redshift_identity_fix:
+          object: public.sm_redshift_identity_fix
+
+  # Validate identity columns - only 'id' should be identity
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_redshift_identity_fix'
+        AND is_identity = 'YES'
+    into: identity_result
+
+  - type: log
+    message: "Identity columns found: {store.identity_result}"
+
+  - type: check
+    check: length(store.identity_result) == 1
+    message: "Expected exactly 1 identity column, got {length(store.identity_result)}"
+
+  - type: check
+    check: store.identity_result[0].column_name == "id"
+    message: "Expected 'id' to be identity column, got {store.identity_result[0].column_name}"
+
+  # Validate non-identity columns count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_redshift_identity_fix'
+        AND is_identity = 'NO'
+    into: non_identity_count
+
+  - type: log
+    message: "Non-identity columns found: {store.non_identity_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.non_identity_count[0].cnt) == 3
+    message: "Expected 3 non-identity columns, got {store.non_identity_count[0].cnt}"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_redshift_identity_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 1
+    message: "Expected 1 row, got {store.data_count[0].cnt}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS public.sm_redshift_identity_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_redshift_identity_fix CASCADE;

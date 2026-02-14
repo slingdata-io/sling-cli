@@ -1,0 +1,160 @@
+# Schema Migration Comprehensive Test: PostgreSQL to ClickHouse
+# Tests: Column descriptions only
+# ClickHouse: NO FK support, NO identity support, NO table-level comments (only column comments)
+
+env:
+  SOURCE: postgres
+  TARGET: clickhouse
+
+steps:
+  # Clean up target first
+  - connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS default.sm_order_items;
+      DROP TABLE IF EXISTS default.sm_orders;
+      DROP TABLE IF EXISTS default.sm_products;
+      DROP TABLE IF EXISTS default.sm_customers;
+      DROP TABLE IF EXISTS default.sm_categories;
+
+  # Clean up source
+  - connection: '{env.SOURCE}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Create source tables with all schema attributes
+  - connection: '{env.SOURCE}'
+    query: |
+      -- Table 1: sm_categories (no FKs, referenced by sm_products)
+      CREATE TABLE public.sm_categories (
+        cat_id SERIAL PRIMARY KEY,
+        cat_name VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+      );
+
+      -- Table 2: sm_customers (no FKs, referenced by sm_orders)
+      CREATE TABLE public.sm_customers (
+        customer_id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        full_name VARCHAR(200) NULL,
+        phone VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Table 3: sm_products (FK to sm_categories)
+      CREATE TABLE public.sm_products (
+        product_id SERIAL PRIMARY KEY,
+        category_id INT NOT NULL,
+        product_name VARCHAR(200) NOT NULL,
+        price DECIMAL(10,2) DEFAULT 0.00,
+        stock_qty INT DEFAULT 0,
+        CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES public.sm_categories(cat_id)
+      );
+
+      -- Table 4: sm_orders (FK to sm_customers)
+      CREATE TABLE public.sm_orders (
+        order_id SERIAL PRIMARY KEY,
+        customer_id INT NOT NULL,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'pending',
+        CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES public.sm_customers(customer_id)
+      );
+
+      -- Table 5: sm_order_items (FKs to sm_orders and sm_products)
+      CREATE TABLE public.sm_order_items (
+        item_id SERIAL PRIMARY KEY,
+        order_id INT NOT NULL,
+        product_id INT NOT NULL,
+        quantity INT DEFAULT 1,
+        CONSTRAINT fk_items_order FOREIGN KEY (order_id) REFERENCES public.sm_orders(order_id),
+        CONSTRAINT fk_items_product FOREIGN KEY (product_id) REFERENCES public.sm_products(product_id)
+      );
+
+  # Add descriptions (column and table)
+  - connection: '{env.SOURCE}'
+    query: |
+      COMMENT ON COLUMN public.sm_categories.cat_name IS 'Category name for products';
+      COMMENT ON COLUMN public.sm_customers.email IS 'Customer email address';
+      COMMENT ON COLUMN public.sm_orders.status IS 'Order status: pending, shipped, delivered';
+      COMMENT ON TABLE public.sm_categories IS 'Product categories lookup table';
+      COMMENT ON TABLE public.sm_customers IS 'Customer master data';
+
+  # Insert test data
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO public.sm_categories (cat_name) VALUES ('Electronics'), ('Clothing');
+      INSERT INTO public.sm_customers (email, full_name, phone) VALUES ('test@example.com', 'Test User', '555-1234'), ('user2@example.com', NULL, NULL);
+      INSERT INTO public.sm_products (category_id, product_name, price, stock_qty) VALUES (1, 'Laptop', 999.99, 10), (2, 'T-Shirt', 29.99, 100);
+      INSERT INTO public.sm_orders (customer_id, status) VALUES (1, 'shipped'), (2, 'pending');
+      INSERT INTO public.sm_order_items (order_id, product_id, quantity) VALUES (1, 1, 2), (2, 2, 3);
+
+  - replication:
+      source: '{ env.SOURCE }'
+      target: '{ env.TARGET }'
+
+      defaults:
+        mode: full-refresh
+
+      # Streams - order doesn't matter for ClickHouse (no FK enforcement)
+      streams:
+        public.sm_order_items:
+          object: default.sm_order_items
+
+        public.sm_orders:
+          object: default.sm_orders
+
+        public.sm_products:
+          object: default.sm_products
+
+        public.sm_categories:
+          object: default.sm_categories
+
+        public.sm_customers:
+          object: default.sm_customers
+
+      env:
+        # ClickHouse only supports descriptions, no FK or identity
+        SLING_SCHEMA_MIGRATION: description
+
+  # Validate column descriptions count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM system.columns
+      WHERE database = 'default' AND table LIKE 'sm_%' AND comment != ''
+    into: desc_count
+
+  - type: log
+    message: "Column descriptions found: {store.desc_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.desc_count[0].cnt) >= 1
+    message: "Expected at least 1 column description, got {store.desc_count[0].cnt}"
+
+  # Note: ClickHouse doesn't support ALTER TABLE for adding table comments
+  # Table comments must be specified during CREATE TABLE, which Sling doesn't support yet
+
+  # Clean up target
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS default.sm_order_items;
+      DROP TABLE IF EXISTS default.sm_orders;
+      DROP TABLE IF EXISTS default.sm_products;
+      DROP TABLE IF EXISTS default.sm_customers;
+      DROP TABLE IF EXISTS default.sm_categories;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;

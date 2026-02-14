@@ -211,7 +211,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		}
 	}
 
-	if cast.ToBool(c.Vals["trace"]) {
+	if cast.ToBool(c.Vals["trace"]) || os.Getenv("DEBUG") == "TRACE" {
 		cfg.Options.Debug = true
 		os.Setenv("DEBUG", "TRACE")
 		env.InitLogger()
@@ -642,6 +642,8 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
+		state.Store["_replication_total_rows"] = state.Execution.TotalRows
+		state.Store["_replication_total_bytes"] = state.Execution.TotalBytes
 		sling.SetPipelineStoreEnv(state.Store)
 	}
 

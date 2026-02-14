@@ -3,7 +3,6 @@ package sling
 import (
 	"context"
 	"maps"
-	"net/http"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -31,16 +30,6 @@ var (
 var deleteMissing func(*TaskExecution, database.Connection, database.Connection) error = func(_ *TaskExecution, _, _ database.Connection) error {
 	g.Warn("use the official release of sling-cli to use delete_missing")
 	return nil
-}
-
-func init() {
-	// we need a webserver to get the pprof webserver
-	if cast.ToBool(os.Getenv("SLING_PPROF")) {
-		go func() {
-			g.Debug("Starting pprof webserver @ localhost:6060")
-			g.LogError(http.ListenAndServe("localhost:6060", nil))
-		}()
-	}
 }
 
 // Execute runs a Sling task.

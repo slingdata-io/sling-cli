@@ -44,7 +44,35 @@ core:
   alter_columns: |
     alter table {table} {col_ddl}
   stl_load_errors_check: select colname, line_number, err_reason  from stl_load_errors order by starttime desc limit 1
- 
+
+  # Redshift only supports insert and delete_insert (no native MERGE support)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Redshift does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
+  merge_update: null
+  merge_update_insert: null
+
+  # Foreign key DDL template (Redshift supports declarative FKs - not enforced by default)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
 metadata:
 
   current_database:
@@ -95,26 +123,13 @@ metadata:
              kcu.table_name,
              position
 
+  # Redshift doesn't support traditional indexes (uses SORTKEY/DISTKEY instead)
+  # Return empty result set
   indexes: |
-    select
-      i.relname as index_name,
-      a.attname as column_name
-    from
-      pg_class t,
-      pg_class i,
-      pg_index ix,
-      pg_attribute a,
-      pg_namespace n
-    where
-      t.oid = ix.indrelid
-      and i.oid = ix.indexrelid
-      and n.oid = i.relnamespace
-      and a.attrelid = t.oid
-      and a.attnum = ANY(ix.indkey)
-      and n.nspname = '{schema}' and t.relname = '{table}'
-    order by
-      t.relname,
-      i.relname     
+    SELECT
+      NULL::text AS index_name,
+      NULL::text AS column_name
+    WHERE FALSE     
   
   columns_full: |
     with tables as (
@@ -420,6 +435,71 @@ metadata:
   ddl_view: |
     select pg_get_viewdef('"{schema}"."{table}"')::text as ddl
 
+  # Extended column attributes for schema migration
+  # Uses pg_attribute.attidentity to detect identity columns ('a' = ALWAYS, 'd' = BY DEFAULT)
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN 'true' ELSE 'false' END AS is_auto_increment,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN '1' ELSE NULL END AS identity_seed,
+      CASE WHEN a.attidentity IN ('a', 'd') THEN '1' ELSE NULL END AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      d.description
+    FROM information_schema.columns c
+    JOIN pg_catalog.pg_class t ON t.relname = c.table_name
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace AND n.nspname = c.table_schema
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name AND a.attnum > 0
+    LEFT JOIN (
+      SELECT kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_schema = '{schema}'
+        AND tc.table_name = '{table}'
+    ) pk ON pk.column_name = c.column_name
+    LEFT JOIN pg_catalog.pg_description d ON d.objoid = t.oid
+      AND d.objsubid = c.ordinal_position
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table,
+      ccu.column_name AS referenced_column,
+      rc.delete_rule AS on_delete,
+      rc.update_rule AS on_update
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_name = tc.constraint_name
+      AND ccu.table_schema = tc.table_schema
+    JOIN information_schema.referential_constraints rc
+      ON rc.constraint_name = tc.constraint_name
+      AND rc.constraint_schema = tc.constraint_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_schema = '{schema}'
+      AND tc.table_name = '{table}'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT
+      d.description
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_catalog.pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+    WHERE n.nspname = '{schema}' AND c.relname = '{table}'
+
 analysis:
   field_chars: |
     select
@@ -565,6 +645,8 @@ function:
   now: current_timestamp
 
 variable:
+  # Redshift default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   max_string_type: varchar(65535)
   max_string_length: 65535
   max_column_length: 127
@@ -617,3 +699,27 @@ general_type_map:
   timestampz: timestamptz
   timez: "varchar(65535)"
   uuid: "varchar(36)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "getdate()": "current_timestamp"
+    "GETDATE()": "current_timestamp"
+    "sysdate": "current_timestamp"
+    "SYSDATE": "current_timestamp"
+    "CURRENT_DATE": "current_date"
+    "current_date": "current_date"
+    "true": "true"
+    "false": "false"
+    "'t'": "true"
+    "'f'": "false"
+  from_general:
+    "current_timestamp": "GETDATE()"
+    "current_timestamp_utc": "SYSDATE"
+    "current_date": "CURRENT_DATE"
+    "current_time": "GETDATE()"
+    "uuid()": "''"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

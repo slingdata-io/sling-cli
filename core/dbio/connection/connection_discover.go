@@ -224,11 +224,13 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		}
 
 		var table database.Table
+		schemaHadWildcard := false
 		level := database.SchemataLevelSchema
 		if opt.Pattern != "" {
 			level = database.SchemataLevelTable
 			table, _ = database.ParseTableName(opt.Pattern, c.Type)
 			if strings.Contains(table.Schema, "*") || strings.Contains(table.Schema, "?") {
+				schemaHadWildcard = true
 				table.Schema = ""
 			}
 			if strings.Contains(table.Name, "*") || strings.Contains(table.Name, "?") {
@@ -260,7 +262,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		}
 
 		// apply filter if table is not specified
-		if len(patterns) > 0 && table.Name == "" {
+		if len(patterns) > 0 && (table.Name == "" || schemaHadWildcard) {
 			schemata = schemata.Filtered(opt.Level == database.SchemataLevelColumn, patterns...)
 		}
 

@@ -611,12 +611,12 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 	return selectStr
 }
 
-// GenerateMergeSQL generates the upsert SQL
-func (conn *PostgresConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+func (conn *PostgresConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
 
-	mc, err := conn.BaseConn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
+	mc, err := conn.BaseConn.GenerateMergeConfigWithStrategy(srcTable, tgtTable, pkFields, strategy)
 	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
+		err = g.Error(err, "could not generate merge variables")
 		return
 	}
 
@@ -649,9 +649,9 @@ func (conn *PostgresConn) GenerateMergeSQL(srcTable string, tgtTable string, pkF
 		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
 		"src_fields", mc.Map["src_fields"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
-		// "set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
 		"set_fields", mc.Map["set_fields"],
 		"insert_fields", mc.Map["insert_fields"],
+		"src_insert_fields", mc.Map["src_insert_fields"],
 	)
 
 	return

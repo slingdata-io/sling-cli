@@ -67,6 +67,11 @@ func CompressorTypePtr(v CompressorType) *CompressorType {
 	return &v
 }
 
+// isZipBytes checks for the zip file magic number (PK\x03\x04)
+func IsZipBytes(data []byte) bool {
+	return len(data) >= 4 && data[0] == 0x50 && data[1] == 0x4b && data[2] == 0x03 && data[3] == 0x04
+}
+
 // Unzip will decompress a zip archive, moving all files and folders
 // within the zip file (parameter 1) to an output directory (parameter 2).
 func Unzip(src string, dest string) (nodes []map[string]any, err error) {

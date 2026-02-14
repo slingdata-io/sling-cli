@@ -1,0 +1,211 @@
+# Schema Migration Comprehensive Test: PostgreSQL to Redshift
+# Tests: Identity, PKs, FKs (declarative), Descriptions
+# Redshift: Supports declarative FKs (not enforced), identity columns, and comments
+
+env:
+  SOURCE: postgres
+  TARGET: redshift
+
+steps:
+  # Clean up target first (in correct order due to FKs)
+  - connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Clean up source
+  - connection: '{env.SOURCE}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Create source tables with all schema attributes
+  - connection: '{env.SOURCE}'
+    query: |
+      -- Table 1: sm_categories (no FKs, referenced by sm_products)
+      CREATE TABLE public.sm_categories (
+        cat_id SERIAL PRIMARY KEY,
+        cat_name VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_active BOOLEAN DEFAULT true
+      );
+
+      -- Table 2: sm_customers (no FKs, referenced by sm_orders)
+      CREATE TABLE public.sm_customers (
+        customer_id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        full_name VARCHAR(200) NULL,
+        phone VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Table 3: sm_products (FK to sm_categories)
+      CREATE TABLE public.sm_products (
+        product_id SERIAL PRIMARY KEY,
+        category_id INT NOT NULL,
+        product_name VARCHAR(200) NOT NULL,
+        price DECIMAL(10,2) DEFAULT 0.00,
+        stock_qty INT DEFAULT 0,
+        CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES public.sm_categories(cat_id)
+      );
+
+      -- Table 4: sm_orders (FK to sm_customers)
+      CREATE TABLE public.sm_orders (
+        order_id SERIAL PRIMARY KEY,
+        customer_id INT NOT NULL,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'pending',
+        CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES public.sm_customers(customer_id)
+      );
+
+      -- Table 5: sm_order_items (FKs to sm_orders and sm_products)
+      CREATE TABLE public.sm_order_items (
+        item_id SERIAL PRIMARY KEY,
+        order_id INT NOT NULL,
+        product_id INT NOT NULL,
+        quantity INT DEFAULT 1,
+        CONSTRAINT fk_items_order FOREIGN KEY (order_id) REFERENCES public.sm_orders(order_id),
+        CONSTRAINT fk_items_product FOREIGN KEY (product_id) REFERENCES public.sm_products(product_id)
+      );
+
+  # Add descriptions (column and table)
+  - connection: '{env.SOURCE}'
+    query: |
+      COMMENT ON COLUMN public.sm_categories.cat_name IS 'Category name for products';
+      COMMENT ON COLUMN public.sm_customers.email IS 'Customer email address';
+      COMMENT ON COLUMN public.sm_orders.status IS 'Order status: pending, shipped, delivered';
+      COMMENT ON TABLE public.sm_categories IS 'Product categories lookup table';
+      COMMENT ON TABLE public.sm_customers IS 'Customer master data';
+
+  # Insert test data
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO public.sm_categories (cat_name) VALUES ('Electronics'), ('Clothing');
+      INSERT INTO public.sm_customers (email, full_name, phone) VALUES ('test@example.com', 'Test User', '555-1234'), ('user2@example.com', NULL, NULL);
+      INSERT INTO public.sm_products (category_id, product_name, price, stock_qty) VALUES (1, 'Laptop', 999.99, 10), (2, 'T-Shirt', 29.99, 100);
+      INSERT INTO public.sm_orders (customer_id, status) VALUES (1, 'shipped'), (2, 'pending');
+      INSERT INTO public.sm_order_items (order_id, product_id, quantity) VALUES (1, 1, 2), (2, 2, 3);
+
+  - replication:
+      source: '{ env.SOURCE }'
+      target: '{ env.TARGET }'
+
+      defaults:
+        mode: full-refresh
+
+      # Streams listed in WRONG topological order to test FK reordering
+      streams:
+        public.sm_order_items:
+          object: public.sm_order_items
+
+        public.sm_orders:
+          object: public.sm_orders
+
+        public.sm_products:
+          object: public.sm_products
+
+        public.sm_categories:
+          object: public.sm_categories
+
+        public.sm_customers:
+          object: public.sm_customers
+
+      env:
+        # Redshift: identity, primary_key, foreign_key, description (no indexes)
+        SLING_SCHEMA_MIGRATION: auto_increment,primary_key,foreign_key,description
+
+  # Validate FK constraints count (Redshift declarative FKs)
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.table_constraints tc
+      WHERE tc.constraint_type = 'FOREIGN KEY'
+        AND tc.table_schema = 'public'
+        AND tc.table_name LIKE 'sm_%'
+    into: fk_count
+
+  - type: log
+    message: "FK constraints found: {store.fk_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.fk_count[0].cnt) >= 1
+    message: "Expected at least 1 FK constraint, got {store.fk_count[0].cnt}"
+
+  # Validate identity columns count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name LIKE 'sm_%' AND column_default LIKE '%identity%'
+    into: identity_count
+
+  - type: log
+    message: "Identity columns found: {store.identity_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.identity_count[0].cnt) >= 1
+    message: "Expected at least 1 identity column, got {store.identity_count[0].cnt}"
+
+  # Validate column descriptions count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM pg_catalog.pg_class t
+      JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_catalog.pg_description d ON d.objoid = t.oid AND d.objsubid > 0
+      WHERE n.nspname = 'public' AND t.relname LIKE 'sm_%'
+    into: desc_count
+
+  - type: log
+    message: "Column descriptions found: {store.desc_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.desc_count[0].cnt) >= 1
+    message: "Expected at least 1 column description, got {store.desc_count[0].cnt}"
+
+  # Validate table descriptions count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_catalog.pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+      WHERE n.nspname = 'public' AND c.relname LIKE 'sm_%' AND d.description IS NOT NULL
+    into: table_desc_count
+
+  - type: log
+    message: "Table descriptions found: {store.table_desc_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.table_desc_count[0].cnt) >= 1
+    message: "Expected at least 1 table description, got {store.table_desc_count[0].cnt}"
+
+  # Clean up target
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;

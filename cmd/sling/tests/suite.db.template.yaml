@@ -347,3 +347,59 @@
   source_update_key: ""
   target_options: ""
   env: '{"level": "column", "validation_row_count": ">0"}'
+
+- n: "26"
+  test_name: merge_strategy_insert
+  source_conn: local
+  source_stream: file://tests/files/test1.csv
+  source_options: '{"columns": {"first_name": "string(100)", "email": "string(150)", "code": "decimal", "rating": "decimal(24,6)"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_merge_ins"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: ""
+  target_options: '{"merge_strategy": "insert", "use_bulk": true, "pre_sql": "{drop_table_merge_ins}"}'
+  env: '{"validation_row_count": ">0"}'
+
+- n: "27"
+  test_name: merge_strategy_update
+  source_conn: local
+  source_stream: file://tests/files/test1.upsert.csv
+  source_options: '{"columns": {"first_name": "string(100)", "email": "string(150)", "code": "decimal", "rating": "decimal"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_merge_ins"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: ""
+  target_options: '{"merge_strategy": "update", "use_bulk": true}'
+  env: '{"validation_row_count": ">0"}'
+
+- n: "28"
+  test_name: merge_strategy_update_insert
+  source_conn: local
+  source_stream: file://tests/files/test1.upsert.csv
+  source_options: '{"columns": {"first_name": "string(100)", "email": "string(150)", "code": "decimal", "rating": "decimal"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_merge_ui"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: ""
+  target_options: '{"merge_strategy": "update_insert", "use_bulk": true, "pre_sql": "{drop_table_merge_ins}"}'
+  env: '{"validation_row_count": ">0"}'
+
+- n: "29"
+  test_name: merge_strategy_delete_insert
+  source_conn: local
+  source_stream: file://tests/files/test1.upsert.csv
+  source_options: '{"columns": {"first_name": "string(100)", "email": "string(150)", "code": "decimal", "rating": "decimal"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_merge_di"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: ""
+  target_options: '{"merge_strategy": "delete_insert", "use_bulk": true, "pre_sql": "{drop_table_merge_ui}", "post_sql": "{drop_table_merge_di}"}'
+  env: '{"validation_stream_row_count": ">0"}'

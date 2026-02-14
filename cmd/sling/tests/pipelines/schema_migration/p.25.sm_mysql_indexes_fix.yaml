@@ -1,0 +1,130 @@
+# Schema Migration Test: MySQL Indexes (exclude PRIMARY)
+# Tests: indexes query excludes PRIMARY key from results and includes uniqueness info
+
+env:
+  SOURCE: mysql
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_mysql_indexes_fix CASCADE;
+
+  # Clean up source (disable FK checks for easier cleanup)
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      SET FOREIGN_KEY_CHECKS = 0;
+      DROP TABLE IF EXISTS sm_mysql_indexes_fix;
+      SET FOREIGN_KEY_CHECKS = 1;
+
+  # Create source table with PRIMARY key and secondary indexes
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE sm_mysql_indexes_fix (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        name VARCHAR(100),
+        status INT DEFAULT 1,
+        UNIQUE INDEX idx_email (email),
+        INDEX idx_name (name),
+        INDEX idx_status (status)
+      ) ENGINE=InnoDB;
+      INSERT INTO sm_mysql_indexes_fix (email, name, status) VALUES ('test@example.com', 'Test User', 1);
+
+  # Run replication with schema migration
+  - replication:
+      source: mysql
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: primary_key,indexes
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        mysql.sm_mysql_indexes_fix:
+          object: public.sm_mysql_indexes_fix
+
+  # Validate primary key was created
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.table_constraints
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_mysql_indexes_fix'
+        AND constraint_type = 'PRIMARY KEY'
+    into: pk_count
+
+  - type: log
+    message: "Primary key constraints found: {store.pk_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.pk_count[0].cnt) == 1
+    message: "Expected 1 primary key constraint, got {store.pk_count[0].cnt}"
+
+  # Validate indexes (should NOT include PRIMARY in the result)
+  # Should have 3 indexes: idx_email, idx_name, idx_status
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'sm_mysql_indexes_fix'
+        AND indexname NOT LIKE '%pkey%'
+      ORDER BY indexname
+    into: index_result
+
+  - type: log
+    message: "Indexes found (excluding PK): {store.index_result}"
+
+  - type: check
+    check: length(store.index_result) == 3
+    message: "Expected 3 non-PK indexes"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_mysql_indexes_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 1
+    message: "Expected 1 row, got {store.data_count[0].cnt}"
+
+  # Validate unique index was created (idx_email should be unique)
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT indexname, indisunique
+      FROM pg_indexes i
+      JOIN pg_class c ON c.relname = i.indexname
+      JOIN pg_index idx ON idx.indexrelid = c.oid
+      WHERE i.schemaname = 'public'
+        AND i.tablename = 'sm_mysql_indexes_fix'
+        AND i.indexname LIKE '%email%'
+    into: unique_idx
+
+  - type: log
+    message: "Unique index info: {store.unique_idx}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      SET FOREIGN_KEY_CHECKS = 0;
+      DROP TABLE IF EXISTS sm_mysql_indexes_fix;
+      SET FOREIGN_KEY_CHECKS = 1;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_mysql_indexes_fix CASCADE;

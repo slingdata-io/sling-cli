@@ -1,0 +1,85 @@
+# Schema Migration Test: Databricks basic (accept identity limitation)
+# Tests: Basic column migration works without identity metadata errors
+# Phase 3: Databricks doesn't expose identity metadata via information_schema
+
+env:
+  SOURCE: databricks
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_databricks_basic_fix CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS default.sm_databricks_basic_fix;
+
+  # Create source table (note: identity columns exist but won't be detected)
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE default.sm_databricks_basic_fix (
+        id BIGINT,
+        name STRING NOT NULL,
+        value DOUBLE,
+        created_at TIMESTAMP
+      );
+      INSERT INTO default.sm_databricks_basic_fix VALUES (1, 'Test1', 1.5, current_timestamp());
+
+  # Run replication with schema migration
+  - replication:
+      source: databricks
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: nullable,primary_key
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        default.sm_databricks_basic_fix:
+          object: public.sm_databricks_basic_fix
+
+  # Validate columns were migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_databricks_basic_fix'
+    into: columns_count
+
+  - type: log
+    message: "Columns migrated: {store.columns_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.columns_count[0].cnt) == 4
+    message: "Expected 4 columns, got {store.columns_count[0].cnt}"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_databricks_basic_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 1
+    message: "Expected 1 row, got {store.data_count[0].cnt}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS default.sm_databricks_basic_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_databricks_basic_fix CASCADE;

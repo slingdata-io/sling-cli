@@ -162,6 +162,19 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		}
 	}
 
+	// check for duplicate step IDs
+	seenIDs := map[string]int{}
+	for i, step := range pipeline.steps {
+		id := step.ID()
+		if id == "" {
+			continue
+		}
+		if prevIdx, exists := seenIDs[id]; exists {
+			return pipeline, g.Error("duplicate step id %q found at index %d and %d. Each step must have a unique id", id, prevIdx+1, i+1)
+		}
+		seenIDs[id] = i
+	}
+
 	pipeline.execID = os.Getenv("SLING_EXEC_ID")
 	if pipeline.execID == "" {
 		pipeline.execID = NewExecID()

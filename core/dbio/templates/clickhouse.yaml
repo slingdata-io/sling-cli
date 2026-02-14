@@ -25,6 +25,31 @@ core:
         from {temp_table}
       )
 
+  # ClickHouse only supports insert and delete_insert
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    ALTER TABLE {tgt_table} DELETE
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # ClickHouse does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
+  merge_update: null
+  merge_update_insert: null
+
+  # ClickHouse does NOT support foreign keys - this template will not be used
+  # add_foreign_key: null
+
+  # Column comment/description template (ClickHouse uses COMMENT COLUMN syntax)
+  add_column_comment: ALTER TABLE {table} COMMENT COLUMN `{column}` {comment}
+
+  # Table comment/description template (ClickHouse uses MODIFY COMMENT)
+  add_table_comment: ALTER TABLE {table} MODIFY COMMENT {comment}
 
 metadata:
 
@@ -63,11 +88,22 @@ metadata:
       and table = '{table}'
     order by position
 
+  # Extract primary key columns from system.tables
   primary_keys: |
-    select 1
+    SELECT
+      'PRIMARY' AS pk_name,
+      arrayJoin(splitByChar(',', replaceRegexpAll(primary_key, ' ', ''))) AS column_name,
+      rowNumberInAllBlocks() + 1 AS position
+    FROM system.tables
+    WHERE database = '{schema}' AND name = '{table}' AND primary_key != ''
 
+  # ClickHouse data-skipping indexes (not traditional B-tree indexes)
+  # Return empty result for now since these are specialized indexes
   indexes: |
-    select 1
+    SELECT
+      '' AS index_name,
+      '' AS column_name
+    WHERE 0
   
   columns_full: |
     with tables as (
@@ -127,6 +163,47 @@ metadata:
 
   session_terminate:
     select pg_terminate_backend({pid})
+
+  # Extended column attributes for schema migration
+  # Note: ClickHouse does not support IDENTITY or FK constraints
+  # Uses system.tables to detect primary key columns
+  columns_extended: |
+    SELECT
+      c.name AS column_name,
+      CASE WHEN startsWith(c.type, 'Nullable') THEN 'true' ELSE 'false' END AS is_nullable,
+      c.default_expression AS default_value,
+      'false' AS is_auto_increment,
+      NULL AS identity_seed,
+      NULL AS identity_increment,
+      CASE
+        WHEN has(splitByChar(',', replaceRegexpAll(t.primary_key, ' ', '')), c.name)
+        THEN 'true'
+        ELSE 'false'
+      END AS is_primary_key,
+      c.comment AS description
+    FROM system.columns c
+    JOIN system.tables t ON t.database = c.database AND t.name = c.table
+    WHERE c.database = '{schema}' AND c.table = '{table}'
+    ORDER BY c.position
+
+  # ClickHouse does NOT support foreign keys
+  # This query returns no rows, which is the correct behavior
+  foreign_keys: |
+    SELECT
+      '' AS constraint_name,
+      '' AS column_name,
+      '' AS referenced_schema,
+      '' AS referenced_table,
+      '' AS referenced_column,
+      '' AS on_delete,
+      '' AS on_update
+    WHERE 1=0
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT comment AS description
+    FROM system.tables
+    WHERE database = '{schema}' AND name = '{table}'
 
 analysis:
   field_chars: |
@@ -268,6 +345,8 @@ function:
 
 
 variable:
+  # ClickHouse default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   # bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000
@@ -293,9 +372,9 @@ native_type_map:
   float32: float
   float64: float
   int16: smallint
-  int32: bigint
+  int32: integer
   int64: bigint
-  int8: integer
+  int8: smallint
   ipv6: string
   json: json
   lowcardinality: string
@@ -327,3 +406,23 @@ general_type_map:
   timestampz: "Nullable(DateTime64(6))"
   timez: "Nullable(String)"
   uuid: "Nullable(UUID)"
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "now()": "current_timestamp"
+    "NOW()": "current_timestamp"
+    "today()": "current_date"
+    "TODAY()": "current_date"
+    "generateUUIDv4()": "uuid()"
+    "1": "true"
+    "0": "false"
+  from_general:
+    "current_timestamp": "now()"
+    "current_timestamp_utc": "now()"
+    "current_date": "today()"
+    "current_time": "now()"
+    "uuid()": "generateUUIDv4()"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"

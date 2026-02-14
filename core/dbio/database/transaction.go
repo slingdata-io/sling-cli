@@ -292,6 +292,30 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	}
 	_ = mux
 
+	// Check for identity columns when target is SQL Server (schema migration scenario)
+	// If inserting explicit values into identity columns, we need IDENTITY_INSERT ON
+	if conn.GetType().IsSQLServer() {
+		hasIdentity := false
+		for _, col := range ds.Columns {
+			if col.IsAutoIncrement() {
+				hasIdentity = true
+				break
+			}
+		}
+		if hasIdentity {
+			_, err = conn.Exec(g.F("SET IDENTITY_INSERT %s ON", tableFName))
+			if err != nil {
+				g.Debug("could not enable IDENTITY_INSERT: %v", err)
+				// Don't fail - the insert might still work if the identity column isn't in the insert list
+				err = nil
+			} else {
+				defer func() {
+					conn.Exec(g.F("SET IDENTITY_INSERT %s OFF", tableFName))
+				}()
+			}
+		}
+	}
+
 	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) {
 		var err error
 		defer context.Wg.Write.Done()
@@ -464,8 +488,15 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	return count, nil
 }
 
-// Merge upserts from source table into target table
+// Merge upserts from source table into target table using the database's default strategy.
+// This is a backward-compatible wrapper that calls MergeWithStrategy with nil strategy.
 func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string) (count int64, err error) {
+	return MergeWithStrategy(conn, tx, sourceTable, targetTable, pkFields, nil)
+}
+
+// MergeWithStrategy upserts from source table into target table using the specified merge strategy.
+// If strategy is nil, uses the database's default merge strategy from templates.
+func MergeWithStrategy(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string, strategy *MergeStrategy) (count int64, err error) {
 
 	srcTable, err := ParseTableName(sourceTable, conn.GetType())
 	if err != nil {
@@ -479,7 +510,7 @@ func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkF
 		return
 	}
 
-	q, err := conn.Self().GenerateMergeSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
+	q, err := conn.Self().GenerateMergeSQLWithStrategy(srcTable.FullName(), tgtTable.FullName(), pkFields, strategy)
 	if err != nil {
 		err = g.Error(err, "could not generate merge sql")
 		return

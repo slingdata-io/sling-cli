@@ -7,14 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flarco/g"
 	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	_ "github.com/timeplus-io/proton-go-driver/v2"
-
-	"github.com/flarco/g"
 )
 
 // ProtonConn is a Proton connection
@@ -320,31 +319,15 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Colum
 	return statement
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy (insert).
 func (conn *ProtonConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	// proton does not support upsert with delete
-	sqlTempl := `
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from table({src_table}) src
-	`
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
-	)
-
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// Proton is a streaming database and only supports the insert strategy (no updates or deletes).
+func (conn *ProtonConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 func processProtonInsertRow(columns iop.Columns, row []any) []any {

@@ -142,6 +142,44 @@ core:
     )
     AS {sql}
 
+  # Databricks supports all 4 merge strategies
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Foreign key DDL template (Databricks Unity Catalog - declarative, not enforced)
+  # Note: Databricks does not support ON DELETE/UPDATE actions
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})
+
+  # Column comment/description template (ALTER TABLE ... ALTER COLUMN syntax)
+  add_column_comment: ALTER TABLE {table} ALTER COLUMN `{column}` COMMENT {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
 metadata:
 
   current_database:
@@ -232,6 +270,59 @@ metadata:
 
   ddl_view: |
     show create table {schema}.{table}
+
+  # Extended column attributes for schema migration (Unity Catalog)
+  # Note: Databricks does NOT expose identity metadata through information_schema.columns
+  # (column_default, is_identity, identity_start, identity_increment are always NULL/'NO')
+  # Identity detection would require parsing SHOW CREATE TABLE output
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      'false' AS is_auto_increment,
+      NULL AS identity_seed,
+      NULL AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      c.comment AS description
+    FROM information_schema.columns c
+    LEFT JOIN (
+      SELECT column_name
+      FROM information_schema.constraint_column_usage
+      WHERE table_schema = lower('{schema}')
+        AND table_name = lower('{table}')
+        AND constraint_type = 'PRIMARY KEY'
+    ) pk ON lower(pk.column_name) = lower(c.column_name)
+    WHERE c.table_schema = lower('{schema}') AND c.table_name = lower('{table}')
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships (Unity Catalog)
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table,
+      ccu.column_name AS referenced_column,
+      'NO ACTION' AS on_delete,
+      'NO ACTION' AS on_update
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.constraint_column_usage ccu
+      ON tc.constraint_name = ccu.constraint_name
+      AND tc.table_schema = ccu.table_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_schema = lower('{schema}')
+      AND tc.table_name = lower('{table}')
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT comment AS description
+    FROM information_schema.tables
+    WHERE table_schema = lower('{schema}') AND table_name = lower('{table}')
 
 analysis:
   # table level
@@ -599,3 +690,27 @@ general_type_map:
   timestampz: timestamp
   timez: string
   uuid: string
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "current_timestamp()": "current_timestamp"
+    "CURRENT_TIMESTAMP()": "current_timestamp"
+    "current_timestamp": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "current_date()": "current_date"
+    "CURRENT_DATE()": "current_date"
+    "current_date": "current_date"
+    "CURRENT_DATE": "current_date"
+    "uuid()": "uuid()"
+    "true": "true"
+    "false": "false"
+  from_general:
+    "current_timestamp": "current_timestamp()"
+    "current_timestamp_utc": "current_timestamp()"
+    "current_date": "current_date()"
+    "current_time": "current_timestamp()"
+    "uuid()": "uuid()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

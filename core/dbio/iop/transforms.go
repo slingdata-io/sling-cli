@@ -1324,6 +1324,8 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 			depth := 1
 			i++
 			inDoubleQuote := false
+			hasNestedOpen := false  // Track if expression contains nested { outside quotes
+			hasNestedClose := false // Track if expression contains nested } outside quotes
 
 			for i < n && depth > 0 {
 				c := runes[i]
@@ -1343,7 +1345,11 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 				if !inDoubleQuote {
 					if c == '{' {
 						depth++
+						hasNestedOpen = true
 					} else if c == '}' {
+						if depth > 1 {
+							hasNestedClose = true
+						}
 						depth--
 					}
 				}
@@ -1356,7 +1362,19 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 
 			// Extract expression (without outer braces)
 			expr := string(runes[start+1 : i-1])
-			result = append(result, expr)
+
+			// If expression has both nested { and } outside quotes, don't extract it as an expression
+			// Instead, recursively scan inside to find actual template expressions
+			if hasNestedOpen && hasNestedClose {
+				// Recursively find matches inside this content
+				innerMatches, innerErr := e.FindMatches(expr)
+				if innerErr != nil {
+					return nil, innerErr
+				}
+				result = append(result, innerMatches...)
+			} else {
+				result = append(result, expr)
+			}
 		} else {
 			i++
 		}
