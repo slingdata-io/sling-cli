@@ -1,6 +1,8 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/md5"
@@ -286,12 +288,12 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "authorization_code_missing_auth_url",
 			auth: Authentication{
-				"type":               AuthTypeOAuth2,
-				"flow":               OAuthFlowAuthorizationCode,
-				"client_id":          "client123",
-				"client_secret":      "secret123",
-				"redirect_uri":       "https://app.example.com/callback",
-				"authorization_url":  "https://api.example.com/oauth/authorize",
+				"type":              AuthTypeOAuth2,
+				"flow":              OAuthFlowAuthorizationCode,
+				"client_id":         "client123",
+				"client_secret":     "secret123",
+				"redirect_uri":      "https://app.example.com/callback",
+				"authorization_url": "https://api.example.com/oauth/authorize",
 			},
 			expectError: true,
 			errorMsg:    "authentication_url is required",
@@ -2967,13 +2969,13 @@ endpoints:
 
 func TestGetSyncUpdateKey(t *testing.T) {
 	tests := []struct {
-		name            string
-		specYAML        string
-		endpointName    string
-		expectedSync    string
-		expectedUpdate  string
-		expectError     bool
-		expectNotFound  bool
+		name           string
+		specYAML       string
+		endpointName   string
+		expectedSync   string
+		expectedUpdate string
+		expectError    bool
+		expectNotFound bool
 	}{
 		{
 			name: "with_maximum_aggregation",
@@ -3245,6 +3247,260 @@ endpoints:
 
 			assert.Equal(t, tt.expectedSync, syncKey, "Sync key mismatch")
 			assert.Equal(t, tt.expectedUpdate, updateKey, "Update key mismatch")
+		})
+	}
+}
+
+// === Unit Tests for helper functions ===
+
+func TestIsZipBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected bool
+	}{
+		{"valid_zip_magic", []byte{0x50, 0x4b, 0x03, 0x04, 0x00}, true},
+		{"json_data", []byte(`{"key":"value"}`), false},
+		{"empty", []byte{}, false},
+		{"too_short", []byte{0x50, 0x4b}, false},
+		{"gzip_magic", []byte{0x1f, 0x8b, 0x08, 0x00}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, iop.IsZipBytes(tt.data))
+		})
+	}
+}
+
+func TestParseJSONLines(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		expected    int // number of records
+		expectError bool
+	}{
+		{
+			name:     "normal_jsonl",
+			input:    "{\"id\":1,\"name\":\"alice\"}\n{\"id\":2,\"name\":\"bob\"}\n{\"id\":3,\"name\":\"charlie\"}\n",
+			expected: 3,
+		},
+		{
+			name:     "with_empty_lines",
+			input:    "{\"id\":1}\n\n{\"id\":2}\n  \n{\"id\":3}\n",
+			expected: 3,
+		},
+		{
+			name:     "single_record",
+			input:    "{\"id\":1}\n",
+			expected: 1,
+		},
+		{
+			name:     "empty_input",
+			input:    "",
+			expected: 0,
+		},
+		{
+			name:     "only_whitespace",
+			input:    "  \n  \n  \n",
+			expected: 0,
+		},
+		{
+			name:        "invalid_json_line",
+			input:       "{\"id\":1}\nnot-json\n",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			records, err := parseJSONLines([]byte(tt.input))
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Len(t, records, tt.expected)
+			}
+		})
+	}
+}
+
+// === Integration Tests with httptest mock servers ===
+
+func TestResponseFormats(t *testing.T) {
+	tests := []struct {
+		name           string
+		handler        func(w http.ResponseWriter, r *http.Request)
+		responseFormat string // value for response.format in spec
+		expectedCount  int
+		expectedFirst  map[string]any // first record expected values
+	}{
+		{
+			name: "jsonlines_format",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/jsonlines")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("{\"id\":1,\"name\":\"alice\"}\n{\"id\":2,\"name\":\"bob\"}\n"))
+			},
+			responseFormat: "jsonlines",
+			expectedCount:  2,
+			expectedFirst:  map[string]any{"id": float64(1), "name": "alice"},
+		},
+		{
+			name: "zip_with_json",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				jsonData := []byte(`[{"id":1,"name":"alice"},{"id":2,"name":"bob"}]`)
+				var buf bytes.Buffer
+				zw := zip.NewWriter(&buf)
+				f, _ := zw.Create("data.json")
+				f.Write(jsonData)
+				zw.Close()
+				w.Header().Set("Content-Type", "application/zip")
+				w.WriteHeader(http.StatusOK)
+				w.Write(buf.Bytes())
+			},
+			expectedCount: 2,
+			expectedFirst: map[string]any{"id": float64(1), "name": "alice"},
+		},
+		{
+			name: "zip_with_jsonlines",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				jsonlData := []byte("{\"id\":1,\"name\":\"alice\"}\n{\"id\":2,\"name\":\"bob\"}\n{\"id\":3,\"name\":\"charlie\"}\n")
+				var buf bytes.Buffer
+				zw := zip.NewWriter(&buf)
+				f, _ := zw.Create("events.jsonl")
+				f.Write(jsonlData)
+				zw.Close()
+				w.Header().Set("Content-Type", "application/zip")
+				w.WriteHeader(http.StatusOK)
+				w.Write(buf.Bytes())
+			},
+			expectedCount: 3,
+			expectedFirst: map[string]any{"id": float64(1), "name": "alice"},
+		},
+		{
+			name: "zip_with_csv",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				csvData := []byte("id,name\n1,alice\n2,bob\n")
+				var buf bytes.Buffer
+				zw := zip.NewWriter(&buf)
+				f, _ := zw.Create("data.csv")
+				f.Write(csvData)
+				zw.Close()
+				w.Header().Set("Content-Type", "application/zip")
+				w.WriteHeader(http.StatusOK)
+				w.Write(buf.Bytes())
+			},
+			expectedCount: 2,
+			expectedFirst: map[string]any{"id": "1", "name": "alice"},
+		},
+		{
+			name: "zip_with_multiple_json_files",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				jsonData1 := []byte(`[{"id":1,"source":"file1"}]`)
+				jsonData2 := []byte(`[{"id":2,"source":"file2"}]`)
+				var buf bytes.Buffer
+				zw := zip.NewWriter(&buf)
+				f1, _ := zw.Create("data1.json")
+				f1.Write(jsonData1)
+				f2, _ := zw.Create("data2.json")
+				f2.Write(jsonData2)
+				zw.Close()
+				w.Header().Set("Content-Type", "application/zip")
+				w.WriteHeader(http.StatusOK)
+				w.Write(buf.Bytes())
+			},
+			expectedCount: 2, // 1 from each JSON file, merged
+			expectedFirst: map[string]any{"id": float64(1), "source": "file1"},
+		},
+		{
+			name: "zip_detected_by_magic_bytes",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				// Return zip with octet-stream content type — should detect via magic bytes
+				jsonData := []byte(`[{"id":1,"name":"magic"}]`)
+				var buf bytes.Buffer
+				zw := zip.NewWriter(&buf)
+				f, _ := zw.Create("data.json")
+				f.Write(jsonData)
+				zw.Close()
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.WriteHeader(http.StatusOK)
+				w.Write(buf.Bytes())
+			},
+			expectedCount: 1,
+			expectedFirst: map[string]any{"id": float64(1), "name": "magic"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock server
+			server := httptest.NewServer(http.HandlerFunc(tt.handler))
+			defer server.Close()
+
+			// Build spec YAML
+			responseFormatLine := ""
+			if tt.responseFormat != "" {
+				responseFormatLine = "      format: " + tt.responseFormat + "\n"
+			}
+
+			specYAML := fmt.Sprintf(`
+name: "test_response_format"
+defaults:
+  state:
+    base_url: "%s"
+endpoints:
+  test_endpoint:
+    request:
+      url: "{state.base_url}/data"
+    response:
+%s      records:
+        jmespath: "[]"
+`, server.URL, responseFormatLine)
+
+			spec, err := LoadSpec(specYAML)
+			if !assert.NoError(t, err, "LoadSpec failed") {
+				return
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, nil)
+			if !assert.NoError(t, err, "NewAPIConnection failed") {
+				return
+			}
+			ac.State.Auth.Authenticated = true
+
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{Limit: 100})
+			if !assert.NoError(t, err, "ReadDataflow failed") {
+				return
+			}
+
+			data, err := df.Collect()
+			if !assert.NoError(t, err, "Collect failed") {
+				return
+			}
+
+			// Convert rows to maps
+			records := []map[string]any{}
+			for _, row := range data.Rows {
+				record := make(map[string]any)
+				for i, col := range data.Columns {
+					if i < len(row) {
+						record[col.Name] = row[i]
+					}
+				}
+				records = append(records, record)
+			}
+
+			assert.Equal(t, tt.expectedCount, len(records), "record count mismatch")
+
+			if tt.expectedFirst != nil && len(records) > 0 {
+				for key, expected := range tt.expectedFirst {
+					actual, exists := records[0][key]
+					assert.True(t, exists, "expected key %s in first record", key)
+					// Compare as strings since Dataflow may coerce types
+					assert.Equal(t, cast.ToString(expected), cast.ToString(actual), "mismatch for key %s", key)
+				}
+			}
 		})
 	}
 }

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"maps"
 	"net/http"
@@ -1156,6 +1158,28 @@ func (ep *Endpoint) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	return nil
+}
+
+// parseJSONLines parses newline-delimited JSON (JSONL/NDJSON) data into a slice
+func parseJSONLines(data []byte) ([]any, error) {
+	var records []any
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var obj any
+		if err := g.JSONUnmarshal(line, &obj); err != nil {
+			return nil, g.Error(err, "could not parse JSONL line: %s", string(line[:min(len(line), 200)]))
+		}
+		records = append(records, obj)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, g.Error(err, "error scanning JSONL data")
+	}
+	return records, nil
 }
 
 // parseSequenceFromInterface converts an interface{} to Sequence ([]Call)
