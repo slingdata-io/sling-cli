@@ -1,6 +1,7 @@
 package filesys
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -513,8 +514,12 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	uploader := manager.NewUploader(svc)
 	uploader.Concurrency = fs.Context().Wg.Limit
 
-	// Create pipe to get bytes written
+	// Create pipe to get bytes written.
+	// Wrap with a buffered reader (10MB) to prevent deadlocks when the S3
+	// multipart uploader blocks trying to fill a 5MB chunk while the upstream
+	// pipeline (CSV → gzip → pipe) is waiting for the pipe to drain.
 	pr, pw := io.Pipe()
+	br := bufio.NewReaderSize(pr, 10*1024*1024)
 	fs.Context().Wg.Write.Add()
 	go func() {
 		defer fs.Context().Wg.Write.Done()
@@ -530,7 +535,7 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	_, err = uploader.Upload(fs.Context().Ctx, &s3.PutObjectInput{
 		Bucket:               aws.String(fs.bucket),
 		Key:                  aws.String(key),
-		Body:                 pr,
+		Body:                 br,
 		ServerSideEncryption: ServerSideEncryption,
 		SSEKMSKeyId:          SSEKMSKeyId,
 	})
