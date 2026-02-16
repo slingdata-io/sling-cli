@@ -51,6 +51,33 @@ core:
       {sql}
     ) as t limit {limit} /* offset {offset} */
 
+  # Exasol supports all 4 merge strategies
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING {src_table} src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({placeholder_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
 metadata:
   
   current_database: |

@@ -1,0 +1,85 @@
+steps:
+  # Test 1: Read JSON with jq source option via inline replication
+  - replication:
+      source: local
+      target: postgres
+
+      defaults:
+        mode: full-refresh
+        source_options:
+          flatten: true
+          jq: ".data[]"
+
+      streams:
+        file://cmd/sling/tests/files/test_jq.json:
+          object: public.test_jq
+
+  # Verify the replication output
+  - type: query
+    connection: postgres
+    query: select count(*) as cnt from public.test_jq
+    into: repl_result
+
+  - type: log
+    message: "jq replication row count => {store.repl_result}"
+
+  - type: check
+    check: store.repl_result[0].cnt == 3
+
+  - type: query
+    connection: postgres
+    query: select name from public.test_jq order by id limit 1
+    into: repl_first
+
+  - type: check
+    check: store.repl_first[0].name == "Alice"
+
+  # Cleanup
+  - type: query
+    connection: postgres
+    query: drop table if exists public.test_jq
+
+  # Test 2: Read JSON with jq source option via CLI command
+  - type: command
+    command: >
+      sling run
+      --src-stream file://cmd/sling/tests/files/test_jq.json
+      --src-options '{ jq: ".data[]" }'
+      --stdout
+      > /tmp/sling_jq_test_output.csv
+    print: true
+
+  # Verify the output row count (3 data rows + header)
+  - type: command
+    command: ['wc', '-l', '/tmp/sling_jq_test_output.csv']
+    into: wc_result
+    print: true
+
+  - type: log
+    message: "jq source option line count => {store.wc_result}"
+
+  # Test 3: Use jq() transform function
+  - type: store
+    key: test_obj
+    value:
+      items:
+        - sku: A1
+          qty: 10
+        - sku: B2
+          qty: 20
+
+  - type: store
+    key: jq_result
+    value: '{ jq(store.test_obj, ".items[].sku") }'
+
+  - type: log
+    message: "jq() function result => {store.jq_result}"
+
+  - type: check
+    check: length(store.jq_result) == 2
+
+  - type: check
+    check: store.jq_result[0] == "A1"
+
+  - type: check
+    check: store.jq_result[1] == "B2"

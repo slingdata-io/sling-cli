@@ -7,15 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/env"
-
-	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
-
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -424,43 +422,15 @@ func (conn *RedshiftConn) BulkImportStream(tableFName string, ds *iop.Datastream
 	return conn.BulkImportFlow(tableFName, df)
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy (delete_insert).
 func (conn *RedshiftConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
-
-	srcTgtPkEqual := strings.ReplaceAll(
-		upsertMap["src_tgt_pk_equal"], "src.", srcTable+".",
-	)
-	srcTgtPkEqual = strings.ReplaceAll(
-		srcTgtPkEqual, "tgt.", tgtTable+".",
-	)
-
-	sqlTempl := `
-	delete from {tgt_table}
-	using {src_table}
-	where {src_tgt_pk_equal}
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
-		"src_tgt_pk_equal", srcTgtPkEqual,
-	)
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// Redshift only supports insert and delete_insert strategies (no native MERGE support).
+func (conn *RedshiftConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 // CopyFromS3 uses the COPY INTO Table command from AWS S3

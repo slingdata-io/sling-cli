@@ -1,0 +1,56 @@
+# Test that backfill from ClickHouse with 0 matching rows does not error
+# Reproduces: https://github.com/slingdata-io/sling-cli/issues/701
+
+source: clickhouse_http
+target: postgres
+
+hooks:
+  start:
+    # Create a source table in ClickHouse with some data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS default.test_empty_backfill;
+        CREATE TABLE default.test_empty_backfill (
+          id UInt64,
+          value String,
+          updated_at DateTime
+        ) ENGINE = MergeTree()
+        ORDER BY id;
+        INSERT INTO default.test_empty_backfill (id, value, updated_at) VALUES
+        (1, 'row1', '2024-01-15 00:00:00'),
+        (2, 'row2', '2024-01-20 00:00:00'),
+        (3, 'row3', '2024-02-01 00:00:00');
+
+    # Drop target table in Postgres
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_empty_backfill;
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: log
+      message: "SUCCESS: backfill with 0 rows did not error"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS default.test_empty_backfill;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_empty_backfill;
+
+streams:
+  default.test_empty_backfill:
+    object: public.test_empty_backfill
+    mode: backfill
+    primary_key: [id]
+    update_key: updated_at
+    source_options:
+      # Use a date range far in the future where no data exists
+      range: '2030-01-01,2030-12-31'

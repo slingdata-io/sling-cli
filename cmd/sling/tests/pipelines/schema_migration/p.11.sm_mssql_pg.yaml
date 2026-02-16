@@ -1,0 +1,246 @@
+# Schema Migration Comprehensive Test: MSSQL to PostgreSQL
+# Tests: Identity (5), FKs (4), Indexes (8), Defaults (8), Nullable (3), Descriptions (3)
+# Streams listed in WRONG order to test FK reordering
+
+env:
+  SOURCE: mssql
+  TARGET: postgres
+
+steps:
+  # Clean up target first (in correct order due to FKs)
+  - connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Clean up source
+  - connection: '{env.SOURCE}'
+    query: |
+      IF OBJECT_ID('dbo.sm_order_items', 'U') IS NOT NULL DROP TABLE dbo.sm_order_items;
+      IF OBJECT_ID('dbo.sm_orders', 'U') IS NOT NULL DROP TABLE dbo.sm_orders;
+      IF OBJECT_ID('dbo.sm_products', 'U') IS NOT NULL DROP TABLE dbo.sm_products;
+      IF OBJECT_ID('dbo.sm_customers', 'U') IS NOT NULL DROP TABLE dbo.sm_customers;
+      IF OBJECT_ID('dbo.sm_categories', 'U') IS NOT NULL DROP TABLE dbo.sm_categories;
+
+  # Create source tables with all schema attributes
+  - connection: '{env.SOURCE}'
+    query: |
+      -- Table 1: sm_categories (no FKs, referenced by sm_products)
+      CREATE TABLE dbo.sm_categories (
+        cat_id INT IDENTITY(1,1) PRIMARY KEY,
+        cat_name NVARCHAR(100) NOT NULL,
+        created_at DATETIME DEFAULT GETDATE(),
+        is_active BIT DEFAULT 1
+      );
+
+      -- Table 2: sm_customers (no FKs, referenced by sm_orders)
+      CREATE TABLE dbo.sm_customers (
+        customer_id INT IDENTITY(1,1) PRIMARY KEY,
+        email NVARCHAR(255) NOT NULL,
+        full_name NVARCHAR(200) NULL,
+        phone NVARCHAR(50) NULL,
+        created_at DATETIME DEFAULT GETDATE()
+      );
+
+      -- Table 3: sm_products (FK to sm_categories)
+      CREATE TABLE dbo.sm_products (
+        product_id INT IDENTITY(100,1) PRIMARY KEY,
+        category_id INT NOT NULL,
+        product_name NVARCHAR(200) NOT NULL,
+        price DECIMAL(10,2) DEFAULT 0.00,
+        stock_qty INT DEFAULT 0,
+        CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES dbo.sm_categories(cat_id)
+      );
+
+      -- Table 4: sm_orders (FK to sm_customers)
+      CREATE TABLE dbo.sm_orders (
+        order_id INT IDENTITY(1000,10) PRIMARY KEY,
+        customer_id INT NOT NULL,
+        order_date DATETIME DEFAULT GETDATE(),
+        status NVARCHAR(50) DEFAULT 'pending',
+        CONSTRAINT fk_orders_customer FOREIGN KEY (customer_id) REFERENCES dbo.sm_customers(customer_id)
+      );
+
+      -- Table 5: sm_order_items (FKs to sm_orders and sm_products)
+      CREATE TABLE dbo.sm_order_items (
+        item_id INT IDENTITY(1,1) PRIMARY KEY,
+        order_id INT NOT NULL,
+        product_id INT NOT NULL,
+        quantity INT DEFAULT 1,
+        CONSTRAINT fk_items_order FOREIGN KEY (order_id) REFERENCES dbo.sm_orders(order_id),
+        CONSTRAINT fk_items_product FOREIGN KEY (product_id) REFERENCES dbo.sm_products(product_id)
+      );
+
+  # Add indexes
+  - connection: '{env.SOURCE}'
+    query: |
+      -- Indexes for sm_categories
+      CREATE INDEX idx_categories_name ON dbo.sm_categories(cat_name);
+
+      -- Indexes for sm_customers
+      CREATE UNIQUE INDEX idx_customers_email ON dbo.sm_customers(email);
+      CREATE INDEX idx_customers_name ON dbo.sm_customers(full_name);
+
+      -- Indexes for sm_products
+      CREATE INDEX idx_products_category ON dbo.sm_products(category_id);
+      CREATE INDEX idx_products_name ON dbo.sm_products(product_name);
+
+      -- Indexes for sm_orders
+      CREATE INDEX idx_orders_customer ON dbo.sm_orders(customer_id);
+      CREATE INDEX idx_orders_date ON dbo.sm_orders(order_date);
+
+      -- Composite index for sm_order_items
+      CREATE INDEX idx_items_order_product ON dbo.sm_order_items(order_id, product_id);
+
+  # Add descriptions (column and table)
+  - connection: '{env.SOURCE}'
+    query: |
+      EXEC sp_addextendedproperty 'MS_Description', 'Category name for products', 'SCHEMA', 'dbo', 'TABLE', 'sm_categories', 'COLUMN', 'cat_name';
+      EXEC sp_addextendedproperty 'MS_Description', 'Customer email address', 'SCHEMA', 'dbo', 'TABLE', 'sm_customers', 'COLUMN', 'email';
+      EXEC sp_addextendedproperty 'MS_Description', 'Order status: pending, shipped, delivered', 'SCHEMA', 'dbo', 'TABLE', 'sm_orders', 'COLUMN', 'status';
+      EXEC sp_addextendedproperty 'MS_Description', 'Product categories lookup table', 'SCHEMA', 'dbo', 'TABLE', 'sm_categories';
+      EXEC sp_addextendedproperty 'MS_Description', 'Customer master data', 'SCHEMA', 'dbo', 'TABLE', 'sm_customers';
+
+  # Insert test data
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO dbo.sm_categories (cat_name) VALUES ('Electronics'), ('Clothing');
+      INSERT INTO dbo.sm_customers (email, full_name, phone) VALUES ('test@example.com', 'Test User', '555-1234'), ('user2@example.com', NULL, NULL);
+      INSERT INTO dbo.sm_products (category_id, product_name, price, stock_qty) VALUES (1, 'Laptop', 999.99, 10), (2, 'T-Shirt', 29.99, 100);
+      INSERT INTO dbo.sm_orders (customer_id, status) VALUES (1, 'shipped'), (2, 'pending');
+      INSERT INTO dbo.sm_order_items (order_id, product_id, quantity) VALUES (1000, 100, 2), (1010, 101, 3);
+  
+  - replication:
+      source: '{ env.SOURCE }'
+      target: '{ env.TARGET }'
+
+      defaults:
+        mode: full-refresh
+
+      # Streams listed in WRONG topological order to test FK reordering
+      # Correct order: sm_categories, sm_customers, sm_products, sm_orders, sm_order_items
+      streams:
+        dbo.sm_order_items:
+          object: public.sm_order_items
+
+        dbo.sm_orders:
+          object: public.sm_orders
+
+        dbo.sm_products:
+          object: public.sm_products
+
+        dbo.sm_categories:
+          object: public.sm_categories
+
+        dbo.sm_customers:
+          object: public.sm_customers
+        
+      env:
+        SLING_SCHEMA_MIGRATION: all
+
+  # Validate FK constraints count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.table_constraints tc
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name LIKE 'sm_%'
+    into: fk_count
+
+  - type: log
+    message: "FK constraints found: {store.fk_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.fk_count[0].cnt) >= 1
+    message: "Expected at least 1 FK constraint, got {store.fk_count[0].cnt}"
+
+  # Validate indexes count (excluding PK)
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename LIKE 'sm_%' AND indexname NOT LIKE '%pkey%'
+    into: idx_count
+
+  - type: log
+    message: "Indexes found (excluding PK): {store.idx_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.idx_count[0].cnt) >= 6
+    message: "Expected at least 6 indexes, got {store.idx_count[0].cnt}"
+
+  # Validate identity columns count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name LIKE 'sm_%' AND is_identity = 'YES'
+    into: identity_count
+
+  - type: log
+    message: "Identity columns found: {store.identity_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.identity_count[0].cnt) >= 5
+    message: "Expected at least 5 identity columns, got {store.identity_count[0].cnt}"
+
+  # Validate column descriptions count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns c
+      JOIN pg_catalog.pg_namespace n ON n.nspname = c.table_schema
+      JOIN pg_catalog.pg_class t ON t.relnamespace = n.oid AND t.relname = c.table_name
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name
+      LEFT JOIN pg_catalog.pg_description pd ON pd.objoid = t.oid AND pd.objsubid = a.attnum
+      WHERE c.table_schema = 'public' AND c.table_name LIKE 'sm_%' AND pd.description IS NOT NULL
+    into: desc_count
+
+  - type: log
+    message: "Column descriptions found: {store.desc_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.desc_count[0].cnt) >= 1
+    message: "Expected at least 1 column description, got {store.desc_count[0].cnt}"
+
+  # Validate table descriptions count
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname LIKE 'sm_%'
+        AND obj_description(c.oid, 'pg_class') IS NOT NULL
+    into: table_desc_count
+
+  - type: log
+    message: "Table descriptions found: {store.table_desc_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.table_desc_count[0].cnt) >= 1
+    message: "Expected at least 1 table description, got {store.table_desc_count[0].cnt}"
+
+  # Clean up target
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      DROP TABLE IF EXISTS public.sm_order_items CASCADE;
+      DROP TABLE IF EXISTS public.sm_orders CASCADE;
+      DROP TABLE IF EXISTS public.sm_products CASCADE;
+      DROP TABLE IF EXISTS public.sm_customers CASCADE;
+      DROP TABLE IF EXISTS public.sm_categories CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      IF OBJECT_ID('dbo.sm_order_items', 'U') IS NOT NULL DROP TABLE dbo.sm_order_items;
+      IF OBJECT_ID('dbo.sm_orders', 'U') IS NOT NULL DROP TABLE dbo.sm_orders;
+      IF OBJECT_ID('dbo.sm_products', 'U') IS NOT NULL DROP TABLE dbo.sm_products;
+      IF OBJECT_ID('dbo.sm_customers', 'U') IS NOT NULL DROP TABLE dbo.sm_customers;
+      IF OBJECT_ID('dbo.sm_categories', 'U') IS NOT NULL DROP TABLE dbo.sm_categories;

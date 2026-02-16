@@ -8,6 +8,38 @@ core:
   truncate_table: delete from {table}
   insert_option: ""
 
+  # SQLite supports all 4 merge strategies
+  # Note: merge_update_insert requires a unique index on PK fields (created by Go code)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} AS tgt
+    SET {set_fields}
+    FROM {src_table} AS src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src WHERE true
+    ON CONFLICT ({tgt_pk_fields})
+    DO UPDATE SET {set_fields_excluded}
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # SQLite does not support ALTER TABLE ADD CONSTRAINT for foreign keys
+  # Foreign keys must be defined during table creation
+  add_foreign_key: null
+
+  # SQLite does not support table comments natively
+  add_table_comment: null
 
 metadata:
   databases: select 'main' as name
@@ -54,6 +86,36 @@ metadata:
     where sm.type='table'
       and sm.name='{table}'
     ORDER BY 1;
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      pti.name AS column_name,
+      CASE WHEN pti."notnull" = 0 THEN 'true' ELSE 'false' END AS is_nullable,
+      pti.dflt_value AS default_value,
+      CASE WHEN pti.pk = 1 AND pti.type LIKE '%INTEGER%' THEN 'true' ELSE 'false' END AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      NULL AS description
+    FROM pragma_table_info('{table}'{{if .schema -}}, '{schema}'{{- end}}) pti
+    ORDER BY pti.cid
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      NULL AS constraint_name,
+      "from" AS column_name,
+      NULL AS referenced_schema,
+      "table" AS referenced_table,
+      "to" AS referenced_column,
+      on_delete AS on_delete,
+      on_update AS on_update
+    FROM pragma_foreign_key_list('{table}'{{if .schema -}}, '{schema}'{{- end}})
+    ORDER BY id, seq
+
+  # Extended table attributes for schema migration
+  # SQLite does not support table comments natively
+  table_extended: null
 
   columns_full: |
     select
@@ -165,3 +227,28 @@ general_type_map:
   timestampz: text
   timez: text
   uuid: text
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "current_timestamp": "current_timestamp"
+    "datetime('now')": "current_timestamp"
+    "datetime('now','utc')": "current_timestamp_utc"
+    "CURRENT_DATE": "current_date"
+    "current_date": "current_date"
+    "date('now')": "current_date"
+    "CURRENT_TIME": "current_time"
+    "current_time": "current_time"
+    "time('now')": "current_time"
+    "1": "true"
+    "0": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP"
+    "current_timestamp_utc": "datetime('now','utc')"
+    "current_date": "CURRENT_DATE"
+    "current_time": "CURRENT_TIME"
+    "uuid()": "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || '4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"

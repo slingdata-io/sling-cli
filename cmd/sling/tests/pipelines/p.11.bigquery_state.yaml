@@ -1,0 +1,81 @@
+env:
+  SOURCE: postgres
+  TARGET: postgres
+
+steps:
+  # Setup source table
+  - connection: '{env.SOURCE}'
+    query: |
+      DROP TABLE IF EXISTS public.test_bq_state_src;
+      CREATE TABLE public.test_bq_state_src (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        update_dt TIMESTAMP
+      );
+      INSERT INTO public.test_bq_state_src VALUES
+        (1, 'alice', '2024-01-01 00:00:00'),
+        (2, 'bob',   '2024-02-01 00:00:00'),
+        (3, 'carol', '2024-03-01 00:00:00');
+
+  # Setup target table
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.test_bq_state_tgt
+
+  # Clean up any previous state (table may not exist yet)
+  - connection: BIGQUERY
+    on_failure: warn
+    query: DELETE FROM sling_test._sling_state WHERE source_stream like '%test_bq_state%'
+
+  # Run incremental replication with BigQuery as state database
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+
+      streams:
+        public.test_bq_state_src:
+          object: public.test_bq_state_tgt
+          mode: incremental
+          primary_key: id
+          update_key: update_dt
+      
+      env:
+        SLING_STATE: BIGQUERY/sling_test
+        SLING_RETRIES: 1
+
+  # Verify rows landed in target
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM public.test_bq_state_tgt
+    into: result
+
+  - type: check
+    check: store.result[0].cnt == 3
+
+  # Verify state was written to BigQuery
+  - type: query
+    connection: BIGQUERY
+    query: |
+      SELECT value, column_type FROM sling_test._sling_state
+      WHERE source_stream like '%test_bq_state_src%'
+    into: state_result
+
+  - type: log
+    message: 'BigQuery state_result => {store.state_result}'
+
+  - type: check
+    check: length(store.state_result) > 0
+    message: 'Expected state record in BigQuery but found none'
+
+  - type: check
+    check: store.state_result[0].column_type == "timestamp"
+    message: 'Expected column_type=timestamp, got {store.state_result[0].column_type}'
+
+  # Clean up
+  - connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS public.test_bq_state_src
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.test_bq_state_tgt
+
+  - connection: BIGQUERY
+    query: DELETE FROM sling_test._sling_state WHERE source_stream like '%test_bq_state%'

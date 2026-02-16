@@ -568,64 +568,59 @@ func (conn *MySQLConn) LoadDataLocal(tableFName string, ds *iop.Datastream) (cou
 
 // UPSERT
 // https://vladmihalcea.com/how-do-upsert-and-merge-work-in-oracle-sql-server-postgresql-and-mysql/
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy (delete_insert).
 func (conn *MySQLConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// MySQL only supports insert and delete_insert strategies (no native MERGE support).
+func (conn *MySQLConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	// Get the merge config from base
+	mc, err := conn.BaseConn.GenerateMergeConfigWithStrategy(srcTable, tgtTable, pkFields, strategy)
 	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
+		return "", g.Error(err, "could not generate merge config")
 	}
 
+	// Parse table names for MariaDB compatibility
+	// see https://github.com/slingdata-io/sling-cli/issues/135
 	srcT, err := ParseTableName(srcTable, conn.GetType())
 	if err != nil {
-		err = g.Error(err, "could not generate parse srcTable")
-		return
+		return "", g.Error(err, "could not parse srcTable")
 	}
 
 	tgtT, err := ParseTableName(tgtTable, conn.GetType())
 	if err != nil {
-		err = g.Error(err, "could not generate parse tgtTable")
-		return
+		return "", g.Error(err, "could not parse tgtTable")
 	}
 
-	// replace src & tgt to make compatible to MariaDB
-	// see https://github.com/slingdata-io/sling-cli/issues/135
-	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "src.", srcT.NameQ()+".")
-	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", tgtT.NameQ()+".")
+	// Replace src. and tgt. aliases with actual table names for MariaDB compatibility
+	mc.Map["src_tgt_pk_equal"] = strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "src.", srcT.NameQ()+".")
+	mc.Map["src_tgt_pk_equal"] = strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", tgtT.NameQ()+".")
 
-	var sqlTemplate string
+	// Handle innodb_lock_wait_timeout if set
+	var prefix string
 	if timeout := conn.GetProp("innodb_lock_wait_timeout"); timeout != "" {
-		sqlTemplate = g.F("SET innodb_lock_wait_timeout = %s;", timeout)
+		prefix = g.F("SET innodb_lock_wait_timeout = %s;\n", timeout)
 	}
 
-	sqlTemplate = sqlTemplate + `
-	delete from {tgt_table}
-	where exists (
-			select 1
-			from {src_table}
-			where {src_tgt_pk_equal}
-	)
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-
+	// Generate SQL using template substitution (same as BaseConn.GenerateMergeSQLWithStrategy)
 	sql = g.R(
-		sqlTemplate,
+		mc.Template,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
+		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
+		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"pk_fields", mc.Map["pk_fields"],
+		"set_fields", mc.Map["set_fields"],
+		"insert_fields", mc.Map["insert_fields"],
+		"src_insert_fields", mc.Map["src_insert_fields"],
+		"src_fields", mc.Map["src_fields"],
+		"tgt_fields", mc.Map["tgt_fields"],
+		"placeholder_fields", mc.Map["placeholder_fields"],
 	)
 
-	return
+	return prefix + sql, nil
 }
 
 func processMySqlLikeInsertRow(columns iop.Columns, row []any) []any {

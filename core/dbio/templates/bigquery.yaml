@@ -37,6 +37,43 @@ core:
         {sql}
       )
 
+  # BigQuery supports all 4 merge strategies
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Foreign key DDL template (BigQuery - declarative, NOT ENFORCED required)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}) NOT ENFORCED
+
+  # Column comment/description template (BigQuery uses ALTER COLUMN SET OPTIONS)
+  add_column_comment: ALTER TABLE {table} ALTER COLUMN `{column}` SET OPTIONS (description={comment})
+
+  # Table comment/description template (BigQuery uses ALTER TABLE SET OPTIONS)
+  add_table_comment: ALTER TABLE {table} SET OPTIONS (description={comment})
+
 metadata:
 
   current_database:
@@ -130,7 +167,66 @@ metadata:
 
   session_terminate:
     select pg_terminate_backend({pid})
-  
+
+  # Extended column attributes for schema migration
+  # Note: BigQuery does not support IDENTITY columns
+  # Uses INFORMATION_SCHEMA.COLUMNS (not COLUMN_FIELD_PATHS which expands nested types)
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      CAST(NULL AS STRING) AS default_value,
+      'false' AS is_auto_increment,
+      CAST(NULL AS STRING) AS identity_seed,
+      CAST(NULL AS STRING) AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      cf.description
+    FROM `{schema}`.INFORMATION_SCHEMA.COLUMNS c
+    LEFT JOIN `{schema}`.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS cf
+      ON cf.table_name = c.table_name AND cf.column_name = c.column_name
+    LEFT JOIN (
+      SELECT kcu.column_name
+      FROM `{schema}`.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+      JOIN `{schema}`.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+        ON tc.constraint_name = kcu.constraint_name
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_name = '{table}'
+    ) pk ON pk.column_name = c.column_name
+    WHERE c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Indexes metadata - BigQuery doesn't support traditional indexes
+  indexes: |
+    SELECT
+      CAST(NULL AS STRING) AS index_name,
+      CAST(NULL AS STRING) AS column_name
+    WHERE FALSE
+
+  # Foreign key relationships
+  foreign_keys: |
+    SELECT
+      tc.constraint_name,
+      kcu.column_name,
+      ccu.table_schema AS referenced_schema,
+      ccu.table_name AS referenced_table,
+      ccu.column_name AS referenced_column,
+      'NO ACTION' AS on_delete,
+      'NO ACTION' AS on_update
+    FROM `{schema}`.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+    JOIN `{schema}`.INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+      ON tc.constraint_name = kcu.constraint_name
+    JOIN `{schema}`.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
+      ON tc.constraint_name = ccu.constraint_name
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND tc.table_name = '{table}'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+
+  # Extended table attributes for schema migration
+  table_extended: |
+    SELECT option_value AS description
+    FROM `{schema}`.INFORMATION_SCHEMA.TABLE_OPTIONS
+    WHERE table_name = '{table}' AND option_name = 'description'
+
 analysis:
   # table level
   table_count: |
@@ -408,6 +504,8 @@ function:
   checksum_json: "length(replace(nullif(to_json_string({field}), 'null'), ' ', ''))"
 
 variable:
+  # BigQuery default is delete_insert as it's more reliable
+  default_merge_strategy: delete_insert
   tmp_folder: /tmp
   bind_string: "?"
   quote_char: '`'
@@ -458,3 +556,28 @@ general_type_map:
   timestampz: timestamp
   timez: string
   uuid: string
+
+# Schema migration: default value translation between native and generalized forms
+# Note: BigQuery has limited default value support
+default_value_map:
+  to_general:
+    "CURRENT_TIMESTAMP()": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "CURRENT_DATE()": "current_date"
+    "CURRENT_DATE": "current_date"
+    "CURRENT_TIME()": "current_time"
+    "CURRENT_TIME": "current_time"
+    "GENERATE_UUID()": "uuid()"
+    "true": "true"
+    "false": "false"
+    "TRUE": "true"
+    "FALSE": "false"
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP()"
+    "current_timestamp_utc": "CURRENT_TIMESTAMP()"
+    "current_date": "CURRENT_DATE()"
+    "current_time": "CURRENT_TIME()"
+    "uuid()": "GENERATE_UUID()"
+    "true": "TRUE"
+    "false": "FALSE"
+    "null": "NULL"

@@ -1,0 +1,111 @@
+# Schema Migration Test: BigQuery COLUMNS view fix
+# Tests: Correct column metadata retrieval using INFORMATION_SCHEMA.COLUMNS
+# instead of COLUMN_FIELD_PATHS (which expands nested STRUCT/ARRAY types)
+
+env:
+  SOURCE: bigquery
+  TARGET: postgres
+  BQ_DATASET: sling_test
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_bq_columns_fix CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS `{env.BQ_DATASET}`.sm_bq_columns_fix;
+
+  # Create source table with various column types
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE OR REPLACE TABLE `{env.BQ_DATASET}`.sm_bq_columns_fix (
+        id INT64 NOT NULL,
+        name STRING,
+        created_at TIMESTAMP,
+        is_active BOOL,
+        price NUMERIC(10, 2),
+        metadata JSON
+      );
+      INSERT INTO `{env.BQ_DATASET}`.sm_bq_columns_fix VALUES (1, 'Test1', CURRENT_TIMESTAMP(), TRUE, 99.99, JSON '{"key": "value"}');
+
+  # Run replication with schema migration
+  - replication:
+      source: bigquery
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: nullable,primary_key
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        sling_test.sm_bq_columns_fix:
+          object: public.sm_bq_columns_fix
+
+  # Validate columns count - should be exactly 6 columns (not expanded nested types)
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_bq_columns_fix'
+    into: columns_count
+
+  - type: log
+    message: "Columns found: {store.columns_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.columns_count[0].cnt) == 6
+    message: "Expected 6 columns, got {store.columns_count[0].cnt}"
+
+  # Validate specific columns exist in correct order
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_bq_columns_fix'
+      ORDER BY ordinal_position
+    into: columns_result
+
+  - type: log
+    message: "Column names: {store.columns_result}"
+
+  # Check columns are in correct order (validates COLUMNS view, not COLUMN_FIELD_PATHS which would expand nested types)
+  - type: check
+    check: store.columns_result[0].column_name == "id"
+    message: "Expected first column to be 'id', got {store.columns_result[0].column_name}"
+
+  - type: check
+    check: store.columns_result[5].column_name == "metadata"
+    message: "Expected last column to be 'metadata', got {store.columns_result[5].column_name}"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_bq_columns_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 1
+    message: "Expected 1 row, got {store.data_count[0].cnt}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS `{env.BQ_DATASET}`.sm_bq_columns_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_bq_columns_fix CASCADE;

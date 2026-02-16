@@ -582,31 +582,13 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 	return nil
 }
 
-// GenerateMergeSQL generates the upsert SQL for Exasol
+// GenerateMergeSQL generates the upsert SQL for Exasol using the database default strategy (update_insert).
 func (conn *ExasolConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	// Use the template from exasol.yaml
-	sqlTemplate := conn.Template().Core["upsert"]
-	if sqlTemplate == "" {
-		return "", g.Error("Did not find upsert in template for %s", conn.GetType())
-	}
-
-	// Replace ph. with src. in placeholder_fields for the VALUES clause
-	srcFieldsValues := strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src.")
-
-	sql = g.R(
-		sqlTemplate,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"placeholder_fields", srcFieldsValues,
-	)
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL for Exasol using the specified strategy.
+// Exasol supports all four merge strategies via native MERGE support.
+func (conn *ExasolConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }

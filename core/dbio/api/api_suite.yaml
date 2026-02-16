@@ -609,3 +609,107 @@
     first_name: Item 1
   expected_env:
     TEST_LAST_NAME: Item 3
+
+- id: 11
+  name: explode_record_expansion
+  mock_response:
+    data:
+      - id: 1
+        name: Order 1
+        items:
+          - sku: A100
+            qty: 2
+          - sku: B200
+            qty: 5
+      - id: 2
+        name: Order 2
+        items:
+          - sku: C300
+            qty: 1
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            - expression: 'explode(record, "items")'
+              output: record
+          records:
+            jmespath: data
+  expected_records:
+    - id: "1"
+      name: Order 1
+      sku: A100
+      qty: "2"
+    - id: "1"
+      name: Order 1
+      sku: B200
+      qty: "5"
+    - id: "2"
+      name: Order 2
+      sku: C300
+      qty: "1"
+  expected_state: {}
+
+- id: 12
+  name: explode_with_subsequent_processor
+  mock_response:
+    data:
+      - id: 1
+        details:
+          - key: color
+            value: red
+          - key: size
+            value: large
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            - expression: 'explode(record, "details")'
+              output: record
+            - expression: 'upper(record.value)'
+              output: record.value
+          records:
+            jmespath: data
+  expected_records:
+    - id: "1"
+      key: color
+      value: RED
+    - id: "1"
+      key: size
+      value: LARGE
+  expected_state: {}
+
+- id: 13
+  name: extract_records_with_jq
+  mock_response:
+    data:
+      - id: 1
+        name: Item 1
+      - id: 2
+        name: Item 2
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          records:
+            jq: ".data[]"
+  expected_records:
+    - id: "1"
+      name: Item 1
+    - id: "2"
+      name: Item 2
+  expected_state: {}
+  expected_next_state: {}

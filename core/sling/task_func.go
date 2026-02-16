@@ -158,6 +158,28 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		"tgt_fields", strings.Join(tgtFields, ", "),
 		"src_fields", strings.Join(srcFields, ", "),
 	)
+
+	// For SQL Server, enable IDENTITY_INSERT if the target table has identity columns
+	// We query sys.identity_columns directly since GetColumns may not include identity metadata
+	if tgtConn.GetType().IsSQLServer() {
+		identityQuery := g.F(
+			"SELECT COUNT(*) as cnt FROM sys.identity_columns WHERE OBJECT_ID = OBJECT_ID('%s')",
+			strings.ReplaceAll(tgtTable.FullName(), `"`, ""),
+		)
+		data, qErr := tgtConn.Query(identityQuery)
+		if qErr == nil && len(data.Rows) > 0 && cast.ToInt(data.Rows[0][0]) > 0 {
+			_, err = tgtConn.Exec(g.F("SET IDENTITY_INSERT %s ON", tgtTable.FullName()))
+			if err != nil {
+				g.Debug("could not enable IDENTITY_INSERT: %v", err)
+				err = nil // Don't fail, the insert might still work
+			} else {
+				defer func() {
+					tgtConn.Exec(g.F("SET IDENTITY_INSERT %s OFF", tgtTable.FullName()))
+				}()
+			}
+		}
+	}
+
 	_, err = tgtConn.Exec(sql)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL: "+sql)

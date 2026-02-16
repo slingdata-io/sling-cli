@@ -18,6 +18,37 @@ core:
     alter table {table} drop column {column} ;
 
   show_alter_table: show alter table column from `{schema}` where tablename = "{table}" order by createtime desc limit 1
+
+  # StarRocks merge strategies:
+  # - All strategies work on Primary Key tables (created with table_keys.primary)
+  # - Only 'insert' works on Duplicate Key tables (default)
+  # See: https://docs.starrocks.io/docs/sql-reference/sql-statements/table_bucket_part_index/DELETE/
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # StarRocks UPDATE with FROM clause doesn't support target table alias,
+  # and set_fields uses src.column format which requires the FROM clause.
+  # This is complex to implement correctly, so merge_update is disabled.
+  # Use merge_update_insert or merge_delete_insert instead.
+  merge_update: null
+
+  # StarRocks doesn't have native MERGE, so we use DELETE+INSERT
+  merge_update_insert: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
     
 
 metadata:
@@ -404,6 +435,9 @@ variable:
   max_string_type: varchar(65533)
   max_string_length: 65533
   max_column_length: 1024
+  # Default to 'insert' since most tables are Duplicate Key tables
+  # Use table_keys.primary for Primary Key tables to enable other merge strategies
+  default_merge_strategy: insert
 
 error_filter:
   table_not_exist: exist

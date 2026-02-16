@@ -49,4 +49,4 @@ streams:
       format: json
       flatten: true
     columns:
-      id: bigint  # Pre-defining columns triggers error
+      id: bigint 

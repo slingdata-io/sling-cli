@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"maps"
 	"net/http"
@@ -406,6 +408,36 @@ func (ep *Endpoint) renderString(val any, extraMaps ...map[string]any) (newVal s
 	return ep.conn.renderString(val, extra)
 }
 
+func (ep *Endpoint) renderStringSafe(val any, extraMaps ...map[string]any) (newVal string, err error) {
+
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderStringSafe(val, extra)
+}
+
 func (ep *Endpoint) renderAny(val any, extraMaps ...map[string]any) (newVal any, err error) {
 	extra := g.M()
 	if len(extraMaps) > 0 {
@@ -433,6 +465,35 @@ func (ep *Endpoint) renderAny(val any, extraMaps ...map[string]any) (newVal any,
 	extra["context"] = contextCopy
 
 	return ep.conn.renderAny(val, extra)
+}
+
+func (ep *Endpoint) renderAnySafe(val any, extraMaps ...map[string]any) (newVal any, err error) {
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderAnySafe(val, extra)
 }
 
 func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
@@ -898,6 +959,26 @@ func (iter *Iteration) renderString(val any, req ...*SingleRequest) (newVal stri
 	return iter.endpoint.renderString(val, extra)
 }
 
+func (iter *Iteration) renderStringSafe(val any, req ...*SingleRequest) (newVal string, err error) {
+
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	// Copy iteration state (lock iter.context separately)
+	iter.context.Lock()
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+	iter.context.Unlock()
+
+	extra["state"] = stateCopy
+
+	return iter.endpoint.renderStringSafe(val, extra)
+}
+
 func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, err error) {
 	extra := g.M()
 	if len(req) > 0 {
@@ -915,6 +996,25 @@ func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, er
 	extra["state"] = stateCopy
 
 	return iter.endpoint.renderAny(val, extra)
+}
+
+func (iter *Iteration) renderAnySafe(val any, req ...*SingleRequest) (newVal any, err error) {
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	// Copy iteration state (lock iter.context separately)
+	iter.context.Lock()
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+	iter.context.Unlock()
+
+	extra["state"] = stateCopy
+
+	return iter.endpoint.renderAnySafe(val, extra)
 }
 
 // StateMap stores the current state of an endpoint's execution
@@ -1060,6 +1160,28 @@ func (ep *Endpoint) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+// parseJSONLines parses newline-delimited JSON (JSONL/NDJSON) data into a slice
+func parseJSONLines(data []byte) ([]any, error) {
+	var records []any
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var obj any
+		if err := g.JSONUnmarshal(line, &obj); err != nil {
+			return nil, g.Error(err, "could not parse JSONL line: %s", string(line[:min(len(line), 200)]))
+		}
+		records = append(records, obj)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, g.Error(err, "error scanning JSONL data")
+	}
+	return records, nil
+}
+
 // parseSequenceFromInterface converts an interface{} to Sequence ([]Call)
 func parseSequenceFromInterface(v interface{}) Sequence {
 	var seq Sequence
@@ -1072,6 +1194,7 @@ func parseSequenceFromInterface(v interface{}) Sequence {
 // Records configures how to extract and process data records from a response
 type Records struct {
 	JmesPath   string   `yaml:"jmespath" json:"jmespath,omitempty"` // for json or xml
+	Jq         string   `yaml:"jq" json:"jq,omitempty"`
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
 	UpdateKey  string   `yaml:"update_key" json:"update_key,omitempty"`
 	Limit      int      `yaml:"limit" json:"limit,omitempty"`   // to limit the records, useful for testing

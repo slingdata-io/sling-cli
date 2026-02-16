@@ -47,3 +47,5 @@ pyproject.toml
 uv.lock
 test.xlsx
 .env
+AGENTS.md
+CLAUDE.md

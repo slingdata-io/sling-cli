@@ -21,6 +21,30 @@ core:
           select {unique_id} from {temp_table}
       )
 
+  # D1 (Cloudflare) supports all 4 merge strategies (SQLite-based)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} AS tgt
+    SET {set_fields}
+    FROM {src_table} AS src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src WHERE true
+    ON CONFLICT ({tgt_pk_fields})
+    DO UPDATE SET {set_fields_excluded}
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 metadata:
   databases: select 'main' as name

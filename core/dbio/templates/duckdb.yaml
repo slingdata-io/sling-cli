@@ -26,8 +26,8 @@ core:
         *,
         {partition_expressions}
       from {table}
-    ) TO '{local_path}' 
-    ( 
+    ) TO '{local_path}'
+    (
       format '{format}', {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}',
       overwrite true,
@@ -35,6 +35,39 @@ core:
       partition_by ( {partition_columns} )
     )
 
+  # DuckDB supports 3 merge strategies (update_insert requires PK constraint)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  # DuckDB's INSERT OR REPLACE requires a PRIMARY KEY constraint on the table
+  # Since sling creates tables without explicit PK constraints, this strategy is disabled
+  merge_update_insert: null
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Foreign key DDL template (DuckDB ENFORCES FK constraints)
+  add_foreign_key: |
+    ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete}{on_update}
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
 
 metadata:
   databases: PRAGMA database_list
@@ -77,12 +110,15 @@ metadata:
       and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
   
+  # Use expressions column cast to array and unnest to extract column names
   indexes: |
-    select index_name as index_name,
-           sql as column_name
-    from duckdb_indexes()
-    where table_schema = '{schema}'
-      and table_name = '{table}'
+    SELECT
+      index_name,
+      unnest(expressions::VARCHAR[]) AS column_name,
+      CASE WHEN is_unique THEN 'true' ELSE 'false' END AS is_unique
+    FROM duckdb_indexes()
+    WHERE schema_name = '{schema}'
+      AND table_name = '{table}'
 
   columns_full: |
     with tables_cte as (
@@ -145,6 +181,51 @@ metadata:
   ddl_view: |
     PRAGMA table_info('{schema}.{table}')
 
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      'false' AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      CAST(NULL AS VARCHAR) AS description
+    FROM information_schema.columns c
+    LEFT JOIN (
+      SELECT replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') AS column_name
+      FROM duckdb_constraints()
+      WHERE table_schema = '{schema}'
+        AND table_name = '{table}'
+        AND constraint_type = 'PRIMARY KEY'
+    ) pk ON lower(pk.column_name) = lower(c.column_name)
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships (DuckDB enforces these!)
+  # Uses native constraint columns instead of regex parsing for reliability
+  foreign_keys: |
+    SELECT
+      dc.constraint_name,
+      unnest(dc.constraint_column_names) AS column_name,
+      split_part(dc.constraint_text, 'REFERENCES ', 2)::VARCHAR AS ref_part,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON DELETE ([A-Z ]+)', 1), 'NO ACTION') AS on_delete,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON UPDATE ([A-Z ]+)', 1), 'NO ACTION') AS on_update,
+      unnest(dc.constraint_column_names) AS fk_column,
+      split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 1) AS referenced_schema,
+      split_part(split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 2), '(', 1) AS referenced_table,
+      unnest(regexp_extract_all(dc.constraint_text, 'REFERENCES [^(]+\(([^)]+)\)')) AS referenced_column
+    FROM duckdb_constraints() dc
+    WHERE dc.schema_name = '{schema}'
+      AND dc.table_name = '{table}'
+      AND dc.constraint_type = 'FOREIGN KEY'
+
+  # Extended table attributes for schema migration
+  # Note: DuckDB comments are retrieved from duckdb_tables()
+  table_extended: |
+    SELECT CAST(NULL AS VARCHAR) AS description
+
 analysis:
   chars: |
     select
@@ -180,6 +261,8 @@ function:
   csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
 
 variable:
+  # DuckDB default is delete_insert as it's more reliable
+  default_merge_strategy: delete_insert
   bool_as: integer
   bind_string: ${c}
   batch_rows: 50
@@ -240,3 +323,27 @@ general_type_map:
   timestampz: timestamptz
   timez: time
   uuid: uuid
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "current_timestamp": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "now()": "current_timestamp"
+    "current_date": "current_date"
+    "CURRENT_DATE": "current_date"
+    "current_time": "current_time"
+    "CURRENT_TIME": "current_time"
+    "gen_random_uuid()": "uuid()"
+    "uuid()": "uuid()"
+    "true": "true"
+    "false": "false"
+  from_general:
+    "current_timestamp": "current_timestamp"
+    "current_timestamp_utc": "current_timestamp"
+    "current_date": "current_date"
+    "current_time": "current_time"
+    "uuid()": "gen_random_uuid()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

@@ -60,7 +60,18 @@ core:
     -- This is a placeholder, actual implementation requires multiple steps
     -- ALTER TABLE {table} {col_ddl}
     select 'alter column not directly supported in Athena, must recreate table'
- 
+
+  # Athena only supports insert (DELETE/UPDATE/MERGE only work with Iceberg tables)
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  # Athena does not support UPDATE, UPDATE_INSERT, or DELETE_INSERT on standard tables
+  # Use Iceberg tables (TypeDbIceberg) for full merge support
+  merge_update: null
+  merge_update_insert: null
+  merge_delete_insert: null
+
 metadata:
   current_database:
     select current_database
@@ -318,6 +329,8 @@ function:
   now: CURRENT_TIMESTAMP
 
 variable:
+  # Athena default is delete_insert since it doesn't support native MERGE
+  default_merge_strategy: delete_insert
   quote_char: '`'
   max_string_type: VARCHAR
   max_string_length: 2147483647

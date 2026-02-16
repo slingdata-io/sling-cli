@@ -46,7 +46,33 @@ core:
   incremental_select_limit_offset: select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc limit {limit} offset {offset}
   incremental_where: '{update_key} {gt} {value}'
   backfill_where: '{update_key} >= {start_value} and {update_key} <= {end_value}'
-  merge_update_insert: 'select error /* merge_update_insert not implemented */' 
+  # Merge strategies (insert, update, update_insert, delete_insert)
+  # These are generic templates - database-specific implementations may override
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 analysis:
   # table level
@@ -394,8 +420,8 @@ variable:
   error_filter_table_exists: already
   bool_as: bool
   
-  # default merge strategy
-  merge_strategy: update_insert
+  # default merge strategy (can be overridden by database-specific templates)
+  default_merge_strategy: update_insert
 
 error_filter:
   table_not_exist: exist

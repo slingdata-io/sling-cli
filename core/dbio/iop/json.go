@@ -7,8 +7,10 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/flarco/g"
+	"github.com/itchyny/gojq"
 	"github.com/jmespath/go-jmespath"
 	"github.com/nqd/flat"
 	"github.com/samber/lo"
@@ -27,17 +29,19 @@ type jsonStream struct {
 	sp       *StreamProcessor
 	decoder  decoderLike
 	jmespath string
+	jq       string
 	flatten  int
 	buffer   chan []any
 }
 
-func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath string) *jsonStream {
+func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath string, jq string) *jsonStream {
 	js := &jsonStream{
 		ColumnMap: map[string]*Column{},
 		ds:        ds,
 		decoder:   decoder,
 		flatten:   flatten,
 		jmespath:  jmespath,
+		jq:        jq,
 		buffer:    make(chan []any, 100000),
 		sp:        NewStreamProcessor(),
 	}
@@ -92,6 +96,13 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 			it.Context.CaptureErr(g.Error(err, "could not search jmespath: %s", js.jmespath))
 			return false
 		}
+	} else if js.jq != "" {
+		results, err := JqRun(js.jq, payload)
+		if err != nil {
+			it.Context.CaptureErr(err)
+			return false
+		}
+		payload = results
 	}
 
 	switch payloadV := payload.(type) {
@@ -334,4 +345,57 @@ func DecodeJSONIfBase64(jsonBody string) (string, error) {
 
 	// If decoded content is not valid JSON, return original
 	return jsonBody, nil
+}
+
+var (
+	jqCache   = map[string]*gojq.Code{}
+	jqCacheMu sync.RWMutex
+)
+
+// JqCompile returns a compiled jq code for the given expression, using a cache.
+func JqCompile(expr string) (*gojq.Code, error) {
+	jqCacheMu.RLock()
+	code, ok := jqCache[expr]
+	jqCacheMu.RUnlock()
+	if ok {
+		return code, nil
+	}
+
+	query, err := gojq.Parse(expr)
+	if err != nil {
+		return nil, g.Error(err, "could not parse jq expression: %s", expr)
+	}
+
+	code, err = gojq.Compile(query)
+	if err != nil {
+		return nil, g.Error(err, "could not compile jq expression: %s", expr)
+	}
+
+	jqCacheMu.Lock()
+	jqCache[expr] = code
+	jqCacheMu.Unlock()
+
+	return code, nil
+}
+
+// JqRun compiles and runs a jq expression against input, returning all results.
+func JqRun(expr string, input any) ([]any, error) {
+	code, err := JqCompile(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	results := []any{}
+	iter := code.Run(input)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, ok := v.(error); ok {
+			return nil, g.Error(err, "jq runtime error for expression: %s", expr)
+		}
+		results = append(results, v)
+	}
+	return results, nil
 }

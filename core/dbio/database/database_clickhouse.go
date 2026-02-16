@@ -8,6 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
+	_ "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
+	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core"
@@ -15,13 +20,6 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
-
-	"github.com/ClickHouse/clickhouse-go/v2"
-	_ "github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
-
-	"github.com/flarco/g"
-	"github.com/flarco/g/net"
 )
 
 // ClickhouseConn is a Clikchouse connection
@@ -619,58 +617,15 @@ retry:
 	return rowAffCnt, err
 }
 
-// GenerateMergeSQL generates the upsert SQL
+// GenerateMergeSQL generates the upsert SQL using the database default strategy (delete_insert).
 func (conn *ClickhouseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
-	if err != nil {
-		err = g.Error(err, "could not generate upsert variables")
-		return
-	}
+	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
+}
 
-	sqlTempl := `
-	alter table {tgt_table}
-	delete where ({tgt_pk_fields}) in (
-			select {src_pk_fields}
-			from {src_table} src
-	)
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-
-	if conn.Version() >= 23 {
-		// use lightweight delete
-		// see https://github.com/slingdata-io/sling-cli/issues/593
-		sqlTempl = `
-	delete from {tgt_table}
-	where ({tgt_pk_fields}) in (
-			select {src_pk_fields}
-			from {src_table} src
-	)
-	;
-
-	insert into {tgt_table}
-		({insert_fields})
-	select {src_fields}
-	from {src_table} src
-	`
-	}
-
-	sql = g.R(
-		sqlTempl,
-		"src_table", srcTable,
-		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
-		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
-		"src_pk_fields", upsertMap["src_pk_fields"],
-	)
-
-	return
+// GenerateMergeSQLWithStrategy generates the merge SQL using the specified strategy.
+// ClickHouse only supports insert and delete_insert strategies (no native MERGE support).
+func (conn *ClickhouseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable string, pkFields []string, strategy *MergeStrategy) (sql string, err error) {
+	return conn.BaseConn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, strategy)
 }
 
 var count = 0

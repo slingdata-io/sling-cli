@@ -1,0 +1,95 @@
+# Schema Migration Test: ClickHouse Primary Key
+# Tests: Primary key detection from system.tables
+# Phase 6: ClickHouse uses system.tables.primary_key for PK metadata
+
+env:
+  SOURCE: clickhouse
+  TARGET: postgres
+
+steps:
+  # Clean up target first
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_clickhouse_pk_fix CASCADE;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS default.sm_clickhouse_pk_fix;
+
+  # Create source table with primary key
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE default.sm_clickhouse_pk_fix (
+        id UInt64,
+        name String,
+        created_at DateTime DEFAULT now()
+      ) ENGINE = MergeTree()
+      PRIMARY KEY (id)
+      ORDER BY (id, created_at);
+
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO default.sm_clickhouse_pk_fix (id, name) VALUES (1, 'Test1');
+
+  # Run replication with schema migration
+  - replication:
+      source: clickhouse
+      target: postgres
+
+      env:
+        SLING_SCHEMA_MIGRATION: primary_key,nullable,default_value,description
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        default.sm_clickhouse_pk_fix:
+          object: public.sm_clickhouse_pk_fix
+
+  # Validate primary key
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT column_name
+      FROM information_schema.key_column_usage
+      WHERE table_schema = 'public'
+        AND table_name = 'sm_clickhouse_pk_fix'
+        AND constraint_name LIKE '%pkey%'
+    into: pk_result
+
+  - type: log
+    message: "Primary key columns found: {store.pk_result}"
+
+  - type: check
+    check: length(store.pk_result) >= 1
+    message: "Expected at least 1 primary key column"
+
+  - type: check
+    check: store.pk_result[0].column_name == "id"
+    message: "Expected 'id' to be primary key, got {store.pk_result[0].column_name}"
+
+  # Validate data migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM public.sm_clickhouse_pk_fix
+    into: data_count
+
+  - type: log
+    message: "Migrated rows: {store.data_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.data_count[0].cnt) == 1
+    message: "Expected 1 row, got {store.data_count[0].cnt}"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS default.sm_clickhouse_pk_fix;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.sm_clickhouse_pk_fix CASCADE;
