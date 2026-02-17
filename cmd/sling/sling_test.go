@@ -94,7 +94,8 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbD1:                {name: "d1", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
-	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
+	dbio.Type("sqlserver_bcp"):   {name: "mssql2022", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
+	dbio.Type("azure_sql"):       {name: "azure_sql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.Type("sqlserver_adbc"):  {name: "mssql_adbc", schema: "dbo"},
 	dbio.Type("sqlserver_odbc"):  {name: "mssql_odbc", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
@@ -1180,6 +1181,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 	}
 	testSuite(t, dbio.Type("sqlserver_adbc"))
 	testSuite(t, dbio.Type("sqlserver_odbc"))
+	testSuite(t, dbio.Type("azure_sql"))
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {
