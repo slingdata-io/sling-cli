@@ -1931,3 +1931,10 @@
     - 'no new data found in source stream'
     - 'execution succeeded'
     - 'SUCCESS: backfill with 0 rows did not error'
+
+- id: 200
+  name: Test MSSQL to AZURE_SQL merge semicolon (full-refresh + incremental)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.100.mssql_merge_semicolon.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'

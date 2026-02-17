@@ -1,6 +1,12 @@
 core:
-  drop_table: drop table if exists {table}
-  drop_view: drop view if exists {view}
+  drop_table: IF OBJECT_ID(N'{table}', N'U') IS NOT NULL DROP TABLE {table}
+  drop_view: IF OBJECT_ID(N'{view}', N'V') IS NOT NULL DROP VIEW {view}
+  drop_index: |
+    if exists (
+      select name
+      from sys.indexes
+      where name = '{name}' and object_id = OBJECT_ID('{table}')
+    ) drop index {index} on {table}
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
     insert into {table} ({names})
@@ -9,6 +15,12 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal}
+  limit: select top {limit} {fields} from {table}{where_clause}
+  limit_offset: select top {limit} * from ( select {fields} from {table}{where_clause} order by 1 offset {offset} rows) as t
+  limit_sql: select top {limit} * from ( {sql} ) as t
+  incremental_select_limit: select top {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where ({incremental_where_cond}){where_and} order by {update_key} asc offset {offset} rows) as t
+  incremental_select: select {fields} from {table} where ({incremental_where_cond}){where_and}
   insert: insert into {table} ({fields}) values ({values})
   insert_temp: insert into {table} ({fields}) select {cols} from {temp_table}
   insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing
@@ -20,11 +32,6 @@ core:
   sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   rename_column: EXEC sp_rename '{table}.{column}', '{new_column}', 'COLUMN'
-  limit: select top {limit} {fields} from {table}{where_clause}
-  limit_offset: select top {limit} * from ( select {fields} from {table}{where_clause} order by 1 offset {offset} rows) as t
-  limit_sql: select top {limit} * from ( {sql} ) as t
-  incremental_select_limit: select top {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
-  incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where ({incremental_where_cond}){where_and} order by {update_key} asc offset {offset} rows) as t
   bulk_insert: |
     BULK INSERT {table}
     from '/dev/stdin'
@@ -37,6 +44,36 @@ core:
     )
   column_names: '{sql}'
   add_column: alter table {table} add {column} {type}
+  alter_columns: alter table {table} alter column {col_ddl}
+  modify_column: '{column} {type}'
+
+  # SQL Server supports all 4 merge strategies
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_update: |
+    UPDATE tgt
+    SET {set_fields}
+    FROM {tgt_table} tgt
+    INNER JOIN {src_table} src
+    ON {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields});
+
+  merge_delete_insert: |
+    DELETE tgt FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
 
 
 metadata:
@@ -323,8 +360,10 @@ variable:
   timestampz_layout: "2006-01-02 15:04:05.0000000', '-07:00"
   
   bind_string: "@p{c}"
-  bool_as: string
   batch_rows: 200
+  batch_values: 1000
+  bool_as: string
+  error_filter_table_exists: already
   max_string_type: nvarchar(max)
   max_string_length: 4000
   max_column_length: 128
@@ -352,6 +391,7 @@ native_type_map:
   smallint: smallint
   smallmoney: decimal
   sql_variant: text
+  text: text
   time: time
   timestamp: binary
   tinyint: smallint
@@ -377,3 +417,36 @@ general_type_map:
   timestampz: datetimeoffset
   timez: "varchar()"
   uuid: uniqueidentifier
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "getdate()": "current_timestamp"
+    "(getdate())": "current_timestamp"
+    "GETDATE()": "current_timestamp"
+    "(GETDATE())": "current_timestamp"
+    "sysdatetime()": "current_timestamp"
+    "(sysdatetime())": "current_timestamp"
+    "getutcdate()": "current_timestamp_utc"
+    "(getutcdate())": "current_timestamp_utc"
+    "GETUTCDATE()": "current_timestamp_utc"
+    "(GETUTCDATE())": "current_timestamp_utc"
+    "newid()": "uuid()"
+    "(newid())": "uuid()"
+    "NEWID()": "uuid()"
+    "(NEWID())": "uuid()"
+    "newsequentialid()": "uuid()"
+    "(newsequentialid())": "uuid()"
+    "((1))": "true"
+    "((0))": "false"
+    "(1)": "true"
+    "(0)": "false"
+  from_general:
+    "current_timestamp": "GETDATE()"
+    "current_timestamp_utc": "GETUTCDATE()"
+    "current_date": "CAST(GETDATE() AS DATE)"
+    "current_time": "CAST(GETDATE() AS TIME)"
+    "uuid()": "NEWID()"
+    "true": "1"
+    "false": "0"
+    "null": "NULL"

@@ -1,0 +1,88 @@
+source: MSSQL
+target: AZURE_SQL
+
+hooks:
+  start:
+    # Create source tables
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.merge_sc_src1', 'U') IS NOT NULL DROP TABLE dbo.merge_sc_src1;
+        IF OBJECT_ID('dbo.merge_sc_src2', 'U') IS NOT NULL DROP TABLE dbo.merge_sc_src2;
+
+        CREATE TABLE dbo.merge_sc_src1 (
+          id INT PRIMARY KEY,
+          name NVARCHAR(100),
+          status NVARCHAR(50),
+          update_dt DATETIME2 DEFAULT GETDATE()
+        );
+
+        CREATE TABLE dbo.merge_sc_src2 (
+          id INT PRIMARY KEY,
+          name NVARCHAR(100),
+          status NVARCHAR(50),
+          update_dt DATETIME2 DEFAULT GETDATE()
+        );
+
+        INSERT INTO dbo.merge_sc_src1 VALUES
+        (1, N'Alice', N'active', '2024-01-01'),
+        (2, N'Bob', N'inactive', '2024-01-02'),
+        (3, N'Charlie', N'active', '2024-01-03'),
+        (4, N'Diana', N'pending', '2024-01-04'),
+        (5, N'Eve', N'active', '2024-01-05');
+
+        -- src2 has updates for existing rows + new rows (all newer than src1)
+        INSERT INTO dbo.merge_sc_src2 VALUES
+        (3, N'Charlie', N'inactive', '2024-02-01'),
+        (5, N'Eve', N'inactive', '2024-02-02'),
+        (6, N'Frank', N'active', '2024-02-03'),
+        (7, N'Grace', N'active', '2024-02-04');
+
+    # Drop target table if exists
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('dbo.merge_test', 'U') IS NOT NULL DROP TABLE dbo.merge_test;
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify target has 7 rows (5 from full-refresh + 2 new from incremental merge)
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM dbo.merge_test
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].cnt) == 7
+      failure_message: "Row count mismatch: expected 7, got {store.result[0].cnt}"
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.merge_sc_src1', 'U') IS NOT NULL DROP TABLE dbo.merge_sc_src1;
+        IF OBJECT_ID('dbo.merge_sc_src2', 'U') IS NOT NULL DROP TABLE dbo.merge_sc_src2;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('dbo.merge_test', 'U') IS NOT NULL DROP TABLE dbo.merge_test;
+
+defaults:
+  mode: incremental
+  update_key: update_dt
+  primary_key: id
+  object: dbo.merge_test
+  target_options:
+    use_bulk: true
+    table_keys:
+      primary: [id]
+
+streams:
+  dbo.merge_sc_src1:
+    mode: full-refresh
+
+  dbo.merge_sc_src2:
