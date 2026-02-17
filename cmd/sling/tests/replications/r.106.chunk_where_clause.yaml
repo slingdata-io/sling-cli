@@ -1,0 +1,17 @@
+source: oracle
+target: mssql
+
+defaults:
+  mode: incremental
+  object: dbo.{stream_table}
+  primary_key: [id]
+  target_options:
+    use_bulk: false
+
+streams:
+  oracle.test1k_duckdb_pg:
+    object: dbo.test1k_chunk_where_bug
+    update_key: id
+    where: "id <= 100"
+    source_options:
+      chunk_size: 50

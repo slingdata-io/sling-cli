@@ -1938,3 +1938,19 @@
   streams: 2
   output_contains:
     - 'execution succeeded'
+
+# Test chunking with where clause (bug: min/max query ignores where clause)
+# Issue: When using chunk_size with a where clause, the min/max query to calculate
+# chunk ranges does not include the where condition, causing too many chunks.
+# With where "id <= 100" and chunk_size 50, we expect 2 chunks (1-50, 51-100),
+# not ~20 chunks (1-1002 / 50) from the full table range.
+- id: 201
+  name: 'Chunking with where clause uses correct range'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.106.chunk_where_clause.yaml'
+  streams: 2
+  output_contains:
+    - 'determined 2 chunks'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'determined 20 chunks'
+    - 'determined 21 chunks'

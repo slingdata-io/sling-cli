@@ -744,6 +744,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
 		}
 
+		// Apply where clause so chunk min/max queries use the filtered range
+		if stream.config.Where != "" {
+			table.Where = stream.config.Where
+		}
+
 		// Get stream table name for variable expansion (always from stream.name, not SQL)
 		streamTable, _ := database.ParseTableName(stream.name, sourceConn.Connection.Type)
 
