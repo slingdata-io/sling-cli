@@ -1,0 +1,114 @@
+# Schema Migration Test: MSSQL -> MySQL AUTO_INCREMENT without explicit PRIMARY KEY
+# Regression test for Error 1075: MySQL requires AUTO_INCREMENT columns to be a key.
+# When SLING_SCHEMA_MIGRATION includes auto_increment and the source IDENTITY column
+# has no explicit PK, Sling must still emit PRIMARY KEY in the target DDL.
+
+env:
+  SOURCE: mssql
+  TARGET: mysql
+
+steps:
+  # Clean up target
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS mysql.autoincrement_test;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: IF OBJECT_ID('dbo.autoincrement_test', 'U') IS NOT NULL DROP TABLE dbo.autoincrement_test;
+
+  # Create source table: IDENTITY column without an explicit PRIMARY KEY constraint
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE dbo.autoincrement_test (
+        CodeRegistryClassID INT IDENTITY(1,1) NOT NULL,
+        DomainID INT,
+        Name VARCHAR(150),
+        Fee FLOAT,
+        ShowBorder BIT NOT NULL DEFAULT 0,
+        DateCreated DATETIME,
+        Description NVARCHAR(MAX)
+      );
+      INSERT INTO dbo.autoincrement_test (DomainID, Name, Fee, ShowBorder, DateCreated, Description)
+      VALUES
+        (1, 'ClassA', 100.50, 1, GETDATE(), 'First class'),
+        (2, 'ClassB', 200.75, 0, GETDATE(), 'Second class'),
+        (3, 'ClassC', 0.00, 1, GETDATE(), NULL);
+
+  # Run replication with auto_increment migration only (no primary_key)
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+
+      env:
+        SLING_SCHEMA_MIGRATION: all
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        dbo.autoincrement_test:
+          object: mysql.autoincrement_test
+
+  # Validate AUTO_INCREMENT column exists on target
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'autoincrement_test'
+        AND extra LIKE '%auto_increment%'
+    into: ai_count
+
+  - type: log
+    message: "Auto-increment columns found: {store.ai_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.ai_count[0].cnt) == 1
+    message: "Expected 1 auto-increment column, got {store.ai_count[0].cnt}"
+
+  # Validate PRIMARY KEY was synthesized for the AUTO_INCREMENT column
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = 'autoincrement_test'
+        AND index_name = 'PRIMARY'
+    into: pk_count
+
+  - type: log
+    message: "Primary key columns found: {store.pk_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.pk_count[0].cnt) == 1
+    message: "Expected PRIMARY KEY to be created for the AUTO_INCREMENT column, got {store.pk_count[0].cnt}"
+
+  # Validate data was migrated correctly
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT CodeRegistryClassID, DomainID, Name FROM mysql.autoincrement_test ORDER BY CodeRegistryClassID
+    into: result
+
+  - type: log
+    message: |
+      Result rows: {length(store.result)}
+      {pretty_table(store.result)}
+
+  - type: check
+    check: length(store.result) == 3
+    message: "Expected 3 rows, got {length(store.result)}"
+
+  - type: log
+    message: "MSSQL IDENTITY -> MySQL AUTO_INCREMENT fix test PASSED"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: IF OBJECT_ID('dbo.autoincrement_test', 'U') IS NOT NULL DROP TABLE dbo.autoincrement_test;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS mysql.autoincrement_test;

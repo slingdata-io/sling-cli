@@ -1,0 +1,70 @@
+# Schema Migration Test: PostgreSQL -> MySQL TEXT column as PRIMARY KEY
+# Tests that Sling emits a clear error (not a raw MySQL Error 1170) when a source PK column
+# maps to a MySQL BLOB/TEXT type (mediumtext) which cannot be indexed without a key length prefix.
+#
+# Root cause: PostgreSQL TEXT (and MSSQL NVARCHAR(MAX)) map to Sling's internal 'text' type
+# with no precision, which MySQL maps to mediumtext. MySQL rejects PRIMARY KEY on BLOB/TEXT
+# columns without a length prefix (Error 1170). Sling should catch this at DDL generation time
+# and surface a clear actionable error message.
+
+env:
+  SOURCE: postgres
+  TARGET: mysql
+
+steps:
+  # Clean up target
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS mysql.text_pk_test;
+
+  # Clean up source
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS public.text_pk_test;
+
+  # Create source table: TEXT PK (PostgreSQL TEXT has no length, maps to mediumtext in MySQL)
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE public.text_pk_test (
+        TransferGUID TEXT NOT NULL PRIMARY KEY,
+        DomainID INT,
+        Name VARCHAR(150),
+        IsPocket BOOLEAN NOT NULL DEFAULT FALSE
+      );
+      INSERT INTO public.text_pk_test (TransferGUID, DomainID, Name, IsPocket)
+      VALUES
+        ('550e8400-e29b-41d4-a716-446655440000', 1, 'Transfer A', true),
+        ('550e8400-e29b-41d4-a716-446655440001', 2, 'Transfer B', false),
+        ('550e8400-e29b-41d4-a716-446655440002', 3, 'Transfer C', true);
+
+  # Run replication with full schema migration:
+  # PostgreSQL TEXT -> Sling 'text' type (no precision) -> MySQL mediumtext
+  # With primary_key migration enabled, this generates: PRIMARY KEY (`TransferGUID`)
+  # MySQL rejects because mediumtext cannot be in a key without a length prefix -> Error 1170
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+
+      env:
+        SLING_SCHEMA_MIGRATION: all
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        public.text_pk_test:
+          object: mysql.text_pk_test
+
+  # If we get here, the error wasn't triggered (test should fail with err: true)
+  - type: log
+    message: "PostgreSQL TEXT PK -> MySQL migration test PASSED (unexpected - Error 1170 should have occurred)"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: DROP TABLE IF EXISTS public.text_pk_test;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS mysql.text_pk_test;
