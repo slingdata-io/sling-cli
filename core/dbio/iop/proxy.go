@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/flarco/g"
 	"golang.org/x/net/proxy"
@@ -68,29 +69,21 @@ func forwardProxy(localConn net.Conn, dialer proxy.Dialer, remoteAddr string) {
 		return
 	}
 
+	var closeOnce sync.Once
+	closeAll := func() {
+		localConn.Close()
+		remoteConn.Close()
+	}
+
 	// Copy localConn.Reader to remoteConn.Writer
 	go func() {
-		_, err := io.Copy(remoteConn, localConn)
-		if err != nil && strings.Contains(err.Error(), "use of closed network") {
-			return
-		} else if err == io.EOF {
-			return
-		} else if err != nil {
-			g.LogError(err, "failed io.Copy(remoteConn, localConn)")
-			return
-		}
+		io.Copy(remoteConn, localConn)
+		closeOnce.Do(closeAll)
 	}()
 
 	// Copy remoteConn.Reader to localConn.Writer
 	go func() {
-		_, err := io.Copy(localConn, remoteConn)
-		if err != nil && strings.Contains(err.Error(), "use of closed network") {
-			return
-		} else if err == io.EOF {
-			return
-		} else if err != nil {
-			g.LogError(err, "failed io.Copy(localConn, remoteConn)")
-			return
-		}
+		io.Copy(localConn, remoteConn)
+		closeOnce.Do(closeAll)
 	}()
 }
