@@ -2,7 +2,7 @@ source: oracle
 target: mssql
 
 defaults:
-  mode: incremental
+  mode: full-refresh
   object: dbo.{stream_table}
   primary_key: [id]
   target_options:
