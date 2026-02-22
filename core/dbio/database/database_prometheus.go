@@ -180,6 +180,24 @@ func (conn *PrometheusConn) ExecContext(ctx context.Context, sql string, args ..
 	return nil, g.Error("ExecContext not implemented on PrometheusConn")
 }
 
+func (conn *PrometheusConn) toFloat(val any) any {
+	switch v := val.(type) {
+	case model.SampleValue:
+		val = strings.ReplaceAll(v.String(), `"`, "")
+	case model.FloatString:
+		val = strings.ReplaceAll(v.String(), `"`, "")
+	case string:
+		val = strings.ReplaceAll(v, `"`, "")
+	default:
+		val = strings.ReplaceAll(cast.ToString(val), `"`, "")
+	}
+	newVal, err := cast.ToFloat64E(val)
+	if err == nil {
+		return newVal
+	}
+	return val
+}
+
 func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	// parse options
 	options := g.M()
@@ -407,7 +425,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 					row[index(k)] = v
 				}
 				row[index("timestamp")] = value.Timestamp.Unix()
-				row[index("value")] = value.Value
+				row[index("value")] = conn.toFloat(value.Value)
 				data.Append(row)
 			}
 
@@ -418,12 +436,12 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 						row[index(k)] = v
 					}
 					row[index("timestamp")] = value.Timestamp.Unix()
-					row[index("count")] = cast.ToFloat64(value.Histogram.Count)
-					row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
+					row[index("count")] = conn.toFloat(value.Histogram.Count)
+					row[index("sum")] = conn.toFloat(value.Histogram.Sum)
 					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+					row[index("bucket_count")] = conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
 					data.Append(row)
 				}
 			}
@@ -502,18 +520,18 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 
 			if sample.Histogram != nil {
 				row[index("timestamp")] = sample.Timestamp.Unix()
-				row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
-				row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
+				row[index("count")] = conn.toFloat(sample.Histogram.Count)
+				row[index("sum")] = conn.toFloat(sample.Histogram.Sum)
 
 				for _, bucket := range sample.Histogram.Buckets {
 					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+					row[index("bucket_count")] = conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
 				}
 			} else {
 				row[index("timestamp")] = sample.Timestamp.Unix()
-				row[index("value")] = cast.ToFloat64(sample.Value)
+				row[index("value")] = conn.toFloat(sample.Value)
 			}
 
 			data.Append(row)
@@ -534,7 +552,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{scalar.Timestamp.Unix(), cast.ToFloat64(scalar.Value)})
+		data.Append([]any{scalar.Timestamp.Unix(), conn.toFloat(scalar.Value)})
 	} else if str, ok := result.(*model.String); ok {
 		data.Columns = iop.Columns{
 			{
@@ -548,7 +566,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{str.Timestamp.Unix(), cast.ToFloat64(str.Value)})
+		data.Append([]any{str.Timestamp.Unix(), conn.toFloat(str.Value)})
 	} else {
 		return nil, g.Error("invalid result: %#v", result)
 	}
@@ -826,7 +844,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 							row[index(k)] = v
 						}
 						row[index("timestamp")] = value.Timestamp.Unix()
-						row[index("value")] = value.Value
+						row[index("value")] = conn.toFloat(value.Value)
 
 						select {
 						case <-queryContext.Ctx.Done():
@@ -844,12 +862,12 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 								row[index(k)] = v
 							}
 							row[index("timestamp")] = hist.Timestamp.Unix()
-							row[index("count")] = hist.Histogram.Count
-							row[index("sum")] = hist.Histogram.Sum
+							row[index("count")] = conn.toFloat(hist.Histogram.Count)
+							row[index("sum")] = conn.toFloat(hist.Histogram.Sum)
 							row[index("bucket_boundaries")] = i
-							row[index("bucket_count")] = bucket.Count
-							row[index("bucket_lower")] = bucket.Lower
-							row[index("bucket_upper")] = bucket.Upper
+							row[index("bucket_count")] = conn.toFloat(bucket.Count)
+							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
+							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
 
 							select {
 							case <-queryContext.Ctx.Done():
@@ -883,18 +901,18 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 					if sample.Histogram != nil {
 						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
-						row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
+						row[index("count")] = conn.toFloat(sample.Histogram.Count)
+						row[index("sum")] = conn.toFloat(sample.Histogram.Sum)
 
 						for _, bucket := range sample.Histogram.Buckets {
 							row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-							row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-							row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-							row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+							row[index("bucket_count")] = conn.toFloat(bucket.Count)
+							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
+							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
 						}
 					} else {
 						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("value")] = cast.ToFloat64(sample.Value)
+						row[index("value")] = conn.toFloat(sample.Value)
 					}
 
 					select {
