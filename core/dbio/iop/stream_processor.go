@@ -237,7 +237,8 @@ func NewStreamProcessor() *StreamProcessor {
 		time.ANSIC,
 		time.UnixDate,
 		time.RubyDate,
-		"2006-01-02 15:04:05.999999999 -0700 MST", // Time.String()
+		"2006-01-02 15:04:05.999999999 -0700 MST",    // Time.String() with named timezone
+		"2006-01-02 15:04:05.999999999 -0700 -07:00", // Time.String() with numeric timezone location
 		"02 Jan 2006",
 		"2006-01-02T15:04:05-0700", // RFC3339 without timezone hh:mm colon
 		"2006-01-02 15:04:05 -07:00",
