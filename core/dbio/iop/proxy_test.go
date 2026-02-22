@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"testing"
 	"time"
 
@@ -89,23 +88,20 @@ func startEchoServer(t *testing.T) net.Listener {
 }
 
 func TestOpenTunnelProxy_NoProxyConfigured(t *testing.T) {
-	os.Unsetenv("ALL_PROXY")
-
-	_, err := OpenTunnelProxy("example.com", 5432)
+	_, err := OpenTunnelProxy("", "example.com", 5432)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no proxy configured")
 }
 
 func TestOpenTunnelProxy_UnreachableProxy(t *testing.T) {
-	// Point ALL_PROXY at a port with nothing listening
+	// supply proxyURL at a port with nothing listening
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	g.AssertNoError(t, err)
 	deadPort := ln.Addr().(*net.TCPAddr).Port
 	ln.Close() // close immediately so the port is unreachable
 
-	t.Setenv("ALL_PROXY", fmt.Sprintf("socks5://127.0.0.1:%d", deadPort))
-
-	localPort, err := OpenTunnelProxy("127.0.0.1", 5432)
+	proxyURL := fmt.Sprintf("socks5://127.0.0.1:%d", deadPort)
+	localPort, err := OpenTunnelProxy(proxyURL, "127.0.0.1", 5432)
 	// tunnel setup succeeds (listener created), but connecting through it should fail
 	g.AssertNoError(t, err)
 
@@ -133,9 +129,8 @@ func TestOpenTunnelProxy_ForwardsTraffic(t *testing.T) {
 	defer socksLn.Close()
 	go minimalSOCKS5(t, socksLn)
 
-	t.Setenv("ALL_PROXY", fmt.Sprintf("socks5://127.0.0.1:%d", socksLn.Addr().(*net.TCPAddr).Port))
-
-	localPort, err := OpenTunnelProxy("127.0.0.1", echoAddr.Port)
+	proxyURL := fmt.Sprintf("socks5://127.0.0.1:%d", socksLn.Addr().(*net.TCPAddr).Port)
+	localPort, err := OpenTunnelProxy(proxyURL, "127.0.0.1", echoAddr.Port)
 	g.AssertNoError(t, err)
 	assert.Greater(t, localPort, 0)
 

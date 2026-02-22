@@ -680,8 +680,12 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
-	// start SOCKS5 proxy tunnel with ALL_PROXY env var
-	if os.Getenv("ALL_PROXY") != "" {
+	// start SOCKS5 proxy tunnel with SLING_PROXY env var
+	proxyURL := conn.GetProp("PROXY_URL")
+	if proxyURL == "" {
+		proxyURL = os.Getenv("SLING_PROXY")
+	}
+	if proxyURL != "" {
 		connU, err := url.Parse(connURL)
 		if err != nil {
 			return g.Error(err, "could not parse connection URL for proxy forwarding")
@@ -698,7 +702,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				)
 			}
 
-			localPort, err := iop.OpenTunnelProxy(connHost, connPort)
+			localPort, err := iop.OpenTunnelProxy(proxyURL, connHost, connPort)
 			if err != nil {
 				return g.Error(err, "could not establish SOCKS5 proxy tunnel")
 			}

@@ -4,7 +4,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 
@@ -12,21 +11,20 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// OpenTunnelProxy forwards traffic through the SOCKS5 proxy in ALL_PROXY
-func OpenTunnelProxy(tgtHost string, tgtPort int) (localPort int, err error) {
-	proxyURL := os.Getenv("ALL_PROXY")
+// OpenTunnelProxy forwards traffic through the SOCKS5 proxy
+func OpenTunnelProxy(proxyURL, tgtHost string, tgtPort int) (localPort int, err error) {
 	if proxyURL == "" {
-		return 0, g.Error("no proxy configured in environment (ALL_PROXY)")
+		return 0, g.Error("no proxy URL provided")
 	}
 
 	u, err := url.Parse(proxyURL)
 	if err != nil {
-		return 0, g.Error(err, "could not parse ALL_PROXY URL")
+		return 0, g.Error(err, "could not parse proxy URL")
 	}
 
 	dialer, err := proxy.FromURL(u, proxy.Direct)
 	if err != nil {
-		return 0, g.Error(err, "could not create dialer from ALL_PROXY URL")
+		return 0, g.Error(err, "could not create dialer from proxy URL")
 	}
 
 	localPort, err = g.GetPort("localhost:0")
