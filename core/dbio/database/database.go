@@ -680,6 +680,37 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
+	// start SOCKS5 proxy tunnel with ALL_PROXY env var
+	if os.Getenv("ALL_PROXY") != "" {
+		connU, err := url.Parse(connURL)
+		if err != nil {
+			return g.Error(err, "could not parse connection URL for proxy forwarding")
+		}
+
+		connHost := connU.Hostname()
+		if connHost != "" {
+			connPort := cast.ToInt(connU.Port())
+			if connPort == 0 {
+				connPort = conn.defaultPort
+				connURL = strings.ReplaceAll(
+					connURL, g.F("@%s", connHost),
+					g.F("@%s:%d", connHost, connPort),
+				)
+			}
+
+			localPort, err := iop.OpenTunnelProxy(connHost, connPort)
+			if err != nil {
+				return g.Error(err, "could not establish SOCKS5 proxy tunnel")
+			}
+
+			connURL = strings.ReplaceAll(
+				connURL, g.F("@%s:%d", connHost, connPort),
+				g.F("@127.0.0.1:%d", localPort),
+			)
+			g.Trace("new connection URL via proxy: " + conn.Self().GetURL(connURL))
+		}
+	}
+
 	if conn.db == nil {
 		connURL = conn.Self().GetURL(connURL)
 		connPool.Mux.Lock()
