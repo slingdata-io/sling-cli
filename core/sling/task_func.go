@@ -199,6 +199,11 @@ var (
 		g.Warn("use the official release of sling-cli to use incremental via sling state")
 		return nil
 	}
+
+	executeCDC = func(t *TaskExecution) error {
+		g.Warn("use the official release of sling-cli to use CDC mode")
+		return nil
+	}
 )
 
 func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {

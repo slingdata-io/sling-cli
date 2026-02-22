@@ -150,6 +150,51 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  merge_change_capture: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _SLING_CDC_SEQ DESC) as _rn
+        FROM {src_table}
+      ) src
+      WHERE src._rn = 1 AND src._SLING_SYNCED_OP = 'D'
+      AND {src_tgt_pk_equal}
+    );
+    MERGE INTO {tgt_table} tgt
+    USING (
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _SLING_CDC_SEQ DESC) as _rn
+        FROM {src_table}
+        WHERE _SLING_SYNCED_OP != 'D'
+      ) sub WHERE _rn = 1
+    ) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} tgt SET _SLING_DELETED_AT = CURRENT_TIMESTAMP
+    WHERE _SLING_DELETED_AT IS NULL
+    AND EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _SLING_CDC_SEQ DESC) as _rn
+        FROM {src_table}
+      ) src
+      WHERE src._rn = 1 AND src._SLING_SYNCED_OP = 'D'
+      AND {src_tgt_pk_equal}
+    );
+    MERGE INTO {tgt_table} tgt
+    USING (
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _SLING_CDC_SEQ DESC) as _rn
+        FROM {src_table}
+        WHERE _SLING_SYNCED_OP != 'D'
+      ) sub WHERE _rn = 1
+    ) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
   # Foreign key DDL template (Snowflake supports declarative FKs - not enforced)
   add_foreign_key: |
     ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})

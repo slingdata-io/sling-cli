@@ -989,6 +989,14 @@ func mergeData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable d
 		return nil
 	}
 
+	if cfg.Mode == ChangeCaptureMode {
+		if err := performMerge(tgtConn, tableTmp, targetTable, cfg); err != nil {
+			err = g.Error(err, "could not merge CDC changes from temp into final")
+			return err
+		}
+		return nil
+	}
+
 	var err error
 	err = g.Error(err, "unsupported transfer mode: %s", cfg.Mode)
 	return err

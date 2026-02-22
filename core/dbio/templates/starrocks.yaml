@@ -49,7 +49,60 @@ core:
     );
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
-    
+
+  merge_change_capture: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) sub
+      WHERE _rn = 1
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) sub WHERE _rn = 1
+    AND ({pk_fields}) NOT IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, _sling_synced_op, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) del WHERE _rn = 1 AND _sling_synced_op = 'D'
+    )
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} SET _sling_deleted_at = now()
+    WHERE _sling_deleted_at IS NULL
+    AND ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) sub
+      WHERE _rn = 1
+    );
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+        WHERE _sling_synced_op != 'D'
+      ) sub
+      WHERE _rn = 1
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) sub WHERE _rn = 1
+    AND ({pk_fields}) NOT IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, _sling_synced_op, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) del WHERE _rn = 1 AND _sling_synced_op = 'D'
+    )
 
 metadata:
   current_database: select database() as name from dual

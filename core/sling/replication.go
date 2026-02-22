@@ -1312,6 +1312,7 @@ type ReplicationStreamConfig struct {
 	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
+	CDCOptions    *CDCOptions    `json:"change_capture_options,omitempty" yaml:"change_capture_options,omitempty"`
 	Schedule      string         `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
@@ -1483,6 +1484,10 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		stream.TargetOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.TargetOptions))
 	} else if replicationCfg.Defaults.TargetOptions != nil {
 		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
+	}
+
+	if stream.CDCOptions == nil {
+		stream.CDCOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.CDCOptions))
 	}
 }
 

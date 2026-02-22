@@ -69,6 +69,7 @@ var (
 		RowNum    string
 		RowID     string
 		ExecID    string
+		CDCSeq    string
 	}{
 		LoadedAt:  "_sling_loaded_at",
 		SyncedAt:  "_sling_synced_at",
@@ -78,6 +79,7 @@ var (
 		RowNum:    "_sling_row_num",
 		RowID:     "_sling_row_id",
 		ExecID:    "_sling_exec_id",
+		CDCSeq:    "_sling_cdc_seq",
 	}
 )
 

@@ -97,6 +97,117 @@ core:
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
+  merge_change_capture: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) src
+      WHERE src._rn = 1 AND src._sling_synced_op = 'D'
+      AND {src_tgt_pk_equal}
+    );
+    create temporary table {temp_table} as
+    with cdc_latest as (
+      select *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      from {src_table}
+      where _sling_synced_op != 'D'
+    )
+    , src_table as (
+      select {src_fields} from cdc_latest where _rn = 1
+    )
+    , updates as (
+      update {tgt_table} tgt
+      set {set_fields}
+      from src_table src
+      where {src_tgt_pk_equal}
+      returning tgt.*
+    )
+    select * from updates;
+    {temp_table_index_sql};
+    with cdc_latest as (
+      select *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      from {src_table}
+      where _sling_synced_op != 'D'
+    )
+    , cdc_deleted as (
+      select {pk_fields} from (
+        select {pk_fields}, _sling_synced_op, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        from {src_table}
+      ) t where _rn = 1 AND _sling_synced_op = 'D'
+    )
+    , src_table as (
+      select {src_fields} from cdc_latest where _rn = 1
+    )
+    insert into {tgt_table}
+    ({insert_fields})
+    select {src_fields} from src_table src
+    where not exists (
+      select 1
+      from {temp_table} upd
+      where {src_upd_pk_equal}
+    )
+    and not exists (
+      select 1
+      from cdc_deleted del
+      where {src_del_pk_equal}
+    )
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} tgt SET _sling_deleted_at = CURRENT_TIMESTAMP
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+    ) src
+    WHERE src._rn = 1 AND src._sling_synced_op = 'D'
+    AND {src_tgt_pk_equal}
+    AND tgt._sling_deleted_at IS NULL;
+    create temporary table {temp_table} as
+    with cdc_latest as (
+      select *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      from {src_table}
+      where _sling_synced_op != 'D'
+    )
+    , src_table as (
+      select {src_fields} from cdc_latest where _rn = 1
+    )
+    , updates as (
+      update {tgt_table} tgt
+      set {set_fields}
+      from src_table src
+      where {src_tgt_pk_equal}
+      returning tgt.*
+    )
+    select * from updates;
+    {temp_table_index_sql};
+    with cdc_latest as (
+      select *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      from {src_table}
+      where _sling_synced_op != 'D'
+    )
+    , cdc_deleted as (
+      select {pk_fields} from (
+        select {pk_fields}, _sling_synced_op, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        from {src_table}
+      ) t where _rn = 1 AND _sling_synced_op = 'D'
+    )
+    , src_table as (
+      select {src_fields} from cdc_latest where _rn = 1
+    )
+    insert into {tgt_table}
+    ({insert_fields})
+    select {src_fields} from src_table src
+    where not exists (
+      select 1
+      from {temp_table} upd
+      where {src_upd_pk_equal}
+    )
+    and not exists (
+      select 1
+      from cdc_deleted del
+      where {src_del_pk_equal}
+    )
+
 metadata:
 
   current_database:

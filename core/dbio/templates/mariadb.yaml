@@ -28,6 +28,42 @@ core:
   merge_update: null
   merge_update_insert: null
 
+  merge_change_capture: |
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn, _sling_synced_op
+        FROM {src_table}
+      ) sub
+      WHERE _rn = 1 AND _sling_synced_op = 'D'
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) sub WHERE _rn = 1
+    ON DUPLICATE KEY UPDATE {set_fields_values}
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} tgt
+    INNER JOIN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn, _sling_synced_op
+        FROM {src_table}
+      ) sub
+      WHERE _rn = 1 AND _sling_synced_op = 'D'
+    ) src ON {src_tgt_pk_equal}
+    SET tgt._sling_deleted_at = CURRENT_TIMESTAMP
+    WHERE tgt._sling_deleted_at IS NULL;
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) sub WHERE _rn = 1
+    ON DUPLICATE KEY UPDATE {set_fields_values}
+
   load_data_local_reader: |
     LOAD DATA LOCAL INFILE 'Reader::{handler_name}'
     INTO TABLE {table}

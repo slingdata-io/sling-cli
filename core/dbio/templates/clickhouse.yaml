@@ -34,13 +34,60 @@ core:
     ALTER TABLE {tgt_table} DELETE
     WHERE ({tgt_pk_fields}) IN (
       SELECT {src_pk_fields} FROM {src_table}
-    );
+    ) SETTINGS mutations_sync = 1;
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
 
   # ClickHouse does not support UPDATE or UPDATE_INSERT (no native MERGE statement)
   merge_update: null
   merge_update_insert: null
+
+  merge_change_capture: |
+    SET allow_experimental_window_functions = 1;
+    ALTER TABLE {tgt_table} DELETE
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+    ) SETTINGS mutations_sync = 1;
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) src WHERE _rn = 1
+    AND ({pk_fields}) NOT IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, _sling_synced_op, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) del WHERE _rn = 1 AND _sling_synced_op = 'D'
+    )
+
+  merge_change_capture_soft: |
+    SET allow_experimental_window_functions = 1;
+    ALTER TABLE {tgt_table} UPDATE _sling_deleted_at = now()
+    WHERE _sling_deleted_at IS NULL
+    AND ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM (
+        SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) WHERE _rn = 1 AND _sling_synced_op = 'D'
+    ) SETTINGS mutations_sync = 1;
+    ALTER TABLE {tgt_table} DELETE
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {src_pk_fields} FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) SETTINGS mutations_sync = 1;
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) src WHERE _rn = 1
+    AND ({pk_fields}) NOT IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, _sling_synced_op, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) del WHERE _rn = 1 AND _sling_synced_op = 'D'
+    )
 
   # ClickHouse does NOT support foreign keys - this template will not be used
   # add_foreign_key: null

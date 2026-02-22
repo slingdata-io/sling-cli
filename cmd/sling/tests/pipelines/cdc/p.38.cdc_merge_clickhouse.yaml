@@ -1,0 +1,92 @@
+# CDC merge_cdc Template Test: ClickHouse target
+# Tests: INSERT, UPDATE, DELETE ops via merge_cdc strategy with staging table approach
+# Note: ClickHouse uses INSERT with ReplacingMergeTree for deduplication
+
+env:
+  TARGET: clickhouse
+
+steps:
+  # Clean up
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS default.cdc_merge_test;
+
+  # Create target table with initial data using ReplacingMergeTree
+  - connection: '{env.TARGET}'
+    query: |
+      CREATE TABLE default.cdc_merge_test (
+        id Int32,
+        name String,
+        amount Int32,
+        _sling_synced_at DateTime DEFAULT now()
+      ) ENGINE = ReplacingMergeTree()
+      ORDER BY id;
+      INSERT INTO default.cdc_merge_test (id, name, amount) VALUES
+        (1, 'Alice', 100),
+        (2, 'Bob', 200),
+        (3, 'Charlie', 300);
+
+  # Run replication with CDC-like source data
+  - replication:
+      source: postgres
+      target: '{env.TARGET}'
+
+      defaults:
+        mode: incremental
+        primary_key: id
+
+      streams:
+        cdc_staging:
+          sql: |
+            SELECT 1 as id, 'Alice Updated' as name, 150 as amount, 'U' as _sling_synced_op, 1::bigint as _sling_cdc_seq, CURRENT_TIMESTAMP as _sling_synced_at
+            UNION ALL SELECT 4, 'Diana', 400, 'I', 3, CURRENT_TIMESTAMP
+            UNION ALL SELECT 1, 'Alice Final', 175, 'U', 4, CURRENT_TIMESTAMP
+          object: default.cdc_merge_test
+          target_options:
+            merge_strategy: change_capture
+
+  # Verify results
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM default.cdc_merge_test
+    into: row_count
+
+  - type: log
+    message: "CDC merge row count: {store.row_count[0].cnt}"
+
+  - type: check
+    check: int_parse(store.row_count[0].cnt) == 3
+    message: "Expected 3 rows, got {store.row_count[0].cnt}"
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT name, amount FROM default.cdc_merge_test WHERE id = 1
+    into: row_1
+
+  - type: check
+    check: store.row_1[0].name == "Alice Final"
+    message: "id=1 should have name='Alice Final', got '{store.row_1[0].name}'"
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM default.cdc_merge_test WHERE id = 2
+    into: row_2
+
+  - type: check
+    check: int_parse(store.row_2[0].cnt) == 0
+    message: "id=2 should be deleted"
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT name FROM default.cdc_merge_test WHERE id = 4
+    into: row_4
+
+  - type: check
+    check: store.row_4[0].name == "Diana"
+    message: "id=4 should be inserted with name='Diana'"
+
+  - type: log
+    message: "CDC merge_cdc ClickHouse test PASSED"
+
+  # Clean up
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS default.cdc_merge_test;
