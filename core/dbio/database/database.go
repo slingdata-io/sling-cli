@@ -1009,11 +1009,13 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		})
 	}
 
+	columns := SQLColumns(colTypes, conn) // type mapping logic !
+
 	conn.Data.Result = result
 	conn.Data.SQL = query
 	conn.Data.Duration = time.Since(start).Seconds()
 	conn.Data.Rows = [][]interface{}{}
-	conn.Data.Columns = SQLColumns(colTypes, conn) // type mapping logic !
+	conn.Data.Columns = columns
 	conn.Data.NoDebug = !strings.Contains(query, noDebugKey)
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
@@ -1055,7 +1057,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		return false
 	}
 
-	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
+	ds = iop.NewDatastreamIt(queryContext.Ctx, columns, nextFunc)
 	ds.NoDebug = strings.Contains(query, noDebugKey)
 	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 	if !ds.NoDebug {
