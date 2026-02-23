@@ -2022,3 +2022,24 @@
   output_contains:
     - 'determined 9 chunks'
     - 'Chunk incremental range override test PASSED'
+
+- id: 211
+  name: 'MariaDB utf8mb4 charset fix for latin1 databases'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.15.mariadb_utf8_charset.yaml'
+  output_contains:
+    - 'CHARACTER SET utf8mb4'
+    # utf8mb4 source (both paths)
+    - 'INSERT utf8mb4 - Row 1: α+β+γ = δ | ℅ Luís'
+    - 'BULK utf8mb4 - Row 1: α+β+γ = δ | ℅ Luís'
+    # latin1 source (both paths)
+    - 'INSERT latin1 - Row 1:'
+    - 'BULK latin1 - Row 1:'
+    # utf8mb3 source (both paths)
+    - 'INSERT utf8mb3 - Row 1: α+β+γ = δ'
+    - 'BULK utf8mb3 - Row 1: α+β+γ = δ'
+    # ascii source (both paths)
+    - 'INSERT ascii - Row 1: Hello world'
+    - 'BULK ascii - Row 1: Hello world'
+    # incremental (both paths)
+    - 'INSERT incremental:'
+    - 'BULK incremental:'

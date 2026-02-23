@@ -1,0 +1,488 @@
+# Test: MariaDB charset fix for CREATE TABLE and LOAD DATA LOCAL
+# Customer error: Error 1366 (22007): Incorrect string value: '\xCE\xB1+\xCE\xB2+...'
+# Root cause: temp tables inherited database's latin1 charset instead of utf8mb4.
+#
+# Tests:
+#   1. utf8mb4 source → INSERT path (use_bulk: false)
+#   2. utf8mb4 source → LOAD DATA LOCAL path (use_bulk: true)
+#   3. latin1 source  → INSERT path
+#   4. latin1 source  → LOAD DATA LOCAL path
+#   5. utf8mb3 source → INSERT path
+#   6. utf8mb3 source → LOAD DATA LOCAL path
+#   7. ascii source   → INSERT path
+#   8. ascii source   → LOAD DATA LOCAL path
+#   9. Incremental mode into pre-existing latin1 target (INSERT)
+#  10. Incremental mode into pre-existing latin1 target (LOAD DATA LOCAL)
+
+env:
+  CONN: MARIADB
+
+steps:
+  # ── Cleanup ──
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      DROP TABLE IF EXISTS mariadb.test_cs_src_utf8mb4;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_latin1;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_utf8mb3;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_ascii;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_incr;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_insert;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_insert_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_bulk_tmp;
+
+  # ── Create source tables with different CHARACTER SETs ──
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      CREATE TABLE mariadb.test_cs_src_utf8mb4 (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET utf8mb4;
+
+      INSERT INTO mariadb.test_cs_src_utf8mb4 (id, comment, card_name) VALUES
+        (1, 'α+β+γ = δ', '℅ Luís'),
+        (2, 'Simple ASCII text', 'John Doe'),
+        (3, 'Ünïcödé tëst', 'José García');
+
+      CREATE TABLE mariadb.test_cs_src_latin1 (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET latin1;
+
+      INSERT INTO mariadb.test_cs_src_latin1 (id, comment, card_name) VALUES
+        (1, 'Caf', 'Ren'),
+        (2, 'Simple ASCII text', 'John Doe'),
+        (3, 'naf', 'Mller');
+
+      CREATE TABLE mariadb.test_cs_src_utf8mb3 (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET utf8mb3;
+
+      INSERT INTO mariadb.test_cs_src_utf8mb3 (id, comment, card_name) VALUES
+        (1, 'α+β+γ = δ', 'Luís'),
+        (2, 'Simple ASCII text', 'John Doe'),
+        (3, 'Ünïcödé tëst', 'José García');
+
+      CREATE TABLE mariadb.test_cs_src_ascii (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET ascii;
+
+      INSERT INTO mariadb.test_cs_src_ascii (id, comment, card_name) VALUES
+        (1, 'Hello world', 'Alice'),
+        (2, 'Simple ASCII text', 'John Doe'),
+        (3, 'Test 123', 'Bob Smith');
+
+  # ── Switch database to latin1 to simulate customer environment ──
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      ALTER DATABASE mariadb CHARACTER SET latin1 COLLATE latin1_swedish_ci;
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 1: utf8mb4 source → INSERT path (customer's error path)
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: false
+      streams:
+        mariadb.test_cs_src_utf8mb4:
+          object: mariadb.test_cs_tgt_insert
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_insert ORDER BY id
+    into: result_insert
+
+  - type: log
+    message: "INSERT utf8mb4 - Row 1: {store.result_insert[0].comment} | {store.result_insert[0].card_name}"
+
+  - type: check
+    check: store.result_insert[0].comment == "α+β+γ = δ"
+    message: "INSERT utf8mb4: Greek letters garbled: {store.result_insert[0].comment}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 2: utf8mb4 source → LOAD DATA LOCAL path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: true
+      streams:
+        mariadb.test_cs_src_utf8mb4:
+          object: mariadb.test_cs_tgt_bulk
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_bulk ORDER BY id
+    into: result_bulk
+
+  - type: log
+    message: "BULK utf8mb4 - Row 1: {store.result_bulk[0].comment} | {store.result_bulk[0].card_name}"
+
+  - type: check
+    check: store.result_bulk[0].comment == "α+β+γ = δ"
+    message: "BULK utf8mb4: Greek letters garbled: {store.result_bulk[0].comment}"
+
+  - type: check
+    check: store.result_bulk[2].card_name == "José García"
+    message: "BULK utf8mb4: accented chars garbled: {store.result_bulk[2].card_name}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 3: latin1 source → INSERT path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: false
+      streams:
+        mariadb.test_cs_src_latin1:
+          object: mariadb.test_cs_tgt_latin1
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_latin1 ORDER BY id
+    into: result_latin1
+
+  - type: log
+    message: "INSERT latin1 - Row 1: {store.result_latin1[0].comment} | {store.result_latin1[0].card_name}"
+
+  - type: check
+    check: length(store.result_latin1) == 3
+    message: "INSERT latin1: expected 3 rows, got {length(store.result_latin1)}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 4: latin1 source → LOAD DATA LOCAL path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: true
+      streams:
+        mariadb.test_cs_src_latin1:
+          object: mariadb.test_cs_tgt_latin1_bulk
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_latin1_bulk ORDER BY id
+    into: result_latin1_bulk
+
+  - type: log
+    message: "BULK latin1 - Row 1: {store.result_latin1_bulk[0].comment} | {store.result_latin1_bulk[0].card_name}"
+
+  - type: check
+    check: length(store.result_latin1_bulk) == 3
+    message: "BULK latin1: expected 3 rows, got {length(store.result_latin1_bulk)}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 5: utf8mb3 source → INSERT path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: false
+      streams:
+        mariadb.test_cs_src_utf8mb3:
+          object: mariadb.test_cs_tgt_utf8mb3
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_utf8mb3 ORDER BY id
+    into: result_utf8mb3
+
+  - type: log
+    message: "INSERT utf8mb3 - Row 1: {store.result_utf8mb3[0].comment} | {store.result_utf8mb3[0].card_name}"
+
+  - type: check
+    check: store.result_utf8mb3[0].comment == "α+β+γ = δ"
+    message: "INSERT utf8mb3: Greek letters garbled: {store.result_utf8mb3[0].comment}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 6: utf8mb3 source → LOAD DATA LOCAL path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: true
+      streams:
+        mariadb.test_cs_src_utf8mb3:
+          object: mariadb.test_cs_tgt_utf8mb3_bulk
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_utf8mb3_bulk ORDER BY id
+    into: result_utf8mb3_bulk
+
+  - type: log
+    message: "BULK utf8mb3 - Row 1: {store.result_utf8mb3_bulk[0].comment} | {store.result_utf8mb3_bulk[0].card_name}"
+
+  - type: check
+    check: store.result_utf8mb3_bulk[0].comment == "α+β+γ = δ"
+    message: "BULK utf8mb3: Greek letters garbled: {store.result_utf8mb3_bulk[0].comment}"
+
+  - type: check
+    check: store.result_utf8mb3_bulk[2].card_name == "José García"
+    message: "BULK utf8mb3: accented chars garbled: {store.result_utf8mb3_bulk[2].card_name}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 7: ascii source → INSERT path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: false
+      streams:
+        mariadb.test_cs_src_ascii:
+          object: mariadb.test_cs_tgt_ascii
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_ascii ORDER BY id
+    into: result_ascii
+
+  - type: log
+    message: "INSERT ascii - Row 1: {store.result_ascii[0].comment} | {store.result_ascii[0].card_name}"
+
+  - type: check
+    check: store.result_ascii[0].comment == "Hello world"
+    message: "INSERT ascii: data corrupted: {store.result_ascii[0].comment}"
+
+  - type: check
+    check: store.result_ascii[2].card_name == "Bob Smith"
+    message: "INSERT ascii: data corrupted: {store.result_ascii[2].card_name}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 8: ascii source → LOAD DATA LOCAL path
+  # ═══════════════════════════════════════════════════════════
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: truncate
+        target_options:
+          use_bulk: true
+      streams:
+        mariadb.test_cs_src_ascii:
+          object: mariadb.test_cs_tgt_ascii_bulk
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_ascii_bulk ORDER BY id
+    into: result_ascii_bulk
+
+  - type: log
+    message: "BULK ascii - Row 1: {store.result_ascii_bulk[0].comment} | {store.result_ascii_bulk[0].card_name}"
+
+  - type: check
+    check: store.result_ascii_bulk[0].comment == "Hello world"
+    message: "BULK ascii: data corrupted: {store.result_ascii_bulk[0].comment}"
+
+  - type: check
+    check: store.result_ascii_bulk[2].card_name == "Bob Smith"
+    message: "BULK ascii: data corrupted: {store.result_ascii_bulk[2].card_name}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 9: Incremental mode into pre-existing latin1 target (INSERT)
+  # ═══════════════════════════════════════════════════════════
+
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      CREATE TABLE mariadb.test_cs_tgt_incr (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET latin1;
+
+      INSERT INTO mariadb.test_cs_tgt_incr (id, comment, card_name) VALUES
+        (10, 'existing row', 'Already Here');
+
+      DROP TABLE IF EXISTS mariadb.test_cs_src_incr;
+      CREATE TABLE mariadb.test_cs_src_incr (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255),
+        updated_at DATETIME
+      ) CHARACTER SET utf8mb4;
+
+      INSERT INTO mariadb.test_cs_src_incr (id, comment, card_name, updated_at) VALUES
+        (10, 'updated row', 'Still Here', '2025-01-01 00:00:00'),
+        (11, 'new row one', 'New Person', '2025-01-02 00:00:00'),
+        (12, 'new row two', 'Another One', '2025-01-03 00:00:00');
+
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: updated_at
+        target_options:
+          use_bulk: false
+      streams:
+        mariadb.test_cs_src_incr:
+          object: mariadb.test_cs_tgt_incr
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_incr ORDER BY id
+    into: result_incr
+
+  - type: log
+    message: |
+      INSERT incremental:
+        Row 0: id={store.result_incr[0].id} comment={store.result_incr[0].comment}
+        Row 1: id={store.result_incr[1].id} comment={store.result_incr[1].comment}
+        Row 2: id={store.result_incr[2].id} comment={store.result_incr[2].comment}
+
+  - type: check
+    check: length(store.result_incr) == 3
+    message: "INSERT incremental: expected 3 rows, got {length(store.result_incr)}"
+
+  - type: check
+    check: store.result_incr[0].comment == "updated row"
+    message: "INSERT incremental: id=10 not updated: {store.result_incr[0].comment}"
+
+  - type: check
+    check: store.result_incr[2].comment == "new row two"
+    message: "INSERT incremental: id=12 missing: {store.result_incr[2].comment}"
+
+  # ═══════════════════════════════════════════════════════════
+  # Test 10: Incremental mode into pre-existing latin1 target (LOAD DATA LOCAL)
+  # ═══════════════════════════════════════════════════════════
+
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_bulk;
+      CREATE TABLE mariadb.test_cs_tgt_incr_bulk (
+        id INT PRIMARY KEY,
+        comment TEXT,
+        card_name VARCHAR(255)
+      ) CHARACTER SET latin1;
+
+      INSERT INTO mariadb.test_cs_tgt_incr_bulk (id, comment, card_name) VALUES
+        (10, 'existing row', 'Already Here');
+
+  - type: replication
+    replication:
+      source: '{env.CONN}'
+      target: '{env.CONN}'
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: updated_at
+        target_options:
+          use_bulk: true
+      streams:
+        mariadb.test_cs_src_incr:
+          object: mariadb.test_cs_tgt_incr_bulk
+
+  - type: query
+    connection: '{env.CONN}'
+    query: SELECT id, comment, card_name FROM mariadb.test_cs_tgt_incr_bulk ORDER BY id
+    into: result_incr_bulk
+
+  - type: log
+    message: |
+      BULK incremental:
+        Row 0: id={store.result_incr_bulk[0].id} comment={store.result_incr_bulk[0].comment}
+        Row 1: id={store.result_incr_bulk[1].id} comment={store.result_incr_bulk[1].comment}
+        Row 2: id={store.result_incr_bulk[2].id} comment={store.result_incr_bulk[2].comment}
+
+  - type: check
+    check: length(store.result_incr_bulk) == 3
+    message: "BULK incremental: expected 3 rows, got {length(store.result_incr_bulk)}"
+
+  - type: check
+    check: store.result_incr_bulk[0].comment == "updated row"
+    message: "BULK incremental: id=10 not updated: {store.result_incr_bulk[0].comment}"
+
+  - type: check
+    check: store.result_incr_bulk[2].comment == "new row two"
+    message: "BULK incremental: id=12 missing: {store.result_incr_bulk[2].comment}"
+
+  # ── Cleanup: restore database charset and drop all tables ──
+  - type: query
+    connection: '{env.CONN}'
+    query: |
+      ALTER DATABASE mariadb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_utf8mb4;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_latin1;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_utf8mb3;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_ascii;
+      DROP TABLE IF EXISTS mariadb.test_cs_src_incr;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_insert;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_insert_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_latin1_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_utf8mb3_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_ascii_bulk_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_tmp;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_bulk;
+      DROP TABLE IF EXISTS mariadb.test_cs_tgt_incr_bulk_tmp;
