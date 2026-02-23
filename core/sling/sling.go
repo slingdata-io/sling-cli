@@ -4,11 +4,12 @@ import (
 	"os"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 // Sling accepts a configuration and runs an Extract-Load task
 func Sling(cfg *Config) (err error) {
-	task := NewTask(os.Getenv("SLING_EXEC_ID"), cfg)
+	task := NewTask(env.ExecID, cfg)
 	if task.Err != nil {
 		return g.Error(task.Err, "error creating Sling task")
 	}

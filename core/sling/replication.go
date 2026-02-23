@@ -112,7 +112,7 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 		}
 	}
 
-	rd.state.Execution.ID = os.Getenv("SLING_EXEC_ID")
+	rd.state.Execution.ID = env.ExecID
 	rd.state.Source = ConnState{Name: rd.Source}
 	rd.state.Target = ConnState{Name: rd.Target}
 	if rd.state.State == nil {
@@ -565,7 +565,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	te := &TaskExecution{
 		Context:      rd.Context,
-		ExecID:       os.Getenv("SLING_EXEC_ID"),
+		ExecID:       env.ExecID,
 		Config:       &cfg,
 		Status:       ExecStatusRunning,
 		StartTime:    g.Ptr(time.Now()),

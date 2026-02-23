@@ -8,7 +8,6 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
-	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -62,20 +61,10 @@ type ExecutionStatus struct {
 	AvgDuration int        `json:"avg_duration,omitempty"`
 }
 
-func NewExecID() string {
-	uid, err := ksuid.NewRandom()
-	execID := g.NewTsID("exec")
-	if err == nil {
-		execID = uid.String()
-	}
-
-	return execID
-}
-
 // NewTask creates a Sling task with given configuration
 func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 	if execID == "" {
-		execID = NewExecID()
+		execID = env.NewExecID()
 	}
 
 	t = &TaskExecution{

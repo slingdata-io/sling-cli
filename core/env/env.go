@@ -17,6 +17,8 @@ import (
 	"github.com/kardianos/osext"
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
+	"github.com/segmentio/ksuid"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -37,7 +39,7 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
-	ExecID         = os.Getenv("SLING_EXEC_ID")
+	ExecID         = g.Getenv("SLING_EXEC_ID", NewExecID())
 	AgentID        = os.Getenv("SLING_AGENT_ID")
 	IsAgentMode    = AgentID != ""
 
@@ -148,6 +150,16 @@ func SetTelVal(key string, value any) {
 	TelMux.Lock()
 	TelMap[key] = value
 	TelMux.Unlock()
+}
+
+func NewExecID() string {
+	uid, err := ksuid.NewRandom()
+	execID := g.NewTsID("exec")
+	if err == nil {
+		execID = uid.String()
+	}
+
+	return execID
 }
 
 func SetLogger() {

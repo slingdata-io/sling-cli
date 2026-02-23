@@ -175,10 +175,7 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		seenIDs[id] = i
 	}
 
-	pipeline.execID = os.Getenv("SLING_EXEC_ID")
-	if pipeline.execID == "" {
-		pipeline.execID = NewExecID()
-	}
+	pipeline.execID = env.ExecID
 
 	return
 }
