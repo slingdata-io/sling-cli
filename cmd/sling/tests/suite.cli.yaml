@@ -2010,3 +2010,15 @@
   output_contains:
     - 'cannot add PRIMARY KEY on column'
     - 'key length prefix'
+
+# Chunking in incremental mode ignores user-specified range
+# Issue: In incremental mode with chunk_size + range, the range min is overridden
+# by the target table's max update_key value. If target has stale data (e.g. 2024-11-01),
+# this generates ~40 chunks instead of using the user-specified range (~10 chunks).
+# With range '2024-12-01,2024-12-10' and chunk_size 1d, we expect 10 chunks, not 40.
+- id: 210
+  name: 'Chunking incremental mode respects user-specified range'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.14.chunk_incremental_range_override.yaml'
+  output_contains:
+    - 'determined 9 chunks'
+    - 'Chunk incremental range override test PASSED'

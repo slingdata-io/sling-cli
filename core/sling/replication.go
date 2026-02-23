@@ -785,7 +785,24 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			if err != nil {
 				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)
 			}
-			min = cast.ToString(tempCfg.IncrementalVal) // set target max value as range min value
+
+			// don't use tempCfg.IncrementalValStr due to quotes
+			incrementalMin := cast.ToString(tempCfg.IncrementalVal)
+			if min == "" {
+				min = incrementalMin
+			} else if incrementalMin != "" {
+				// use the higher of user-specified range min or target's max value
+				// so we don't re-process already-synced data, but also don't
+				// start from an earlier date than the user requested
+				Sp := iop.NewStreamProcessor()
+				if minT, err := Sp.ParseTime(min); err == nil {
+					if incT, err := Sp.ParseTime(incrementalMin); err == nil && incT.After(minT) {
+						min = incrementalMin
+					}
+				} else if cast.ToFloat64(incrementalMin) > cast.ToFloat64(min) {
+					min = incrementalMin
+				}
+			}
 		}
 
 		var chunks []database.Chunk

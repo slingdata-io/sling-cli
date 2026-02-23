@@ -1,0 +1,76 @@
+# Chunking in incremental mode ignores user-specified range when target table doesn't exist
+# Issue: In incremental mode with chunk_size + range, when the target table does not exist,
+# getIncrementalValueViaDB returns nil, overriding the user's range min with "".
+# This causes ChunkByColumnRange to parse "" as year-0 time, generating hundreds of
+# thousands of chunks instead of using the user-specified range start.
+#
+# We reproduce this with an existing target table whose max update_key is earlier than
+# the user's range start. The incremental logic overrides range min with the target's max,
+# causing extra chunks. Range '2024-12-01,2024-12-10' + chunk_size 1d should give 10 chunks.
+
+env:
+  SOURCE: oracle
+  TARGET: postgres
+
+steps:
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: BEGIN EXECUTE IMMEDIATE 'DROP TABLE oracle.test_chunk_range'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.test_chunk_range;
+
+  # Create Oracle source table with DATE column, data in Dec 2024
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE oracle.test_chunk_range (
+        id NUMBER PRIMARY KEY,
+        event_date DATE,
+        val VARCHAR2(50)
+      )
+
+  - type: query
+    connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO oracle.test_chunk_range (id, event_date, val)
+      SELECT
+        LEVEL as id,
+        DATE '2024-12-01' + MOD(LEVEL, 10) as event_date,
+        'row_' || LEVEL as val
+      FROM dual
+      CONNECT BY LEVEL <= 20
+
+  # Run replication: incremental mode with chunk_size 1d and explicit range.
+  # BUG: range min '2024-12-01' is overridden by target max '2024-11-01'.
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+
+      defaults:
+        mode: incremental
+        target_options:
+          use_bulk: false
+
+      streams:
+        oracle.test_chunk_range:
+          object: public.test_chunk_range
+          update_key: event_date
+          primary_key: [id]
+          source_options:
+            range: '2024-12-01,2024-12-10'
+            chunk_size: 1d
+
+  - type: log
+    message: "Chunk incremental range override test PASSED"
+
+  # Clean up
+  - type: query
+    connection: '{env.SOURCE}'
+    query: BEGIN EXECUTE IMMEDIATE 'DROP TABLE oracle.test_chunk_range'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.test_chunk_range;
