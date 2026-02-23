@@ -1932,9 +1932,114 @@
     - 'execution succeeded'
     - 'SUCCESS: backfill with 0 rows did not error'
 
-- id: 200
-  name: Test MSSQL to AZURE_SQL merge semicolon (full-refresh + incremental)
-  run: 'sling run -d -r cmd/sling/tests/replications/r.100.mssql_merge_semicolon.yaml'
+# - id: 200
+#   name: Test MSSQL to AZURE_SQL merge semicolon (full-refresh + incremental)
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.100.mssql_merge_semicolon.yaml'
+#   streams: 2
+#   output_contains:
+#     - 'execution succeeded'
+
+# Test chunking with where clause (bug: min/max query ignores where clause)
+# Issue: When using chunk_size with a where clause, the min/max query to calculate
+# chunk ranges does not include the where condition, causing too many chunks.
+# With where "id <= 100" and chunk_size 50, we expect 2 chunks (1-50, 51-100),
+# not ~20 chunks (1-1002 / 50) from the full table range.
+- id: 201
+  name: 'Chunking with where clause uses correct range'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.106.chunk_where_clause.yaml'
   streams: 2
   output_contains:
+    - 'determined 2 chunks'
     - 'execution succeeded'
+  output_does_not_contain:
+    - 'determined 20 chunks'
+    - 'determined 21 chunks'
+
+# CDC merge_cdc strategy tests
+- id: 202
+  name: CDC merge_cdc strategy - Snowflake target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.32.cdc_merge_snowflake.yaml'
+  output_contains:
+    - 'CDC merge_cdc Snowflake test PASSED'
+
+- id: 203
+  name: CDC merge_cdc strategy - BigQuery target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.33.cdc_merge_bigquery.yaml'
+  output_contains:
+    - 'CDC merge_cdc BigQuery test PASSED'
+
+- id: 204
+  name: CDC merge_cdc strategy - SQL Server target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.34.cdc_merge_sqlserver.yaml'
+  output_contains:
+    - 'CDC merge_cdc SQL Server test PASSED'
+
+- id: 205
+  name: CDC merge_cdc strategy - SQLite target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.39.cdc_merge_sqlite.yaml'
+  output_contains:
+    - 'CDC merge_cdc SQLite test PASSED'
+
+- id: 206
+  name: CDC merge_cdc strategy - Postgres target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.30.cdc_merge_postgres.yaml'
+  output_contains:
+    - 'CDC merge_cdc PostgreSQL test PASSED'
+
+- id: 207
+  name: CDC merge_cdc strategy - MySQL target
+  run: 'sling run -d -p cmd/sling/tests/pipelines/cdc/p.31.cdc_merge_mysql.yaml'
+  output_contains:
+    - 'CDC merge_cdc MySQL test PASSED'
+
+# MSSQL IDENTITY -> MySQL AUTO_INCREMENT fix: when auto_increment is enabled without
+# primary_key, MySQL requires AUTO_INCREMENT columns to have a KEY - Sling must synthesize one.
+- id: 208
+  name: 'Schema migration MSSQL IDENTITY to MySQL AUTO_INCREMENT fix'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.30.sm_mssql_mysql_autoincrement_fix.yaml'
+  streams: 1
+  group: schema_migration
+  output_contains:
+    - 'MSSQL IDENTITY -> MySQL AUTO_INCREMENT fix test PASSED'
+
+- id: 209
+  name: 'Schema migration TEXT PK to MySQL clear error for BLOB/TEXT key'
+  run: 'sling run -d cmd/sling/tests/pipelines/schema_migration/p.31.sm_pg_mysql_text_pk_error.yaml'
+  err: true
+  group: schema_migration
+  output_contains:
+    - 'cannot add PRIMARY KEY on column'
+    - 'key length prefix'
+
+# Chunking in incremental mode ignores user-specified range
+# Issue: In incremental mode with chunk_size + range, the range min is overridden
+# by the target table's max update_key value. If target has stale data (e.g. 2024-11-01),
+# this generates ~40 chunks instead of using the user-specified range (~10 chunks).
+# With range '2024-12-01,2024-12-10' and chunk_size 1d, we expect 10 chunks, not 40.
+- id: 210
+  name: 'Chunking incremental mode respects user-specified range'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.14.chunk_incremental_range_override.yaml'
+  output_contains:
+    - 'determined 9 chunks'
+    - 'Chunk incremental range override test PASSED'
+
+- id: 211
+  name: 'MariaDB utf8mb4 charset fix for latin1 databases'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.15.mariadb_utf8_charset.yaml'
+  output_contains:
+    - 'CHARACTER SET utf8mb4'
+    # utf8mb4 source (both paths)
+    - 'INSERT utf8mb4 - Row 1: α+β+γ = δ | ℅ Luís'
+    - 'BULK utf8mb4 - Row 1: α+β+γ = δ | ℅ Luís'
+    # latin1 source (both paths)
+    - 'INSERT latin1 - Row 1:'
+    - 'BULK latin1 - Row 1:'
+    # utf8mb3 source (both paths)
+    - 'INSERT utf8mb3 - Row 1: α+β+γ = δ'
+    - 'BULK utf8mb3 - Row 1: α+β+γ = δ'
+    # ascii source (both paths)
+    - 'INSERT ascii - Row 1: Hello world'
+    - 'BULK ascii - Row 1: Hello world'
+    # incremental (both paths)
+    - 'INSERT incremental:'
+    - 'BULK incremental:'

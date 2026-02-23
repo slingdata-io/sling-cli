@@ -44,6 +44,8 @@ const (
 	BackfillMode Mode = "backfill"
 	// DefinitionOnlyMode is to create table/file definition without data
 	DefinitionOnlyMode Mode = "definition-only"
+	// ChangeCaptureMode is for change data capture (cdc)
+	ChangeCaptureMode Mode = "change-capture"
 )
 
 var AllMode = []struct {
@@ -56,6 +58,7 @@ var AllMode = []struct {
 	{SnapshotMode, "SnapshotMode"},
 	{BackfillMode, "BackfillMode"},
 	{DefinitionOnlyMode, "DefinitionOnlyMode"},
+	{ChangeCaptureMode, "CDCMode"},
 }
 
 // NewConfig return a config object from a YAML / JSON string
@@ -350,13 +353,14 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	}
 
-	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode, DefinitionOnlyMode)
+	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode, DefinitionOnlyMode, ChangeCaptureMode)
 	if !validMode {
-		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot, truncate, or definition-only")
+		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot, truncate, definition-only, or change-capture")
 		return
 	}
 
-	if cfg.Mode == IncrementalMode {
+	switch cfg.Mode {
+	case IncrementalMode:
 		if cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
 			// use default keys if none are provided
 			if len(cfg.Source.PrimaryKey()) == 0 {
@@ -382,7 +386,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			}
 			return
 		}
-	} else if cfg.Mode == BackfillMode {
+	case BackfillMode:
 		if cfg.Source.UpdateKey == "" || len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
@@ -397,9 +401,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			err = g.Error("must specify valid range value for backfill mode separated by one comma, for example `2021-01-01,2021-02-01`. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		}
-	} else if cfg.Mode == SnapshotMode {
+	case SnapshotMode:
 		cfg.MetadataLoadedAt = g.Bool(true) // needed for snapshot mode
-	} else if cfg.Mode == DefinitionOnlyMode {
+	case DefinitionOnlyMode:
 		// For file targets, only parquet and arrow formats are supported
 		if tgtFileProvided {
 			format := cfg.Target.ObjectFileFormat()
@@ -407,6 +411,15 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 				err = g.Error("definition-only mode for file targets only supports parquet or arrow formats, got: %s", format)
 				return
 			}
+		}
+	case ChangeCaptureMode:
+		if !srcDbProvided {
+			err = g.Error("change-capture mode requires a database source connection")
+			return
+		}
+		if !tgtDbProvided {
+			err = g.Error("change-capture mode requires a database target connection")
+			return
 		}
 	}
 
@@ -1596,6 +1609,70 @@ type TargetOptions struct {
 	PostSQL        *string                  `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 	IsolationLevel *database.IsolationLevel `json:"isolation_level,omitempty" yaml:"isolation_level,omitempty"`
 	MergeStrategy  *database.MergeStrategy  `json:"merge_strategy,omitempty" yaml:"merge_strategy,omitempty"`
+}
+
+// CDCOptions are options for change data capture mode
+type CDCOptions struct {
+	// Batching
+	BatchSize    *int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
+	BatchTimeout *int `json:"batch_timeout,omitempty" yaml:"batch_timeout,omitempty"`
+
+	// Behavior
+	StartFrom  *string `json:"start_from,omitempty" yaml:"start_from,omitempty"`
+	SoftDelete *bool   `json:"soft_delete,omitempty" yaml:"soft_delete,omitempty"`
+
+	// Error Recovery
+	RetryAttempts     *int    `json:"retry_attempts,omitempty" yaml:"retry_attempts,omitempty"`
+	RetryBackoff      *string `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`
+	RetryInitialDelay *string `json:"retry_initial_delay,omitempty" yaml:"retry_initial_delay,omitempty"`
+	RetryMaxDelay     *string `json:"retry_max_delay,omitempty" yaml:"retry_max_delay,omitempty"`
+
+	// Initial Load
+	InitialLoadMode          *string `json:"initial_load_mode,omitempty" yaml:"initial_load_mode,omitempty"`
+	InitialLoadChunkSize     *int    `json:"initial_load_chunk_size,omitempty" yaml:"initial_load_chunk_size,omitempty"`
+	InitialLoadCheckpointInt *int    `json:"initial_load_checkpoint_int,omitempty" yaml:"initial_load_checkpoint_int,omitempty"`
+
+	// Source Impact
+	MaxSourceCPUPercent *int  `json:"max_source_cpu_percent,omitempty" yaml:"max_source_cpu_percent,omitempty"`
+	MaxReadRate         *int  `json:"max_read_rate,omitempty" yaml:"max_read_rate,omitempty"`
+	BackoffOnHighLoad   *bool `json:"backoff_on_high_load,omitempty" yaml:"backoff_on_high_load,omitempty"`
+
+	// Backfill / Replay
+	ReplayFrom *string `json:"replay_from,omitempty" yaml:"replay_from,omitempty"`
+}
+
+// SetDefaults sets default values for CDCOptions
+func (o *CDCOptions) SetDefaults() {
+	if o == nil {
+		return
+	}
+	if o.BatchSize == nil {
+		o.BatchSize = g.Int(10000)
+	}
+	if o.BatchTimeout == nil {
+		o.BatchTimeout = g.Int(30)
+	}
+	if o.StartFrom == nil {
+		o.StartFrom = g.String("now")
+	}
+	if o.SoftDelete == nil {
+		o.SoftDelete = g.Bool(false)
+	}
+	if o.RetryAttempts == nil {
+		o.RetryAttempts = g.Int(3)
+	}
+	if o.RetryInitialDelay == nil {
+		o.RetryInitialDelay = g.String("1s")
+	}
+	if o.RetryMaxDelay == nil {
+		o.RetryMaxDelay = g.String("30s")
+	}
+	if o.InitialLoadMode == nil {
+		o.InitialLoadMode = g.String("chunked")
+	}
+	if o.InitialLoadChunkSize == nil {
+		o.InitialLoadChunkSize = g.Int(100000)
+	}
 }
 
 // DeleteMissingConfig represents extended delete_missing configuration

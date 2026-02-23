@@ -112,7 +112,7 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 		}
 	}
 
-	rd.state.Execution.ID = os.Getenv("SLING_EXEC_ID")
+	rd.state.Execution.ID = env.ExecID
 	rd.state.Source = ConnState{Name: rd.Source}
 	rd.state.Target = ConnState{Name: rd.Target}
 	if rd.state.State == nil {
@@ -565,7 +565,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	te := &TaskExecution{
 		Context:      rd.Context,
-		ExecID:       os.Getenv("SLING_EXEC_ID"),
+		ExecID:       env.ExecID,
 		Config:       &cfg,
 		Status:       ExecStatusRunning,
 		StartTime:    g.Ptr(time.Now()),
@@ -744,6 +744,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
 		}
 
+		// Apply where clause so chunk min/max queries use the filtered range
+		if stream.config.Where != "" {
+			table.Where = stream.config.Where
+		}
+
 		// Get stream table name for variable expansion (always from stream.name, not SQL)
 		streamTable, _ := database.ParseTableName(stream.name, sourceConn.Connection.Type)
 
@@ -780,7 +785,24 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			if err != nil {
 				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)
 			}
-			min = cast.ToString(tempCfg.IncrementalVal) // set target max value as range min value
+
+			// don't use tempCfg.IncrementalValStr due to quotes
+			incrementalMin := cast.ToString(tempCfg.IncrementalVal)
+			if min == "" {
+				min = incrementalMin
+			} else if incrementalMin != "" {
+				// use the higher of user-specified range min or target's max value
+				// so we don't re-process already-synced data, but also don't
+				// start from an earlier date than the user requested
+				Sp := iop.NewStreamProcessor()
+				if minT, err := Sp.ParseTime(min); err == nil {
+					if incT, err := Sp.ParseTime(incrementalMin); err == nil && incT.After(minT) {
+						min = incrementalMin
+					}
+				} else if cast.ToFloat64(incrementalMin) > cast.ToFloat64(min) {
+					min = incrementalMin
+				}
+			}
 		}
 
 		var chunks []database.Chunk
@@ -1307,6 +1329,7 @@ type ReplicationStreamConfig struct {
 	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
+	CDCOptions    *CDCOptions    `json:"change_capture_options,omitempty" yaml:"change_capture_options,omitempty"`
 	Schedule      string         `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
@@ -1478,6 +1501,10 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		stream.TargetOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.TargetOptions))
 	} else if replicationCfg.Defaults.TargetOptions != nil {
 		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
+	}
+
+	if stream.CDCOptions == nil {
+		stream.CDCOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.CDCOptions))
 	}
 }
 

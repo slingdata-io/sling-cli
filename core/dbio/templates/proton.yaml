@@ -26,6 +26,8 @@ core:
   merge_update: null
   merge_update_insert: null
   merge_delete_insert: null
+  merge_cdc: null
+  merge_change_capture_soft: null
 
 metadata:
   current_database: select current_database()

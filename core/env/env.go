@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/kardianos/osext"
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
+	"github.com/segmentio/ksuid"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -37,13 +40,14 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
-	ExecID         = os.Getenv("SLING_EXEC_ID")
+	ExecID         = g.Getenv("SLING_EXEC_ID", NewExecID())
 	AgentID        = os.Getenv("SLING_AGENT_ID")
 	IsAgentMode    = AgentID != ""
 
 	// File logging
 	debugLogFile *os.File
 	traceLogFile *os.File
+	logFileInit  = false
 	logFileMux   sync.Mutex
 	GetOAuthMap  = func() map[string]map[string]any {
 		return map[string]map[string]any{}
@@ -69,6 +73,7 @@ var (
 		RowNum    string
 		RowID     string
 		ExecID    string
+		CDCSeq    string
 	}{
 		LoadedAt:  "_sling_loaded_at",
 		SyncedAt:  "_sling_synced_at",
@@ -78,6 +83,7 @@ var (
 		RowNum:    "_sling_row_num",
 		RowID:     "_sling_row_id",
 		ExecID:    "_sling_exec_id",
+		CDCSeq:    "_sling_cdc_seq",
 	}
 )
 
@@ -146,6 +152,16 @@ func SetTelVal(key string, value any) {
 	TelMux.Lock()
 	TelMap[key] = value
 	TelMux.Unlock()
+}
+
+func NewExecID() string {
+	uid, err := ksuid.NewRandom()
+	execID := g.NewTsID("exec")
+	if err == nil {
+		execID = uid.String()
+	}
+
+	return execID
 }
 
 func SetLogger() {
@@ -228,6 +244,10 @@ func InitLogger() {
 
 // setupFileLogging initializes file logging based on SLING_DEBUG_FILE and SLING_TRACE_FILE env vars
 func setupFileLogging() {
+	if IsThreadChild {
+		return // don't write log from child processes
+	}
+
 	logFileMux.Lock()
 	defer logFileMux.Unlock()
 
@@ -241,6 +261,9 @@ func setupFileLogging() {
 		traceLogFile = nil
 	}
 
+	// setup env from env.yaml
+	LoadSlingEnvFile()
+
 	// Open debug log file
 	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {
 		f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -248,6 +271,29 @@ func setupFileLogging() {
 			g.Warn("could not open debug log file: %s", err.Error())
 		} else {
 			debugLogFile = f
+		}
+	}
+
+	// Open debug log file from SLING_LOG_DIR (date-based rotation)
+	// Only if SLING_DEBUG_FILE wasn't set and this is not a thread child process
+	if logDir := os.Getenv("SLING_LOG_DIR"); logDir != "" && debugLogFile == nil {
+		// Expand ~ to home directory
+		if strings.HasPrefix(logDir, "~/") {
+			logDir = path.Join(g.UserHomeDir(), logDir[2:])
+		}
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			g.Warn("could not create log directory: %s", err.Error())
+		} else {
+			logFileName := "sling_debug_" + time.Now().Format("2006_01_02") + ".log"
+			logPath := path.Join(logDir, logFileName)
+
+			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				g.Warn("could not open log file: %s", err.Error())
+			} else {
+				debugLogFile = f
+				cleanupOldLogFiles(logDir, 15)
+			}
 		}
 	}
 
@@ -277,6 +323,33 @@ func CloseFileLogging() {
 	}
 }
 
+// cleanupOldLogFiles removes old .log files from the directory, keeping the latest `keep` files.
+// Files are sorted by name (which sorts chronologically for date-based filenames).
+func cleanupOldLogFiles(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		g.Warn("could not read log directory for cleanup: %s", err.Error())
+		return
+	}
+
+	var logFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
+			logFiles = append(logFiles, entry.Name())
+		}
+	}
+
+	sort.Strings(logFiles)
+
+	if len(logFiles) > keep {
+		for _, name := range logFiles[:len(logFiles)-keep] {
+			if err := os.Remove(path.Join(dir, name)); err != nil {
+				g.Warn("could not remove old log file %s: %s", name, err.Error())
+			}
+		}
+	}
+}
+
 // stripANSI removes ANSI escape codes from a string
 func stripANSI(text string) string {
 	// Match ANSI escape sequences: ESC[ followed by any number of params and a letter
@@ -300,6 +373,14 @@ func stripANSI(text string) string {
 		}
 	}
 	return result.String()
+}
+
+func shortExecID() string {
+	val := ExecID
+	if len(val) > 8 {
+		val = val[len(val)-8:]
+	}
+	return val
 }
 
 // formatLogLine formats a log line for file output (no colors)
@@ -344,7 +425,23 @@ func formatLogLine(ll *g.LogLine) string {
 	// Strip any ANSI codes from the text
 	text = stripANSI(text)
 
-	return fmt.Sprintf("%s %s%s\n", timeText, levelPrefix, text)
+	return fmt.Sprintf("%s | %s %s%s\n", shortExecID(), timeText, levelPrefix, text)
+}
+
+func writeHeader(logFile *os.File) {
+	// Write session header
+	wd, _ := os.Getwd()
+	header := fmt.Sprintf(
+		"\n%s\n== %s | version: %s | exec_id: %s\n== dir: %s | command: %s\n%s\n",
+		strings.Repeat("=", 100),
+		time.Now().Format("2006-01-02 15:04:05"),
+		core.Version,
+		ExecID,
+		wd,
+		strings.Join(os.Args, " "),
+		strings.Repeat("=", 80),
+	)
+	logFile.WriteString(header)
 }
 
 // writeToLogFile writes the log entry to configured log file(s)
@@ -357,6 +454,16 @@ func writeToLogFile(ll *g.LogLine) {
 		return
 	}
 
+	if !logFileInit {
+		if debugLogFile != nil {
+			writeHeader(debugLogFile)
+		}
+		if traceLogFile != nil {
+			writeHeader(traceLogFile)
+		}
+		logFileInit = true
+	}
+
 	level := zerolog.Level(ll.Level)
 
 	// Handle Print/Println entries (level 9) - these are raw output from child processes
@@ -366,6 +473,10 @@ func writeToLogFile(ll *g.LogLine) {
 		if strings.TrimSpace(text) == "" {
 			return
 		}
+
+		// Add execID prefix
+		text = shortExecID() + " | " + text
+
 		// Ensure text ends with newline
 		if !strings.HasSuffix(text, "\n") {
 			text = text + "\n"

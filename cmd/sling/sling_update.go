@@ -211,7 +211,7 @@ func checkUpdate() {
 	_, respB, _ := net.ClientDo(
 		"POST", "https://version.slingdata.io",
 		strings.NewReader(g.Marshal(g.M(
-			"exec_id", os.Getenv("SLING_EXEC_ID"),
+			"exec_id", env.ExecID,
 			"channel", lo.Ternary(isDevChannel, "dev", "stable"),
 			"version_cli", core.VersionSlash(),
 			"package", getSlingPackage(),

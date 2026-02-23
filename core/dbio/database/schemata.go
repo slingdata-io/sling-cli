@@ -30,7 +30,8 @@ type Table struct {
 	Columns     iop.Columns `json:"columns,omitempty"`
 	Keys        TableKeys   `json:"keys,omitempty"`
 
-	Raw string `json:"raw"`
+	Raw   string `json:"raw"`
+	Where string `json:"where,omitempty"`
 
 	limit  *int
 	offset int
@@ -206,6 +207,7 @@ func (t *Table) Clone() Table {
 		Columns:     t.Columns,
 		Keys:        t.Keys,
 		Raw:         t.Raw,
+		Where:       t.Where,
 		limit:       t.limit,
 		offset:      t.offset,
 	}

@@ -271,6 +271,18 @@ func (ds *Datastream) StartBwProcessor() {
 	go ds.processBwRows()
 }
 
+// DrainReprocess returns any row that was sent to the Reprocess channel
+// during a pause/unpause cycle but was not consumed (e.g., for push-based
+// streams that have no ds.Start() iterator loop). Returns nil if empty.
+func (ds *Datastream) DrainReprocess() []any {
+	select {
+	case row := <-ds.it.Reprocess:
+		return row
+	default:
+		return nil
+	}
+}
+
 // SetReady sets the ds.ready
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {

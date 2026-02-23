@@ -795,6 +795,11 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		t.Config.Mode = FullRefreshMode
 	}
 
+	// CDC mode has its own execution path
+	if t.Config.Mode == ChangeCaptureMode {
+		return executeCDC(t)
+	}
+
 	// Initiate connections
 	t.SetProgress("connecting to source database (%s)", t.Config.SrcConn.Type)
 	srcConn, err := t.getSrcDBConn(t.Context.Ctx)

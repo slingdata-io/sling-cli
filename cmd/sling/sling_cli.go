@@ -40,12 +40,6 @@ var (
 func init() {
 	env.InitLogger()
 	store.InitDB()
-
-	if os.Getenv("SLING_EXEC_ID") == "" {
-		// set exec id if none provided
-		env.ExecID = sling.NewExecID()
-		os.Setenv("SLING_EXEC_ID", env.ExecID)
-	}
 }
 
 var cliRunFlags = []g.Flag{
@@ -370,41 +364,6 @@ var cliConns = &g.CliSC{
 		},
 	},
 	ExecProcess: processConns,
-}
-
-var cliCloud = &g.CliSC{
-	Name:                  "cloud",
-	Singular:              "cloud",
-	Description:           "Manage and trigger replications on the cloud",
-	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
-	SubComs: []*g.CliSC{
-		{
-			Name:        "login",
-			Description: "Authenticate into Sling Cloud",
-		},
-		{
-			Name:        "status",
-			Description: "Get status of replications",
-		},
-		{
-			Name:        "deploy",
-			Description: "deploy one or more replications to the cloud",
-			PosFlags: []g.Flag{
-				{
-					Name:        "replication",
-					ShortName:   "r",
-					Type:        "string",
-					Description: "The file or folder path of YAML / JSON replication file(s)",
-				},
-			},
-		},
-		{
-			Name:        "run",
-			Description: "Execute a run on the cloud",
-			Flags:       cliRunFlags,
-		},
-	},
-	ExecProcess: processCloud,
 }
 
 func init() {

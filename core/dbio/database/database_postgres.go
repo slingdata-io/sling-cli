@@ -647,6 +647,8 @@ func (conn *PostgresConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable
 		"temp_table_index_sql", tempTableIndexSQL,
 		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"src_del_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "del."),
+		"pk_fields", mc.Map["pk_fields"],
 		"src_fields", mc.Map["src_fields"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],

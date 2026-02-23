@@ -680,6 +680,41 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
+	// start SOCKS5 proxy tunnel with SLING_PROXY env var
+	proxyURL := conn.GetProp("PROXY_URL")
+	if proxyURL == "" {
+		proxyURL = os.Getenv("SLING_PROXY")
+	}
+	if proxyURL != "" {
+		connU, err := url.Parse(connURL)
+		if err != nil {
+			return g.Error(err, "could not parse connection URL for proxy forwarding")
+		}
+
+		connHost := connU.Hostname()
+		if connHost != "" {
+			connPort := cast.ToInt(connU.Port())
+			if connPort == 0 {
+				connPort = conn.defaultPort
+				connURL = strings.ReplaceAll(
+					connURL, g.F("@%s", connHost),
+					g.F("@%s:%d", connHost, connPort),
+				)
+			}
+
+			localPort, err := iop.OpenTunnelProxy(proxyURL, connHost, connPort)
+			if err != nil {
+				return g.Error(err, "could not establish SOCKS5 proxy tunnel")
+			}
+
+			connURL = strings.ReplaceAll(
+				connURL, g.F("@%s:%d", connHost, connPort),
+				g.F("@127.0.0.1:%d", localPort),
+			)
+			g.Trace("new connection URL via proxy: " + conn.Self().GetURL(connURL))
+		}
+	}
+
 	if conn.db == nil {
 		connURL = conn.Self().GetURL(connURL)
 		connPool.Mux.Lock()
@@ -974,11 +1009,14 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		})
 	}
 
+	// assign separaetly to avoid conn.Data.Columns sync issues
+	columns := SQLColumns(colTypes, conn) // type mapping logic !
+
 	conn.Data.Result = result
 	conn.Data.SQL = query
 	conn.Data.Duration = time.Since(start).Seconds()
 	conn.Data.Rows = [][]interface{}{}
-	conn.Data.Columns = SQLColumns(colTypes, conn) // type mapping logic !
+	conn.Data.Columns = columns
 	conn.Data.NoDebug = !strings.Contains(query, noDebugKey)
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
@@ -1020,7 +1058,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		return false
 	}
 
-	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
+	ds = iop.NewDatastreamIt(queryContext.Ctx, columns, nextFunc)
 	ds.NoDebug = strings.Contains(query, noDebugKey)
 	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 	if !ds.NoDebug {
@@ -2556,13 +2594,44 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 
 	// Add PRIMARY KEY constraint for columns marked as primary key (when not temporary)
-	if (sm.HasPrimaryKeyEnabled() || sm.HasForeignKeyEnabled()) && !temporary {
+	if !temporary {
 		var pkCols []string
-		for _, col := range columns {
-			if col.IsPrimaryKey() {
-				pkCols = append(pkCols, conn.Template().Quote(col.Name))
+		if sm.HasPrimaryKeyEnabled() || sm.HasForeignKeyEnabled() {
+			isMySQLLike := conn.Self().GetType().IsMySQLLike()
+			for _, col := range columns {
+				if col.IsPrimaryKey() {
+					// MySQL/MariaDB cannot use BLOB/TEXT columns in a key specification without
+					// a key length prefix, which would cause:
+					//   Error 1170: BLOB/TEXT column used in key specification without a key length
+					// This happens when the source PK column maps to 'text' type with no precision
+					// (e.g., PostgreSQL TEXT, MSSQL NVARCHAR(MAX)) -> MySQL mediumtext.
+					if isMySQLLike && col.Type == iop.TextType {
+						if nativeType, err := conn.Self().GetNativeType(col); err == nil {
+							lowerNative := strings.ToLower(nativeType)
+							if strings.Contains(lowerNative, "text") || strings.Contains(lowerNative, "blob") {
+								return "", g.Error("cannot add PRIMARY KEY on column %q: MySQL/MariaDB cannot index a TEXT/BLOB column (%s) without a key length prefix. Consider using a VARCHAR column on the source for primary key columns.", col.Name, nativeType)
+							}
+						}
+					}
+					pkCols = append(pkCols, conn.Template().Quote(col.Name))
+				}
 			}
 		}
+
+		// MySQL/MariaDB require AUTO_INCREMENT columns to be a key.
+		// If no PK was found from source metadata, synthesize one from the AUTO_INCREMENT
+		// column to avoid:
+		//   Error 1075: there can be only one auto column and it must be defined as a key
+		if len(pkCols) == 0 && sm.HasAutoIncrementEnabled() &&
+			conn.Self().GetType().IsMySQLLike() {
+			for _, col := range columns {
+				if col.IsAutoIncrement() {
+					pkCols = append(pkCols, conn.Template().Quote(col.Name))
+					break // only one AUTO_INCREMENT column is allowed in MySQL
+				}
+			}
+		}
+
 		if len(pkCols) > 0 {
 			pkConstraint := g.F("PRIMARY KEY (%s)", strings.Join(pkCols, ", "))
 			// BigQuery requires NOT ENFORCED for primary keys
@@ -2810,12 +2879,14 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 type MergeStrategy string
 
 const (
-	MergeStrategyNone          MergeStrategy = ""
-	MergeStrategyInsert        MergeStrategy = "insert"
-	MergeStrategyUpdate        MergeStrategy = "update"
-	MergeStrategyUpdateInsert  MergeStrategy = "update_insert"
-	MergeStrategyDeleteInsert  MergeStrategy = "delete_insert"
-	MergeStrategyHistoryInsert MergeStrategy = "history_insert"
+	MergeStrategyNone              MergeStrategy = ""
+	MergeStrategyInsert            MergeStrategy = "insert"
+	MergeStrategyUpdate            MergeStrategy = "update"
+	MergeStrategyUpdateInsert      MergeStrategy = "update_insert"
+	MergeStrategyDeleteInsert      MergeStrategy = "delete_insert"
+	MergeStrategyHistoryInsert     MergeStrategy = "history_insert"
+	MergeStrategyChangeCapture     MergeStrategy = "change_capture"
+	MergeStrategyChangeCaptureSoft MergeStrategy = "change_capture_soft"
 )
 
 // Merge inserts / updates from a srcTable into a target table.
@@ -2901,11 +2972,13 @@ func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable str
 		"tgt_table", tgtTable,
 		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"src_del_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "del."),
 		"pk_fields", mc.Map["pk_fields"],
 		"src_pk_fields", mc.Map["src_pk_fields"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
 		"set_fields_excluded", mc.Map["set_fields_excluded"],
+		"set_fields_values", mc.Map["set_fields_values"],
 		"insert_fields", mc.Map["insert_fields"],
 		"src_insert_fields", mc.Map["src_insert_fields"],
 		"src_fields", mc.Map["src_fields"],
@@ -2966,7 +3039,16 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		srcPkFields = append(srcPkFields, srcField)
 		tgtPkFields = append(tgtPkFields, tgtField)
 
-		pkEqualField := g.F("src.%s = tgt.%s", srcField, tgtField)
+		// cast src PK to target type when types differ (e.g. CDC staging writes text, target has bigint)
+		srcPkExpr := g.F("src.%s", srcField)
+		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
+			castedExpr := conn.Self().CastColumnForSelect(*srcCol, *tgtCol)
+			quotedName := conn.Template().Quote(srcCol.Name)
+			if !strings.EqualFold(castedExpr, quotedName) {
+				srcPkExpr = strings.ReplaceAll(castedExpr, quotedName, g.F("src.%s", srcField))
+			}
+		}
+		pkEqualField := g.F("%s = tgt.%s", srcPkExpr, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
 		pkFieldMap[pkField] = ""
 	}
@@ -2980,6 +3062,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	tgtFields := conn.Template().QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
 	setFieldsAll := []string{}
+	setFieldsValues := []string{} // VALUES() style for MySQL ON DUPLICATE KEY UPDATE
 	insertFields := []string{}
 	placeholderFields := []string{}
 	srcInsertFields := []string{}
@@ -3006,9 +3089,11 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 
 		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
 
-		// set sync operation to `U` for update update
+		// set sync operation to `U` for update, except for CDC which preserves the original op
 		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
-			setSrcExpr = "'U'"
+			if g.PtrVal(strategy) != MergeStrategyChangeCapture {
+				setSrcExpr = "'U'"
+			}
 		}
 
 		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
@@ -3016,12 +3101,19 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
 			setFields = append(setFields, setField)
+			setFieldsValues = append(setFieldsValues, g.F("%s = VALUES(%s)", tgtColNameQ, tgtColNameQ))
 		}
 	}
 
 	// if PK is all the available columns
 	if len(setFields) == 0 && len(setFieldsAll) > 0 {
 		setFields = setFieldsAll
+		// rebuild VALUES-style fields for all columns
+		setFieldsValues = setFieldsValues[:0]
+		for _, tgtColName := range tgtCols.Names() {
+			tgtColNameQ := conn.Quote(tgtColName)
+			setFieldsValues = append(setFieldsValues, g.F("%s = VALUES(%s)", tgtColNameQ, tgtColNameQ))
+		}
 	}
 
 	// cast into the correct type
@@ -3044,6 +3136,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		Map: map[string]string{
 			"src_tgt_pk_equal":    strings.Join(pkEqualFields, " and "),
 			"src_upd_pk_equal":    strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+			"src_del_pk_equal":    strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "del."),
 			"src_fields":          strings.Join(srcFields, ", "),
 			"tgt_fields":          strings.Join(tgtFields, ", "),
 			"insert_fields":       strings.Join(insertFields, ", "),
@@ -3053,12 +3146,13 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"tgt_pk_fields":       strings.Join(tgtPkFields, ", "),
 			"set_fields":          strings.Join(setFields, ", "),
 			"set_fields_excluded": setFieldsExcluded,
+			"set_fields_values":   strings.Join(setFieldsValues, ", "),
 			"placeholder_fields":  strings.Join(placeholderFields, ", "),
 		},
 	}
 
 	switch mc.Strategy {
-	case MergeStrategyInsert, MergeStrategyUpdate, MergeStrategyUpdateInsert, MergeStrategyDeleteInsert:
+	case MergeStrategyInsert, MergeStrategyUpdate, MergeStrategyUpdateInsert, MergeStrategyDeleteInsert, MergeStrategyChangeCapture, MergeStrategyChangeCaptureSoft:
 	case MergeStrategyNone:
 		return mc, g.Error("no default merge strategy specified for %s", conn.GetType())
 	default:
@@ -3095,6 +3189,8 @@ func getSupportedMergeStrategiesFromTemplates(conn Connection) []string {
 		MergeStrategyUpdate,
 		MergeStrategyUpdateInsert,
 		MergeStrategyDeleteInsert,
+		MergeStrategyChangeCapture,
+		MergeStrategyChangeCaptureSoft,
 	}
 
 	for _, s := range allStrategies {
