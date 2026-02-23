@@ -1009,6 +1009,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		})
 	}
 
+	// assign separaetly to avoid conn.Data.Columns sync issues
 	columns := SQLColumns(colTypes, conn) // type mapping logic !
 
 	conn.Data.Result = result
