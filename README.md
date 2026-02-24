@@ -195,14 +195,6 @@ If you're using the python wrapper, decompress the downloaded binary and put the
 
 We welcome contributions to improve Sling! Here are some guidelines to help you get started.
 
-### Branch Naming Convention
-
-When creating a new branch for your contribution, please use the following naming convention:
-
-- `feature/your-feature-name` for new features
-- `bugfix/issue-description` for bug fixes
-- `docs/update-description` for documentation updates
-
 ### Testing Guidelines
 
 Sling has three main test suites: Database, File and CLI. When contributing, please ensure that your changes pass the relevant tests.
