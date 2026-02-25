@@ -1,0 +1,31 @@
+FROM --platform=linux/arm64 ubuntu:jammy
+
+RUN groupadd -r sling && useradd -r -g sling sling
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates unzip zstd && \
+    cd /tmp && \
+    curl -sSL -o dm.conda https://conda.anaconda.org/conda-forge/linux-aarch64/libadbc-driver-manager-1.10.0-hfefdfc9_0.conda && \
+    unzip -o dm.conda && \
+    tar --use-compress-program=unzstd -xf pkg-libadbc-driver-manager-1.10.0-hfefdfc9_0.tar.zst && \
+    cp lib/libadbc_driver_manager.so* /usr/local/lib/ && \
+    ldconfig && \
+    rm -rf /tmp/* && \
+    apt-get clean && rm -rf /var/lib/apt/lists /var/cache/apt
+
+# Copy sling binary (built externally by run_docker_test.sh)
+COPY --chown=sling:sling sling /usr/local/bin/sling
+RUN chmod 755 /usr/local/bin/sling
+
+# Setup sling user home
+RUN mkdir -p /home/sling && chmod 755 /home/sling && chown sling:sling /home/sling
+USER sling
+
+# Install dbc CLI + DuckDB ADBC driver
+RUN curl -LsSf https://dbc.columnar.tech/install.sh | sh && \
+    /home/sling/.local/bin/dbc install duckdb
+
+ENV PATH="${PATH}:/home/sling/.local/bin"
+ENV SLING_PACKAGE="DOCKER"
+
+ENTRYPOINT ["sling"]

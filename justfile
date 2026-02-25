@@ -114,6 +114,14 @@ test-all: test-cli test-connections test-dbio test-core test-python
     #!/usr/bin/env bash
     echo "✓ All tests passed!"
 
+# Test ADBC DuckDB via Docker (auto-detects host arch, skips cross-arch)
+# Usage: just test-adbc-docker [amd64|arm64|amd64,arm64]
+test-adbc-docker arch="amd64,arm64":
+    #!/usr/bin/env bash
+    set -e
+    echo "TESTING ADBC DuckDB via Docker ({{arch}})"
+    bash cmd/sling/tests/pipelines/adbc/run_docker_test.sh "{{arch}}"
+
 # Clean build artifacts
 clean:
     #!/usr/bin/env bash

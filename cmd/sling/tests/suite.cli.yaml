@@ -2043,3 +2043,9 @@
     # incremental (both paths)
     - 'INSERT incremental:'
     - 'BULK incremental:'
+
+- id: 212
+  name: ADBC DuckDB write and read via ADBC driver
+  run: 'sling run -d -p cmd/sling/tests/pipelines/adbc/p.40.adbc_duckdb.yaml'
+  output_contains:
+    - 'ADBC DuckDB test PASSED'

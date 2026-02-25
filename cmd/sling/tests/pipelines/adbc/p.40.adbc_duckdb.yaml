@@ -1,0 +1,43 @@
+# ADBC DuckDB regression test
+# Validates: purego struct return fix (Linux), duckdb_adbc_init entrypoint auto-detection
+# Requires: dbc CLI installed, ADBC driver manager, DUCKDB_ADBC and POSTGRES connections
+
+steps:
+  # Write test data into DuckDB via ADBC using inline replication from Postgres
+  - replication:
+      source: postgres
+      target: DUCKDB_ADBC
+      defaults:
+        mode: full-refresh
+      streams:
+        "select 1 as id, 'hello' as name, 42.5 as value":
+          sql: "select 1 as id, 'hello' as name, 42.5 as value"
+          object: main.adbc_test
+
+  - log: "ADBC write completed"
+
+  # Read back from DuckDB via ADBC and verify
+  - type: query
+    connection: DUCKDB_ADBC
+    query: select id, name, value from main.adbc_test order by id
+    into: result
+
+  - log: "ADBC read result: {store.result}"
+
+  - type: check
+    check: int_parse(store.result[0].id) == 1
+    message: "Expected id=1, got {store.result[0].id}"
+
+  - type: check
+    check: store.result[0].name == "hello"
+    message: "Expected name='hello', got {store.result[0].name}"
+
+  - type: check
+    check: float_parse(store.result[0].value) == 42.5
+    message: "Expected value=42.5, got {store.result[0].value}"
+
+  - log: "ADBC DuckDB test PASSED"
+
+  # Cleanup
+  - connection: DUCKDB_ADBC
+    query: DROP TABLE IF EXISTS main.adbc_test
