@@ -1,0 +1,145 @@
+# Reproduce: Incremental load from SFTP using file timestamp not honored
+# Issue: https://github.com/slingdata-io/sling-cli/issues/711
+#
+# When using mode=incremental with update_key=_sling_loaded_at and
+# SLING_LOADED_AT_COLUMN=timestamp, subsequent runs re-process all files
+# instead of only new ones. The bug is that SLING_FS_TIMESTAMP gets passed
+# with SQL single quotes (e.g., '2026-02-24 09:22:42...') from FormatValue,
+# and GetRefTs() cannot parse them, so all files pass the timestamp filter.
+#
+# Steps:
+#   1. Clean up SFTP dir and target table
+#   2. Create initial CSV files on SFTP via SSH
+#   3. Full-refresh replication to Postgres (establishes baseline)
+#   4. Wait 2 seconds (so new files have newer timestamps)
+#   5. Create additional CSV files on SFTP via SSH
+#   6. Incremental replication (should only pick up new files)
+#   7. Verify only the new files' rows were inserted in the incremental run
+
+env:
+  SLING_LOADED_AT_COLUMN: timestamp
+  SLING_STREAM_URL_COLUMN: "true"
+
+steps:
+  # --- Cleanup ---
+  - type: command
+    id: cleanup_sftp
+    ssh_conn: SFTP
+    command: rm -rf /tmp/sftp/sling_test/test_711
+
+  - type: query
+    id: cleanup_pg
+    connection: postgres
+    query: DROP TABLE IF EXISTS public.test_711_daily;
+
+  # --- Step 1: Create initial CSV files on SFTP via SSH ---
+  - type: command
+    id: create_files_initial
+    ssh_conn: SFTP
+    command: |
+      mkdir -p /tmp/sftp/sling_test/test_711
+      printf 'id,name,value\n1,alpha,100\n2,beta,200\n3,gamma,300\n' > /tmp/sftp/sling_test/test_711/file_a.csv
+      printf 'id,name,value\n4,delta,400\n5,epsilon,500\n' > /tmp/sftp/sling_test/test_711/file_b.csv
+      ls -la /tmp/sftp/sling_test/test_711/
+
+  - type: log
+    message: "Created initial files: {state.create_files_initial.output.stdout}"
+
+  # --- Step 2: Full-refresh replication (loads all 5 rows) ---
+  - id: repl_full
+    replication:
+      source: sftp
+      target: postgres
+
+      defaults:
+        mode: full-refresh
+        source_options:
+          format: csv
+        target_options:
+          use_bulk: false
+
+      streams:
+        /tmp/sftp/sling_test/test_711/:
+          object: public.test_711_daily
+          single: true
+
+    on_failure: abort
+
+  - type: query
+    id: count_after_full
+    connection: postgres
+    query: SELECT count(*) as cnt FROM public.test_711_daily;
+
+  - type: log
+    message: "After full-refresh: {state.count_after_full.result[0].cnt} rows"
+
+  - type: check
+    check: int_parse(state.count_after_full.result[0].cnt) == 5
+    failure_message: "Expected 5 rows after full-refresh"
+    on_failure: abort
+
+  # --- Step 3: Wait so new files have newer timestamps ---
+  - type: command
+    id: wait_for_ts
+    ssh_conn: SFTP
+    command: sleep 2
+
+  # --- Step 4: Create additional CSV file on SFTP via SSH ---
+  - type: command
+    id: create_file_new
+    ssh_conn: SFTP
+    command: |
+      printf 'id,name,value\n6,zeta,600\n7,eta,700\n' > /tmp/sftp/sling_test/test_711/file_c.csv
+      ls -la /tmp/sftp/sling_test/test_711/
+
+  - type: log
+    message: "After adding new file: {state.create_file_new.output.stdout}"
+
+  # --- Step 5: Incremental replication (should only load file_c = 2 rows) ---
+  - id: repl_incremental
+    replication:
+      source: sftp
+      target: postgres
+
+      defaults:
+        mode: incremental
+        update_key: _sling_loaded_at
+        source_options:
+          format: csv
+        target_options:
+          use_bulk: false
+
+      streams:
+        /tmp/sftp/sling_test/test_711/:
+          object: public.test_711_daily
+          single: true
+
+    on_failure: abort
+
+  - type: query
+    id: count_after_incr
+    connection: postgres
+    query: SELECT count(*) as cnt FROM public.test_711_daily;
+
+  - type: log
+    message: "After incremental: {state.count_after_incr.result[0].cnt} rows (expected 7 if only new file loaded, got more if bug present)"
+
+  # If bug is present: all 3 files are re-processed, giving 5 + 5 = 10 rows
+  #   (the 5 original rows from file_a + file_b get re-inserted)
+  # If fixed: only file_c is processed, giving 5 + 2 = 7 rows
+  - type: check
+    id: verify_incremental
+    check: int_parse(state.count_after_incr.result[0].cnt) == 7
+    failure_message: "BUG CONFIRMED: Expected 7 rows (5 + 2 new) but got {state.count_after_incr.result[0].cnt}. Incremental file timestamp filtering is broken."
+
+  - type: log
+    message: "SFTP incremental file timestamp test result: {state.count_after_incr.result[0].cnt} rows"
+
+  # --- Cleanup ---
+  - type: command
+    ssh_conn: SFTP
+    command: rm -rf /tmp/sftp/sling_test/test_711
+
+  - type: query
+    connection: postgres
+    query: DROP TABLE IF EXISTS public.test_711_daily;

@@ -2049,3 +2049,14 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/adbc/p.40.adbc_duckdb.yaml'
   output_contains:
     - 'ADBC DuckDB test PASSED'
+
+# SFTP incremental file timestamp not honored (issue 711)
+# Bug: SLING_FS_TIMESTAMP gets SQL-quoted value from FormatValue (e.g., '2026-02-24...')
+# but GetRefTs() can't parse it, so all files pass the timestamp filter on re-runs.
+- id: 213
+  name: 'SFTP incremental file timestamp filtering (issue 711)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.16.sftp_incremental_file_timestamp.yaml'
+  output_contains:
+    - 'file stream using file_sys_timestamp='
+    - 'SFTP incremental file timestamp test result:'
+    - 'execution succeeded'
