@@ -997,12 +997,15 @@
   output_contains:
     - 'execution succeeded'
 
-# Test MongoDB ObjectID filtering
+# Test MongoDB ObjectID filtering and ISODate filter parsing
 - id: 116
   name: MongoDB filter test
   run: |
     sling run -r cmd/sling/tests/replications/r.54.mongo_filter.yaml
     sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml
+    sling run -r cmd/sling/tests/replications/r.54.mongo_isodate_filter.yaml
+  output_contains:
+    - 'inserted 0 rows'
 
 - id: 117
   name: JSON to Snowflake nested import test

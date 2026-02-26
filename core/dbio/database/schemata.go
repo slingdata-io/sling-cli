@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -255,7 +256,18 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		}
 		if opts.Where != "" {
 			var where any
-			g.Unmarshal(opts.Where, &where)
+			switch t.Dialect {
+			case dbio.TypeDbMongoDB:
+				// isoDateRegex matches ISODate("...") patterns used in MongoDB shell syntax
+				var isoDateRegex = regexp.MustCompile(`ISODate\("([^"]+)"\)`)
+
+				// normalizeMongoWhereClause replaces MongoDB shell-specific functions with valid JSON equivalents.
+				// For example: ISODate("2025-01-01T00:00:00.000Z") => "2025-01-01T00:00:00.000Z"
+				whereStr := isoDateRegex.ReplaceAllString(opts.Where, `"$1"`)
+				g.Unmarshal(whereStr, &where)
+			default:
+				g.Unmarshal(opts.Where, &where)
+			}
 			m["filter"] = where // json array or object
 		}
 
