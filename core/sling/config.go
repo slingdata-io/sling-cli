@@ -1641,37 +1641,56 @@ type CDCOptions struct {
 	ReplayFrom *string `json:"replay_from,omitempty" yaml:"replay_from,omitempty"`
 }
 
-// SetDefaults sets default values for CDCOptions
-func (o *CDCOptions) SetDefaults() {
+// SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
+func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o == nil {
+		o = &cdcOptions
 		return
 	}
 	if o.BatchSize == nil {
-		o.BatchSize = g.Int(10000)
+		o.BatchSize = cdcOptions.BatchSize
 	}
 	if o.BatchTimeout == nil {
-		o.BatchTimeout = g.Int(30)
+		o.BatchTimeout = cdcOptions.BatchTimeout
 	}
 	if o.StartFrom == nil {
-		o.StartFrom = g.String("now")
+		o.StartFrom = cdcOptions.StartFrom
 	}
 	if o.SoftDelete == nil {
-		o.SoftDelete = g.Bool(false)
+		o.SoftDelete = cdcOptions.SoftDelete
 	}
 	if o.RetryAttempts == nil {
-		o.RetryAttempts = g.Int(3)
+		o.RetryAttempts = cdcOptions.RetryAttempts
+	}
+	if o.RetryBackoff == nil {
+		o.RetryBackoff = cdcOptions.RetryBackoff
 	}
 	if o.RetryInitialDelay == nil {
-		o.RetryInitialDelay = g.String("1s")
+		o.RetryInitialDelay = cdcOptions.RetryInitialDelay
 	}
 	if o.RetryMaxDelay == nil {
-		o.RetryMaxDelay = g.String("30s")
+		o.RetryMaxDelay = cdcOptions.RetryMaxDelay
 	}
 	if o.InitialLoadMode == nil {
-		o.InitialLoadMode = g.String("chunked")
+		o.InitialLoadMode = cdcOptions.InitialLoadMode
 	}
 	if o.InitialLoadChunkSize == nil {
-		o.InitialLoadChunkSize = g.Int(100000)
+		o.InitialLoadChunkSize = cdcOptions.InitialLoadChunkSize
+	}
+	if o.InitialLoadCheckpointInt == nil {
+		o.InitialLoadCheckpointInt = cdcOptions.InitialLoadCheckpointInt
+	}
+	if o.MaxSourceCPUPercent == nil {
+		o.MaxSourceCPUPercent = cdcOptions.MaxSourceCPUPercent
+	}
+	if o.MaxReadRate == nil {
+		o.MaxReadRate = cdcOptions.MaxReadRate
+	}
+	if o.BackoffOnHighLoad == nil {
+		o.BackoffOnHighLoad = cdcOptions.BackoffOnHighLoad
+	}
+	if o.ReplayFrom == nil {
+		o.ReplayFrom = cdcOptions.ReplayFrom
 	}
 }
 
@@ -1813,6 +1832,18 @@ var TargetDBOptionsDefault = TargetOptions{
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
 	ColumnCasing:     g.Ptr(iop.NormalizeColumnCasing),
+}
+
+var CDCOptionsDefault = CDCOptions{
+	BatchSize:            g.Int(10000),
+	BatchTimeout:         g.Int(30),
+	StartFrom:            g.String("now"),
+	SoftDelete:           g.Bool(false),
+	RetryAttempts:        g.Int(3),
+	RetryInitialDelay:    g.String("1s"),
+	RetryMaxDelay:        g.String("30s"),
+	InitialLoadMode:      g.String("chunked"),
+	InitialLoadChunkSize: g.Int(100000),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

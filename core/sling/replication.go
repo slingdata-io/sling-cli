@@ -1505,6 +1505,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 
 	if stream.CDCOptions == nil {
 		stream.CDCOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.CDCOptions))
+	} else if replicationCfg.Defaults.CDCOptions != nil {
+		stream.CDCOptions.SetDefaults(*replicationCfg.Defaults.CDCOptions)
 	}
 }
 
