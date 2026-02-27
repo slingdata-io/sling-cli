@@ -517,6 +517,7 @@ func Println(text string) {
 }
 
 func LoadSlingEnvFile() (ef EnvFile) {
+	LoadDotEnvSling()
 	ef = LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
 	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"

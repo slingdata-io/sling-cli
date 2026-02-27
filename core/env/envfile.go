@@ -124,6 +124,50 @@ func formatYAML(input []byte) []byte {
 	return newOutput
 }
 
+// LoadDotEnvSling reads a `.env.sling` file from the current working directory
+// and injects its key=value pairs into os environment variables.
+// Existing env vars are not overwritten.
+func LoadDotEnvSling() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	dotEnvPath := path.Join(cwd, ".env.sling")
+	bytes, err := os.ReadFile(dotEnvPath)
+	if err != nil {
+		return // file doesn't exist or can't be read
+	}
+
+	for _, line := range strings.Split(string(bytes), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, val, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+
+		// remove surrounding quotes
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') ||
+				(val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+
+		// don't overwrite existing env vars
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, val)
+		}
+	}
+}
+
 func LoadEnvFile(path string) (ef EnvFile) {
 	bytes, _ := os.ReadFile(path)
 
