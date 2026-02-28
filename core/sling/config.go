@@ -1614,29 +1614,21 @@ type TargetOptions struct {
 
 // CDCOptions are options for change data capture mode
 type CDCOptions struct {
-	// Batching
-	BatchSize    *int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
-	BatchTimeout *int `json:"batch_timeout,omitempty" yaml:"batch_timeout,omitempty"`
-
-	// Behavior
-	StartFrom  *string `json:"start_from,omitempty" yaml:"start_from,omitempty"`
-	SoftDelete *bool   `json:"soft_delete,omitempty" yaml:"soft_delete,omitempty"`
-
-	// Error Recovery
-	RetryAttempts     *int    `json:"retry_attempts,omitempty" yaml:"retry_attempts,omitempty"`
-	RetryBackoff      *string `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`
-	RetryInitialDelay *string `json:"retry_initial_delay,omitempty" yaml:"retry_initial_delay,omitempty"`
-	RetryMaxDelay     *string `json:"retry_max_delay,omitempty" yaml:"retry_max_delay,omitempty"`
 
 	// Initial Load
-	InitialLoadMode          *string `json:"initial_load_mode,omitempty" yaml:"initial_load_mode,omitempty"`
-	InitialLoadChunkSize     *int    `json:"initial_load_chunk_size,omitempty" yaml:"initial_load_chunk_size,omitempty"`
-	InitialLoadCheckpointInt *int    `json:"initial_load_checkpoint_int,omitempty" yaml:"initial_load_checkpoint_int,omitempty"`
+	InitialLoadStart     *string `json:"initial_load_start,omitempty" yaml:"initial_load_start,omitempty"`
+	InitialLoadChunkSize *int    `json:"initial_load_chunk_size,omitempty" yaml:"initial_load_chunk_size,omitempty"`
 
-	// Source Impact
-	MaxSourceCPUPercent *int  `json:"max_source_cpu_percent,omitempty" yaml:"max_source_cpu_percent,omitempty"`
-	MaxReadRate         *int  `json:"max_read_rate,omitempty" yaml:"max_read_rate,omitempty"`
-	BackoffOnHighLoad   *bool `json:"backoff_on_high_load,omitempty" yaml:"backoff_on_high_load,omitempty"`
+	// Batching
+	RunMaxEvents   *int `json:"run_max_events,omitempty" yaml:"run_max_events,omitempty"`
+	RunMaxDuration *string `json:"run_max_duration,omitempty" yaml:"run_max_duration,omitempty"`
+
+	// Delete behavior
+	SoftDelete *bool `json:"soft_delete,omitempty" yaml:"soft_delete,omitempty"`
+
+	// Error Recovery
+	RetryAttempts *int    `json:"retry_attempts,omitempty" yaml:"retry_attempts,omitempty"`
+	RetryDelay    *string `json:"retry_delay,omitempty" yaml:"retry_delay,omitempty"`
 
 	// Backfill / Replay
 	ReplayFrom *string `json:"replay_from,omitempty" yaml:"replay_from,omitempty"`
@@ -1648,14 +1640,14 @@ func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 		o = &cdcOptions
 		return
 	}
-	if o.BatchSize == nil {
-		o.BatchSize = cdcOptions.BatchSize
+	if o.RunMaxEvents == nil {
+		o.RunMaxEvents = cdcOptions.RunMaxEvents
 	}
-	if o.BatchTimeout == nil {
-		o.BatchTimeout = cdcOptions.BatchTimeout
+	if o.RunMaxDuration == nil {
+		o.RunMaxDuration = cdcOptions.RunMaxDuration
 	}
-	if o.StartFrom == nil {
-		o.StartFrom = cdcOptions.StartFrom
+	if o.InitialLoadStart == nil {
+		o.InitialLoadStart = cdcOptions.InitialLoadStart
 	}
 	if o.SoftDelete == nil {
 		o.SoftDelete = cdcOptions.SoftDelete
@@ -1663,32 +1655,11 @@ func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o.RetryAttempts == nil {
 		o.RetryAttempts = cdcOptions.RetryAttempts
 	}
-	if o.RetryBackoff == nil {
-		o.RetryBackoff = cdcOptions.RetryBackoff
-	}
-	if o.RetryInitialDelay == nil {
-		o.RetryInitialDelay = cdcOptions.RetryInitialDelay
-	}
-	if o.RetryMaxDelay == nil {
-		o.RetryMaxDelay = cdcOptions.RetryMaxDelay
-	}
-	if o.InitialLoadMode == nil {
-		o.InitialLoadMode = cdcOptions.InitialLoadMode
+	if o.RetryDelay == nil {
+		o.RetryDelay = cdcOptions.RetryDelay
 	}
 	if o.InitialLoadChunkSize == nil {
 		o.InitialLoadChunkSize = cdcOptions.InitialLoadChunkSize
-	}
-	if o.InitialLoadCheckpointInt == nil {
-		o.InitialLoadCheckpointInt = cdcOptions.InitialLoadCheckpointInt
-	}
-	if o.MaxSourceCPUPercent == nil {
-		o.MaxSourceCPUPercent = cdcOptions.MaxSourceCPUPercent
-	}
-	if o.MaxReadRate == nil {
-		o.MaxReadRate = cdcOptions.MaxReadRate
-	}
-	if o.BackoffOnHighLoad == nil {
-		o.BackoffOnHighLoad = cdcOptions.BackoffOnHighLoad
 	}
 	if o.ReplayFrom == nil {
 		o.ReplayFrom = cdcOptions.ReplayFrom
@@ -1836,14 +1807,12 @@ var TargetDBOptionsDefault = TargetOptions{
 }
 
 var CDCOptionsDefault = CDCOptions{
-	BatchSize:            g.Int(10000),
-	BatchTimeout:         g.Int(30),
-	StartFrom:            g.String("now"),
+	RunMaxEvents:         g.Int(100000),
+	RunMaxDuration:       g.String("10m"),
+	InitialLoadStart:     g.String("now"),
 	SoftDelete:           g.Bool(false),
 	RetryAttempts:        g.Int(3),
-	RetryInitialDelay:    g.String("1s"),
-	RetryMaxDelay:        g.String("30s"),
-	InitialLoadMode:      g.String("chunked"),
+	RetryDelay:           g.String("5s"),
 	InitialLoadChunkSize: g.Int(100000),
 }
 
