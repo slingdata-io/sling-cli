@@ -502,6 +502,7 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 			Mode:          cfg.Mode,
 			PrimaryKeyI:   cfg.Source.PrimaryKeyI,
 			UpdateKey:     cfg.Source.UpdateKey,
+			CDCOptions:    cfg.ReplicationStream.CDCOptions,
 		},
 		Streams: map[string]*ReplicationStreamConfig{
 			cfg.Source.Stream: {},

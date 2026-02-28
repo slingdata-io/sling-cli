@@ -45,6 +45,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	cfg := &sling.Config{
 		Source: sling.Source{Options: &sling.SourceOptions{}},
 		Target: sling.Target{Options: &sling.TargetOptions{}},
+		// for CDC options
+		ReplicationStream: &sling.ReplicationStreamConfig{},
 	}
 
 	var replicationCfgPath, pipelineCfgPath, directoryPath string
@@ -208,6 +210,17 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "examples":
 			showExamples = cast.ToBool(v)
+		case "cdc-options":
+			payload := cast.ToString(v)
+			options, err := parsePayload(payload, true)
+			if err != nil {
+				return ok, g.Error(err, "invalid cdc options -> %s", payload)
+			}
+
+			err = g.JSONConvert(options, &cfg.ReplicationStream.CDCOptions)
+			if err != nil {
+				return ok, g.Error(err, "invalid cdc options -> %s", payload)
+			}
 		}
 	}
 
