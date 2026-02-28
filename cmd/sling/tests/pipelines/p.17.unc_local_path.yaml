@@ -1,0 +1,43 @@
+# Test: Local file connection with a base path in the URL
+# Verifies that relative stream/object paths are resolved against
+# the connection's base path (e.g., file:///some/base/dir).
+# This is the fix for issue #712 (UNC path support).
+steps:
+  # Setup: create a base directory with a source file
+  - type: command
+    command: ['mkdir', '-p', '/tmp/sling_unc_test/base']
+
+  - type: write
+    to: local//tmp/sling_unc_test/base/input.csv
+    content: |
+      id,name
+      1,Alice
+      2,Bob
+
+  # Define connections with base paths via env vars
+  - type: store
+    map:
+      env.UNC_SRC: "{ type: local, url: file:///tmp/sling_unc_test/base }"
+      env.UNC_TGT: "{ type: local, url: file:///tmp/sling_unc_test/base }"
+
+  # Run a replication using relative paths with base-path connections
+  - replication:
+      source: UNC_SRC
+      target: UNC_TGT
+
+      defaults:
+        mode: full-refresh
+
+      streams:
+        input.csv:
+          object: output.csv
+
+  # Verify the output file landed in the base directory (print to stdout for output_contains)
+  - type: command
+    command: ['cat', '/tmp/sling_unc_test/base/output.csv']
+    print: true
+
+  # Cleanup
+  - type: delete
+    location: local//tmp/sling_unc_test/
+    recursive: true

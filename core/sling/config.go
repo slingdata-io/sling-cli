@@ -589,8 +589,19 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
+
+			object := cfg.Target.Object
+			// For local file connections with a base path in the URL, prepend it
+			if cfg.TgtConn.Type == dbio.TypeFileLocal {
+				connURL := cfg.TgtConn.URL()
+				basePath := strings.TrimPrefix(connURL, "file://")
+				if basePath != "" && !strings.HasPrefix(object, "/") {
+					object = strings.TrimSuffix(basePath, "/") + "/" + object
+				}
+			}
+
 			// object is not url, but relative path, needs to be normalized
-			cfg.Target.Data["url"] = filesys.NormalizeURI(fc, cfg.Target.Object)
+			cfg.Target.Data["url"] = filesys.NormalizeURI(fc, object)
 		}
 	}
 
@@ -650,8 +661,19 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
+
+			stream := cfg.Source.Stream
+			// For local file connections with a base path in the URL, prepend it
+			if cfg.SrcConn.Type == dbio.TypeFileLocal {
+				connURL := cfg.SrcConn.URL()
+				basePath := strings.TrimPrefix(connURL, "file://")
+				if basePath != "" && !strings.HasPrefix(stream, "/") {
+					stream = strings.TrimSuffix(basePath, "/") + "/" + stream
+				}
+			}
+
 			// object is not url, but relative path, needs to be normalized
-			cfg.Source.Data["url"] = filesys.NormalizeURI(fc, cfg.Source.Stream)
+			cfg.Source.Data["url"] = filesys.NormalizeURI(fc, stream)
 		}
 	}
 

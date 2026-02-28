@@ -2063,3 +2063,11 @@
     - 'file stream using file_sys_timestamp='
     - 'SFTP incremental file timestamp test result:'
     - 'execution succeeded'
+
+# Local file connection with base path (UNC path support, issue #712)
+- id: 214
+  name: 'Local file connection base path resolution (issue 712)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.17.unc_local_path.yaml'
+  output_contains:
+    - 'Alice'
+    - 'execution succeeded'
