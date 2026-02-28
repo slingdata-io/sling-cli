@@ -68,7 +68,8 @@ The Sling MCP tool provides these pipeline commands:
 {
   "action": "parse",
   "input": {
-    "file_path": "/path/to/pipeline.yaml"
+    "file_path": "/path/to/pipeline.yaml",
+    "working_dir": "/optional/work/dir"
   }
 }
 
@@ -76,7 +77,8 @@ The Sling MCP tool provides these pipeline commands:
 {
   "action": "run",
   "input": {
-    "file_path": "/path/to/pipeline.yaml"
+    "file_path": "/path/to/pipeline.yaml",
+    "working_dir": "/optional/work/dir"
   }
 }
 ```
@@ -603,7 +605,8 @@ steps:
 {
   "action": "parse",
   "input": {
-    "file_path": "/path/to/pipeline.yaml"
+    "file_path": "/path/to/pipeline.yaml",
+    "working_dir": "/optional/work/dir"
   }
 }
 ```
@@ -614,6 +617,7 @@ steps:
   "action": "run",
   "input": {
     "file_path": "/path/to/pipeline.yaml",
+    "working_dir": "/optional/work/dir",
     "env": {
       "CUSTOM_VAR": "value"
     }

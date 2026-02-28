@@ -314,12 +314,14 @@ tools:
     
     **For `action: "parse"`**:
     - `file_path` (string, required): The file path of the API specification.
+    - `working_dir` (string, optional): Working directory to change to before running
     
     **For `action: "docs"`**:
     - No parameters required (empty object)
     
     **For `action: "test"`**:
     - `connection` (string, required): The name of the connection to test
+    - `working_dir` (string, optional): Working directory to change to before running
     - `debug` (boolean, optional): Enable debug logging during the test (default: false)
     - `trace` (boolean, optional): Enable trace logging during the test (default: false)
     - `endpoints` (array, optional): Specify the endpoints to test (only for API connections)
@@ -342,6 +344,7 @@ tools:
       "action": "test",
       "input": {
         "connection": "MY_API",
+        "working_dir": "/path/to/dir",
         "debug": true,
         "limit": 15
       }
@@ -351,7 +354,8 @@ tools:
     {
       "action": "parse",
       "input": {
-        "file_path": "path/to/github_api.yaml"
+        "file_path": "path/to/github_api.yaml",
+        "working_dir": "/path/to/dir"
       }
     }
     ```
@@ -446,9 +450,11 @@ tools:
 
     **For `action: "parse"`**:
     - `file_path` (string, required): Path to the pipeline configuration file to read.
+    - `working_dir` (string, optional): Working directory to change to before reading
     
     **For `action: "run"`**:
     - `file_path` (string, required): Path to the pipeline configuration file to execute.
+    - `working_dir` (string, optional): Working directory to change to before running
     - `env` (object, optional): Environment variables to set for the pipeline run.
     
     **Output**: The output format depends on the action and audience:
