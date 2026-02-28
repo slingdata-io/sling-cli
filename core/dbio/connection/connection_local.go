@@ -175,8 +175,11 @@ func GetLocalConns(options ...any) ConnEntries {
 	}
 
 	// Environment variables
+	envMap := env.LoadDotEnvSling()
 	for key, val := range g.KVArrToMap(os.Environ()...) {
 		var conn Connection
+
+		_, fromDotEnv := envMap[key]
 
 		// try to decode base64
 		payload := g.M()
@@ -234,7 +237,7 @@ func GetLocalConns(options ...any) ConnEntries {
 		c := ConnEntry{
 			Name:        conn.Info().Name,
 			Description: conn.GetType().NameLong(),
-			Source:      "env variable",
+			Source:      lo.Ternary(fromDotEnv, "sling dot-env", "env variable"),
 			Connection:  conn,
 		}
 		if exC, ok := connsMap[c.Name]; ok {

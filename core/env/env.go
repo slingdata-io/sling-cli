@@ -261,8 +261,9 @@ func setupFileLogging() {
 		traceLogFile = nil
 	}
 
-	// setup env from env.yaml
+	// setup env from env.yaml and .env.sling
 	LoadSlingEnvFile()
+	LoadDotEnvSling()
 
 	// Open debug log file
 	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {
@@ -517,7 +518,6 @@ func Println(text string) {
 }
 
 func LoadSlingEnvFile() (ef EnvFile) {
-	LoadDotEnvSling()
 	ef = LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
 	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"
