@@ -33,6 +33,11 @@ func init() {
 
 	// update version string
 	Version = g.F("%s (%s)", parts[0], parts[1])
+
+	// Disable AWS IMDS completely to avoid WRN messages
+	if os.Getenv("AWS_EC2_METADATA_DISABLED") == "" {
+		os.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	}
 }
 
 func VersionSlash() string {
