@@ -63,8 +63,8 @@ core:
 
   merge_change_capture_soft: |
     SET allow_experimental_window_functions = 1;
-    ALTER TABLE {tgt_table} UPDATE _sling_deleted_at = now()
-    WHERE _sling_deleted_at IS NULL
+    ALTER TABLE {tgt_table} UPDATE _sling_synced_at = now64(6), _sling_synced_op = 'D'
+    WHERE _sling_synced_op != 'D'
     AND ({tgt_pk_fields}) IN (
       SELECT {src_pk_fields} FROM (
         SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
