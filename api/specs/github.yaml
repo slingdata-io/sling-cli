@@ -45,8 +45,12 @@ defaults:
         backoff_base: 2
 
       - action: break
-        condition: response.status == 422
+        condition: response.status == 422 
         message: "stopping iteration due to code 422 (Unprocessable Content)"
+
+      - action: break
+        condition: contains(response.headers.content_type, "text/html")
+        message: "returned HTML content"
 
       - action: "stop"
         condition: response.status == 403 && request.attempts > 5
