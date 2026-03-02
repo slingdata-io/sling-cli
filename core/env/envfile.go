@@ -142,8 +142,24 @@ func LoadDotEnvSling() map[string]string {
 		return dotEnvMap.Items() // file doesn't exist or can't be read
 	}
 
-	for _, line := range strings.Split(string(bytes), "\n") {
-		line = strings.TrimSpace(line)
+	for key, val := range ParseDotEnv(string(bytes)) {
+		// don't overwrite existing env vars
+		if _, exists := os.LookupEnv(key); !exists {
+			dotEnvMap.Set(key, val)
+			os.Setenv(key, val)
+		}
+	}
+	return dotEnvMap.Items()
+}
+
+// ParseDotEnv parses a .env file content into key-value pairs.
+// It supports single-line and multi-line values enclosed in matching quotes (' or ").
+func ParseDotEnv(content string) map[string]string {
+	result := map[string]string{}
+	lines := strings.Split(content, "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -156,21 +172,36 @@ func LoadDotEnvSling() map[string]string {
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 
-		// remove surrounding quotes
-		if len(val) >= 2 {
-			if (val[0] == '"' && val[len(val)-1] == '"') ||
-				(val[0] == '\'' && val[len(val)-1] == '\'') {
+		// check for quoted multi-line values
+		if len(val) >= 1 && (val[0] == '\'' || val[0] == '"') {
+			quote := val[0]
+
+			// check if closing quote is on the same line
+			if len(val) >= 2 && val[len(val)-1] == quote {
+				// single-line quoted value
 				val = val[1 : len(val)-1]
+			} else {
+				// multi-line: accumulate lines until we find the closing quote
+				var buf strings.Builder
+				buf.WriteString(val[1:]) // content after opening quote
+				for i++; i < len(lines); i++ {
+					raw := lines[i]
+					trimmed := strings.TrimRight(raw, " \t")
+					if len(trimmed) > 0 && trimmed[len(trimmed)-1] == quote {
+						buf.WriteByte('\n')
+						buf.WriteString(trimmed[:len(trimmed)-1])
+						break
+					}
+					buf.WriteByte('\n')
+					buf.WriteString(raw)
+				}
+				val = buf.String()
 			}
 		}
 
-		// don't overwrite existing env vars
-		if _, exists := os.LookupEnv(key); !exists {
-			dotEnvMap.Set(key, val)
-			os.Setenv(key, val)
-		}
+		result[key] = val
 	}
-	return dotEnvMap.Items()
+	return result
 }
 
 func UnsetEnvKeys(keys []string) {
