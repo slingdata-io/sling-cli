@@ -1637,9 +1637,10 @@ type TargetOptions struct {
 // CDCOptions are options for change data capture mode
 type CDCOptions struct {
 
-	// Initial Load
-	InitialLoadStart     *string `json:"initial_load_start,omitempty" yaml:"initial_load_start,omitempty"`
-	InitialLoadChunkSize *int    `json:"initial_load_chunk_size,omitempty" yaml:"initial_load_chunk_size,omitempty"`
+	// Snapshot (Initial Load)
+	SnapshotStart       *string `json:"snapshot_start,omitempty" yaml:"snapshot_start,omitempty"`
+	SnapshotChunkSize   *int    `json:"snapshot_chunk_size,omitempty" yaml:"snapshot_chunk_size,omitempty"`
+	SnapshotRunDuration *string `json:"snapshot_run_duration,omitempty" yaml:"snapshot_run_duration,omitempty"`
 
 	// Batching
 	RunMaxEvents   *int `json:"run_max_events,omitempty" yaml:"run_max_events,omitempty"`
@@ -1668,8 +1669,8 @@ func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o.RunMaxDuration == nil {
 		o.RunMaxDuration = cdcOptions.RunMaxDuration
 	}
-	if o.InitialLoadStart == nil {
-		o.InitialLoadStart = cdcOptions.InitialLoadStart
+	if o.SnapshotStart == nil {
+		o.SnapshotStart = cdcOptions.SnapshotStart
 	}
 	if o.SoftDelete == nil {
 		o.SoftDelete = cdcOptions.SoftDelete
@@ -1680,8 +1681,11 @@ func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o.RetryDelay == nil {
 		o.RetryDelay = cdcOptions.RetryDelay
 	}
-	if o.InitialLoadChunkSize == nil {
-		o.InitialLoadChunkSize = cdcOptions.InitialLoadChunkSize
+	if o.SnapshotChunkSize == nil {
+		o.SnapshotChunkSize = cdcOptions.SnapshotChunkSize
+	}
+	if o.SnapshotRunDuration == nil {
+		o.SnapshotRunDuration = cdcOptions.SnapshotRunDuration
 	}
 	if o.ReplayFrom == nil {
 		o.ReplayFrom = cdcOptions.ReplayFrom
@@ -1831,11 +1835,11 @@ var TargetDBOptionsDefault = TargetOptions{
 var CDCOptionsDefault = CDCOptions{
 	RunMaxEvents:         g.Int(100000),
 	RunMaxDuration:       g.String("10m"),
-	InitialLoadStart:     g.String("now"),
-	SoftDelete:           g.Bool(false),
-	RetryAttempts:        g.Int(3),
-	RetryDelay:           g.String("5s"),
-	InitialLoadChunkSize: g.Int(100000),
+	SnapshotStart:     g.String("now"),
+	SoftDelete:        g.Bool(false),
+	RetryAttempts:     g.Int(3),
+	RetryDelay:        g.String("5s"),
+	SnapshotChunkSize: g.Int(100000),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
