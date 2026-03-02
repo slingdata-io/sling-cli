@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -122,6 +123,60 @@ func formatYAML(input []byte) []byte {
 		prevC = c
 	}
 	return newOutput
+}
+
+var dotEnvMap = cmap.New[string]()
+
+// LoadDotEnvSling reads a `.env.sling` file from the current working directory
+// and injects its key=value pairs into os environment variables.
+// Existing env vars are not overwritten.
+func LoadDotEnvSling() map[string]string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return dotEnvMap.Items()
+	}
+
+	dotEnvPath := path.Join(cwd, ".env.sling")
+	bytes, err := os.ReadFile(dotEnvPath)
+	if err != nil {
+		return dotEnvMap.Items() // file doesn't exist or can't be read
+	}
+
+	for _, line := range strings.Split(string(bytes), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, val, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+
+		// remove surrounding quotes
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') ||
+				(val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+
+		// don't overwrite existing env vars
+		if _, exists := os.LookupEnv(key); !exists {
+			dotEnvMap.Set(key, val)
+			os.Setenv(key, val)
+		}
+	}
+	return dotEnvMap.Items()
+}
+
+func UnsetEnvKeys(keys []string) {
+	for _, key := range keys {
+		os.Unsetenv(key)
+	}
 }
 
 func LoadEnvFile(path string) (ef EnvFile) {

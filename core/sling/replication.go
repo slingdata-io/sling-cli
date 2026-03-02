@@ -444,13 +444,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 							if stream != nil && stream.Disabled {
 								continue
 							}
-							// leave as is for order to be respected
-							if len(endpoint.DependsOn) > 0 {
-								if stream == nil {
-									stream = &ReplicationStreamConfig{}
-								}
-								setEndpointProps(stream) // set overrides
+							// always set endpoint props (overrides, primary_key, description, dependsOn)
+							if stream == nil {
+								stream = &ReplicationStreamConfig{}
+								setEndpointProps(stream)
 								rd.AddStream(key, stream)
+							} else {
+								setEndpointProps(stream)
 							}
 							matched = false
 							continue
@@ -1505,6 +1505,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 
 	if stream.CDCOptions == nil {
 		stream.CDCOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.CDCOptions))
+	} else if replicationCfg.Defaults.CDCOptions != nil {
+		stream.CDCOptions.SetDefaults(*replicationCfg.Defaults.CDCOptions)
 	}
 }
 

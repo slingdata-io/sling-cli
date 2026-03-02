@@ -544,6 +544,7 @@ func (c *Connection) setURL() (err error) {
 
 			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
+				setIfMissing("user", U.Username())
 				setIfMissing("username", U.Username())
 				setIfMissing("password", U.Password())
 				setIfMissing("port", U.Port(c.Info().Type.DefPort()))

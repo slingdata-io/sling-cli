@@ -1,0 +1,18 @@
+source: mongo
+target: postgres
+
+# Tests that ISODate("...") function syntax in where filters is properly parsed.
+# Before the fix, ISODate("...") values were silently converted to null, causing
+# {"$gte": null} to match documents where the field is null (returning 1 row).
+# After the fix, ISODate("...") is parsed to a proper time.Time value,
+# and a far-future date like year 3000 returns 0 rows (no documents match).
+
+defaults:
+  mode: full-refresh
+  source_options:
+    flatten: 1
+
+streams:
+  default.test1k_mongodb:
+    object: public.mongo_isodate_test
+    where: '{"update_dt": {"$gte": ISODate("3000-01-01T00:00:00.000Z")}}'

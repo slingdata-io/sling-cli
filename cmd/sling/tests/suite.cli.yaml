@@ -997,12 +997,15 @@
   output_contains:
     - 'execution succeeded'
 
-# Test MongoDB ObjectID filtering
+# Test MongoDB ObjectID filtering and ISODate filter parsing
 - id: 116
   name: MongoDB filter test
   run: |
     sling run -r cmd/sling/tests/replications/r.54.mongo_filter.yaml
     sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml
+    sling run -r cmd/sling/tests/replications/r.54.mongo_isodate_filter.yaml
+  output_contains:
+    - 'inserted 0 rows'
 
 - id: 117
   name: JSON to Snowflake nested import test
@@ -2043,3 +2046,28 @@
     # incremental (both paths)
     - 'INSERT incremental:'
     - 'BULK incremental:'
+
+- id: 212
+  name: ADBC DuckDB write and read via ADBC driver
+  run: 'sling run -d -p cmd/sling/tests/pipelines/adbc/p.40.adbc_duckdb.yaml'
+  output_contains:
+    - 'ADBC DuckDB test PASSED'
+
+# SFTP incremental file timestamp not honored (issue 711)
+# Bug: SLING_FS_TIMESTAMP gets SQL-quoted value from FormatValue (e.g., '2026-02-24...')
+# but GetRefTs() can't parse it, so all files pass the timestamp filter on re-runs.
+- id: 213
+  name: 'SFTP incremental file timestamp filtering (issue 711)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.16.sftp_incremental_file_timestamp.yaml'
+  output_contains:
+    - 'file stream using file_sys_timestamp='
+    - 'SFTP incremental file timestamp test result:'
+    - 'execution succeeded'
+
+# Local file connection with base path (UNC path support, issue #712)
+- id: 214
+  name: 'Local file connection base path resolution (issue 712)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.17.unc_local_path.yaml'
+  output_contains:
+    - 'Alice'
+    - 'execution succeeded'

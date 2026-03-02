@@ -316,6 +316,7 @@ Validate that a connection works properly:
   "action": "test",
   "input": {
     "connection": "MY_POSTGRES",
+    "working_dir": "/optional/work/dir",
     "debug": true,
     "trace": false
   }
@@ -618,6 +619,7 @@ streams:
   "action": "test",
   "input": {
     "connection": "SALESFORCE_API",
+    "working_dir": "/optional/work/dir",
     "endpoints": ["accounts", "contacts"],
     "limit": 10,
     "debug": true
@@ -665,6 +667,7 @@ streams:
   "action": "test",
   "input": {
     "connection": "MY_DB",
+    "working_dir": "/optional/work/dir",
     "debug": true,
     "trace": true
   }

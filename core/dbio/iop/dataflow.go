@@ -84,6 +84,15 @@ func (df *Dataflow) Err() (err error) {
 	return eG.Err()
 }
 
+func (df *Dataflow) SyncedSeqValue() (value int64) {
+	for _, ds := range df.Streams {
+		if v := cast.ToInt64(ds.Metadata.SyncedSeq.Value); v > value {
+			value = v
+		}
+	}
+	return
+}
+
 // IsClosed is true is ds is closed
 func (df *Dataflow) IsClosed() bool {
 	return df.closed

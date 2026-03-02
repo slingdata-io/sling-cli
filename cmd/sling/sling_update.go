@@ -221,25 +221,27 @@ func checkUpdate() {
 	)
 	respMap := map[string]string{}
 	g.JSONUnmarshal(respB, &respMap)
-	if time.Now().Second()%6 == 0 && len(respMap) > 0 {
+	if len(respMap) > 0 {
 		updateVersion = respMap["version_latest"]
-		if isDevChannel {
-			if core.VersionSlash() != updateVersion && updateVersion != "" {
-				updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
-			}
-		} else {
-			isNew, err := g.CompareVersions(core.Version, updateVersion)
-			if err != nil {
-				g.Debug("Error comparing versions: %s", err.Error())
-			} else if isNew {
-				updateMessage = env.GreenString(g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction))
-			}
-		}
-		if message := respMap["media"]; message != "" {
-			if updateMessage != "" {
-				updateMessage = updateMessage + "\n" + env.BlueString(message)
+		if time.Now().Second()%6 == 0 {
+			if isDevChannel {
+				if core.VersionSlash() != updateVersion && updateVersion != "" {
+					updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
+				}
 			} else {
-				updateMessage = env.BlueString(message)
+				isNew, err := g.CompareVersions(core.Version, updateVersion)
+				if err != nil {
+					g.Debug("Error comparing versions: %s", err.Error())
+				} else if isNew {
+					updateMessage = env.GreenString(g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction))
+				}
+			}
+			if message := respMap["media"]; message != "" {
+				if updateMessage != "" {
+					updateMessage = updateMessage + "\n" + env.BlueString(message)
+				} else {
+					updateMessage = env.BlueString(message)
+				}
 			}
 		}
 	}

@@ -502,6 +502,7 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 			Mode:          cfg.Mode,
 			PrimaryKeyI:   cfg.Source.PrimaryKeyI,
 			UpdateKey:     cfg.Source.UpdateKey,
+			CDCOptions:    cfg.ReplicationStream.CDCOptions,
 		},
 		Streams: map[string]*ReplicationStreamConfig{
 			cfg.Source.Stream: {},
@@ -588,8 +589,19 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
+
+			object := cfg.Target.Object
+			// For local file connections with a base path in the URL, prepend it
+			if cfg.TgtConn.Type == dbio.TypeFileLocal {
+				connURL := cfg.TgtConn.URL()
+				basePath := strings.TrimPrefix(connURL, "file://")
+				if basePath != "" && !strings.HasPrefix(object, "/") {
+					object = strings.TrimSuffix(basePath, "/") + "/" + object
+				}
+			}
+
 			// object is not url, but relative path, needs to be normalized
-			cfg.Target.Data["url"] = filesys.NormalizeURI(fc, cfg.Target.Object)
+			cfg.Target.Data["url"] = filesys.NormalizeURI(fc, object)
 		}
 	}
 
@@ -649,8 +661,19 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
+
+			stream := cfg.Source.Stream
+			// For local file connections with a base path in the URL, prepend it
+			if cfg.SrcConn.Type == dbio.TypeFileLocal {
+				connURL := cfg.SrcConn.URL()
+				basePath := strings.TrimPrefix(connURL, "file://")
+				if basePath != "" && !strings.HasPrefix(stream, "/") {
+					stream = strings.TrimSuffix(basePath, "/") + "/" + stream
+				}
+			}
+
 			// object is not url, but relative path, needs to be normalized
-			cfg.Source.Data["url"] = filesys.NormalizeURI(fc, cfg.Source.Stream)
+			cfg.Source.Data["url"] = filesys.NormalizeURI(fc, stream)
 		}
 	}
 
@@ -1613,65 +1636,59 @@ type TargetOptions struct {
 
 // CDCOptions are options for change data capture mode
 type CDCOptions struct {
-	// Batching
-	BatchSize    *int `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
-	BatchTimeout *int `json:"batch_timeout,omitempty" yaml:"batch_timeout,omitempty"`
 
-	// Behavior
-	StartFrom  *string `json:"start_from,omitempty" yaml:"start_from,omitempty"`
-	SoftDelete *bool   `json:"soft_delete,omitempty" yaml:"soft_delete,omitempty"`
+	// Snapshot (Initial Load)
+	SnapshotStart       *string `json:"snapshot_start,omitempty" yaml:"snapshot_start,omitempty"`
+	SnapshotChunkSize   *int    `json:"snapshot_chunk_size,omitempty" yaml:"snapshot_chunk_size,omitempty"`
+	SnapshotRunDuration *string `json:"snapshot_run_duration,omitempty" yaml:"snapshot_run_duration,omitempty"`
+
+	// Batching
+	RunMaxEvents   *int `json:"run_max_events,omitempty" yaml:"run_max_events,omitempty"`
+	RunMaxDuration *string `json:"run_max_duration,omitempty" yaml:"run_max_duration,omitempty"`
+
+	// Delete behavior
+	SoftDelete *bool `json:"soft_delete,omitempty" yaml:"soft_delete,omitempty"`
 
 	// Error Recovery
-	RetryAttempts     *int    `json:"retry_attempts,omitempty" yaml:"retry_attempts,omitempty"`
-	RetryBackoff      *string `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`
-	RetryInitialDelay *string `json:"retry_initial_delay,omitempty" yaml:"retry_initial_delay,omitempty"`
-	RetryMaxDelay     *string `json:"retry_max_delay,omitempty" yaml:"retry_max_delay,omitempty"`
-
-	// Initial Load
-	InitialLoadMode          *string `json:"initial_load_mode,omitempty" yaml:"initial_load_mode,omitempty"`
-	InitialLoadChunkSize     *int    `json:"initial_load_chunk_size,omitempty" yaml:"initial_load_chunk_size,omitempty"`
-	InitialLoadCheckpointInt *int    `json:"initial_load_checkpoint_int,omitempty" yaml:"initial_load_checkpoint_int,omitempty"`
-
-	// Source Impact
-	MaxSourceCPUPercent *int  `json:"max_source_cpu_percent,omitempty" yaml:"max_source_cpu_percent,omitempty"`
-	MaxReadRate         *int  `json:"max_read_rate,omitempty" yaml:"max_read_rate,omitempty"`
-	BackoffOnHighLoad   *bool `json:"backoff_on_high_load,omitempty" yaml:"backoff_on_high_load,omitempty"`
+	RetryAttempts *int    `json:"retry_attempts,omitempty" yaml:"retry_attempts,omitempty"`
+	RetryDelay    *string `json:"retry_delay,omitempty" yaml:"retry_delay,omitempty"`
 
 	// Backfill / Replay
 	ReplayFrom *string `json:"replay_from,omitempty" yaml:"replay_from,omitempty"`
 }
 
-// SetDefaults sets default values for CDCOptions
-func (o *CDCOptions) SetDefaults() {
+// SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
+func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o == nil {
+		o = &cdcOptions
 		return
 	}
-	if o.BatchSize == nil {
-		o.BatchSize = g.Int(10000)
+	if o.RunMaxEvents == nil {
+		o.RunMaxEvents = cdcOptions.RunMaxEvents
 	}
-	if o.BatchTimeout == nil {
-		o.BatchTimeout = g.Int(30)
+	if o.RunMaxDuration == nil {
+		o.RunMaxDuration = cdcOptions.RunMaxDuration
 	}
-	if o.StartFrom == nil {
-		o.StartFrom = g.String("now")
+	if o.SnapshotStart == nil {
+		o.SnapshotStart = cdcOptions.SnapshotStart
 	}
 	if o.SoftDelete == nil {
-		o.SoftDelete = g.Bool(false)
+		o.SoftDelete = cdcOptions.SoftDelete
 	}
 	if o.RetryAttempts == nil {
-		o.RetryAttempts = g.Int(3)
+		o.RetryAttempts = cdcOptions.RetryAttempts
 	}
-	if o.RetryInitialDelay == nil {
-		o.RetryInitialDelay = g.String("1s")
+	if o.RetryDelay == nil {
+		o.RetryDelay = cdcOptions.RetryDelay
 	}
-	if o.RetryMaxDelay == nil {
-		o.RetryMaxDelay = g.String("30s")
+	if o.SnapshotChunkSize == nil {
+		o.SnapshotChunkSize = cdcOptions.SnapshotChunkSize
 	}
-	if o.InitialLoadMode == nil {
-		o.InitialLoadMode = g.String("chunked")
+	if o.SnapshotRunDuration == nil {
+		o.SnapshotRunDuration = cdcOptions.SnapshotRunDuration
 	}
-	if o.InitialLoadChunkSize == nil {
-		o.InitialLoadChunkSize = g.Int(100000)
+	if o.ReplayFrom == nil {
+		o.ReplayFrom = cdcOptions.ReplayFrom
 	}
 }
 
@@ -1813,6 +1830,16 @@ var TargetDBOptionsDefault = TargetOptions{
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
 	ColumnCasing:     g.Ptr(iop.NormalizeColumnCasing),
+}
+
+var CDCOptionsDefault = CDCOptions{
+	RunMaxEvents:         g.Int(100000),
+	RunMaxDuration:       g.String("10m"),
+	SnapshotStart:     g.String("now"),
+	SoftDelete:        g.Bool(false),
+	RetryAttempts:     g.Int(3),
+	RetryDelay:        g.String("5s"),
+	SnapshotChunkSize: g.Int(100000),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

@@ -154,14 +154,14 @@ core:
     )
 
   merge_change_capture_soft: |
-    UPDATE {tgt_table} tgt SET _sling_deleted_at = CURRENT_TIMESTAMP
+    UPDATE {tgt_table} tgt SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
     FROM (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
       FROM {src_table}
     ) src
     WHERE src._rn = 1 AND src._sling_synced_op = 'D'
     AND {src_tgt_pk_equal}
-    AND tgt._sling_deleted_at IS NULL;
+    AND tgt._sling_synced_op != 'D';
     create temporary table {temp_table} as
     with cdc_latest as (
       select *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn

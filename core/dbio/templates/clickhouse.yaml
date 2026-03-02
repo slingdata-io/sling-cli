@@ -5,7 +5,7 @@ core:
   create_index: "select 'indexes not implemented for clickhouse'"
   create_schema: create database {schema}
   create_table: create table if not exists {table} ({col_types}) engine=MergeTree {primary_key} {partition_by} ORDER BY {order_by}
-  rename_table: ALTER TABLE {table} RENAME TO {new_table}
+  rename_table: RENAME TABLE {table} TO {new_table}
   alter_columns: alter table {table} modify column {col_ddl}
   modify_column: '{column} {type}'
   update: alter table {table} update {set_fields} where {pk_fields_equal}
@@ -63,8 +63,8 @@ core:
 
   merge_change_capture_soft: |
     SET allow_experimental_window_functions = 1;
-    ALTER TABLE {tgt_table} UPDATE _sling_deleted_at = now()
-    WHERE _sling_deleted_at IS NULL
+    ALTER TABLE {tgt_table} UPDATE _sling_synced_at = now64(6), _sling_synced_op = 'D'
+    WHERE _sling_synced_op != 'D'
     AND ({tgt_pk_fields}) IN (
       SELECT {src_pk_fields} FROM (
         SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn

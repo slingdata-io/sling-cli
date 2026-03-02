@@ -330,7 +330,14 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	if t.Config.MetadataSyncedAt != nil && *t.Config.MetadataSyncedAt {
+	if t.Config.Mode == ChangeCaptureMode {
+		metadata.SyncedAt.Key = env.ReservedFields.SyncedAt
+		metadata.SyncedAt.Value = *t.StartTime // only timestamp
+		metadata.SyncedOp.Key = env.ReservedFields.SyncedOp
+		metadata.SyncedOp.Value = "S" // default to snapshot operation
+		metadata.SyncedSeq.Key = env.ReservedFields.CDCSeq
+		metadata.SyncedSeq.Value = int64(0)
+	} else if t.Config.MetadataSyncedAt != nil && *t.Config.MetadataSyncedAt {
 		metadata.SyncedAt.Key = env.ReservedFields.SyncedAt
 		metadata.SyncedAt.Value = *t.StartTime // only timestamp
 		metadata.SyncedOp.Key = env.ReservedFields.SyncedOp

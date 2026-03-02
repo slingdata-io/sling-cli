@@ -91,6 +91,17 @@ func (conn *ArrowDBConn) Init() error {
 		}
 	}
 
+	// Set default entrypoint for known drivers if not explicitly provided
+	if adbcProps["entrypoint"] == "" && adbcProps["driver_entrypoint"] == "" {
+		driverName := conn.GetProp("driver_name")
+		if ep := getDefaultEntrypoint(driverName); ep != "" {
+			adbcProps["entrypoint"] = ep
+		}
+	}
+
+	// Resolve the ADBC driver manager library path if not already set
+	resolveDriverManagerLib()
+
 	db, err := drivermgr.Driver{}.NewDatabase(adbcProps)
 	if err != nil {
 		return g.Error(err, "could not init new ADBC database. See https://docs.slingdata.io/connections/database-connections/adbc")
@@ -111,6 +122,98 @@ func (conn *ArrowDBConn) Init() error {
 	// Reload templates with driver-specific overrides
 	// (BaseConn.Init() loaded the default ADBC template)
 	return conn.LoadTemplates()
+}
+
+// getDefaultEntrypoint returns the ADBC driver init function name for known drivers.
+// The ADBC driver manager uses this to locate the initialization symbol in the shared library.
+func getDefaultEntrypoint(driverName string) string {
+	mapping := map[string]string{
+		"duckdb": "duckdb_adbc_init",
+	}
+	if ep, ok := mapping[strings.ToLower(driverName)]; ok {
+		return ep
+	}
+	return ""
+}
+
+// resolveDriverManagerLib searches common installation paths for the ADBC driver manager
+// shared library and sets the ADBC_DRIVER_MANAGER_LIB env var if found.
+// This is called before loading the driver manager so it can be found without
+// requiring the user to manually set the env var.
+func resolveDriverManagerLib() {
+	// Skip if already set
+	if os.Getenv("ADBC_DRIVER_MANAGER_LIB") != "" {
+		return
+	}
+
+	var libName string
+	var searchPaths []string
+
+	home, _ := os.UserHomeDir()
+
+	switch runtime.GOOS {
+	case "darwin":
+		libName = "libadbc_driver_manager.dylib"
+		searchPaths = []string{
+			"/usr/local/lib",
+			"/opt/homebrew/lib",
+		}
+		// Conda/mamba paths
+		if home != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(home, "mambaforge", "lib"),
+				filepath.Join(home, "miniforge3", "lib"),
+				filepath.Join(home, "miniconda3", "lib"),
+				filepath.Join(home, "anaconda3", "lib"),
+			)
+		}
+		// Homebrew mambaforge cask path
+		searchPaths = append(searchPaths,
+			"/opt/homebrew/Caskroom/mambaforge/base/lib",
+			"/opt/homebrew/Caskroom/miniforge/base/lib",
+		)
+		// pip install --user puts .dylib in site-packages
+		if home != "" {
+			pyGlob := filepath.Join(home, "Library", "Python", "3.*", "lib", "python", "site-packages", "adbc_driver_manager")
+			if matches, _ := filepath.Glob(pyGlob); len(matches) > 0 {
+				searchPaths = append(searchPaths, matches...)
+			}
+		}
+	case "linux":
+		libName = "libadbc_driver_manager.so"
+		searchPaths = []string{
+			"/usr/lib",
+			"/usr/local/lib",
+			"/usr/lib/x86_64-linux-gnu",
+			"/usr/lib/aarch64-linux-gnu",
+			"/lib",
+			"/lib64",
+		}
+		if home != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(home, ".local", "lib"),
+				filepath.Join(home, "mambaforge", "lib"),
+				filepath.Join(home, "miniforge3", "lib"),
+				filepath.Join(home, "miniconda3", "lib"),
+			)
+			// pip install --user puts .so in site-packages
+			pyGlob := filepath.Join(home, ".local", "lib", "python3.*", "site-packages", "adbc_driver_manager")
+			if matches, _ := filepath.Glob(pyGlob); len(matches) > 0 {
+				searchPaths = append(searchPaths, matches...)
+			}
+		}
+	default:
+		return
+	}
+
+	for _, dir := range searchPaths {
+		libPath := filepath.Join(dir, libName)
+		if _, err := os.Stat(libPath); err == nil {
+			os.Setenv("ADBC_DRIVER_MANAGER_LIB", libPath)
+			g.Trace("auto-detected ADBC driver manager: %s", libPath)
+			return
+		}
+	}
 }
 
 // GetArrowDBCDriverType maps ADBC driver names to corresponding database types
@@ -207,13 +310,20 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 	case "windows":
 		ext = ".dll"
 		pathSeparator = ";"
-		// Windows: %LOCALAPPDATA%\ADBC\Drivers or ~/.dbc/drivers
+		// Windows: dbc installs to %APPDATA%\adbc\drivers
+		appData := os.Getenv("APPDATA")
+		if appData != "" {
+			driverPaths = append(driverPaths, filepath.Join(appData, "adbc", "drivers"))
+		}
 		localAppData := os.Getenv("LOCALAPPDATA")
 		if localAppData != "" {
 			driverPaths = append(driverPaths, filepath.Join(localAppData, "ADBC", "Drivers"))
 		}
 		if home != "" {
-			driverPaths = append(driverPaths, filepath.Join(home, ".dbc", "drivers"))
+			driverPaths = append(driverPaths,
+				filepath.Join(home, ".config", "adbc", "drivers"),
+				filepath.Join(home, ".dbc", "drivers"),
+			)
 		}
 		// System paths
 		programFiles := os.Getenv("ProgramFiles")
@@ -227,6 +337,7 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 		if home != "" {
 			driverPaths = []string{
 				filepath.Join(home, ".local", "share", "ADBC", "Drivers"),
+				filepath.Join(home, ".config", "adbc", "drivers"),
 				filepath.Join(home, ".dbc", "drivers"),
 			}
 		}

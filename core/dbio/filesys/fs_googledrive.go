@@ -27,6 +27,14 @@ type GoogleDriveFileSysClient struct {
 	fileID       string // Optional: Direct file ID for single file access
 }
 
+// googleDriveTimeout is the default timeout for Google Drive API requests
+const googleDriveTimeout = 90 * time.Second
+
+// apiCtx returns a context with timeout for Google Drive API calls
+func (fs *GoogleDriveFileSysClient) apiCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(fs.Context().Ctx, googleDriveTimeout)
+}
+
 // Init initializes the fs client
 func (fs *GoogleDriveFileSysClient) Init(ctx context.Context) (err error) {
 	var instance FileSysClient
@@ -159,7 +167,9 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 	// Validate rootFolderID if provided
 	if fs.rootFolderID != "" {
 		// Get detailed folder information
-		folderInfo, err := fs.client.Files.Get(fs.rootFolderID).SupportsAllDrives(true).Fields("id,name,mimeType,parents,capabilities,driveId,owners,permissions").Do()
+		ctx, cancel := fs.apiCtx()
+		defer cancel()
+		folderInfo, err := fs.client.Files.Get(fs.rootFolderID).Context(ctx).SupportsAllDrives(true).Fields("id,name,mimeType,parents,capabilities,driveId,owners,permissions").Do()
 		if err != nil {
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
 				return g.Error("Root folder ID '%s' does not exist or is not accessible", fs.rootFolderID)
@@ -171,7 +181,9 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 
 	// Validate fileID if provided
 	if fs.fileID != "" {
-		_, err = fs.client.Files.Get(fs.fileID).Fields("id").SupportsAllDrives(true).Do()
+		ctx, cancel := fs.apiCtx()
+		defer cancel()
+		_, err = fs.client.Files.Get(fs.fileID).Context(ctx).Fields("id").SupportsAllDrives(true).Do()
 		if err != nil {
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
 				return g.Error("File ID '%s' does not exist or is not accessible", fs.fileID)
@@ -199,7 +211,9 @@ func (fs *GoogleDriveFileSysClient) queryList(query string, fields googleapi.Fie
 retry:
 	attempt++
 
-	result, err = fs.client.Files.List().Q(query).Fields(fields).IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+	ctx, cancel := fs.apiCtx()
+	result, err = fs.client.Files.List().Context(ctx).Q(query).Fields(fields).IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+	cancel()
 	if err != nil {
 		if strings.Contains(err.Error(), "Error 500") && attempt < 5 {
 			time.Sleep(2 * time.Second)
@@ -405,7 +419,9 @@ func (fs *GoogleDriveFileSysClient) List(uri string) (nodes FileNodes, err error
 
 		// Get file info to check if it's a file or folder
 		var file *drive.File
-		file, err = fs.client.Files.Get(fileID).Fields("id, name, size, createdTime, modifiedTime, mimeType, owners").SupportsAllDrives(true).Do()
+		getCtx, getCancel := fs.apiCtx()
+		defer getCancel()
+		file, err = fs.client.Files.Get(fileID).Context(getCtx).Fields("id, name, size, createdTime, modifiedTime, mimeType, owners").SupportsAllDrives(true).Do()
 		if err != nil {
 			// If file doesn't exist (404), return empty list
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
@@ -479,12 +495,14 @@ func (fs *GoogleDriveFileSysClient) List(uri string) (nodes FileNodes, err error
 
 	pageToken := ""
 	for {
-		call := fs.client.Files.List().Q(query).Fields(fields).PageSize(1000).IncludeItemsFromAllDrives(true).SupportsAllDrives(true)
+		listCtx, listCancel := fs.apiCtx()
+		call := fs.client.Files.List().Context(listCtx).Q(query).Fields(fields).PageSize(1000).IncludeItemsFromAllDrives(true).SupportsAllDrives(true)
 		if pageToken != "" {
 			call = call.PageToken(pageToken)
 		}
 
 		result, err := call.Do()
+		listCancel()
 		if err != nil {
 			return nodes, g.Error(err, "Could not list files")
 		}
@@ -577,7 +595,9 @@ func (fs *GoogleDriveFileSysClient) ListRecursive(uri string) (nodes FileNodes, 
 
 		// Get file info to check if it's a file or folder
 		var file *drive.File
-		file, err = fs.client.Files.Get(fileID).Fields("id, name, size, createdTime, modifiedTime, mimeType, owners").SupportsAllDrives(true).Do()
+		getCtx2, getCancel2 := fs.apiCtx()
+		defer getCancel2()
+		file, err = fs.client.Files.Get(fileID).Context(getCtx2).Fields("id, name, size, createdTime, modifiedTime, mimeType, owners").SupportsAllDrives(true).Do()
 		if err != nil {
 			// If file doesn't exist (404), return empty list
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
@@ -648,12 +668,14 @@ func (fs *GoogleDriveFileSysClient) ListRecursive(uri string) (nodes FileNodes, 
 
 		pageToken := ""
 		for processedCount < maxItems {
-			call := fs.client.Files.List().Q(query).Fields(fields).PageSize(100).IncludeItemsFromAllDrives(true).SupportsAllDrives(true)
+			listCtx, listCancel := fs.apiCtx()
+			call := fs.client.Files.List().Context(listCtx).Q(query).Fields(fields).PageSize(100).IncludeItemsFromAllDrives(true).SupportsAllDrives(true)
 			if pageToken != "" {
 				call = call.PageToken(pageToken)
 			}
 
 			result, err := call.Do()
+			listCancel()
 			if err != nil {
 				return nodes, g.Error(err, "Could not list files")
 			}
@@ -731,7 +753,9 @@ func (fs *GoogleDriveFileSysClient) delete(uri string) (err error) {
 		return g.Error(err, "Could not get file ID for deletion")
 	}
 
-	err = fs.client.Files.Delete(fileID).SupportsAllDrives(true).Do()
+	delCtx, delCancel := fs.apiCtx()
+	defer delCancel()
+	err = fs.client.Files.Delete(fileID).Context(delCtx).SupportsAllDrives(true).Do()
 	if err != nil {
 		return g.Error(err, "Could not delete file: "+path)
 	}
@@ -790,7 +814,9 @@ func (fs *GoogleDriveFileSysClient) getOrCreateFolder(path string) (folderID str
 				Parents:  []string{parentID},
 			}
 
-			created, err := fs.client.Files.Create(folder).Fields("id").SupportsAllDrives(true).Do()
+			createCtx, createCancel := fs.apiCtx()
+			created, err := fs.client.Files.Create(folder).Context(createCtx).Fields("id").SupportsAllDrives(true).Do()
+			createCancel()
 			if err != nil {
 				return "", g.Error(err, "Could not create folder: "+part)
 			}

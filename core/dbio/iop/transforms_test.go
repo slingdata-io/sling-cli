@@ -2593,3 +2593,146 @@ func TestEvaluatorFindMatches(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluatorRenderJmespathJq(t *testing.T) {
+	// Test that JMESPath and JQ expressions with state variables render correctly
+	// using KeepMissingExpr, ensuring that brackets used in JMESPath/JQ syntax
+	// are not mistakenly treated as template expressions.
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		state    map[string]any
+	}{
+		// JMESPath expressions with state variables that should be rendered
+		{
+			name:     "jmespath_state_var_with_flatten",
+			input:    "{state.endpoint_name}[]",
+			expected: "Employee[]",
+			state:    map[string]any{"state": map[string]any{"endpoint_name": "Employee"}},
+		},
+		{
+			name:     "jmespath_state_var_nested_path",
+			input:    "{state.resource}.data[]",
+			expected: "users.data[]",
+			state:    map[string]any{"state": map[string]any{"resource": "users"}},
+		},
+		{
+			name:     "jmespath_state_var_with_child_selector",
+			input:    "{state.root}[].{state.field}",
+			expected: "results[].name",
+			state:    map[string]any{"state": map[string]any{"root": "results", "field": "name"}},
+		},
+		{
+			name:     "jmespath_state_var_with_filter",
+			input:    "{state.collection}[?status=='active']",
+			expected: "orders[?status=='active']",
+			state:    map[string]any{"state": map[string]any{"collection": "orders"}},
+		},
+
+		// Plain JMESPath expressions (no state vars) should pass through unchanged
+		{
+			name:     "jmespath_plain_data_flatten",
+			input:    "data[]",
+			expected: "data[]",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_nested",
+			input:    "response.items[].name",
+			expected: "response.items[].name",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_at_wrap",
+			input:    "[@]",
+			expected: "[@]",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_wildcard",
+			input:    "data[*].id",
+			expected: "data[*].id",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_filter_expr",
+			input:    "people[?age > `20`].name",
+			expected: "people[?age > `20`].name",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_pipe",
+			input:    "locations[?state == 'WA'].name | sort(@) | {WashingtonCities: join(', ', @)}",
+			expected: "locations[?state == 'WA'].name | sort(@) | {WashingtonCities: join(', ', @)}",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jmespath_plain_multiselect_hash",
+			input:    "people[].{Name: name, Age: age}",
+			expected: "people[].{Name: name, Age: age}",
+			state:    map[string]any{},
+		},
+
+		// JQ expressions with state variables
+		{
+			name:     "jq_state_var_simple",
+			input:    ".{state.field}[]",
+			expected: ".records[]",
+			state:    map[string]any{"state": map[string]any{"field": "records"}},
+		},
+
+		// Plain JQ expressions should pass through unchanged
+		{
+			name:     "jq_plain_array_iter",
+			input:    ".data[]",
+			expected: ".data[]",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jq_plain_select",
+			input:    ".[] | select(.status == \"active\")",
+			expected: ".[] | select(.status == \"active\")",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jq_plain_object_construction",
+			input:    ".[] | {name: .name, id: .id}",
+			expected: ".[] | {name: .name, id: .id}",
+			state:    map[string]any{},
+		},
+		{
+			name:     "jq_plain_nested_field",
+			input:    ".response.data[].items",
+			expected: ".response.data[].items",
+			state:    map[string]any{},
+		},
+
+		// Mixed: state var with missing var (missing stays intact)
+		{
+			name:     "jmespath_mixed_existing_and_missing",
+			input:    "{state.resource}[].{state.missing_field}",
+			expected: "items[].{state.missing_field}",
+			state:    map[string]any{"state": map[string]any{"resource": "items"}},
+		},
+
+		// Dynamic endpoints: the exact user scenario from the bug report
+		{
+			name:     "dynamic_endpoint_jmespath",
+			input:    "{state.endpoint_name}[]",
+			expected: "CustomerType[]",
+			state:    map[string]any{"state": map[string]any{"endpoint_name": "CustomerType"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "secrets"), tt.state)
+			eval.KeepMissingExpr = true
+
+			result, err := eval.RenderString(tt.input)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

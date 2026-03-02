@@ -78,8 +78,8 @@ core:
     )
 
   merge_change_capture_soft: |
-    UPDATE {tgt_table} SET _sling_deleted_at = CURRENT_TIMESTAMP
-    WHERE _sling_deleted_at IS NULL
+    UPDATE {tgt_table} SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
+    WHERE _sling_synced_op != 'D'
     AND ({tgt_pk_fields}) IN (
       SELECT {pk_fields} FROM (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn

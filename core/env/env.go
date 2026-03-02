@@ -261,8 +261,9 @@ func setupFileLogging() {
 		traceLogFile = nil
 	}
 
-	// setup env from env.yaml
+	// setup env from env.yaml and .env.sling
 	LoadSlingEnvFile()
+	LoadDotEnvSling()
 
 	// Open debug log file
 	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {

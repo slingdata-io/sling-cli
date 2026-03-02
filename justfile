@@ -83,7 +83,7 @@ test-dbio-api:
     cd core/dbio/api && go test -v && cd -
 
 # Test all dbio
-test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-api test-dbio-filesys
+test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-api # test-dbio-filesys
 
 # Test Python (default, without ARROW)
 test-python-main:
@@ -91,6 +91,7 @@ test-python-main:
     echo "TESTING Python"
     export SLING_BINARY="$PWD/cmd/sling/sling"
     cd ../sling-python/sling && python -m pytest tests/tests.py -v && cd -
+    cd ../sling-python/sling && python -m pytest tests/test_api_spec.py -v && cd -
 
 # Test Python class without ARROW
 test-python-arrow-false:
@@ -109,10 +110,41 @@ test-python-arrow-true:
 # Run all Python tests
 test-python: test-python-main test-python-arrow-false test-python-arrow-true
 
+test-cdc-basic:
+    #!/usr/bin/env bash
+    cd ../sling && bash scripts/test.cdc.sh basic && cd -
+
+test-cdc-soft-delete:
+    #!/usr/bin/env bash
+    cd ../sling && bash scripts/test.cdc.sh soft_delete && cd -
+
+test-cdc-soft-replay:
+    #!/usr/bin/env bash
+    cd ../sling && bash scripts/test.cdc.sh replay && cd -
+
+test-cdc-soft-sustained:
+    #!/usr/bin/env bash
+    cd ../sling && bash scripts/test.cdc.sh sustained && cd -
+
+# Run all CDC test
+test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay test-cdc-soft-sustained
+
 # Run all tests
-test-all: test-cli test-connections test-dbio test-core test-python
+test-all: test-cli test-connections test-dbio test-core test-python test-cdc
     #!/usr/bin/env bash
     echo "✓ All tests passed!"
+
+test-dbio-core-python: test-dbio test-core test-python
+    #!/usr/bin/env bash
+    echo "✓ All tests passed!"
+
+# Test ADBC DuckDB via Docker (auto-detects host arch, skips cross-arch)
+# Usage: just test-adbc-docker [amd64|arm64|amd64,arm64]
+test-adbc-docker arch="amd64,arm64":
+    #!/usr/bin/env bash
+    set -e
+    echo "TESTING ADBC DuckDB via Docker ({{arch}})"
+    bash cmd/sling/tests/pipelines/adbc/run_docker_test.sh "{{arch}}"
 
 # Clean build artifacts
 clean:

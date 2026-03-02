@@ -192,8 +192,8 @@ core:
     WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
 
   merge_change_capture_soft: |
-    UPDATE {tgt_table} tgt SET _sling_deleted_at = CURRENT_TIMESTAMP
-    WHERE _sling_deleted_at IS NULL
+    UPDATE {tgt_table} tgt SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
+    WHERE _sling_synced_op != 'D'
     AND EXISTS (
       SELECT 1 FROM (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn

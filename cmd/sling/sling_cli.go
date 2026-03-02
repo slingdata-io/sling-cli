@@ -118,6 +118,11 @@ var cliRunFlags = []g.Flag{
 		Description: "An object/map to specify the type that a column should be cast as (JSON or YAML).",
 	},
 	{
+		Name:        "cdc-options",
+		Type:        "string",
+		Description: "in-line CDC options to configure change-capture mode (JSON or YAML).\n",
+	},
+	{
 		Name:        "streams",
 		ShortName:   "",
 		Type:        "string",

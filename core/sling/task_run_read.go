@@ -312,7 +312,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 		// file stream incremental mode
 		if g.In(t.Config.Source.UpdateKey, env.ReservedFields.LoadedAt, env.ReservedFields.SyncedAt) {
-			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalValStr
+			options["SLING_FS_TIMESTAMP"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalValStr, "'"), "'") // remove quotes
 			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
 		} else {
 			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey

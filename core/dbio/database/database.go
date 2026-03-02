@@ -3091,7 +3091,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 
 		// set sync operation to `U` for update, except for CDC which preserves the original op
 		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
-			if g.PtrVal(strategy) != MergeStrategyChangeCapture {
+			if !g.In(g.PtrVal(strategy), MergeStrategyChangeCapture, MergeStrategyChangeCaptureSoft) {
 				setSrcExpr = "'U'"
 			}
 		}

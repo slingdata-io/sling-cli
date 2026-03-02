@@ -115,18 +115,18 @@ core:
     DELETE FROM {tgt_table} tgt
     WHERE EXISTS (
       SELECT 1 FROM (
-        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as _rn
         FROM {src_table} src
       ) src
-      WHERE src._rn = 1 AND src._sling_synced_op = 'D'
+      WHERE src._rn = 1 AND src."_SLING_SYNCED_OP" = 'D'
       AND {src_tgt_pk_equal}
     );
     MERGE INTO {tgt_table} tgt
     USING (
       SELECT * FROM (
-        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as _rn
         FROM {src_table} src
-        WHERE _sling_synced_op != 'D'
+        WHERE "_SLING_SYNCED_OP" != 'D'
       ) sub WHERE _rn = 1
     ) src
     ON ({src_tgt_pk_equal})
@@ -134,22 +134,22 @@ core:
     WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
 
   merge_change_capture_soft: |
-    UPDATE {tgt_table} tgt SET _sling_deleted_at = CURRENT_TIMESTAMP
-    WHERE _sling_deleted_at IS NULL
+    UPDATE {tgt_table} tgt SET "_SLING_SYNCED_AT" = CURRENT_TIMESTAMP, "_SLING_SYNCED_OP" = 'D'
+    WHERE "_SLING_SYNCED_AT" IS NULL
     AND EXISTS (
       SELECT 1 FROM (
-        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as _rn
         FROM {src_table} src
       ) src
-      WHERE src._rn = 1 AND src._sling_synced_op = 'D'
+      WHERE src._rn = 1 AND src."_SLING_SYNCED_OP" = 'D'
       AND {src_tgt_pk_equal}
     );
     MERGE INTO {tgt_table} tgt
     USING (
       SELECT * FROM (
-        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as _rn
         FROM {src_table} src
-        WHERE _sling_synced_op != 'D'
+        WHERE "_SLING_SYNCED_OP" != 'D'
       ) sub WHERE _rn = 1
     ) src
     ON ({src_tgt_pk_equal})

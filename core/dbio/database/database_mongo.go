@@ -220,6 +220,10 @@ func (conn *MongoDBConn) processMongoFilter(filter any) any {
 				return oid
 			}
 		}
+		// Check if string is an ISO 8601 datetime (from ISODate() normalization)
+		if t, ok := parseISODateString(v); ok {
+			return t
+		}
 		return v
 	default:
 		return filter
@@ -272,6 +276,29 @@ func (conn *MongoDBConn) processObjectIDValue(val any) any {
 	}
 }
 
+// parseISODateString attempts to parse an ISO 8601 datetime string.
+// Returns the parsed time and true if successful, zero time and false otherwise.
+func parseISODateString(s string) (time.Time, bool) {
+	// Only attempt parsing for strings that look like ISO 8601 datetimes
+	// (at least 10 chars for "YYYY-MM-DD" and contains a '-')
+	if len(s) < 10 || s[4] != '-' || s[7] != '-' {
+		return time.Time{}, false
+	}
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02",
+	}
+	for _, format := range formats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // isObjectIDString checks if a string is a valid ObjectID hex format
 func (conn *MongoDBConn) isObjectIDString(s string) bool {
 	// ObjectID is 24 hex characters
@@ -310,10 +337,8 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 	filter := bson.D{}
 	if filterOpt, ok := opts["filter"]; ok {
-		// Process the filter to convert ObjectID strings
-		if filterString := g.Marshal(filterOpt); strings.Contains(filterString, "ObjectId(") || strings.Contains(filterString, `"_id"`) {
-			filterOpt = conn.processMongoFilter(filterOpt)
-		}
+		// Process the filter to convert ObjectID strings and ISO date strings
+		filterOpt = conn.processMongoFilter(filterOpt)
 
 		// Convert processed filter to bson.D
 		switch v := filterOpt.(type) {
