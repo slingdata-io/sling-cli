@@ -1264,6 +1264,60 @@ dynamic_endpoints:
 				},
 			},
 		},
+		{
+			name: "dynamic_jmespath_with_state_variable",
+			specYAML: `
+name: "Test Dynamic JMESPath State Var"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - iterate: '["customer_type", "order_type"]'
+    into: "state.endpoint_name"
+    endpoint:
+      name: "{state.endpoint_name}"
+      request:
+        url: "{state.base_url}/{state.endpoint_name}"
+      response:
+        records:
+          jmespath: "{state.endpoint_name}[]"
+`,
+			expectedEndpointNames: []string{
+				"customer_type",
+				"order_type",
+			},
+			dataResponses: map[string]map[string]any{
+				"/customer_type": {
+					"customer_type": []map[string]any{
+						{"id": 1, "name": "Retail"},
+						{"id": 2, "name": "Wholesale"},
+					},
+				},
+				"/order_type": {
+					"order_type": []map[string]any{
+						{"id": 10, "name": "Standard"},
+						{"id": 20, "name": "Express"},
+						{"id": 30, "name": "Overnight"},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				"customer_type": 2,
+				"order_type":    3,
+			},
+			expectedRecordValues: map[string][]any{
+				"customer_type": {
+					map[string]any{"id": float64(1), "name": "Retail"},
+					map[string]any{"id": float64(2), "name": "Wholesale"},
+				},
+				"order_type": {
+					map[string]any{"id": float64(10), "name": "Standard"},
+					map[string]any{"id": float64(20), "name": "Express"},
+					map[string]any{"id": float64(30), "name": "Overnight"},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
