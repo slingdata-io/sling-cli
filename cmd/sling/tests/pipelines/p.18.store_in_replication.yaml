@@ -1,0 +1,115 @@
+# Test that pipeline {store.xxx} values are accessible in replication where: and sql: fields
+# This validates the user-reported feature of passing store variables into replications
+
+steps:
+  # 1. Create source table in Postgres
+  - id: setup
+    connection: postgres
+    query: |
+      DROP TABLE IF EXISTS public.store_repl_source;
+      DROP TABLE IF EXISTS public.store_repl_target_where;
+      DROP TABLE IF EXISTS public.store_repl_target_sql;
+      CREATE TABLE public.store_repl_source (
+        id INT PRIMARY KEY,
+        name VARCHAR(50),
+        category VARCHAR(20)
+      );
+      INSERT INTO public.store_repl_source (id, name, category) VALUES
+        (1, 'Alice', 'A'),
+        (2, 'Bob', 'B'),
+        (3, 'Charlie', 'A'),
+        (4, 'Diana', 'B'),
+        (5, 'Eve', 'A');
+
+  - log: "Created source table with 5 rows"
+
+  # 2. Store a filter value
+  - type: store
+    key: filter_category
+    value: A
+
+  - type: store
+    key: max_id
+    value: "4"
+
+  - log: "store.filter_category = {store.filter_category}, store.max_id = {store.max_id}"
+
+  # 3. Run inline replication using {store.xxx} in where: field (table stream)
+  - replication:
+      source: postgres
+      target: postgres
+      defaults:
+        mode: full-refresh
+      streams:
+        public.store_repl_source:
+          object: public.store_repl_target_where
+          where: "category = '{store.filter_category}'"
+    on_failure: abort
+
+  - log: "Replication with where clause completed"
+
+  # 4. Run inline replication using {store.xxx} in sql: field
+  - replication:
+      source: postgres
+      target: postgres
+      defaults:
+        mode: full-refresh
+      streams:
+        store_repl_sql:
+          sql: "select * from public.store_repl_source where category = '{store.filter_category}' and id <= {store.max_id}"
+          object: public.store_repl_target_sql
+    on_failure: abort
+
+  - log: "Replication with sql field completed"
+
+  # 5. Verify where: results (should have 3 rows: Alice, Charlie, Eve with category A)
+  - connection: postgres
+    query: SELECT id, name, category FROM public.store_repl_target_where ORDER BY id
+    into: result_where
+
+  - log: |
+      where: results:
+      {pretty_table(store.result_where)}
+
+  - check: length(store.result_where) == 3
+    failure_message: "Expected 3 rows from where filter, got {length(store.result_where)}"
+
+  - check: store.result_where[0].name == "Alice"
+    failure_message: "Expected first row to be Alice, got {store.result_where[0].name}"
+
+  - check: store.result_where[1].name == "Charlie"
+    failure_message: "Expected second row to be Charlie, got {store.result_where[1].name}"
+
+  - check: store.result_where[2].name == "Eve"
+    failure_message: "Expected third row to be Eve, got {store.result_where[2].name}"
+
+  - log: "SUCCESS: store variables work in where: field"
+
+  # 6. Verify sql: results (should have 2 rows: Alice and Charlie with category A and id <= 4)
+  - connection: postgres
+    query: SELECT id, name, category FROM public.store_repl_target_sql ORDER BY id
+    into: result_sql
+
+  - log: |
+      sql: results:
+      {pretty_table(store.result_sql)}
+
+  - check: length(store.result_sql) == 2
+    failure_message: "Expected 2 rows from sql filter, got {length(store.result_sql)}"
+
+  - check: store.result_sql[0].name == "Alice"
+    failure_message: "Expected first row to be Alice, got {store.result_sql[0].name}"
+
+  - check: store.result_sql[1].name == "Charlie"
+    failure_message: "Expected second row to be Charlie, got {store.result_sql[1].name}"
+
+  - log: "SUCCESS: store variables work in sql: field"
+
+  # 7. Cleanup
+  - connection: postgres
+    query: |
+      DROP TABLE IF EXISTS public.store_repl_source;
+      DROP TABLE IF EXISTS public.store_repl_target_where;
+      DROP TABLE IF EXISTS public.store_repl_target_sql;
+
+  - log: "Pipeline completed successfully"

@@ -2071,3 +2071,12 @@
   output_contains:
     - 'Alice'
     - 'execution succeeded'
+
+# Test pipeline store variables in replication where: and sql: fields
+- id: 215
+  name: 'Pipeline store variables in replication where/sql fields'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.18.store_in_replication.yaml'
+  output_contains:
+    - 'store variables work in where: field'
+    - 'store variables work in sql: field'
+    - 'Pipeline completed successfully'
