@@ -210,6 +210,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "examples":
 			showExamples = cast.ToBool(v)
+		case "home-dir":
+			if homeDir := cast.ToString(v); homeDir != "" {
+				os.Setenv("SLING_HOME_DIR", homeDir)
+				env.LoadHomeDir()
+				connection.GetLocalConns(true) // force reload connections
+			}
 		case "cdc-options":
 			payload := cast.ToString(v)
 			options, err := parsePayload(payload, true)
