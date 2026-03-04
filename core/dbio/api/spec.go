@@ -365,6 +365,9 @@ func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
 		"mode", sCfg.Mode,
 		"store", ep.conn.State.Store,
 		"limit", sCfg.Limit,
+		"range_start", nil,
+		"range_end", nil,
+		"range_step", nil,
 	)
 
 	// set backfill params
@@ -372,6 +375,9 @@ func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
 		contextMap["range_start"] = rangeParts[0]
 		if len(rangeParts) > 1 {
 			contextMap["range_end"] = lo.Ternary[any](rangeParts[1] == "", nil, rangeParts[1])
+		}
+		if len(rangeParts) > 2 {
+			contextMap["range_step"] = lo.Ternary[any](rangeParts[2] == "", nil, rangeParts[2])
 		}
 	}
 
