@@ -3558,3 +3558,279 @@ endpoints:
 		})
 	}
 }
+
+func TestAuthTokenRefreshOnRetry(t *testing.T) {
+	// This test reproduces an issue where DoRequest's retry path (goto retry)
+	// re-sends the same httpReq with stale auth headers instead of refreshing
+	// them from conn.State.Auth.Headers.
+	//
+	// Scenario: A user's API token expires server-side. The server returns 401.
+	// A retry rule fires, and meanwhile Auth.Headers has been updated with a
+	// new token (by EnsureAuthenticated or equivalent). But the retry re-sends
+	// the same httpReq with the OLD token baked in at MakeRequest() time.
+	//
+	// The mock server:
+	// - On the FIRST request: rotates the valid token from v1→v2, updates
+	//   Auth.Headers on the APIConnection, then returns 401 (old token rejected)
+	// - On the SECOND request (retry): only accepts token_v2
+	//
+	// This guarantees deterministic ordering without relying on timing/sleeps.
+
+	var mu sync.Mutex
+	currentToken := "token_v1"
+	requestCount := 0
+	var ac *APIConnection // set after creation, before server receives requests
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestCount++
+		reqNum := requestCount
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+
+		authHeader := r.Header.Get("Authorization")
+
+		if reqNum == 1 {
+			// First request: simulate server-side token expiration.
+			// Rotate the valid token to v2 and update Auth.Headers
+			// (simulating what EnsureAuthenticated does after re-auth).
+			mu.Lock()
+			currentToken = "token_v2"
+			mu.Unlock()
+
+			// Update the APIConnection's auth headers to the new token
+			ac.State.Auth.Mutex.Lock()
+			ac.State.Auth.Headers["Authorization"] = "Bearer token_v2"
+			ac.State.Auth.Mutex.Unlock()
+
+			// Reject this request — it carries the old token
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("token expired (request #%d): got %q, want %q",
+					reqNum, authHeader, "Bearer token_v2"),
+			})
+			return
+		}
+
+		// Subsequent requests: validate against current token
+		mu.Lock()
+		validToken := "Bearer " + currentToken
+		mu.Unlock()
+
+		if authHeader != validToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("invalid token (request #%d): got %q, want %q",
+					reqNum, authHeader, validToken),
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": 1, "name": "Test"},
+				{"id": 2, "name": "Data"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_auth_retry_refresh
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer token_v1"
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+      rules:
+        - condition: "response.status == 401"
+          action: retry
+          max_attempts: 3
+`, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	ac, err = NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+	assert.Equal(t, "Bearer token_v1", ac.State.Auth.Headers["Authorization"])
+
+	// ReadDataflow → MakeRequest bakes "Bearer token_v1" into httpReq.Header.
+	// First request hits server → server rotates to token_v2, updates Auth.Headers,
+	// returns 401. Retry rule fires → goto retry → PerformRequest re-sends httpReq.
+	//
+	// BUG: retry uses the SAME httpReq with old "Bearer token_v1" headers.
+	// FIX: retry should refresh httpReq.Header from conn.State.Auth.Headers.
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	if err == nil {
+		_, err = df.Collect()
+	}
+
+	mu.Lock()
+	totalRequests := requestCount
+	mu.Unlock()
+
+	// After fix: retry refreshes auth headers from conn.State.Auth.Headers,
+	// so the second attempt uses "Bearer token_v2" and succeeds.
+	assert.NoError(t, err, "retry should succeed after refreshing auth headers")
+	assert.Equal(t, 2, totalRequests, "should take exactly 2 requests (1 failed + 1 retry)")
+	t.Logf("collected records after %d HTTP requests (retry refreshed headers)", totalRequests)
+}
+
+func TestAuthTokenRefreshDuringPagination(t *testing.T) {
+	// This test reproduces an issue where paginated requests use stale auth
+	// headers after token rotation. During long-running paginated extractions,
+	// EnsureAuthenticated() may refresh the token (updating Auth.Headers),
+	// but subsequent requests still carry the OLD headers baked in at
+	// MakeRequest() time.
+	//
+	// The mock server:
+	// - Page 1: succeeds with token_v1, returns has_more=true
+	// - Page 2: server rotates token to v2, updates Auth.Headers, returns 401
+	// - Page 2 retry / page 2 re-request: should use token_v2
+	//
+	// This simulates a real API whose token expires mid-extraction.
+
+	var mu sync.Mutex
+	currentToken := "token_v1"
+	requestCount := 0
+	var ac *APIConnection
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestCount++
+		reqNum := requestCount
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		authHeader := r.Header.Get("Authorization")
+
+		// On the 2nd request (page 2), simulate token expiration
+		if reqNum == 2 {
+			mu.Lock()
+			currentToken = "token_v2"
+			mu.Unlock()
+
+			ac.State.Auth.Mutex.Lock()
+			ac.State.Auth.Headers["Authorization"] = "Bearer token_v2"
+			ac.State.Auth.Mutex.Unlock()
+
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("token expired (request #%d): got %q", reqNum, authHeader),
+			})
+			return
+		}
+
+		// All other requests: validate against current token
+		mu.Lock()
+		validToken := "Bearer " + currentToken
+		mu.Unlock()
+
+		if authHeader != validToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("invalid token (request #%d): got %q, want %q",
+					reqNum, authHeader, validToken),
+			})
+			return
+		}
+
+		page := r.URL.Query().Get("page")
+		hasMore := true
+		nextPage := "2"
+		if page == "2" {
+			hasMore = false
+			nextPage = ""
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": reqNum, "value": fmt.Sprintf("page_%s", page)},
+			},
+			"next_page": nextPage,
+			"has_more":  hasMore,
+		})
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_auth_pagination_refresh
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer token_v1"
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+      parameters:
+        page: "{state.next_page}"
+    response:
+      records:
+        jmespath: data
+      processors:
+        - expression: response.json.next_page
+          output: state.next_page
+          aggregation: last
+      rules:
+        - condition: "response.status == 401"
+          action: retry
+          max_attempts: 3
+    pagination:
+      stop_condition: "response.json.has_more == false"
+      next_state:
+        next_page: "{state.next_page}"
+`, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	ac, err = NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{"next_page": "1"},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 100,
+	})
+	if err == nil {
+		_, err = df.Collect()
+	}
+
+	mu.Lock()
+	totalRequests := requestCount
+	mu.Unlock()
+
+	// After fix: page 2 retry refreshes auth headers and uses "Bearer token_v2".
+	assert.NoError(t, err, "paginated request should succeed after auth header refresh")
+	assert.Equal(t, 3, totalRequests, "should take 3 requests (page1 ok + page2 fail + page2 retry ok)")
+	t.Logf("collected records from both pages across %d HTTP requests", totalRequests)
+}
