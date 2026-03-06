@@ -1476,7 +1476,6 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
-		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -1484,6 +1483,10 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 			setFunc() // if not found, set default
 		}
 	}
+
+	// handle columns: if stream columns use "+" prefix, merge with defaults
+	// otherwise, use legacy replace behavior (stream replaces defaults entirely)
+	stream.Columns = mergeColumns(replicationCfg.Defaults.Columns, stream.Columns)
 
 	// set default hooks
 	if stream.Hooks.IsEmpty() {
@@ -1699,6 +1702,124 @@ func makeColumns(nodes yaml.MapSlice) (columns []any) {
 	}
 
 	return columns
+}
+
+// mergeColumns handles the interaction between default columns and stream-level columns.
+// If stream columns use the "+" prefix (e.g. "+voyage_id: bigint"), they are merged
+// with defaults. A "+column: ~" (null) unsets that default.
+// Without the "+" prefix, stream columns replace defaults entirely (legacy behavior).
+// Each column entry is map[string]any{"name": "col_name", "type": "col_type"}.
+func mergeColumns(defaultCols, streamCols any) any {
+	defaultSlice, _ := defaultCols.([]any)
+	streamSlice, _ := streamCols.([]any)
+
+	if len(defaultSlice) == 0 {
+		// strip "+" prefix from names if present
+		return cleanMergePrefixes(streamCols)
+	}
+	if len(streamSlice) == 0 {
+		return defaultCols
+	}
+
+	// check if stream columns use merge mode ("+" prefix)
+	mergeMode := false
+	for _, col := range streamSlice {
+		if m, ok := col.(map[string]any); ok {
+			name := cast.ToString(m["name"])
+			if strings.HasPrefix(name, "+") {
+				mergeMode = true
+				break
+			}
+		}
+	}
+
+	// legacy behavior: stream replaces defaults entirely
+	if !mergeMode {
+		return streamCols
+	}
+
+	// helper to get name from column entry (lowercase, without "+" prefix)
+	colName := func(col any) string {
+		if m, ok := col.(map[string]any); ok {
+			name := cast.ToString(m["name"])
+			return strings.ToLower(strings.TrimPrefix(name, "+"))
+		}
+		return ""
+	}
+
+	// helper to get type from column entry
+	colType := func(col any) string {
+		if m, ok := col.(map[string]any); ok {
+			return cast.ToString(m["type"])
+		}
+		return ""
+	}
+
+	// collect stream column names for quick lookup
+	streamNames := map[string]bool{}
+	for _, col := range streamSlice {
+		streamNames[colName(col)] = true
+	}
+
+	// start with defaults that aren't overridden by stream
+	var merged []any
+	for _, col := range defaultSlice {
+		if !streamNames[colName(col)] {
+			merged = append(merged, col)
+		}
+	}
+
+	// append stream columns (with "+" stripped), skipping those with empty type (unset)
+	for _, col := range streamSlice {
+		cleanName := colName(col)
+		if typ := colType(col); typ != "" {
+			merged = append(merged, g.M("name", cleanName, "type", typ))
+		}
+	}
+
+	if len(merged) == 0 {
+		return nil
+	}
+
+	return merged
+}
+
+// cleanMergePrefixes strips "+" prefixes from column names when there are no defaults to merge with
+func cleanMergePrefixes(cols any) any {
+	slice, ok := cols.([]any)
+	if !ok || len(slice) == 0 {
+		return cols
+	}
+
+	hasPrefixes := false
+	for _, col := range slice {
+		if m, ok := col.(map[string]any); ok {
+			if strings.HasPrefix(cast.ToString(m["name"]), "+") {
+				hasPrefixes = true
+				break
+			}
+		}
+	}
+
+	if !hasPrefixes {
+		return cols
+	}
+
+	var cleaned []any
+	for _, col := range slice {
+		if m, ok := col.(map[string]any); ok {
+			name := strings.TrimPrefix(cast.ToString(m["name"]), "+")
+			typ := cast.ToString(m["type"])
+			if typ != "" {
+				cleaned = append(cleaned, g.M("name", name, "type", typ))
+			}
+		}
+	}
+
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
 }
 
 func LoadReplicationConfigFromFile(cfgPath string) (config ReplicationConfig, err error) {

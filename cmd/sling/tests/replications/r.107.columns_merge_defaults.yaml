@@ -1,0 +1,214 @@
+source: oracle
+target: postgres
+
+defaults:
+  mode: full-refresh
+  columns:
+    note_id: bigint
+    source_id: bigint
+    trip_header_id: bigint
+    note: text
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.test_col_merge';
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    - type: query
+      connection: '{source.name}'
+      query: |
+        CREATE TABLE SYSTEM.test_col_merge (
+          note_id NUMBER(38) NOT NULL,
+          note_title VARCHAR2(64),
+          source_id NUMBER(38),
+          note NCLOB,
+          trip_id NUMBER(38),
+          trip_header_id NUMBER(38),
+          object_type VARCHAR2(60)
+        )
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO SYSTEM.test_col_merge (note_id, note_title, source_id, note, trip_id, trip_header_id, object_type)
+        VALUES (1, 'test', 100, 'hello', 200, 300, 'type1')
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # verify stream 1 inherited defaults (no stream-level columns)
+    # alphabetical: note[0], note_id[1], note_title[2], object_type[3], source_id[4], trip_header_id[5], trip_id[6]
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select column_name, data_type
+        from information_schema.columns
+        where table_schema = 'public' and table_name = '_test_col_merge_1'
+        order by column_name
+      into: cols1
+
+    - type: log
+      message: "stream1 (defaults only): {store.cols1}"
+
+    - type: check
+      check: store.cols1[1].data_type == "bigint"
+      failure_message: "stream1 note_id should be bigint (from defaults)"
+
+    - type: check
+      check: store.cols1[0].data_type == "text"
+      failure_message: "stream1 note should be text (from defaults)"
+
+    - type: check
+      check: store.cols1[4].data_type == "bigint"
+      failure_message: "stream1 source_id should be bigint (from defaults)"
+
+    - type: check
+      check: store.cols1[5].data_type == "bigint"
+      failure_message: "stream1 trip_header_id should be bigint (from defaults)"
+
+    # trip_id has no default, so Oracle NUMBER(38) maps to numeric
+    - type: check
+      check: store.cols1[6].data_type == "numeric"
+      failure_message: "stream1 trip_id should be numeric (no default override)"
+
+    # verify stream 2: stream-level columns should MERGE with defaults
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select column_name, data_type
+        from information_schema.columns
+        where table_schema = 'public' and table_name = '_test_col_merge_2'
+        order by column_name
+      into: cols2
+
+    - type: log
+      message: "stream2 (merged): {store.cols2}"
+
+    # defaults should still apply after merge
+    - type: check
+      check: store.cols2[1].data_type == "bigint"
+      failure_message: "stream2 note_id should be bigint (from defaults, merged)"
+
+    - type: check
+      check: store.cols2[0].data_type == "text"
+      failure_message: "stream2 note should be text (from defaults, merged)"
+
+    - type: check
+      check: store.cols2[4].data_type == "bigint"
+      failure_message: "stream2 source_id should be bigint (from defaults, merged)"
+
+    - type: check
+      check: store.cols2[5].data_type == "bigint"
+      failure_message: "stream2 trip_header_id should be bigint (from defaults, merged)"
+
+    # stream-level column should also apply (this was numeric before the fix)
+    - type: check
+      check: store.cols2[6].data_type == "bigint"
+      failure_message: "stream2 trip_id should be bigint (from stream columns, merged with defaults)"
+
+    # verify stream 3: unset a default with +column: ~ (null)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select column_name, data_type
+        from information_schema.columns
+        where table_schema = 'public' and table_name = '_test_col_merge_3'
+        order by column_name
+      into: cols3
+
+    - type: log
+      message: "stream3 (unset note_id): {store.cols3}"
+
+    # note_id was unset via +note_id: ~, should fall back to numeric (Oracle NUMBER(38) default)
+    - type: check
+      check: store.cols3[1].data_type == "numeric"
+      failure_message: "stream3 note_id should be numeric (unset via +col: null)"
+
+    # other defaults should still apply
+    - type: check
+      check: store.cols3[0].data_type == "text"
+      failure_message: "stream3 note should be text (from defaults, not unset)"
+
+    - type: check
+      check: store.cols3[4].data_type == "bigint"
+      failure_message: "stream3 source_id should be bigint (from defaults, not unset)"
+
+    - type: check
+      check: store.cols3[5].data_type == "bigint"
+      failure_message: "stream3 trip_header_id should be bigint (from defaults, not unset)"
+
+    # verify stream 4: legacy replace behavior (no + prefix)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select column_name, data_type
+        from information_schema.columns
+        where table_schema = 'public' and table_name = '_test_col_merge_4'
+        order by column_name
+      into: cols4
+
+    - type: log
+      message: "stream4 (legacy replace): {store.cols4}"
+
+    # only trip_id should be bigint (stream-level), defaults are NOT inherited
+    - type: check
+      check: store.cols4[6].data_type == "bigint"
+      failure_message: "stream4 trip_id should be bigint (from stream columns)"
+
+    # note_id should be numeric (default NOT inherited, legacy replace)
+    - type: check
+      check: store.cols4[1].data_type == "numeric"
+      failure_message: "stream4 note_id should be numeric (defaults replaced, not inherited)"
+
+    # source_id should be numeric (default NOT inherited, legacy replace)
+    - type: check
+      check: store.cols4[4].data_type == "numeric"
+      failure_message: "stream4 source_id should be numeric (defaults replaced, not inherited)"
+
+    # cleanup
+    - type: query
+      connection: '{target.name}'
+      query: |
+        drop table if exists public._test_col_merge_1;
+        drop table if exists public._test_col_merge_2;
+        drop table if exists public._test_col_merge_3;
+        drop table if exists public._test_col_merge_4;
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.test_col_merge';
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+
+streams:
+  # stream 1: no stream-level columns, should get all defaults
+  SYSTEM.test_col_merge:
+    object: public._test_col_merge_1
+
+  # stream 2: "+" prefix columns merge with defaults
+  SYSTEM.test_col_merge_2:
+    sql: select * from SYSTEM.test_col_merge
+    columns:
+      +trip_id: bigint
+    object: public._test_col_merge_2
+
+  # stream 3: "+" prefix with null unsets a default
+  SYSTEM.test_col_merge_3:
+    sql: select * from SYSTEM.test_col_merge
+    columns:
+      +note_id: ~
+    object: public._test_col_merge_3
+
+  # stream 4: no "+" prefix = legacy replace behavior (defaults ignored)
+  SYSTEM.test_col_merge_4:
+    sql: select * from SYSTEM.test_col_merge
+    columns:
+      trip_id: bigint
+    object: public._test_col_merge_4

@@ -2080,3 +2080,11 @@
     - 'store variables work in where: field'
     - 'store variables work in sql: field'
     - 'Pipeline completed successfully'
+
+# Test that stream-level columns merge with defaults.columns instead of replacing
+- id: 216
+  name: 'Stream columns merge with defaults columns (Oracle to Postgres)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.107.columns_merge_defaults.yaml'
+  streams: 4
+  output_contains:
+    - 'execution succeeded'
