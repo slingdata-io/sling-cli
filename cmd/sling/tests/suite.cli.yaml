@@ -2095,3 +2095,12 @@
   output_contains:
     - 'setting incremental state'
     - 'execution succeeded'
+
+# Oracle chunking with custom SQL fails because Oracle doesn't support AS for table aliases
+# Sling wraps custom SQL as "(...) as t" but Oracle requires "(...) t" (no AS keyword)
+- id: 218
+  name: 'Oracle chunking with custom SQL (AS table alias bug)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.108.oracle_chunk_custom_sql.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'
