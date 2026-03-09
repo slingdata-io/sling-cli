@@ -1,0 +1,91 @@
+env:
+  SOURCE: mssql2022
+  TARGET: clickhouse
+
+steps:
+  # Setup source table in MSSQL
+  - connection: '{env.SOURCE}'
+    query: |
+      IF OBJECT_ID('dbo.test_direct_state', 'U') IS NOT NULL DROP TABLE dbo.test_direct_state;
+      CREATE TABLE dbo.test_direct_state (
+        id INT PRIMARY KEY,
+        name NVARCHAR(100),
+        updated DATETIME
+      );
+      INSERT INTO dbo.test_direct_state VALUES
+        (1, 'alice', '2024-01-15 10:30:00'),
+        (2, 'bob',   '2024-02-20 14:45:00'),
+        (3, 'carol', '2024-03-10 09:00:00'),
+        (4, 'dave',  '2024-04-05 16:20:00');
+
+  # Clean up target table in ClickHouse
+  - connection: '{env.TARGET}'
+    on_failure: warn
+    query: DROP TABLE IF EXISTS default.test_direct_state
+
+  # Clean up any previous state
+  - connection: POSTGRES
+    on_failure: warn
+    query: DELETE FROM sling_state._sling_state WHERE source_stream like '%test_direct_state%'
+
+  # Run incremental replication with direct_insert + column_casing + SLING_STATE
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+
+      streams:
+        dbo.test_direct_state:
+          object: default.test_direct_state
+          mode: incremental
+          update_key: updated
+          target_options:
+            column_casing: snake
+            direct_insert: true
+
+      env:
+        SLING_STATE: POSTGRES/sling_state
+        SLING_RETRIES: 1
+
+  # Verify rows landed in target
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM default.test_direct_state
+    into: result
+
+  - type: log
+    message: 'row count => {store.result[0].cnt}'
+
+  - type: check
+    check: int_parse(store.result[0].cnt) == 4
+
+  # Verify state was written
+  - type: query
+    connection: POSTGRES
+    query: |
+      SELECT value, column_type FROM sling_state._sling_state
+      WHERE source_stream like '%test_direct_state%'
+    into: state_result
+
+  - type: log
+    message: 'state_result => {store.state_result}'
+
+  - type: check
+    check: length(store.state_result) > 0
+    message: 'Expected state record but found none'
+
+  - type: check
+    check: store.state_result[0].column_type == "datetime"
+    message: 'Expected column_type=datetime, got {store.state_result[0].column_type}'
+
+  # Clean up
+  - connection: '{env.SOURCE}'
+    query: |
+      IF OBJECT_ID('dbo.test_direct_state', 'U') IS NOT NULL DROP TABLE dbo.test_direct_state;
+
+  - connection: '{env.TARGET}'
+    on_failure: warn
+    query: DROP TABLE IF EXISTS default.test_direct_state
+
+  - connection: POSTGRES
+    on_failure: warn
+    query: DELETE FROM sling_state._sling_state WHERE source_stream like '%test_direct_state%'

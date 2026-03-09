@@ -571,6 +571,10 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
+	// Sync columns and stats from stream processors (needed for incremental state)
+	df.SyncColumns()
+	df.SyncStats()
+
 	// Validate data only for full-refresh or truncate
 	// otherwise, we cannot validate the data.
 	if g.In(cfg.Mode, FullRefreshMode, TruncateMode) {

@@ -2088,3 +2088,10 @@
   streams: 4
   output_contains:
     - 'execution succeeded'
+
+- id: 217
+  name: 'SLING_STATE with direct_insert and datetime update_key (MSSQL to ClickHouse)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.17.direct_insert_state_datetime.yaml'
+  output_contains:
+    - 'setting incremental state'
+    - 'execution succeeded'
