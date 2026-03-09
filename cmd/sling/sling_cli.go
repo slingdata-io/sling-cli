@@ -561,6 +561,11 @@ func cliInit(done chan struct{}) int {
 		flaggy.AttachSubcommand(cli.Sc, 1)
 	}
 
+	// patch 'sling mcp' into 'sling serve mcp' for backwards compatibility
+	if len(os.Args) >= 2 && os.Args[1] == "mcp" {
+		os.Args = append([]string{os.Args[0], "serve"}, os.Args[1:]...)
+	}
+
 	flaggy.ShowHelpOnUnexpectedDisable()
 	flaggy.Parse()
 
