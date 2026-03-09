@@ -115,6 +115,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			println()
 			g.Info("testing endpoint: %#v", endpoint.Name)
+			api.FireSpecEvent(g.M("type", "endpoint-start", "endpoint", endpoint.Name))
 			testedEndpoints = append(testedEndpoints, endpoint.Name)
 
 			// set limits for testing
@@ -153,6 +154,7 @@ func (c *Connection) Test() (ok bool, err error) {
 			}
 
 			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
+			api.FireSpecEvent(g.M("type", "endpoint-done", "endpoint", endpoint.Name, "record_count", len(data.Rows)))
 
 			records := data.Records(false)
 			if len(records) > 0 {

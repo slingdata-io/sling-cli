@@ -16,6 +16,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/g"
@@ -1380,6 +1381,10 @@ func ParseLocation(location string) (conn Connection, objectExpr string, err err
 		return
 	}
 
+	if entry.Connection.Type == dbio.TypeFileLocal {
+		objectExpr = env.CleanWindowsPath(objectExpr) // fix windows path
+	}
+
 	return entry.Connection, objectExpr, nil
 }
 
@@ -1480,6 +1485,7 @@ func LoadAPISpec(specIdentifier string) (spec api.Spec, err error) {
 	// load from location
 	case strings.HasPrefix(specIdentifier, "file://"):
 		specPath := strings.TrimPrefix(specIdentifier, "file://")
+		specPath = env.CleanWindowsPath(specPath) // fix windows path
 		bytes, err := os.ReadFile(specPath)
 		if err != nil {
 			return spec, g.Error(err, "could not read api spec from: %s", specPath)

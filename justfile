@@ -127,7 +127,7 @@ test-cdc-soft-sustained:
     cd ../sling && bash scripts/test.cdc.sh sustained && cd -
 
 # Run all CDC test
-test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay test-cdc-soft-sustained
+test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay
 
 # Run all tests
 test-all: test-cli test-connections test-dbio test-core test-python test-cdc

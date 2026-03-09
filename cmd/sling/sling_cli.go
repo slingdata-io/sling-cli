@@ -193,6 +193,11 @@ var cliRunFlags = []g.Flag{
 		Type:        "bool",
 		Description: "Shows some examples.",
 	},
+	{
+		Name:        "home-dir",
+		Type:        "string",
+		Description: "Specify the sling home directory to use.",
+	},
 }
 
 var cliRun = &g.CliSC{
@@ -270,11 +275,23 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "Set logging level to TRACE (do not use in production).",
 				},
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
+				},
 			},
 		},
 		{
 			Name:        "list",
 			Description: "list local connections detected",
+			Flags: []g.Flag{
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
+				},
+			},
 		},
 		{
 			Name:        "test",
@@ -304,6 +321,11 @@ var cliConns = &g.CliSC{
 					Type:        "string",
 					Description: "The endpoint(s) to test, for API connections only",
 				},
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
+				},
 			},
 		},
 		{
@@ -315,6 +337,13 @@ var cliConns = &g.CliSC{
 					ShortName:   "",
 					Type:        "string",
 					Description: "The name of the connection to remove",
+				},
+			},
+			Flags: []g.Flag{
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
 				},
 			},
 		},
@@ -333,6 +362,13 @@ var cliConns = &g.CliSC{
 					ShortName:   "",
 					Type:        "string",
 					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#set-connections",
+				},
+			},
+			Flags: []g.Flag{
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
 				},
 			},
 		},
@@ -364,6 +400,11 @@ var cliConns = &g.CliSC{
 					Name:        "trace",
 					Type:        "bool",
 					Description: "Set logging level to TRACE (do not use in production).",
+				},
+				{
+					Name:        "home-dir",
+					Type:        "string",
+					Description: "Specify the sling home directory to use.",
 				},
 			},
 		},
@@ -518,6 +559,11 @@ func cliInit(done chan struct{}) int {
 	flaggy.SetVersion(core.Version)
 	for _, cli := range g.CliArr {
 		flaggy.AttachSubcommand(cli.Sc, 1)
+	}
+
+	// patch 'sling mcp' into 'sling serve mcp' for backwards compatibility
+	if len(os.Args) >= 2 && os.Args[1] == "mcp" {
+		os.Args = append([]string{os.Args[0], "serve"}, os.Args[1:]...)
 	}
 
 	flaggy.ShowHelpOnUnexpectedDisable()

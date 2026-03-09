@@ -368,7 +368,6 @@ func TestBigQuery(t *testing.T) {
 }
 
 func connect(db *testDB) (conn Connection, err error) {
-	env.SetHomeDir("sling")
 	connsMap, _ = env.GetHomeDirConnsMap()
 
 	if ce, ok := connsMap[db.name]; ok {

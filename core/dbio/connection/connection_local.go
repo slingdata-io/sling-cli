@@ -130,25 +130,21 @@ func GetLocalConns(options ...any) ConnEntries {
 		}
 	}
 
-	for name, homeDir := range env.HomeDirs {
-		envFilePath := env.GetEnvFilePath(homeDir)
-		if g.PathExists(envFilePath) {
-			m := g.M()
-			g.JSONConvert(env.LoadEnvFile(envFilePath), &m)
-			profileConns, err := ReadConnections(m)
-			if !g.LogError(err) {
-				for _, conn := range profileConns {
-					c := ConnEntry{
-						Name:        strings.ToUpper(conn.Info().Name),
-						Description: conn.GetType().NameLong(),
-						Source:      name + " env yaml",
-						Connection:  conn,
-					}
-					connsMap[c.Name] = c
+	if envFilePath := env.GetEnvFilePath(env.HomeDir); g.PathExists(envFilePath) {
+		m := g.M()
+		g.JSONConvert(env.LoadEnvFile(envFilePath), &m)
+		profileConns, err := ReadConnections(m)
+		if !g.LogError(err) {
+			for _, conn := range profileConns {
+				c := ConnEntry{
+					Name:        strings.ToUpper(conn.Info().Name),
+					Description: conn.GetType().NameLong(),
+					Source:      "sling env yaml",
+					Connection:  conn,
 				}
+				connsMap[c.Name] = c
 			}
 		}
-
 	}
 
 	// env.yaml as an Environment variable

@@ -713,3 +713,67 @@
       name: Item 2
   expected_state: {}
   expected_next_state: {}
+
+- id: 14
+  name: jmespath_with_state_variable_rendering
+  mock_response:
+    customers:
+      - id: 1
+        name: Alice
+        email: alice@example.com
+      - id: 2
+        name: Bob
+        email: bob@example.com
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        state:
+          endpoint_name: customers
+        response:
+          records:
+            jmespath: "{state.endpoint_name}[]"
+  expected_records:
+    - id: "1"
+      name: Alice
+      email: alice@example.com
+    - id: "2"
+      name: Bob
+      email: bob@example.com
+  expected_state:
+    endpoint_name: customers
+
+- id: 15
+  name: jq_with_state_variable_rendering
+  mock_response:
+    orders:
+      - id: 101
+        product: Widget
+        quantity: 5
+      - id: 102
+        product: Gadget
+        quantity: 3
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        state:
+          resource: orders
+        response:
+          records:
+            jq: ".{state.resource}[]"
+  expected_records:
+    - id: "101"
+      product: Widget
+      quantity: "5"
+    - id: "102"
+      product: Gadget
+      quantity: "3"
+  expected_state:
+    resource: orders

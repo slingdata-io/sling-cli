@@ -1,0 +1,19 @@
+source: ORACLE
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+  target_options:
+    use_bulk: false
+
+streams:
+  oracle.test1k_duckdb_pg:
+    object: public.test1k_oracle_chunk_sql
+    primary_key: [id]
+    update_key: id
+    sql: |-
+      SELECT *
+      FROM ORACLE.TEST1K_DUCKDB_PG
+      WHERE ID <= 100
+    source_options:
+      chunk_size: 50

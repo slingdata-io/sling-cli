@@ -210,6 +210,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "examples":
 			showExamples = cast.ToBool(v)
+		case "home-dir":
+			if homeDir := cast.ToString(v); homeDir != "" {
+				os.Setenv("SLING_HOME_DIR", homeDir)
+				env.LoadHomeDir()
+				connection.GetLocalConns(true) // force reload connections
+			}
 		case "cdc-options":
 			payload := cast.ToString(v)
 			options, err := parsePayload(payload, true)
@@ -439,11 +445,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		cfg.Env["SLING_WORK_PATH"], _ = os.Getwd()
 	}
 
-	// set logging
-	if val := cfg.Env["SLING_LOGGING"]; val != "" {
-		os.Setenv("SLING_LOGGING", val)
-	}
-
 	task = sling.NewTask(env.ExecID, cfg)
 	task.Replication = replication
 
@@ -546,6 +547,12 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	if len(replication.Tasks) == 0 {
 		g.Warn("Did not match any streams. Exiting.")
 		return
+	}
+
+	// set logging
+	if val := cast.ToString(replication.Env["SLING_LOGGING"]); val != "" {
+		os.Setenv("SLING_LOGGING", val)
+		env.InitLogger()
 	}
 
 	isThreadChild := cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))

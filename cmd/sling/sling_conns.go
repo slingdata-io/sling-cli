@@ -25,11 +25,16 @@ var (
 func processConns(c *g.CliSC) (ok bool, err error) {
 	ok = true
 
+	if homeDir := cast.ToString(c.Vals["home-dir"]); homeDir != "" {
+		os.Setenv("SLING_HOME_DIR", homeDir)
+		env.LoadHomeDir()
+	}
+
 	ef := env.LoadSlingEnvFile()
 	ec := connection.EnvFileConns{EnvFile: &ef}
 	asJSON := os.Getenv("SLING_OUTPUT") == "json"
 
-	entries := connection.GetLocalConns()
+	entries := connection.GetLocalConns(true)
 	defer connection.CloseAll()
 
 	env.SetTelVal("task_start_time", time.Now())

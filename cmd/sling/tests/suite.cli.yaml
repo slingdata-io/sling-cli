@@ -2071,3 +2071,36 @@
   output_contains:
     - 'Alice'
     - 'execution succeeded'
+
+# Test pipeline store variables in replication where: and sql: fields
+- id: 215
+  name: 'Pipeline store variables in replication where/sql fields'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.18.store_in_replication.yaml'
+  output_contains:
+    - 'store variables work in where: field'
+    - 'store variables work in sql: field'
+    - 'Pipeline completed successfully'
+
+# Test that stream-level columns merge with defaults.columns instead of replacing
+- id: 216
+  name: 'Stream columns merge with defaults columns (Oracle to Postgres)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.107.columns_merge_defaults.yaml'
+  streams: 4
+  output_contains:
+    - 'execution succeeded'
+
+- id: 217
+  name: 'SLING_STATE with direct_insert and datetime update_key (MSSQL to ClickHouse)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.17.direct_insert_state_datetime.yaml'
+  output_contains:
+    - 'setting incremental state'
+    - 'execution succeeded'
+
+# Oracle chunking with custom SQL fails because Oracle doesn't support AS for table aliases
+# Sling wraps custom SQL as "(...) as t" but Oracle requires "(...) t" (no AS keyword)
+- id: 218
+  name: 'Oracle chunking with custom SQL (AS table alias bug)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.108.oracle_chunk_custom_sql.yaml'
+  streams: 2
+  output_contains:
+    - 'execution succeeded'

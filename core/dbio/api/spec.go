@@ -365,6 +365,9 @@ func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
 		"mode", sCfg.Mode,
 		"store", ep.conn.State.Store,
 		"limit", sCfg.Limit,
+		"range_start", nil,
+		"range_end", nil,
+		"range_step", nil,
 	)
 
 	// set backfill params
@@ -372,6 +375,9 @@ func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
 		contextMap["range_start"] = rangeParts[0]
 		if len(rangeParts) > 1 {
 			contextMap["range_end"] = lo.Ternary[any](rangeParts[1] == "", nil, rangeParts[1])
+		}
+		if len(rangeParts) > 2 {
+			contextMap["range_step"] = lo.Ternary[any](rangeParts[2] == "", nil, rangeParts[2])
 		}
 	}
 
@@ -1270,6 +1276,7 @@ type SingleRequest struct {
 	httpRespWg sync.WaitGroup `yaml:"-" json:"-"`
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
+	durationMs int64          `yaml:"-" json:"-"`
 	iter       *Iteration     `yaml:"-" json:"-"` // the iteration that the req belongs to
 	state      StateMap       `yaml:"-" json:"-"` // copy of iteration state for request (prevents mutation)
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
@@ -1320,6 +1327,61 @@ func (lrs *SingleRequest) Map() map[string]any {
 		g.LogError(g.Error(err, "error converting single-request-state"))
 	}
 	return vars
+}
+
+// SpecEventChn, when non-nil, receives structured spec test events as JSON-safe maps.
+// The LSP layer creates this channel before a test run and drains it in a goroutine.
+var SpecEventChn chan map[string]any
+
+// FireSpecEvent sends an event to SpecEventChn if it is non-nil.
+func FireSpecEvent(event map[string]any) {
+	if SpecEventChn != nil {
+		SpecEventChn <- event
+	}
+}
+
+// ToSpecEvent builds a JSON-safe map with all request/response details
+// for the spec inspector. Includes unexported fields (id, timestamp,
+// endpoint name, iteration id) that don't normally marshal.
+func (req *SingleRequest) ToSpecEvent() map[string]any {
+	event := g.M(
+		"type", "request-complete",
+		"req_id", req.id,
+		"timestamp", req.timestamp,
+		"endpoint", req.endpoint.Name,
+		"duration_ms", req.durationMs,
+	)
+
+	// iteration context
+	if req.iter != nil {
+		event["iter_id"] = req.iter.id
+		event["iter_sequence"] = req.iter.sequence
+	}
+
+	// request state
+	if req.Request != nil {
+		event["request"] = g.M(
+			"method", req.Request.Method,
+			"url", req.Request.URL,
+			"headers", req.Request.Headers,
+			"payload", req.Request.Payload,
+			"attempts", req.Request.Attempts,
+		)
+	}
+
+	// response state
+	if req.Response != nil {
+		event["size_bytes"] = len(req.Response.Text)
+		event["response"] = g.M(
+			"status", req.Response.Status,
+			"headers", req.Response.Headers,
+			"body", req.Response.Text,
+			"record_count", len(req.Response.Records),
+			"records", req.Response.Records,
+		)
+	}
+
+	return event
 }
 
 // RequestState captures the state of the HTTP request for reference and debugging

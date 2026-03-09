@@ -23,19 +23,6 @@ type EnvFile struct {
 	Body       string `json:"-" yaml:"-"`
 }
 
-func SetHomeDir(name string) string {
-	envKey := strings.ToUpper(name) + "_HOME_DIR"
-	dir := os.Getenv(envKey)
-	if dir == "" {
-		dir = path.Join(g.UserHomeDir(), "."+name)
-		os.Setenv(envKey, dir)
-	}
-	envMux.Lock()
-	HomeDirs[name] = dir
-	envMux.Unlock()
-	return dir
-}
-
 func (ef *EnvFile) WriteEnvFile() (err error) {
 	connsMap := yaml.MapSlice{}
 
@@ -217,7 +204,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 	ef.Path = path
 
 	// expand variables
-	envMap := map[string]any{}
+	envMap := map[string]any{"SLING_HOME_DIR": HomeDir}
 	for _, tuple := range os.Environ() {
 		key := strings.Split(tuple, "=")[0]
 		val := strings.TrimPrefix(tuple, key+"=")
@@ -252,5 +239,5 @@ func LoadEnvFile(path string) (ef EnvFile) {
 }
 
 func GetEnvFilePath(dir string) string {
-	return path.Join(dir, "env.yaml")
+	return CleanWindowsPath(path.Join(dir, "env.yaml"))
 }

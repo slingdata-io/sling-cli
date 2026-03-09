@@ -19,3 +19,6 @@ streams:
       table_keys:
         primary: [id]
         index: [first_name]
+
+env:
+  SLING_LOGGING: JSON

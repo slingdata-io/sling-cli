@@ -35,7 +35,6 @@ var (
 	LogSink        func(*g.LogLine)
 	TelMap         = g.M("begin_time", time.Now().UnixMicro())
 	TelMux         = sync.Mutex{}
-	HomeDirs       = map[string]string{}
 	envMux         = sync.Mutex{}
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
@@ -99,25 +98,13 @@ const (
 var envFolder embed.FS
 
 func init() {
-
-	HomeDir = SetHomeDir("sling")
-	HomeDirEnvFile = GetEnvFilePath(HomeDir)
 	Executable, _ = osext.Executable()
-
-	// create env file if not exists
-	os.MkdirAll(HomeDir, 0755)
-	if HomeDir != "" && !g.PathExists(HomeDirEnvFile) {
-		defaultEnvBytes, _ := envFolder.ReadFile("default.env.yaml")
-		os.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
-	}
 
 	if content := os.Getenv("SLING_ENV_YAML"); content != "" {
 		os.Setenv("ENV_YAML", content)
 	}
 
-	// other sources of creds
-	SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
-	SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
+	LoadHomeDir()
 
 	if SentryDsn == "" {
 		SentryDsn = os.Getenv("SENTRY_DSN")
@@ -136,6 +123,24 @@ func init() {
 			g.Debug("Starting pprof webserver @ localhost:6060")
 			g.LogError(http.ListenAndServe("localhost:6060", nil))
 		}()
+	}
+}
+
+func LoadHomeDir() {
+	envKey := "SLING_HOME_DIR"
+	HomeDir = CleanWindowsPath(os.Getenv(envKey))
+	if HomeDir == "" {
+		HomeDir = CleanWindowsPath(path.Join(g.UserHomeDir(), ".sling"))
+		os.Setenv(envKey, HomeDir)
+	}
+
+	HomeDirEnvFile = GetEnvFilePath(HomeDir)
+
+	// create env file if not exists
+	os.MkdirAll(HomeDir, 0755)
+	if HomeDir != "" && !g.PathExists(HomeDirEnvFile) {
+		defaultEnvBytes, _ := envFolder.ReadFile("default.env.yaml")
+		os.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
 	}
 }
 
@@ -619,15 +624,13 @@ func GetHomeDirConnsMap() (connsMap map[string]map[string]any, err error) {
 	defer envMux.Unlock()
 	envMux.Lock()
 	connsMap = map[string]map[string]any{}
-	for _, homeDir := range HomeDirs {
-		envFilePath := GetEnvFilePath(homeDir)
-		if g.PathExists(envFilePath) {
-			m := g.M()
-			g.JSONConvert(LoadEnvFile(envFilePath), &m)
-			cm, _ := readConnectionsMap(m)
-			for k, v := range cm {
-				connsMap[k] = v
-			}
+	envFilePath := GetEnvFilePath(HomeDir)
+	if g.PathExists(envFilePath) {
+		m := g.M()
+		g.JSONConvert(LoadEnvFile(envFilePath), &m)
+		cm, _ := readConnectionsMap(m)
+		for k, v := range cm {
+			connsMap[k] = v
 		}
 	}
 	return connsMap, nil
