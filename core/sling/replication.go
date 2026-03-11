@@ -768,7 +768,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		if chunkExpr != "" {
 			// no update_key needed for chunking by expression
 		} else if stream.config.UpdateKey == "" {
-			return g.Error(err, "did not provide update_key for stream chunking: %s", stream.name)
+			return g.Error("did not provide update_key for stream chunking: %s", stream.name)
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config

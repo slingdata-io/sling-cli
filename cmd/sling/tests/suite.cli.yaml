@@ -2104,3 +2104,13 @@
   streams: 2
   output_contains:
     - 'execution succeeded'
+
+# DuckDB file locking prevents concurrent chunk writes (issue #717)
+# When using chunk_size with DuckDB target, multiple threads try to open the same
+# .duckdb file simultaneously, causing "Could not set lock on file" errors.
+- id: 219
+  name: 'DuckDB chunking file lock (issue #717)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.19.duckdb_chunk_lock.yaml'
+  group: duckdb
+  output_contains:
+    - 'SUCCESS: DuckDB chunking with chunk_size works (issue #717)'

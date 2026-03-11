@@ -317,6 +317,7 @@ func (cfg *Config) ClearTableForChunkLoadWithRange() (err error) {
 		if err != nil {
 			return g.Error(err, "could not connect to target conn for preparing final table for chunk loading")
 		}
+		defer dbConn.Close()
 
 		switch cfg.Mode {
 		case FullRefreshMode:
