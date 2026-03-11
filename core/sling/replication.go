@@ -726,6 +726,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 	if err != nil {
 		return g.Error(err)
 	}
+	defer sourceConnDB.Close()
 
 	for i, stream := range streamsToChunk {
 		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
@@ -781,6 +782,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			if err != nil {
 				return g.Error(err, "could not connect to target database for stream chunking: %s", stream.name)
 			}
+			defer tgtConn.Close()
 			err = getIncrementalValueViaDB(&tempCfg, tgtConn, sourceConnDB.GetType())
 			if err != nil {
 				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)

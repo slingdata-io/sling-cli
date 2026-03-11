@@ -1,21 +1,25 @@
 # Test DuckDB chunking file lock (issue #717)
-# When using chunk_size with DuckDB target, ClearTableForChunkLoadWithRange
-# must close its connection before chunk tasks open theirs, otherwise
-# DuckDB's exclusive file lock causes "Could not set lock on file" errors.
+# When using chunk_size with DuckDB target and wildcard streams,
+# the connection opened during ClearTableForChunkLoadWithRange (or other compile steps)
+# must be properly closed before chunk tasks open theirs.
 
 steps:
-  # 1. Create source table in Postgres
+  # 1. Create source tables in Postgres
   - id: setup
     connection: postgres
     query: |
       DROP TABLE IF EXISTS public.test_duckdb_chunk_lock;
+      DROP TABLE IF EXISTS public.test_duckdb_chunk_lock_other;
       CREATE TABLE public.test_duckdb_chunk_lock AS
       SELECT generate_series AS id, 'name_' || generate_series AS name
       FROM generate_series(1, 1000);
+      CREATE TABLE public.test_duckdb_chunk_lock_other AS
+      SELECT generate_series AS id, 'other_' || generate_series AS val
+      FROM generate_series(1, 100);
 
-  - log: "Created source table with 1000 rows"
+  - log: "Created source tables (1000 + 100 rows)"
 
-  # 2. Run replication with chunking to DuckDB target
+  # 2. Run replication with explicit streams, one chunked
   - replication:
       source: postgres
       target: DUCKDB
@@ -26,6 +30,8 @@ steps:
       env:
         SLING_THREADS: 1
       streams:
+        public.test_duckdb_chunk_lock_other:
+          object: main.test_duckdb_chunk_lock_other
         public.test_duckdb_chunk_lock:
           object: main.test_duckdb_chunk_lock
           primary_key: [id]
@@ -34,23 +40,58 @@ steps:
             chunk_size: 250
     on_failure: abort
 
-  - log: "Replication with chunking completed"
+  - log: "Replication with explicit streams completed"
 
-  # 3. Verify all 1000 rows arrived
+  # 3. Run replication with wildcard (like the user's public.*)
+  #    This is the scenario that triggers the issue
+  - replication:
+      source: postgres
+      target: DUCKDB
+      defaults:
+        mode: full-refresh
+        object: "main.{stream_table}"
+        target_options:
+          use_bulk: false
+        source_options:
+          chunk_size: 250
+      env:
+        SLING_THREADS: 1
+      streams:
+        "public.test_duckdb_chunk_lock*":
+          primary_key: [id]
+          update_key: id
+    on_failure: abort
+
+  - log: "Replication with wildcard completed"
+
+  # 4. Verify all rows arrived
   - connection: DUCKDB
     query: SELECT count(*) as cnt FROM main.test_duckdb_chunk_lock
     into: result
 
-  - log: "DuckDB row count: {store.result[0].cnt}"
+  - log: "DuckDB chunk table row count: {store.result[0].cnt}"
 
   - check: int_parse(store.result[0].cnt) == 1000
     failure_message: "Expected 1000 rows, got {store.result[0].cnt}"
 
+  - connection: DUCKDB
+    query: SELECT count(*) as cnt FROM main.test_duckdb_chunk_lock_other
+    into: result_other
+
+  - log: "DuckDB other table row count: {store.result_other[0].cnt}"
+
+  - check: int_parse(store.result_other[0].cnt) == 100
+    failure_message: "Expected 100 rows, got {store.result_other[0].cnt}"
+
   - log: "SUCCESS: DuckDB chunking with chunk_size works (issue #717)"
 
-  # 4. Cleanup
+  # 5. Cleanup
   - connection: DUCKDB
-    query: DROP TABLE IF EXISTS main.test_duckdb_chunk_lock;
+    query: |
+      DROP TABLE IF EXISTS main.test_duckdb_chunk_lock;
+      DROP TABLE IF EXISTS main.test_duckdb_chunk_lock_other;
 
   - connection: postgres
-    query: DROP TABLE IF EXISTS public.test_duckdb_chunk_lock;
+    query: |
+      DROP TABLE IF EXISTS public.test_duckdb_chunk_lock;
+      DROP TABLE IF EXISTS public.test_duckdb_chunk_lock_other;
