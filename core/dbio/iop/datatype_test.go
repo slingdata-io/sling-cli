@@ -419,7 +419,7 @@ func TestColumnTyping(t *testing.T) {
 			name:                 "string_max_length",
 			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 200}},
 			columnTyping:         ColumnTyping{String: &StringColumnTyping{MaxLength: 150}},
-			expectedStringLength: 200, // original length since MaxLength doesn't override max
+			expectedStringLength: 150, // MaxLength caps the column length
 		},
 		{
 			name:                 "string_use_max",

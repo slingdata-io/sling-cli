@@ -1,0 +1,177 @@
+# Reproduce: Oracle column_typing and explicit columns type not translating correctly
+# Three scenarios:
+#   1. column_typing with max_length:250 + use_bulk:true  → should produce VARCHAR2(250), not CLOB
+#   2. column_typing with max_length:250 + use_bulk:false → should produce VARCHAR2(250), not CLOB
+#   3. explicit columns: { col_001: string(100) }         → should produce VARCHAR2(100), not CLOB
+
+steps:
+  # 0. Cleanup all test tables
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_BULK'; EXCEPTION WHEN OTHERS THEN NULL; END;
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_NOBULK'; EXCEPTION WHEN OTHERS THEN NULL; END;
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_COLS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  # ── Stream 1: column_typing + use_bulk: true ──
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://cmd/sling/tests/files/test_wide_columns.csv:
+          object: SYSTEM.TEST_TYPING_BULK
+          target_options:
+            use_bulk: true
+            column_typing:
+              string:
+                max_length: 250
+
+  - connection: oracle
+    query: |
+      SELECT column_name, data_type, data_length
+      FROM all_tab_columns
+      WHERE table_name = 'TEST_TYPING_BULK' AND owner = 'SYSTEM'
+      AND column_name LIKE 'COL_%'
+      ORDER BY column_name
+    into: bulk_cols
+
+  - log: |
+      Stream 1 (column_typing + use_bulk=true):
+      {pretty_table(store.bulk_cols)}
+
+  - check: int_parse(store.bulk_cols[0].data_length) <= 250
+    failure_message: "BULK: column_typing max_length:250 not respected. COL_001 data_length={store.bulk_cols[0].data_length} (expected <= 250)"
+    on_failure: warn
+
+  - connection: oracle
+    query: SELECT COUNT(*) as cnt FROM SYSTEM.TEST_TYPING_BULK
+    into: bulk_count
+
+  - check: int_parse(store.bulk_count[0].cnt) == 5
+    failure_message: "BULK: Expected 5 rows, got {store.bulk_count[0].cnt}"
+    on_failure: warn
+
+  - log: "Stream 1 done"
+
+  # ── Stream 2: column_typing + use_bulk: false ──
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://cmd/sling/tests/files/test_wide_columns.csv:
+          object: SYSTEM.TEST_TYPING_NOBULK
+          target_options:
+            use_bulk: false
+            column_typing:
+              string:
+                max_length: 250
+
+  - connection: oracle
+    query: |
+      SELECT column_name, data_type, data_length
+      FROM all_tab_columns
+      WHERE table_name = 'TEST_TYPING_NOBULK' AND owner = 'SYSTEM'
+      AND column_name LIKE 'COL_%'
+      ORDER BY column_name
+    into: nobulk_cols
+
+  - log: |
+      Stream 2 (column_typing + use_bulk=false):
+      {pretty_table(store.nobulk_cols)}
+
+  - check: int_parse(store.nobulk_cols[0].data_length) <= 250
+    failure_message: "NOBULK: column_typing max_length:250 not respected. COL_001 data_length={store.nobulk_cols[0].data_length} (expected <= 250)"
+    on_failure: warn
+
+  - connection: oracle
+    query: SELECT COUNT(*) as cnt FROM SYSTEM.TEST_TYPING_NOBULK
+    into: nobulk_count
+
+  - check: int_parse(store.nobulk_count[0].cnt) == 5
+    failure_message: "NOBULK: Expected 5 rows, got {store.nobulk_count[0].cnt}"
+    on_failure: warn
+
+  - log: "Stream 2 done"
+
+  # ── Stream 3: explicit columns with string(100) ──
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://cmd/sling/tests/files/test_wide_columns.csv:
+          object: SYSTEM.TEST_TYPING_COLS
+          columns:
+            col_001: string(100)
+            col_002: string(200)
+
+  - connection: oracle
+    query: |
+      SELECT column_name, data_type, data_length
+      FROM all_tab_columns
+      WHERE table_name = 'TEST_TYPING_COLS' AND owner = 'SYSTEM'
+      AND column_name IN ('COL_001', 'COL_002', 'COL_003')
+      ORDER BY column_name
+    into: cols_info
+
+  - log: |
+      Stream 3 (explicit columns string(100)/string(200)):
+      {pretty_table(store.cols_info)}
+
+  - check: int_parse(store.cols_info[0].data_length) == 100
+    failure_message: "COLS: COL_001 should be VARCHAR2(100), got data_length={store.cols_info[0].data_length}"
+    on_failure: warn
+
+  - check: int_parse(store.cols_info[1].data_length) == 200
+    failure_message: "COLS: COL_002 should be VARCHAR2(200), got data_length={store.cols_info[1].data_length}"
+    on_failure: warn
+
+  - connection: oracle
+    query: SELECT COUNT(*) as cnt FROM SYSTEM.TEST_TYPING_COLS
+    into: cols_count
+
+  - check: int_parse(store.cols_count[0].cnt) == 5
+    failure_message: "COLS: Expected 5 rows, got {store.cols_count[0].cnt}"
+    on_failure: warn
+
+  - log: "Stream 3 done"
+
+  # ── Final validation (strict) ──
+  - check: int_parse(store.bulk_cols[0].data_length) <= 250
+    failure_message: "FAIL BULK: COL_001 data_length={store.bulk_cols[0].data_length} (expected <= 250)"
+
+  - log: "SUCCESS: Stream 1 (column_typing + use_bulk=true) passed"
+
+  - check: int_parse(store.nobulk_cols[0].data_length) <= 250
+    failure_message: "FAIL NOBULK: COL_001 data_length={store.nobulk_cols[0].data_length} (expected <= 250)"
+
+  - log: "SUCCESS: Stream 2 (column_typing + use_bulk=false) passed"
+
+  - check: int_parse(store.cols_info[0].data_length) == 100
+    failure_message: "FAIL COLS: COL_001 data_length={store.cols_info[0].data_length} (expected 100)"
+
+  - check: int_parse(store.cols_info[1].data_length) == 200
+    failure_message: "FAIL COLS: COL_002 data_length={store.cols_info[1].data_length} (expected 200)"
+
+  - log: "SUCCESS: Stream 3 (explicit columns) passed"
+
+  # ── Cleanup ──
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_BULK'; EXCEPTION WHEN OTHERS THEN NULL; END;
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_NOBULK'; EXCEPTION WHEN OTHERS THEN NULL; END;
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TYPING_COLS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  - log: "Oracle column_typing test complete"

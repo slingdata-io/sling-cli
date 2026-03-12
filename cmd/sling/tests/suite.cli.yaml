@@ -2114,3 +2114,14 @@
   group: duckdb
   output_contains:
     - 'SUCCESS: DuckDB chunking with chunk_size works (issue #717)'
+
+# Oracle column_typing and explicit columns type not translating correctly
+# Tests: column_typing+bulk, column_typing+nobulk, explicit columns string(N)
+- id: 220
+  name: 'Oracle column_typing and explicit columns type translation'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.20.oracle_sqlldr_column_typing.yaml'
+  output_contains:
+    - 'Stream 1 (column_typing + use_bulk=true) passed'
+    - 'Stream 2 (column_typing + use_bulk=false) passed'
+    - 'Stream 3 (explicit columns) passed'
+    - 'Oracle column_typing test complete'
