@@ -2125,3 +2125,14 @@
     - 'Stream 2 (column_typing + use_bulk=false) passed'
     - 'Stream 3 (explicit columns) passed'
     - 'Oracle column_typing test complete'
+
+# String lengths not auto-inferred when reading from delimited files to Oracle
+# Issue: Without column_typing, all string columns from CSV/text files get VARCHAR2(4000)
+# instead of being sized based on actual max string length in the data.
+# Reproduces user report: caret-delimited file, no header, column names in config
+- id: 221
+  name: 'CSV to Oracle string length auto-inference (no column_typing)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.21.csv_oracle_string_length_inference.yaml'
+  output_contains:
+    - 'SUCCESS: String lengths were auto-inferred from delimited file data'
+    - 'CSV to Oracle string length inference test complete'

@@ -1,0 +1,114 @@
+# Reproduce: String lengths not auto-inferred when reading from delimited files
+# Issue: When reading CSV/text files to Oracle without column_typing, all string columns
+# get VARCHAR2(4000) instead of being sized based on actual data length.
+# The expected behavior is that Sling should infer string lengths from the data
+# (using Stats.MaxLen) and create appropriately sized VARCHAR2 columns.
+#
+# This test:
+#   1. Generates a temp delimited file with known string lengths (caret-delimited, no header)
+#   2. Replicates it to Oracle WITHOUT column_typing (reproduces the bug)
+#   3. Checks that Oracle columns have inferred lengths < 4000 (not all VARCHAR2(4000))
+
+steps:
+  # 0. Create temp directory
+  - command: mkdir -p temp/csv_oracle_strlen
+
+  # 1. Write a caret-delimited file with known max string lengths
+  #    col1: max 5 chars (codes like "ABC01")
+  #    col2: max 10 chars (short names)
+  #    col3: max 30 chars (longer descriptions)
+  #    col4: max 3 chars (numeric-looking but string)
+  #    header: false (no header row, just like the user's setup)
+  - type: write
+    to: local/temp/csv_oracle_strlen/orgUnits.txt
+    content: |
+      ABC01^Sales^Regional Sales Division East^100
+      DEF02^Marketing^Digital Marketing Department^200
+      GHI03^Finance^Corporate Finance and Audit^300
+      JKL04^HR^Human Resources and Talent^400
+      MNO05^IT^Information Technology Support^500
+
+  # 2. Cleanup Oracle test table
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_STRLEN_INFER'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  # 3. Replicate delimited file to Oracle WITHOUT column_typing
+  #    This mimics the user's setup: caret delimiter, no header, column names provided
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://temp/csv_oracle_strlen/orgUnits.txt:
+          object: SYSTEM.TEST_STRLEN_INFER
+          source_options:
+            delimiter: "^"
+            header: false
+          target_options:
+            column_typing:
+              string:
+                max_length: 200
+                length_factor: 2
+                use_max: false
+          columns:
+            ORGSRUCTURECODE:
+            ORGUNITCODE:
+            ORGUNITCODEORIG:
+            ORGUNITNAME:
+
+  # 4. Check what Oracle created — get actual column data_length values
+  - connection: oracle
+    query: |
+      SELECT column_name, data_type, data_length
+      FROM all_tab_columns
+      WHERE table_name = 'TEST_STRLEN_INFER' AND owner = 'SYSTEM'
+      AND column_name NOT LIKE '%SLING%'
+      ORDER BY column_id
+    into: col_info
+
+  - log: |
+      Column info (no column_typing):
+      {pretty_table(store.col_info)}
+
+  # 5. Verify row count
+  - connection: oracle
+    query: SELECT COUNT(*) as cnt FROM SYSTEM.TEST_STRLEN_INFER
+    into: row_count
+
+  - check: int_parse(store.row_count[0].cnt) == 5
+    failure_message: "Expected 5 rows, got {store.row_count[0].cnt}"
+
+  # 6. Verify string lengths were inferred (NOT all 4000)
+  #    The max string in the file is ~30 chars, so with 2x safety factor = ~60
+  #    Any reasonable inferred length should be well under 4000
+  - check: int_parse(store.col_info[0].data_length) < 4000
+    failure_message: |
+      BUG: ORGSRUCTURECODE has data_length={store.col_info[0].data_length} (expected < 4000).
+      String length was NOT inferred from file data — got max_string_type default instead.
+
+  - check: int_parse(store.col_info[1].data_length) < 4000
+    failure_message: |
+      BUG: ORGUNITCODE has data_length={store.col_info[1].data_length} (expected < 4000).
+      String length was NOT inferred from file data — got max_string_type default instead.
+
+  - check: int_parse(store.col_info[2].data_length) < 4000
+    failure_message: |
+      BUG: ORGUNITCODEORIG has data_length={store.col_info[2].data_length} (expected < 4000).
+      String length was NOT inferred from file data — got max_string_type default instead.
+
+  - check: int_parse(store.col_info[3].data_length) < 4000
+    failure_message: |
+      BUG: ORGUNITNAME has data_length={store.col_info[3].data_length} (expected < 4000).
+      String length was NOT inferred from file data — got max_string_type default instead.
+
+  - log: "SUCCESS: String lengths were auto-inferred from delimited file data"
+
+  # 7. Cleanup
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_STRLEN_INFER'; EXCEPTION WHEN OTHERS THEN NULL; END;
+  - command: rm -rf temp/csv_oracle_strlen
+
+  - log: "CSV to Oracle string length inference test complete"
