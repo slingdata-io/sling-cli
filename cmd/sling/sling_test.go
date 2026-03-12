@@ -86,7 +86,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
-	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
+	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
 	dbio.Type("postgres_adbc"):   {name: "postgres_adbc", adjustCol: g.Bool(false)},
 	dbio.TypeDbRedshift:          {name: "redshift", adjustCol: g.Bool(false)},

@@ -343,7 +343,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	}
 
 retry:
-	proc := exec.Command(
+	proc := exec.CommandContext(ds.Context.Ctx,
 		conn.sqlldrPath(),
 		"'"+credHost+"'",
 		"control="+ctlPath,
@@ -353,6 +353,7 @@ retry:
 		"log="+logPath,
 		"bad="+logPath,
 	)
+	proc.WaitDelay = 15 * time.Second
 
 	ds.SetConfig(conn.Props())
 	proc.Stderr = &stderr
@@ -375,6 +376,17 @@ retry:
 			g.Warn("could not start sqlldr (%s), retrying...", err.Error())
 			time.Sleep(1 * time.Second)
 			goto retry
+		}
+
+		errOutput := stderr.String() + stdout.String()
+
+		// detect OOM specifically so users get actionable guidance
+		if strings.Contains(errOutput, "SQL*Loader-700") || strings.Contains(errOutput, "Out of memory") {
+			return ds.Count, g.Error(
+				err,
+				"SQL*Loader ran out of memory (SQL*Loader-700). Try reducing batch size or the char() allocation size for string columns.\n\nOutput:\n%s",
+				errOutput,
+			)
 		}
 
 		err = g.Error(
@@ -458,7 +470,9 @@ func (conn *OracleConn) sqlLoadCsvReader(ds *iop.Datastream, pu *cmap.Concurrent
 	go func() {
 		defer pipeW.Close()
 		err := conn.writeCsv(ds, pipeW, pu)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), io.ErrClosedPipe.Error()) {
+			ds.Context.CaptureErr(g.Error(err, "error writing to sqlldr stdin pipe"))
+			ds.Context.Cancel()
 			return
 		}
 	}()
