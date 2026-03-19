@@ -39,7 +39,7 @@ func (fs *AzureFileSysClient) Init(ctx context.Context) (err error) {
 	}
 
 	// service principal keys that need to be set in env var
-	for _, key := range g.ArrStr("CLIENT_ID", "TENANT_ID", "CLIENT_CERTIFICATE_PATH", "CLIENT_CERTIFICATE_PASSWORD") {
+	for _, key := range g.ArrStr("CLIENT_ID", "TENANT_ID", "CLIENT_SECRET", "CLIENT_CERTIFICATE_PATH", "CLIENT_CERTIFICATE_PASSWORD") {
 		if val := fs.GetProp(key); val != "" {
 			os.Setenv("AZURE_"+key, val)
 		}

@@ -98,7 +98,7 @@ func (conn *MsFabricConn) makeABFSClient() (fs filesys.FileSysClient, err error)
 	}
 
 	// Authentication properties - pass through from connection
-	for _, key := range []string{"ACCOUNT_KEY", "SAS_SVC_URL", "CLIENT_ID", "TENANT_ID", "CLIENT_SECRET"} {
+	for _, key := range []string{"ACCOUNT_KEY", "SAS_SVC_URL", "CLIENT_ID", "TENANT_ID", "CLIENT_SECRET", "CLIENT_CERTIFICATE_PATH", "CLIENT_CERTIFICATE_PASSWORD"} {
 		if val := conn.GetProp(key); val != "" {
 			abfsProps = append(abfsProps, key+"="+val)
 		}
