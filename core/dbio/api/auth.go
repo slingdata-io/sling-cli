@@ -413,11 +413,21 @@ func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateA
 		deviceAuthURL = strings.Replace(authURL, "/token", "/device/code", 1)
 	}
 
+	// Render scopes
+	scopes := make([]string, len(a.Scopes))
+	for i, s := range a.Scopes {
+		rendered, err := a.renderString(s)
+		if err != nil {
+			return g.Error(err, "could not render scope[%d]", i)
+		}
+		scopes[i] = rendered
+	}
+
 	// Create OAuth2 config
 	conf := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		Scopes:       a.Scopes,
+		Scopes:       scopes,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:       authorizeURL,
 			TokenURL:      authURL,
