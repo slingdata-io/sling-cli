@@ -1,0 +1,63 @@
+# Test DuckLake non-ASCII / Unicode column names (issue #721)
+# When replicating from DuckLake to Postgres, non-English column names
+# (e.g. Chinese characters) are incorrectly converted to generic "col", "col1", etc.
+# The CleanHeaderRow function strips all non-ASCII characters, leaving empty strings
+# which then become "col", "col1" placeholders.
+
+steps:
+  # 1. Setup: create ducklake table with Chinese column names
+  - connection: DUCKLAKE
+    query: |
+      DROP TABLE IF EXISTS sling_test.test_unicode_cols;
+      CREATE TABLE sling_test.test_unicode_cols ("编码" VARCHAR, "名称" VARCHAR);
+      INSERT INTO sling_test.test_unicode_cols VALUES ('1', '王'), ('2', '李');
+
+  - log: "Created ducklake source table with Chinese column names"
+
+  # 2. Replicate from ducklake to postgres
+  - replication:
+      source: DUCKLAKE
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        sling_test.test_unicode_cols:
+          object: public.test_unicode_cols
+    on_failure: abort
+
+  - log: "Replicated ducklake -> postgres"
+
+  # 3. Verify column names are preserved in postgres (not converted to col/col1)
+  - connection: POSTGRES
+    query: |
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'test_unicode_cols'
+      ORDER BY ordinal_position
+    into: pg_cols
+
+  - log: "Postgres columns => {store.pg_cols}"
+
+  # Column names should NOT be "col"/"col1" (the bug converts them to generic names)
+  - check: store.pg_cols[0].column_name != "col"
+    failure_message: "Column 1 was converted to generic 'col', expected Unicode name"
+
+  - check: store.pg_cols[1].column_name != "col1"
+    failure_message: "Column 2 was converted to generic 'col1', expected Unicode name"
+
+  # 4. Verify data is intact
+  - connection: POSTGRES
+    query: SELECT count(*) as cnt FROM public.test_unicode_cols
+    into: row_count
+
+  - check: int_parse(store.row_count[0].cnt) == 2
+    failure_message: "Expected 2 rows, got {store.row_count[0].cnt}"
+
+  - log: "SUCCESS: DuckLake Unicode column names preserved (issue #721)"
+
+  # 5. Cleanup
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS public.test_unicode_cols
+
+  - connection: DUCKLAKE
+    query: DROP TABLE IF EXISTS sling_test.test_unicode_cols

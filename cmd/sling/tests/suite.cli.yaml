@@ -2136,3 +2136,9 @@
   output_contains:
     - 'SUCCESS: String lengths were auto-inferred from delimited file data'
     - 'CSV to Oracle string length inference test complete'
+
+- id: 222
+  name: 'DuckLake Unicode column names preserved when replicating to Postgres (issue #721)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.22.ducklake_unicode_column_names.yaml'
+  output_contains:
+    - 'SUCCESS: DuckLake Unicode column names preserved (issue #721)'
