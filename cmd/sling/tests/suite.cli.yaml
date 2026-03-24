@@ -237,7 +237,7 @@
 - id: 38
   name: Run sling with replication configuration 07
   run: sling run -r cmd/sling/tests/replications/r.07.yaml
-  streams: 15
+  streams: 16
   group: sqlite
 
 - id: 39
