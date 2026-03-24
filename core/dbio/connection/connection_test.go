@@ -34,6 +34,7 @@ func TestConnectionDiscover(t *testing.T) {
 				"../../../cmd/sling/tests/files/test6.csv",
 				"../../../cmd/sling/tests/files/test7.csv",
 				"../../../cmd/sling/tests/files/test8.csv",
+				"../../../cmd/sling/tests/files/test_wide_columns.csv",
 			},
 		},
 		{
