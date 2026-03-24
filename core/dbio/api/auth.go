@@ -413,11 +413,21 @@ func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateA
 		deviceAuthURL = strings.Replace(authURL, "/token", "/device/code", 1)
 	}
 
+	// Render scopes
+	scopes := make([]string, len(a.Scopes))
+	for i, s := range a.Scopes {
+		rendered, err := a.renderString(s)
+		if err != nil {
+			return g.Error(err, "could not render scope[%d]", i)
+		}
+		scopes[i] = rendered
+	}
+
 	// Create OAuth2 config
 	conf := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		Scopes:       a.Scopes,
+		Scopes:       scopes,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:       authorizeURL,
 			TokenURL:      authURL,
@@ -533,13 +543,41 @@ func (a *AuthenticatorOAuth2) authorizationCodeFlow(ctx context.Context, conf *o
 		return g.Error("authentication_url is required for authorization_code flow")
 	}
 
-	// Use dynamic port for local server
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return g.Error(err, "failed to listen on dynamic port")
+	// Determine redirect URL and local server port
+	var ln net.Listener
+	var callbackPath string
+
+	if conf.RedirectURL != "" {
+		// Use the configured redirect_uri from the spec/connection
+		u, err := url.Parse(conf.RedirectURL)
+		if err != nil {
+			return g.Error(err, "failed to parse redirect_uri: %s", conf.RedirectURL)
+		}
+		callbackPath = u.Path
+		if callbackPath == "" {
+			callbackPath = "/callback"
+		}
+
+		listenPort := u.Port()
+		if listenPort == "" {
+			listenPort = "80" // default HTTP port
+		}
+
+		ln, err = net.Listen("tcp", "127.0.0.1:"+listenPort)
+		if err != nil {
+			return g.Error(err, "failed to listen on port %s (from redirect_uri)", listenPort)
+		}
+	} else {
+		// No redirect_uri configured, use dynamic port
+		var err error
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return g.Error(err, "failed to listen on dynamic port")
+		}
+		callbackPath = "/callback"
+		port := ln.Addr().(*net.TCPAddr).Port
+		conf.RedirectURL = fmt.Sprintf("http://localhost:%d/callback", port)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	conf.RedirectURL = fmt.Sprintf("http://localhost:%d/callback", port)
 
 	// Generate state and PKCE if applicable
 	stateVal := generateRandomState()
@@ -559,7 +597,8 @@ func (a *AuthenticatorOAuth2) authorizationCodeFlow(ctx context.Context, conf *o
 	server := http.Server{}
 
 	// Callback handler
-	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != stateVal {
 			fmt.Fprintf(w, `<h1>Authorization Failed</h1><p>Invalid state parameter.</p>`)
 			errorChan <- g.Error("invalid state in callback")
@@ -577,7 +616,7 @@ func (a *AuthenticatorOAuth2) authorizationCodeFlow(ctx context.Context, conf *o
 
 	// Start server
 	go func() {
-		server.Handler = http.DefaultServeMux
+		server.Handler = mux
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errorChan <- g.Error(err, "failed to start callback server")
 		}

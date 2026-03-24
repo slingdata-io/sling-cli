@@ -237,7 +237,7 @@
 - id: 38
   name: Run sling with replication configuration 07
   run: sling run -r cmd/sling/tests/replications/r.07.yaml
-  streams: 15
+  streams: 16
   group: sqlite
 
 - id: 39
@@ -2104,3 +2104,41 @@
   streams: 2
   output_contains:
     - 'execution succeeded'
+
+# DuckDB file locking prevents concurrent chunk writes (issue #717)
+# When using chunk_size with DuckDB target, multiple threads try to open the same
+# .duckdb file simultaneously, causing "Could not set lock on file" errors.
+- id: 219
+  name: 'DuckDB chunking file lock (issue #717)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.19.duckdb_chunk_lock.yaml'
+  group: duckdb
+  output_contains:
+    - 'SUCCESS: DuckDB chunking with chunk_size works (issue #717)'
+
+# Oracle column_typing and explicit columns type not translating correctly
+# Tests: column_typing+bulk, column_typing+nobulk, explicit columns string(N)
+- id: 220
+  name: 'Oracle column_typing and explicit columns type translation'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.20.oracle_sqlldr_column_typing.yaml'
+  output_contains:
+    - 'Stream 1 (column_typing + use_bulk=true) passed'
+    - 'Stream 2 (column_typing + use_bulk=false) passed'
+    - 'Stream 3 (explicit columns) passed'
+    - 'Oracle column_typing test complete'
+
+# String lengths not auto-inferred when reading from delimited files to Oracle
+# Issue: Without column_typing, all string columns from CSV/text files get VARCHAR2(4000)
+# instead of being sized based on actual max string length in the data.
+# Reproduces user report: caret-delimited file, no header, column names in config
+- id: 221
+  name: 'CSV to Oracle string length auto-inference (no column_typing)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.21.csv_oracle_string_length_inference.yaml'
+  output_contains:
+    - 'SUCCESS: String lengths were auto-inferred from delimited file data'
+    - 'CSV to Oracle string length inference test complete'
+
+- id: 222
+  name: 'DuckLake Unicode column names preserved when replicating to Postgres (issue #721)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.22.ducklake_unicode_column_names.yaml'
+  output_contains:
+    - 'SUCCESS: DuckLake Unicode column names preserved (issue #721)'

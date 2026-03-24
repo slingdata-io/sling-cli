@@ -41,7 +41,7 @@ type CSV struct {
 // CleanHeaderRow cleans the header row from incompatible characters
 func CleanHeaderRow(header []string) []string {
 	// replace any other chars than regex expression
-	regexAllow := *regexp.MustCompile(`[^a-zA-Z0-9_]`)
+	regexAllow := *regexp.MustCompile(`[^\p{L}\p{N}_]`)
 	fieldMap := map[string]string{}
 
 	transformer := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)

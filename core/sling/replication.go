@@ -726,6 +726,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 	if err != nil {
 		return g.Error(err)
 	}
+	defer sourceConnDB.Close()
 
 	for i, stream := range streamsToChunk {
 		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
@@ -768,7 +769,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		if chunkExpr != "" {
 			// no update_key needed for chunking by expression
 		} else if stream.config.UpdateKey == "" {
-			return g.Error(err, "did not provide update_key for stream chunking: %s", stream.name)
+			return g.Error("did not provide update_key for stream chunking: %s", stream.name)
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
@@ -781,6 +782,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			if err != nil {
 				return g.Error(err, "could not connect to target database for stream chunking: %s", stream.name)
 			}
+			defer tgtConn.Close()
 			err = getIncrementalValueViaDB(&tempCfg, tgtConn, sourceConnDB.GetType())
 			if err != nil {
 				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)

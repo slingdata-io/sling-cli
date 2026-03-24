@@ -1258,7 +1258,7 @@ func (conn *BigQueryConn) GetSchemata(level SchemataLevel, schemaName string, ta
 			data.Columns = iop.NewColumnsFromFields("schema_name")
 			data.Append([]any{values["schema"]})
 		case SchemataLevelTable:
-			data, err = conn.GetTablesAndViews(schemaName)
+			data, err = conn.GetTablesAndViews(cast.ToString(values["schema"]))
 		case SchemataLevelColumn:
 			data, err = conn.SubmitTemplate(
 				"single", conn.template.Metadata, "schemata",

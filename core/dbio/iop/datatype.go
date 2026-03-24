@@ -1416,6 +1416,15 @@ remap:
 		nativeType = template.GeneralTypeMap["string"]
 	}
 
+	// when column_typing string max_length is set and column is text,
+	// remap to string so the varchar() precision path is used
+	if ct.String != nil && ct.String.MaxLength > 0 && col.Type == TextType {
+		if stringType, ok := template.GeneralTypeMap["string"]; ok && strings.HasSuffix(stringType, "()") {
+			nativeType = stringType
+			col.Type = StringType
+		}
+	}
+
 	// Add precision as needed
 	if strings.HasSuffix(nativeType, "()") {
 		maxStringLength := cast.ToInt(template.Value("variable.max_string_length"))
@@ -1454,6 +1463,19 @@ remap:
 					}
 					length = newLength
 				}
+			} else if ct.String != nil {
+				// apply column_typing even for non-sourced columns (e.g. CSV/file sources)
+				if length <= 0 {
+					length = col.Stats.MaxLen * 2
+					if length < 255 {
+						length = 255
+					}
+				}
+				newLength := ct.String.Apply(length, maxStringLength)
+				if newLength != length {
+					g.Debug(`  applied string length mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
+				}
+				length = newLength
 			} else if length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
@@ -1461,7 +1483,7 @@ remap:
 				}
 			}
 
-			if !isSourced && maxStringType != "" {
+			if !isSourced && ct.String == nil && maxStringType != "" {
 				nativeType = maxStringType // use specified default
 			} else if length >= maxStringLength {
 				// let's make text since high
@@ -2152,7 +2174,10 @@ type StringColumnTyping struct {
 }
 
 func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
-	if sct.MaxLength > max {
+	if sct.MaxLength > 0 && sct.MaxLength < max {
+		// cap at MaxLength when it's smaller than the DB's native max
+		max = sct.MaxLength
+	} else if sct.MaxLength > max {
 		max = sct.MaxLength
 	}
 	if max == 0 {
@@ -2176,6 +2201,11 @@ func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
 
 	if length < sct.MinLength {
 		return sct.MinLength
+	}
+
+	// cap at max_length when set
+	if sct.MaxLength > 0 && length > max {
+		return max
 	}
 
 	return length
