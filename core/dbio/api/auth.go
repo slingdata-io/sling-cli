@@ -672,8 +672,14 @@ func generateRandomState() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// openBrowser opens the default browser to the given URL (unchanged from original).
+// openBrowser opens the default browser to the given URL.
+// If the BROWSER environment variable is set, it is used as the browser command.
 func (a *AuthenticatorOAuth2) openBrowser(url string) error {
+	// Respect BROWSER env var for session-level browser override
+	if browserEnv := os.Getenv("BROWSER"); browserEnv != "" {
+		return exec.Command(browserEnv, url).Start()
+	}
+
 	var cmd string
 	var args []string
 
