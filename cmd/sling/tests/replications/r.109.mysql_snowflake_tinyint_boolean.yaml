@@ -1,0 +1,131 @@
+# Test for MySQL TINYINT vs TINYINT(1) type mapping to Snowflake
+# Issue: MySQL TINYINT columns with values beyond 0/1 (e.g. 1, 2, 4) were mapped
+# to BOOLEAN in Snowflake, causing all non-zero values to become TRUE.
+# Fix: TINYINT maps to SMALLINT (integer), TINYINT(1) maps to BOOLEAN.
+source: mysql
+target: snowflake
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Create source table in MySQL with both TINYINT and TINYINT(1) columns
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.tinyint_bool_test;
+        CREATE TABLE mysql.tinyint_bool_test (
+          id INT PRIMARY KEY,
+          status TINYINT,
+          flag TINYINT(1)
+        );
+        INSERT INTO mysql.tinyint_bool_test (id, status, flag) VALUES
+          (1, 1, 1),
+          (2, 2, 0),
+          (3, 4, 1),
+          (4, 0, 0),
+          (5, NULL, NULL);
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT id, status, flag FROM mysql.tinyint_bool_test ORDER BY id
+      into: source_data
+
+    - type: log
+      message: |
+        Source data (MySQL):
+        {pretty_table(store.source_data)}
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # ===== Verify values in Snowflake =====
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, status, flag FROM public.tinyint_bool_test ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Snowflake result data:
+        {pretty_table(store.result)}
+
+    # Check column types in Snowflake
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'PUBLIC'
+          AND table_name = 'TINYINT_BOOL_TEST'
+          AND column_name IN ('STATUS', 'FLAG')
+        ORDER BY column_name
+      into: col_types
+
+    - type: log
+      message: |
+        Snowflake column types:
+        {pretty_table(store.col_types)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result) == 5
+      failure_message: "Expected 5 rows but found {length(store.result)}"
+
+    # ===== Verify STATUS column (TINYINT -> SMALLINT, integer values preserved) =====
+
+    - type: check
+      check: int_parse(store.result[0].status) == 1
+      failure_message: "Row 1 status should be 1, got {store.result[0].status}"
+
+    # Key test: value=2 must NOT become TRUE/1
+    - type: check
+      check: int_parse(store.result[1].status) == 2
+      failure_message: "Row 2 status should be 2, got {store.result[1].status} (TINYINT value lost due to BOOLEAN mapping)"
+
+    # Key test: value=4 must NOT become TRUE/1
+    - type: check
+      check: int_parse(store.result[2].status) == 4
+      failure_message: "Row 3 status should be 4, got {store.result[2].status} (TINYINT value lost due to BOOLEAN mapping)"
+
+    - type: check
+      check: int_parse(store.result[3].status) == 0
+      failure_message: "Row 4 status should be 0, got {store.result[3].status}"
+
+    - type: check
+      check: store.result[4].status == nil
+      failure_message: "Row 5 status should be NULL, got {store.result[4].status}"
+
+    # ===== Verify FLAG column (TINYINT(1) -> BOOLEAN) =====
+
+    - type: check
+      check: store.result[0].flag == true || store.result[0].flag == "true" || store.result[0].flag == "1"
+      failure_message: "Row 1 flag should be true, got {store.result[0].flag}"
+
+    - type: check
+      check: store.result[1].flag == false || store.result[1].flag == "false" || store.result[1].flag == "0"
+      failure_message: "Row 2 flag should be false, got {store.result[1].flag}"
+
+    - type: log
+      message: "SUCCESS: MySQL TINYINT values correctly preserved in Snowflake (not collapsed to BOOLEAN)"
+    - type: log
+      message: "SUCCESS: MySQL TINYINT(1) correctly mapped to BOOLEAN in Snowflake"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.tinyint_bool_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.tinyint_bool_test
+
+streams:
+  mysql.tinyint_bool_test:
+    object: public.tinyint_bool_test
+    mode: full-refresh

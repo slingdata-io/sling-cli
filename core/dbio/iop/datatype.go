@@ -1612,10 +1612,22 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 		}
 	}
 
-	dbType = strings.Split(strings.ToLower(dbType), "(")[0]
-	dbType = strings.Split(dbType, "<")[0]
+	dbType = strings.ToLower(dbType)
 
 	template, _ := connType.Template()
+
+	// Try matching with parenthesized type first (e.g. "tinyint(1)")
+	// before stripping parentheses. This allows MySQL/MariaDB/StarRocks
+	// to distinguish tinyint(1) (boolean) from tinyint (small integer).
+	dbTypeFull := strings.Split(dbType, "<")[0]
+	dbTypeFull = strings.TrimRight(dbTypeFull, " ")
+	if matchedType, ok := template.NativeTypeMap[dbTypeFull]; ok {
+		return ColumnType(matchedType)
+	}
+
+	dbType = strings.Split(dbType, "(")[0]
+	dbType = strings.Split(dbType, "<")[0]
+
 	if matchedType, ok := template.NativeTypeMap[dbType]; ok {
 		colType = ColumnType(matchedType)
 	} else {

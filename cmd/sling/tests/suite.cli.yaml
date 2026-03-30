@@ -2142,3 +2142,31 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.22.ducklake_unicode_column_names.yaml'
   output_contains:
     - 'SUCCESS: DuckLake Unicode column names preserved (issue #721)'
+
+# Wildcard transform with type_of + length fails on non-string columns
+# Issue: goval ternary does not short-circuit, so length(value) is called on
+# all column types (int, date, etc.) even when guarded by type_of(value) == "string"
+# User report: Oracle -> Postgres, truncate long strings via wildcard transform
+- id: 223
+  name: 'Wildcard transform type_of + length on mixed types (Oracle -> Postgres)'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.23.ternary_length_mixed_types.yaml'
+  output_contains:
+    - 'SUCCESS: Wildcard transform with type_of + length works on mixed-type columns'
+    - 'Ternary length mixed types test complete'
+
+# MySQL TINYINT columns with values > 1 (e.g. 1, 2, 4) are mapped to BOOLEAN
+# in Snowflake, causing all non-zero values to collapse to TRUE.
+# User report: full-refresh recreates table with BOOLEAN column, losing integer values.
+- id: 224
+  name: 'MySQL TINYINT vs TINYINT(1) type mapping to Snowflake'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.109.mysql_snowflake_tinyint_boolean.yaml'
+  output_contains:
+    - 'SUCCESS: MySQL TINYINT values correctly preserved in Snowflake (not collapsed to BOOLEAN)'
+    - 'SUCCESS: MySQL TINYINT(1) correctly mapped to BOOLEAN in Snowflake'
+
+- id: 225
+  name: 'MySQL TINYINT vs TINYINT(1) type mapping to StarRocks'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.110.mysql_starrocks_tinyint_boolean.yaml'
+  output_contains:
+    - 'SUCCESS: MySQL TINYINT values correctly preserved as integers in StarRocks'
+    - 'SUCCESS: MySQL TINYINT(1)/BOOLEAN correctly mapped to BOOLEAN in StarRocks'
