@@ -101,6 +101,9 @@ func (conn *ProtonConn) Init() error {
 			Password: password, // This might be an empty string
 		},
 		DialTimeout: 5 * time.Second,
+		Compression: &proton.Compression{
+			Method: proton.CompressionLZ4,
+		},
 	})
 	if err != nil {
 		return g.Error(err, "could not connect to proton")
