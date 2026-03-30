@@ -2,7 +2,7 @@ module github.com/slingdata-io/sling-cli
 
 go 1.24
 
-toolchain go1.24.11
+toolchain go1.24.13
 
 require (
 	cloud.google.com/go v0.115.0
@@ -230,7 +230,3 @@ require (
 	gopkg.in/mattn/go-isatty.v0 v0.0.4 // indirect
 	gopkg.in/mattn/go-runewidth.v0 v0.0.4 // indirect
 )
-
-replace github.com/flarco/g => ../g
-
-replace github.com/slingdata-io/sling => ../sling

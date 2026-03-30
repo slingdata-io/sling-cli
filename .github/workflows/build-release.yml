@@ -26,7 +26,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: "1.24.11"
+          go-version: "1.24.13"
           cache: false
         
       - name: Get the version
@@ -86,7 +86,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: "1.24.11"
+          go-version: "1.24.13"
           cache: false
         
       - name: Load Secrets
@@ -125,7 +125,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: "1.24.11"
+          go-version: "1.24.13"
           cache: true
         
       - name: Load Secrets
@@ -175,7 +175,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: "1.24.11"
+          go-version: "1.24.13"
           cache: false
         
       - name: Load Secrets
@@ -230,7 +230,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: "1.24.11"
+          go-version: "1.24.13"
           cache: false
         
       - name: Load Secrets

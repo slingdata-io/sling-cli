@@ -23,7 +23,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5.5.0
         with:
-          go-version: '1.24.11'  # Adjust this to your Go version
+          go-version: '1.24.13'  # Adjust this to your Go version
 
       - name: Set release version
         run: |
