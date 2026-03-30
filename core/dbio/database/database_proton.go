@@ -467,8 +467,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 						row[colI] = val
 					}
 					eG.Capture(err)
-				} else {
-					g.Debug("decimal if value == nil")
 				}
 			}
 
@@ -476,8 +474,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToBoolE(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("boolean if value == nil")
 				}
 			}
 
@@ -485,8 +481,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToStringE(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("string if value == nil")
 				}
 			}
 
@@ -494,8 +488,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt8E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("int8 if value == nil")
 				}
 			}
 
@@ -503,8 +495,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt16E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("int16 if value == nil")
 				}
 			}
 
@@ -512,8 +502,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt32E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("int32 if value == nil")
 				}
 			}
 
@@ -522,8 +510,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToIntE(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("int if value == nil")
 				}
 			}
 
@@ -532,8 +518,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt64E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("int64 if value == nil")
 				}
 			}
 
@@ -541,8 +525,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint8E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("uint8 if value == nil")
 				}
 			}
 
@@ -550,8 +532,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint16E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("uint16 if value == nil")
 				}
 			}
 
@@ -560,8 +540,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint32E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("uint32 if value == nil")
 				}
 			}
 
@@ -570,8 +548,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint64E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("uint64 if value == nil")
 				}
 			}
 
@@ -580,8 +556,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat64E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("float64 if value == nil")
 				}
 			}
 
@@ -589,8 +563,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat32E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("float32 if value == nil")
 				}
 			}
 
@@ -598,8 +570,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat64E(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("float64 if value == nil")
 				}
 			}
 
@@ -607,8 +577,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayString(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arraystring if value == nil")
 				}
 			}
 
@@ -616,8 +584,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayBool(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayboolean if value == nil")
 				}
 			}
 
@@ -625,8 +591,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt8(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayint8 if value == nil")
 				}
 			}
 
@@ -634,8 +598,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt16(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayint16 if value == nil")
 				}
 			}
 
@@ -643,8 +605,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayint32 if value == nil")
 				}
 			}
 
@@ -652,8 +612,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayint64 if value == nil")
 				}
 			}
 
@@ -661,8 +619,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint8(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayuint8 if value == nil")
 				}
 			}
 
@@ -670,8 +626,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint16(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayuint16 if value == nil")
 				}
 			}
 
@@ -679,8 +633,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayuint32 if value == nil")
 				}
 			}
 
@@ -688,8 +640,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayuint64 if value == nil")
 				}
 			}
 
@@ -697,8 +647,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayFloat32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayfloat32 if value == nil")
 				}
 			}
 
@@ -706,8 +654,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayFloat64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty arrayfloat64 if value == nil")
 				}
 			}
 
@@ -715,8 +661,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringString(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringstring if value == nil")
 				}
 			}
 
@@ -724,8 +668,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringInt32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringint32 if value == nil")
 				}
 			}
 
@@ -733,8 +675,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringInt64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringint64 if value == nil")
 				}
 			}
 
@@ -742,8 +682,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringUint32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringuint32 if value == nil")
 				}
 			}
 
@@ -751,8 +689,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringUint64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringuint64 if value == nil")
 				}
 			}
 
@@ -760,8 +696,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringFloat64(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringfloat64 if value == nil")
 				}
 			}
 
@@ -769,8 +703,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringFloat32(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringfloat32 if value == nil")
 				}
 			}
 
@@ -778,8 +710,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringArrayString(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapstringarraystring if value == nil")
 				}
 			}
 
@@ -787,8 +717,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapInt32String(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapint32string if value == nil")
 				}
 			}
 
@@ -796,8 +724,6 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapInt64String(row[colI])
 					eG.Capture(err)
-				} else {
-					g.Debug("empty mapint64string if value == nil")
 				}
 			}
 
