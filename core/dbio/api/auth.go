@@ -451,7 +451,7 @@ func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateA
 		if err == nil {
 			state.Token = newTok.AccessToken
 			state.Headers = map[string]string{"Authorization": g.F("Bearer %s", newTok.AccessToken)}
-			if newTok.RefreshToken != storedTok.RefreshToken && !env.IsAgentMode {
+			if newTok.RefreshToken != storedTok.RefreshToken {
 				a.SaveToken(newTok) // Save if rotated
 			}
 			g.Debug("Used refreshed token from storage")
