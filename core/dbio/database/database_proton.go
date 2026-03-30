@@ -202,9 +202,152 @@ func retryWithBackoff(operation func() error) error {
 	})
 }
 
+// colClassification holds pre-computed column index lists for type conversion.
+// Built once per column-change event and reused across all batches.
+type colClassification struct {
+	decimalCols              []int
+	intCols                  []int
+	int8Cols                 []int
+	int16Cols                []int
+	int32Cols                []int
+	int64Cols                []int
+	uint8Cols                []int
+	uint16Cols               []int
+	uint32Cols               []int
+	uint64Cols               []int
+	float32Cols              []int
+	float64Cols              []int
+	floatCols                []int
+	stringCols               []int
+	booleanCols              []int
+	arrayStringCols          []int
+	arrayBooleanCols         []int
+	arrayInt8Cols            []int
+	arrayInt16Cols           []int
+	arrayInt32Cols           []int
+	arrayInt64Cols           []int
+	arrayUint8Cols           []int
+	arrayUint16Cols          []int
+	arrayUint32Cols          []int
+	arrayUint64Cols          []int
+	arrayFloat32Cols         []int
+	arrayFloat64Cols         []int
+	mapStringStringCols      []int
+	mapStringInt32Cols       []int
+	mapStringInt64Cols       []int
+	mapStringUint32Cols      []int
+	mapStringUint64Cols      []int
+	mapStringFloat64Cols     []int
+	mapStringFloat32Cols     []int
+	mapStringArrayStringCols []int
+	mapInt32StringCols       []int
+	mapInt64StringCols       []int
+}
+
+// classifyColumns builds a colClassification from the target columns.
+func classifyColumns(insFields iop.Columns) colClassification {
+	var cc colClassification
+	for i, col := range insFields {
+		dbType := strings.ToLower(col.DbType)
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.TrimPrefix(dbType, "nullable(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+		if strings.HasPrefix(dbType, "low_cardinality(") {
+			dbType = strings.TrimPrefix(dbType, "low_cardinality(")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+
+		switch dbType {
+		case "int8":
+			cc.int8Cols = append(cc.int8Cols, i)
+		case "int16":
+			cc.int16Cols = append(cc.int16Cols, i)
+		case "int32":
+			cc.int32Cols = append(cc.int32Cols, i)
+		case "int64":
+			cc.int64Cols = append(cc.int64Cols, i)
+		case "uint8":
+			cc.uint8Cols = append(cc.uint8Cols, i)
+		case "uint16":
+			cc.uint16Cols = append(cc.uint16Cols, i)
+		case "uint32":
+			cc.uint32Cols = append(cc.uint32Cols, i)
+		case "uint64":
+			cc.uint64Cols = append(cc.uint64Cols, i)
+		case "float32":
+			cc.float32Cols = append(cc.float32Cols, i)
+		case "float64":
+			cc.float64Cols = append(cc.float64Cols, i)
+		case "string":
+			cc.stringCols = append(cc.stringCols, i)
+		case "bool":
+			cc.booleanCols = append(cc.booleanCols, i)
+		case "array(string)":
+			cc.arrayStringCols = append(cc.arrayStringCols, i)
+		case "array(bool)", "array(boolean)":
+			cc.arrayBooleanCols = append(cc.arrayBooleanCols, i)
+		case "array(int64)":
+			cc.arrayInt64Cols = append(cc.arrayInt64Cols, i)
+		case "array(int32)":
+			cc.arrayInt32Cols = append(cc.arrayInt32Cols, i)
+		case "array(int16)":
+			cc.arrayInt16Cols = append(cc.arrayInt16Cols, i)
+		case "array(int8)":
+			cc.arrayInt8Cols = append(cc.arrayInt8Cols, i)
+		case "array(uint64)":
+			cc.arrayUint64Cols = append(cc.arrayUint64Cols, i)
+		case "array(uint32)":
+			cc.arrayUint32Cols = append(cc.arrayUint32Cols, i)
+		case "array(uint16)":
+			cc.arrayUint16Cols = append(cc.arrayUint16Cols, i)
+		case "array(uint8)":
+			cc.arrayUint8Cols = append(cc.arrayUint8Cols, i)
+		case "array(float32)":
+			cc.arrayFloat32Cols = append(cc.arrayFloat32Cols, i)
+		case "array(float64)":
+			cc.arrayFloat64Cols = append(cc.arrayFloat64Cols, i)
+		case "map(string, string)":
+			cc.mapStringStringCols = append(cc.mapStringStringCols, i)
+		case "map(string, int32)":
+			cc.mapStringInt32Cols = append(cc.mapStringInt32Cols, i)
+		case "map(string, int64)":
+			cc.mapStringInt64Cols = append(cc.mapStringInt64Cols, i)
+		case "map(string, uint32)":
+			cc.mapStringUint32Cols = append(cc.mapStringUint32Cols, i)
+		case "map(string, uint64)":
+			cc.mapStringUint64Cols = append(cc.mapStringUint64Cols, i)
+		case "map(string, float64)":
+			cc.mapStringFloat64Cols = append(cc.mapStringFloat64Cols, i)
+		case "map(string, float32)":
+			cc.mapStringFloat32Cols = append(cc.mapStringFloat32Cols, i)
+		case "map(string, array(string))":
+			cc.mapStringArrayStringCols = append(cc.mapStringArrayStringCols, i)
+		case "map(int32, string)":
+			cc.mapInt32StringCols = append(cc.mapInt32StringCols, i)
+		case "map(int64, string)":
+			cc.mapInt64StringCols = append(cc.mapInt64StringCols, i)
+		default:
+			switch {
+			case col.Type == iop.DecimalType:
+				cc.decimalCols = append(cc.decimalCols, i)
+			case col.Type == iop.SmallIntType:
+				cc.intCols = append(cc.intCols, i)
+			case col.Type.IsInteger():
+				cc.int64Cols = append(cc.int64Cols, i)
+			case col.Type == iop.FloatType:
+				cc.floatCols = append(cc.floatCols, i)
+			}
+		}
+	}
+	return cc
+}
+
 // BulkImportStream inserts a stream into a table
 func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
+	var insFields iop.Columns
+	var cc colClassification
 
 	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
@@ -243,10 +386,17 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			if err != nil {
 				return count, g.Error(err, "could not get matching list of columns from table")
 			}
+
+			// recompute column validation and classification only on schema change
+			insFields, err = conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
+			if err != nil {
+				return count, g.Error(err, "columns mismatch")
+			}
+			cc = classifyColumns(insFields)
 		}
 
 		batchCount++
-		err = conn.processBatch(tableFName, table, batch, columns, batchCount, &count, ds)
+		err = conn.processBatch(tableFName, table, batch, insFields, cc, batchCount, &count, ds)
 		if err != nil {
 			if permanentErr, ok := err.(*backoff.PermanentError); ok {
 				return count, g.Error(permanentErr.Err, "permanent error processing batch %d", batchCount)
@@ -261,8 +411,10 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	return count, nil
 }
 
-// processBatch handles the processing of a single batch
-func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.Batch, columns iop.Columns, batchCount int, count *uint64, ds *iop.Datastream) error {
+// processBatch handles the processing of a single batch.
+// Proton does not support transactions, so we skip Begin/Commit.
+// The retry loop only contains: PrepareBatch → Append rows → Send.
+func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.Batch, insFields iop.Columns, cc colClassification, batchCount int, count *uint64, ds *iop.Datastream) error {
 	batchRows := make([][]any, 0, batch.Count)
 	for row := range batch.Rows {
 		batchRows = append(batchRows, row)
@@ -274,6 +426,12 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		table.FullName())
 	conn.SetIdempotent(true, idPrefix)
 
+	insertStatement := conn.GenerateInsertStatement(
+		table.FullName(),
+		insFields,
+		1,
+	)
+
 	operation := func() error {
 		// Check context cancellation
 		select {
@@ -282,176 +440,9 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		default:
 		}
 
-		var err error
-		if conn.Tx() == nil {
-			err = conn.Begin(&sql.TxOptions{Isolation: sql.LevelDefault})
-			if err != nil {
-				return backoff.Permanent(g.Error(err, "could not begin transaction"))
-			}
-			defer func() {
-				if err != nil {
-					if rollbackErr := conn.Rollback(); rollbackErr != nil {
-						g.Warn("Failed to rollback transaction: %v", rollbackErr)
-					}
-				}
-			}()
-		}
-
-		insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
-		if err != nil {
-			return backoff.Permanent(g.Error(err, "columns mismatch"))
-		}
-
-		insertStatement := conn.GenerateInsertStatement(
-			table.FullName(),
-			insFields,
-			1,
-		)
-
 		batched, err := conn.ProtonConn.PrepareBatch(ds.Context.Ctx, insertStatement)
 		if err != nil {
 			return g.Error(err, "could not prepare statement for table: %s, statement: %s", table.FullName(), insertStatement)
-		}
-
-		decimalCols := []int{}
-		intCols := []int{}
-		int8Cols := []int{}
-		int16Cols := []int{}
-		int32Cols := []int{}
-		int64Cols := []int{}
-		uint8Cols := []int{}
-		uint16Cols := []int{}
-		uint32Cols := []int{}
-		uint64Cols := []int{}
-		float32Cols := []int{}
-		float64Cols := []int{}
-		floatCols := []int{}
-		stringCols := []int{}
-		booleanCols := []int{}
-
-		// Array types
-		arrayStringCols := []int{}
-		arrayBooleanCols := []int{}
-		arrayInt8Cols := []int{}
-		arrayInt16Cols := []int{}
-		arrayInt32Cols := []int{}
-		arrayInt64Cols := []int{}
-		arrayUint8Cols := []int{}
-		arrayUint16Cols := []int{}
-		arrayUint32Cols := []int{}
-		arrayUint64Cols := []int{}
-		arrayFloat32Cols := []int{}
-		arrayFloat64Cols := []int{}
-
-		// Map types
-		mapStringStringCols := []int{}
-		mapStringInt32Cols := []int{}
-		mapStringInt64Cols := []int{}
-		mapStringUint32Cols := []int{}
-		mapStringUint64Cols := []int{}
-		mapStringFloat64Cols := []int{}
-		mapStringFloat32Cols := []int{}
-		mapStringArrayStringCols := []int{}
-		mapInt32StringCols := []int{}
-		mapInt64StringCols := []int{}
-
-        // Build casting plans based on the TARGET columns actually used for this batch insert (insFields),
-        // in the SAME ORDER as the incoming batch rows. This ensures value positions match row indexes
-        // and values are coerced to the destination types (e.g., Float64) even if the batch inferred integers.
-        for i, col := range insFields {
-			dbType := strings.ToLower(col.DbType)
-			if strings.HasPrefix(dbType, "nullable(") {
-				dbType = strings.TrimPrefix(dbType, "nullable(")
-				dbType = strings.TrimSuffix(dbType, ")")
-			}
-			if strings.HasPrefix(dbType, "low_cardinality(") {
-				dbType = strings.TrimPrefix(dbType, "low_cardinality(")
-				dbType = strings.TrimSuffix(dbType, ")")
-			}
-
-			switch dbType {
-			case "int8":
-				int8Cols = append(int8Cols, i)
-			case "int16":
-				int16Cols = append(int16Cols, i)
-			case "int32":
-				int32Cols = append(int32Cols, i)
-			case "int64":
-				int64Cols = append(int64Cols, i)
-			case "uint8":
-				uint8Cols = append(uint8Cols, i)
-			case "uint16":
-				uint16Cols = append(uint16Cols, i)
-			case "uint32":
-				uint32Cols = append(uint32Cols, i)
-			case "uint64":
-				uint64Cols = append(uint64Cols, i)
-			case "float32":
-				float32Cols = append(float32Cols, i)
-			case "float64":
-				float64Cols = append(float64Cols, i)
-			case "string":
-				stringCols = append(stringCols, i)
-			case "bool":
-				booleanCols = append(booleanCols, i)
-			case "array(string)":
-				arrayStringCols = append(arrayStringCols, i)
-			case "array(bool)", "array(boolean)":
-				arrayBooleanCols = append(arrayBooleanCols, i)
-			case "array(int64)":
-				arrayInt64Cols = append(arrayInt64Cols, i)
-			case "array(int32)":
-				arrayInt32Cols = append(arrayInt32Cols, i)
-			case "array(int16)":
-				arrayInt16Cols = append(arrayInt16Cols, i)
-			case "array(int8)":
-				arrayInt8Cols = append(arrayInt8Cols, i)
-			case "array(uint64)":
-				arrayUint64Cols = append(arrayUint64Cols, i)
-			case "array(uint32)":
-				arrayUint32Cols = append(arrayUint32Cols, i)
-			case "array(uint16)":
-				arrayUint16Cols = append(arrayUint16Cols, i)
-			case "array(uint8)":
-				arrayUint8Cols = append(arrayUint8Cols, i)
-			case "array(float32)":
-				arrayFloat32Cols = append(arrayFloat32Cols, i)
-			case "array(float64)":
-				arrayFloat64Cols = append(arrayFloat64Cols, i)
-			case "map(string, string)":
-				mapStringStringCols = append(mapStringStringCols, i)
-			case "map(string, int32)":
-				mapStringInt32Cols = append(mapStringInt32Cols, i)
-			case "map(string, int64)":
-				mapStringInt64Cols = append(mapStringInt64Cols, i)
-			case "map(string, uint32)":
-				mapStringUint32Cols = append(mapStringUint32Cols, i)
-			case "map(string, uint64)":
-				mapStringUint64Cols = append(mapStringUint64Cols, i)
-			case "map(string, float64)":
-				mapStringFloat64Cols = append(mapStringFloat64Cols, i)
-			case "map(string, float32)":
-				mapStringFloat32Cols = append(mapStringFloat32Cols, i)
-			case "map(string, array(string))":
-				mapStringArrayStringCols = append(mapStringArrayStringCols, i)
-			case "map(int32, string)":
-				mapInt32StringCols = append(mapInt32StringCols, i)
-			case "map(int64, string)":
-				mapInt64StringCols = append(mapInt64StringCols, i)
-
-			default:
-				// Fall back to col.Type if DbType is not recognized
-				switch {
-				case col.Type == iop.DecimalType:
-					decimalCols = append(decimalCols, i)
-				case col.Type == iop.SmallIntType:
-					intCols = append(intCols, i)
-				case col.Type.IsInteger():
-					int64Cols = append(int64Cols, i)
-				case col.Type == iop.FloatType:
-					floatCols = append(floatCols, i)
-				}
-			}
 		}
 
 		// Counter for successfully inserts within this batch
@@ -459,8 +450,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 		for _, row := range batchRows {
 			var eG g.ErrorGroup
 
-			// set decimals correctly
-			for _, colI := range decimalCols {
+			for _, colI := range cc.decimalCols {
 				if row[colI] != nil {
 					val, err := decimal.NewFromString(cast.ToString(row[colI]))
 					if err == nil {
@@ -470,35 +460,35 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				}
 			}
 
-			for _, colI := range booleanCols {
+			for _, colI := range cc.booleanCols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToBoolE(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range stringCols {
+			for _, colI := range cc.stringCols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToStringE(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range int8Cols {
+			for _, colI := range cc.int8Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt8E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range int16Cols {
+			for _, colI := range cc.int16Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt16E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range int32Cols {
+			for _, colI := range cc.int32Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt32E(row[colI])
 					eG.Capture(err)
@@ -506,7 +496,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 
 			// set Int32 correctly
-			for _, colI := range intCols {
+			for _, colI := range cc.intCols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToIntE(row[colI])
 					eG.Capture(err)
@@ -514,21 +504,21 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 
 			// set Int64 correctly
-			for _, colI := range int64Cols {
+			for _, colI := range cc.int64Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToInt64E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range uint8Cols {
+			for _, colI := range cc.uint8Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint8E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range uint16Cols {
+			for _, colI := range cc.uint16Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint16E(row[colI])
 					eG.Capture(err)
@@ -536,7 +526,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 
 			// set Int32 correctly
-			for _, colI := range uint32Cols {
+			for _, colI := range cc.uint32Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint32E(row[colI])
 					eG.Capture(err)
@@ -544,7 +534,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 
 			// set Int64 correctly
-			for _, colI := range uint64Cols {
+			for _, colI := range cc.uint64Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToUint64E(row[colI])
 					eG.Capture(err)
@@ -552,175 +542,175 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			}
 
 			// set Float64 correctly
-			for _, colI := range floatCols {
+			for _, colI := range cc.floatCols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat64E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range float32Cols {
+			for _, colI := range cc.float32Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat32E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range float64Cols {
+			for _, colI := range cc.float64Cols {
 				if row[colI] != nil {
 					row[colI], err = cast.ToFloat64E(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayStringCols {
+			for _, colI := range cc.arrayStringCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayString(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayBooleanCols {
+			for _, colI := range cc.arrayBooleanCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayBool(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayInt8Cols {
+			for _, colI := range cc.arrayInt8Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt8(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayInt16Cols {
+			for _, colI := range cc.arrayInt16Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt16(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayInt32Cols {
+			for _, colI := range cc.arrayInt32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayInt64Cols {
+			for _, colI := range cc.arrayInt64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayInt64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayUint8Cols {
+			for _, colI := range cc.arrayUint8Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint8(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayUint16Cols {
+			for _, colI := range cc.arrayUint16Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint16(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayUint32Cols {
+			for _, colI := range cc.arrayUint32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayUint64Cols {
+			for _, colI := range cc.arrayUint64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayUint64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayFloat32Cols {
+			for _, colI := range cc.arrayFloat32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayFloat32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range arrayFloat64Cols {
+			for _, colI := range cc.arrayFloat64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToArrayFloat64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringStringCols {
+			for _, colI := range cc.mapStringStringCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringString(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringInt32Cols {
+			for _, colI := range cc.mapStringInt32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringInt32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringInt64Cols {
+			for _, colI := range cc.mapStringInt64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringInt64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringUint32Cols {
+			for _, colI := range cc.mapStringUint32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringUint32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringUint64Cols {
+			for _, colI := range cc.mapStringUint64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringUint64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringFloat64Cols {
+			for _, colI := range cc.mapStringFloat64Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringFloat64(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringFloat32Cols {
+			for _, colI := range cc.mapStringFloat32Cols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringFloat32(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapStringArrayStringCols {
+			for _, colI := range cc.mapStringArrayStringCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapStringArrayString(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapInt32StringCols {
+			for _, colI := range cc.mapInt32StringCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapInt32String(row[colI])
 					eG.Capture(err)
 				}
 			}
 
-			for _, colI := range mapInt64StringCols {
+			for _, colI := range cc.mapInt64StringCols {
 				if row[colI] != nil {
 					row[colI], err = conn.convertToMapInt64String(row[colI])
 					eG.Capture(err)
@@ -747,12 +737,7 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 			return g.Error(err, "could not send batch data")
 		}
 
-		err = conn.Commit()
-		if err != nil {
-			return g.Error(err, "could not commit transaction")
-		}
-
-		// Update count only after successful commit
+		// Update count only after successful send
 		*count += internalCount
 		return nil
 	}
