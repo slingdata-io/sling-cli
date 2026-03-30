@@ -733,10 +733,8 @@ func (conn *ProtonConn) processBatch(tableFName string, table Table, batch *iop.
 				return backoff.Permanent(err) // Type conversion errors are permanent
 			}
 
-			// Do insert
-			ds.Context.Lock()
+			// Do insert (batched is local to this closure, no concurrent access)
 			err = batched.Append(row...)
-			ds.Context.Unlock()
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "could not insert into table %s, row: %#v", tableFName, row))
 				return g.Error(err, "could not execute statement") // Network/temporary errors can retry
