@@ -796,7 +796,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// CDC mode has its own execution path
-	if t.Config.Mode == ChangeCaptureMode {
+	if t.Config.Mode == ChangeCaptureMode || t.isFullRefreshCDC() {
 		return executeCDC(t)
 	}
 

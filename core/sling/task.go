@@ -461,6 +461,11 @@ func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
 	return g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet)
 }
 
+// isFullRefreshCDC means we should use CDC snapshot mode
+func (t *TaskExecution) isFullRefreshCDC() bool {
+	return t.Config.Mode == FullRefreshMode && t.Config.ReplicationStream != nil && t.Config.ReplicationStream.CDCOptions != nil && os.Getenv("SLING_STATE") != ""
+}
+
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode
 func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
