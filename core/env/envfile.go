@@ -23,7 +23,8 @@ type EnvFile struct {
 	Body       string `json:"-" yaml:"-"`
 }
 
-func (ef *EnvFile) WriteEnvFile() (err error) {
+// marshalEnvFileBytes marshals the EnvFile into formatted YAML bytes
+func (ef *EnvFile) marshalEnvFileBytes() ([]byte, error) {
 	connsMap := yaml.MapSlice{}
 
 	// order connections names
@@ -58,19 +59,36 @@ func (ef *EnvFile) WriteEnvFile() (err error) {
 
 	envBytes, err := yaml.Marshal(efMap)
 	if err != nil {
-		return g.Error(err, "could not marshal into YAML")
+		return nil, g.Error(err, "could not marshal into YAML")
 	}
 
-	output := []byte(ef.TopComment + string(envBytes))
+	output := formatYAML([]byte(ef.TopComment + string(envBytes)))
+	return output, nil
+}
+
+func (ef *EnvFile) WriteEnvFile() (err error) {
+	output, err := ef.marshalEnvFileBytes()
+	if err != nil {
+		return err
+	}
 
 	// fix windows path
 	ef.Path = strings.ReplaceAll(ef.Path, `\`, `/`)
-	err = os.WriteFile(ef.Path, formatYAML(output), 0644)
+	err = os.WriteFile(ef.Path, output, 0644)
 	if err != nil {
 		return g.Error(err, "could not write YAML file")
 	}
 
 	return
+}
+
+// MarshalBody returns the EnvFile as a formatted YAML string
+func (ef *EnvFile) MarshalBody() (string, error) {
+	output, err := ef.marshalEnvFileBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
 }
 
 func formatYAML(input []byte) []byte {
