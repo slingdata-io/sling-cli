@@ -189,7 +189,7 @@ metadata:
     order by owner, view_name
 
   columns: |
-    select column_name, data_type, coalesce(data_precision, data_length) as precision, data_scale as scale
+    select column_name, data_type, coalesce(data_precision, data_length) as precision, data_scale as scale, data_length as maximum_length
     from sys.all_tab_columns
     where owner = '{schema}'
       and table_name = '{table}'
@@ -201,7 +201,8 @@ metadata:
       col.column_name,
       col.data_type,
       coalesce(col.data_precision, col.data_length) as precision,
-      col.data_scale as scale
+      col.data_scale as scale,
+      col.data_length as maximum_length
     from sys.all_tab_columns col
     inner join sys.all_synonyms syn
       on syn.table_owner = col.owner

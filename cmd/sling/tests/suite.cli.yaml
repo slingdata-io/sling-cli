@@ -2178,3 +2178,16 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.24.timestamp_in_stream_wildcard.yaml'
   output_contains:
     - 'SUCCESS: timestamp variables in stream wildcard pattern work correctly (issue #376)'
+
+# sqlldr ctl file hardcodes char(400000) even when column_typing.string.max_length is set.
+# This causes sqlldr to pre-allocate massive memory for every string column.
+# The table DDL gets correct VARCHAR2 sizing but the bulk load ctl does not.
+# Ref: getColumnsString() in database_oracle.go always defaults to char(400000).
+- id: 227
+  name: 'Oracle sqlldr ctl respects column_typing max_length'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.25.oracle_sqlldr_char_sizing.yaml'
+  output_contains:
+    - 'SUCCESS: Oracle table columns correctly sized from column_typing'
+    - 'Oracle sqlldr char sizing test complete'
+  output_does_not_contain:
+    - 'char(400000)'

@@ -259,7 +259,7 @@ func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 	// logic to insert rows with values containing new line chars
 	// addFilePath is additional rows to be inserted
-	countTot, err := conn.SQLLoad(tableFName, ds)
+	countTot, err := conn.SQLLoad(tableFName, ds, columns)
 	if err != nil {
 		return 0, g.Error(err, "Error with SQLLoad")
 	}
@@ -270,7 +270,7 @@ func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 // SQLLoad uses sqlldr to Bulk Import
 // cat test1.csv | sqlldr system/oracle@oracle.host:1521/xe control=sqlldr.ctl log=/dev/stdout bad=/dev/stderr
 // cannot import when newline in value. Need to scan for new lines.
-func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream, tgtColumns ...iop.Columns) (count uint64, err error) {
 	var stderr, stdout bytes.Buffer
 
 	connURL := conn.ConnString()
@@ -289,7 +289,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	ctlStr := g.R(
 		conn.BaseConn.GetTemplateValue("core.sqlldr"),
 		"table", tableFName,
-		"columns", conn.getColumnsString(ds),
+		"columns", conn.getColumnsString(ds, tgtColumns...),
 	)
 	err = os.WriteFile(
 		ctlPath,
@@ -430,7 +430,19 @@ retry:
 	return ds.Count, err
 }
 
-func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
+func (conn *OracleConn) getColumnsString(ds *iop.Datastream, tgtColumns ...iop.Columns) string {
+	// build lookup of target column length by name (from GetColumns/metadata)
+	tgtLength := map[string]int{}
+	if len(tgtColumns) > 0 {
+		for _, col := range tgtColumns[0] {
+			if col.DbPrecision > 0 {
+				tgtLength[strings.ToLower(col.Name)] = col.DbPrecision
+			} else if col.Stats.MaxLen > 0 {
+				tgtLength[strings.ToLower(col.Name)] = col.Stats.MaxLen
+			}
+		}
+	}
+
 	columnsString := ""
 	for _, col := range ds.Columns {
 		expr := ""
@@ -452,10 +464,15 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 				colNameEscaped,
 			)
 		} else if col.IsString() {
-			expr = g.F("char(400000) NULLIF %s=BLANKS", colName)
-			if col.DbPrecision > 400000 {
-				expr = g.F("char(%d) NULLIF %s=BLANKS", col.DbPrecision, colName)
+			charSize := 400000 // default fallback when precision is unknown
+			if p, ok := tgtLength[strings.ToLower(col.Name)]; ok && p > 0 {
+				charSize = p
+			} else if col.DbPrecision > 0 {
+				charSize = col.DbPrecision
+			} else if col.Stats.MaxLen > 0 {
+				charSize = col.Stats.MaxLen
 			}
+			expr = g.F("char(%d) NULLIF %s=BLANKS", charSize, colName)
 		}
 		columnsString += fmt.Sprintf("  %s %s,\n", colName, expr)
 	}

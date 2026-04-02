@@ -1,0 +1,75 @@
+# Reproduce: sqlldr ctl file uses char(400000) even when column_typing.string.max_length is set
+# Issue: When replicating CSV to Oracle with use_bulk=true and column_typing.string.max_length=255,
+# the Oracle table columns get correct VARCHAR2 sizing, but the sqlldr control file still
+# hardcodes char(400000) for all string columns. This causes sqlldr to pre-allocate massive
+# memory (10s of GB for moderately sized tables).
+#
+# The bug is in getColumnsString() in database_oracle.go:
+#   char(400000) is always used unless col.DbPrecision > 400000
+#   It should respect col.DbPrecision when it's set (e.g. from column_typing).
+#
+# This test:
+#   1. Replicates a CSV file to Oracle with use_bulk=true and column_typing max_length=255
+#   2. Verifies the table was created with correct column sizing (< 4000)
+#   3. Checks debug output does NOT contain char(400000) in the sqlldr ctl
+
+steps:
+  # 0. Cleanup
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_SQLLDR_CHAR'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  # 1. Replicate CSV to Oracle with column_typing + use_bulk=true
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://cmd/sling/tests/files/test_wide_columns.csv:
+          object: SYSTEM.TEST_SQLLDR_CHAR
+          target_options:
+            use_bulk: true
+            column_typing:
+              string:
+                max_length: 255
+                min_length: 50
+                length_factor: 1
+
+  # 2. Verify table columns are correctly sized (not VARCHAR2(4000))
+  - connection: oracle
+    query: |
+      SELECT column_name, data_type, data_length
+      FROM all_tab_columns
+      WHERE table_name = 'TEST_SQLLDR_CHAR' AND owner = 'SYSTEM'
+      AND column_name LIKE 'COL_%'
+      ORDER BY column_name
+    into: col_info
+
+  - log: |
+      Oracle column metadata:
+      {pretty_table(store.col_info)}
+
+  # 3. Verify row count
+  - connection: oracle
+    query: SELECT COUNT(*) as cnt FROM SYSTEM.TEST_SQLLDR_CHAR
+    into: row_count
+
+  - check: int_parse(store.row_count[0].cnt) == 5
+    failure_message: "Expected 5 rows, got {store.row_count[0].cnt}"
+
+  # 4. Verify table columns respect column_typing (should be <= 255)
+  - check: int_parse(store.col_info[0].data_length) <= 255
+    failure_message: "COL_001 data_length={store.col_info[0].data_length} (expected <= 255 from column_typing)"
+
+  - log: "SUCCESS: Oracle table columns correctly sized from column_typing"
+
+  # 5. The real bug check happens via output_does_not_contain in suite.cli.yaml:
+  #    The debug output prints "sqlldr ctl file content" which should NOT contain char(400000)
+  #    when column_typing.string.max_length=255 is set.
+  - log: "Oracle sqlldr char sizing test complete"
+
+  # 6. Cleanup
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_SQLLDR_CHAR'; EXCEPTION WHEN OTHERS THEN NULL; END;
