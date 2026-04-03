@@ -859,9 +859,6 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 				if srcType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
 					correctType = iop.TextType // mariadb's `json` type is `longtext`
 				}
-				if srcType == dbio.TypeDbStarRocks && strings.EqualFold(colName, "json_data") {
-					correctType = iop.TextType // starrocks's `json` type is `varchar(65500)`
-				}
 			case tgtType.IsMySQLLike():
 				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
 					correctType = iop.DatetimeType // mysql/mariadb uses datetime

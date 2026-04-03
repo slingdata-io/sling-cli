@@ -212,7 +212,11 @@ metadata:
       cols.table_name as table_name,
       tables.is_view as is_view,
       cols.column_name as column_name,
-      cols.data_type as data_type,
+      case
+        when cols.data_type = 'tinyint' and cols.column_type like '%unsigned%' then 'unsigned tinyint'
+        when cols.data_type = 'tinyint' then cols.column_type
+        else cols.data_type
+      end as data_type,
       cols.ordinal_position as position
     from information_schema.columns cols
     join tables
