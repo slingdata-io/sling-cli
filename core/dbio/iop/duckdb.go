@@ -789,7 +789,65 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 	columns, describeErr := duck.Describe(sql)
 
-	// one query at a time
+	// add any specified transforms
+	transforms := []map[string]string{}
+	fsProps := map[string]string{}
+	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
+	if transformsPayload, ok := fsProps["transforms"]; ok {
+		if err := g.Unmarshal(transformsPayload, &transforms); err != nil {
+			g.Warn("could not unmarshal transform payload: %s", err.Error())
+		}
+	}
+
+	// Arrow IPC output mode: uses a separate DuckDB process to pipe binary Arrow data.
+	// Only applies to SELECT/WITH queries — describe, pragma, etc. must use CSV mode.
+	sqlStripped, _ := StripSQLComments(sql)
+	sqlLower := strings.TrimSpace(strings.ToLower(sqlStripped))
+	isSelectQuery := strings.HasPrefix(sqlLower, "select") || strings.HasPrefix(sqlLower, "with")
+	useArrow := cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) && isSelectQuery
+	if useArrow {
+		duck.AddExtension("arrow from community")
+
+		arrowReader, arrowCleanup, err := duck.StreamArrow(queryCtx.Ctx, sql)
+		if err != nil {
+			return nil, g.Error(err, "Failed to start Arrow stream")
+		}
+
+		ds = NewDatastreamContext(queryCtx.Ctx, columns)
+		ds.Defer(func() { arrowCleanup() })
+
+		if cds, ok := opts["datastream"]; ok {
+			ds = cds.(*Datastream)
+			ds.Columns = columns
+		}
+
+		ds.Inferred = true
+		ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
+		ds.SetConfig(duck.Props())
+		if len(transforms) > 0 {
+			ds.SetConfig(map[string]string{"transforms": g.Marshal(transforms)})
+		}
+
+		err = ds.ConsumeArrowReaderStream(arrowReader)
+		if err != nil {
+			ds.Close()
+			return ds, g.Error(err, "could not read Arrow output stream")
+		}
+
+		// handle filename, always last column (after Arrow columns are set)
+		if cast.ToBool(opts["filename"]) {
+			ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
+			ds.Metadata.StreamURL.Key = "" // so it is not added again
+		}
+
+		if describeErr != nil {
+			g.LogError(describeErr)
+		}
+
+		return ds, nil
+	}
+
+	// CSV mode: one query at a time on the interactive process
 	duck.Context.Lock()
 
 	// new datastream
@@ -803,16 +861,6 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	if err != nil {
 		duck.Context.Unlock() // release lock
 		return nil, g.Error(err, "Failed to submit SQL")
-	}
-
-	// add any specified transforms
-	transforms := []map[string]string{}
-	fsProps := map[string]string{}
-	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
-	if transformsPayload, ok := fsProps["transforms"]; ok {
-		if err := g.Unmarshal(transformsPayload, &transforms); err != nil {
-			g.Warn("could not unmarshal transform payload: %s", err.Error())
-		}
 	}
 
 	if cds, ok := opts["datastream"]; ok {
@@ -838,9 +886,6 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		duck.Context.Unlock() // release lock
 	})
 
-	// TODO: Add Arrows output
-	// COPY  (SELECT extension_name, loaded, installed FROM duckdb_extensions())  TO '/dev/stdout' (FORMAT ARROWS, BATCH_SIZE 100);
-
 	err = ds.ConsumeCsvReader(dq.reader)
 	if err != nil {
 		ds.Close()
@@ -856,6 +901,159 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	}
 
 	return
+}
+
+// StreamArrow launches a separate DuckDB CLI process that outputs Arrow IPC binary data to stdout.
+// This bypasses the interactive CSV process entirely, avoiding line-based scanning issues with binary data.
+func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.ReadCloser, cleanup func(), err error) {
+	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
+	if err != nil {
+		return nil, nil, g.Error(err, "could not get duckdb binary")
+	}
+
+	// Build args (no -csv or -nullvalue flags for Arrow mode)
+	args := []string{}
+	instance := duck.GetProp("instance")
+	if instance != "" {
+		// Always open file-based instances read-only to avoid lock conflicts
+		// with the interactive process that already holds a write lock
+		args = append(args, "-readonly")
+		args = append(args, instance)
+	} else if cast.ToBool(duck.GetProp("read_only")) {
+		args = append(args, "-readonly")
+	}
+
+	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
+		dsn := "md:" + duck.GetProp("database")
+		if motherduckAttachMode := duck.GetProp("motherduck_attach_mode"); motherduckAttachMode != "" {
+			dsn = g.F("%s?attach_mode=%s", dsn, motherduckAttachMode)
+		}
+		args = append(args, dsn)
+	}
+
+	// Build SQL script
+	scriptParts := []string{}
+	if extSQL := duck.getLoadExtensionSQL(); extSQL != "" {
+		scriptParts = append(scriptParts, extSQL)
+	}
+	if secretSQL := duck.getCreateSecretSQL(); secretSQL != "" {
+		scriptParts = append(scriptParts, secretSQL)
+	}
+	scriptParts = append(scriptParts, "SET preserve_insertion_order = false;")
+
+	if runtime.GOOS == "windows" {
+		// Windows: use temp file since /dev/stdout doesn't exist
+		tmpFile, tmpErr := os.CreateTemp("", "sling-arrow-*.ipc")
+		if tmpErr != nil {
+			return nil, nil, g.Error(tmpErr, "could not create temp file for Arrow output")
+		}
+		tmpPath := tmpFile.Name()
+		tmpFile.Close()
+
+		scriptParts = append(scriptParts, g.F("COPY (%s) TO '%s' (FORMAT ARROWS);", sql, tmpPath))
+		script := strings.Join(scriptParts, "\n")
+
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Stdin = strings.NewReader(script)
+		if duck.Proc != nil {
+			cmd.Dir = duck.Proc.WorkDir
+			cmd.Env = g.MapToKVArr(duck.Proc.Env)
+		} else if workDir := duck.GetProp("working_dir"); workDir != "" {
+			cmd.Dir = workDir
+			cmd.Env = os.Environ()
+		}
+
+		// MotherDuck token
+		if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
+			cmd.Env = append(cmd.Env, "motherduck_token="+motherduckToken)
+		}
+
+		var stderrBuf strings.Builder
+		cmd.Stderr = &stderrBuf
+
+		if runErr := cmd.Run(); runErr != nil {
+			os.Remove(tmpPath)
+			errMsg := stderrBuf.String()
+			if errMsg != "" {
+				return nil, nil, g.Error("Arrow DuckDB process failed: %s\n%s", runErr, errMsg)
+			}
+			return nil, nil, g.Error(runErr, "Arrow DuckDB process failed")
+		}
+
+		file, openErr := os.Open(tmpPath)
+		if openErr != nil {
+			os.Remove(tmpPath)
+			return nil, nil, g.Error(openErr, "could not open Arrow temp file")
+		}
+
+		cleanup = func() {
+			file.Close()
+			os.Remove(tmpPath)
+		}
+		return file, cleanup, nil
+	}
+
+	// Unix: pipe Arrow IPC directly through /dev/stdout
+	scriptParts = append(scriptParts, g.F("COPY (%s) TO '/dev/stdout' (FORMAT ARROWS);", sql))
+	script := strings.Join(scriptParts, "\n")
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = strings.NewReader(script)
+	if duck.Proc != nil {
+		cmd.Dir = duck.Proc.WorkDir
+		cmd.Env = g.MapToKVArr(duck.Proc.Env)
+	} else if workDir := duck.GetProp("working_dir"); workDir != "" {
+		cmd.Dir = workDir
+		cmd.Env = os.Environ()
+	}
+
+	// MotherDuck token
+	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
+		cmd.Env = append(cmd.Env, "motherduck_token="+motherduckToken)
+	}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, g.Error(err, "could not get stdout pipe for Arrow DuckDB process")
+	}
+
+	var stderrBuf strings.Builder
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, g.Error(err, "could not get stderr pipe for Arrow DuckDB process")
+	}
+
+	// capture stderr in background
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stderrPipe.Read(buf)
+			if n > 0 {
+				stderrBuf.Write(buf[:n])
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}()
+
+	if err = cmd.Start(); err != nil {
+		return nil, nil, g.Error(err, "could not start Arrow DuckDB process")
+	}
+
+	cleanup = func() {
+		waitErr := cmd.Wait()
+		if waitErr != nil {
+			errMsg := stderrBuf.String()
+			if errMsg != "" {
+				g.Warn("Arrow DuckDB process error: %s\n%s", waitErr, errMsg)
+			} else {
+				g.Warn("Arrow DuckDB process error: %s", waitErr)
+			}
+		}
+	}
+
+	return stdoutPipe, cleanup, nil
 }
 
 // initScanner is set only once
