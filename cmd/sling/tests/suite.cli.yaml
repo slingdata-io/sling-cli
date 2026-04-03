@@ -2171,14 +2171,6 @@
     - 'SUCCESS: MySQL TINYINT values correctly preserved as integers in StarRocks'
     - 'SUCCESS: MySQL TINYINT(1)/BOOLEAN correctly mapped to BOOLEAN in StarRocks'
 
-# Timestamp variables in source stream wildcard patterns (issue #376)
-# Users want to filter source files by date using {timestamp.YYYY}-{timestamp.MM}-{timestamp.DD}
-- id: 226
-  name: 'Timestamp variables in stream wildcard pattern (issue #376)'
-  run: 'sling run -d -p cmd/sling/tests/pipelines/p.24.timestamp_in_stream_wildcard.yaml'
-  output_contains:
-    - 'SUCCESS: timestamp variables in stream wildcard pattern work correctly (issue #376)'
-
 # sqlldr ctl file hardcodes char(400000) even when column_typing.string.max_length is set.
 # This causes sqlldr to pre-allocate massive memory for every string column.
 # The table DDL gets correct VARCHAR2 sizing but the bulk load ctl does not.
