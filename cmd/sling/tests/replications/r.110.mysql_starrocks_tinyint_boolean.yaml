@@ -1,0 +1,137 @@
+# Test MySQL TINYINT vs TINYINT(1) type mapping to StarRocks
+# StarRocks has native BOOLEAN type, plus TINYINT(1) alias.
+# Verify: TINYINT -> SMALLINT (integer), TINYINT(1) -> BOOLEAN, native BOOLEAN -> BOOLEAN
+source: mysql
+target: starrocks
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Create source table in MySQL with BOOLEAN, TINYINT(1), and plain TINYINT columns
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.tinyint_bool_sr_test;
+        CREATE TABLE mysql.tinyint_bool_sr_test (
+          id INT PRIMARY KEY,
+          bool_col BOOLEAN,
+          flag TINYINT(1),
+          status TINYINT
+        );
+        INSERT INTO mysql.tinyint_bool_sr_test (id, bool_col, flag, status) VALUES
+          (1, true,  1, 1),
+          (2, false, 0, 2),
+          (3, true,  1, 4),
+          (4, false, 0, 0),
+          (5, NULL, NULL, NULL);
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT id, bool_col, flag, status FROM mysql.tinyint_bool_sr_test ORDER BY id
+      into: source_data
+
+    - type: log
+      message: |
+        Source data (MySQL):
+        {pretty_table(store.source_data)}
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # ===== Verify values in StarRocks =====
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, bool_col, flag, status FROM public.tinyint_bool_sr_test ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        StarRocks result data:
+        {pretty_table(store.result)}
+
+    # Check column types in StarRocks
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT column_name, data_type, column_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tinyint_bool_sr_test'
+          AND column_name IN ('bool_col', 'flag', 'status')
+        ORDER BY column_name
+      into: col_types
+
+    - type: log
+      message: |
+        StarRocks column types:
+        {pretty_table(store.col_types)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result) == 5
+      failure_message: "Expected 5 rows but found {length(store.result)}"
+
+    # ===== Verify STATUS column (TINYINT -> SMALLINT, integer values preserved) =====
+
+    - type: check
+      check: int_parse(store.result[0].status) == 1
+      failure_message: "Row 1 status should be 1, got {store.result[0].status}"
+
+    - type: check
+      check: int_parse(store.result[1].status) == 2
+      failure_message: "Row 2 status should be 2, got {store.result[1].status} (TINYINT value lost due to BOOLEAN mapping)"
+
+    - type: check
+      check: int_parse(store.result[2].status) == 4
+      failure_message: "Row 3 status should be 4, got {store.result[2].status} (TINYINT value lost due to BOOLEAN mapping)"
+
+    - type: check
+      check: int_parse(store.result[3].status) == 0
+      failure_message: "Row 4 status should be 0, got {store.result[3].status}"
+
+    - type: check
+      check: store.result[4].status == nil
+      failure_message: "Row 5 status should be NULL, got {store.result[4].status}"
+
+    # ===== Verify BOOL_COL and FLAG (TINYINT(1)/BOOLEAN -> BOOLEAN) =====
+
+    - type: check
+      check: int_parse(store.result[0].bool_col) == 1
+      failure_message: "Row 1 bool_col should be truthy (1), got {store.result[0].bool_col}"
+
+    - type: check
+      check: int_parse(store.result[1].bool_col) == 0
+      failure_message: "Row 2 bool_col should be falsy (0), got {store.result[1].bool_col}"
+
+    - type: check
+      check: int_parse(store.result[0].flag) == 1
+      failure_message: "Row 1 flag should be truthy (1), got {store.result[0].flag}"
+
+    - type: check
+      check: int_parse(store.result[1].flag) == 0
+      failure_message: "Row 2 flag should be falsy (0), got {store.result[1].flag}"
+
+    - type: log
+      message: "SUCCESS: MySQL TINYINT values correctly preserved as integers in StarRocks"
+    - type: log
+      message: "SUCCESS: MySQL TINYINT(1)/BOOLEAN correctly mapped to BOOLEAN in StarRocks"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.tinyint_bool_sr_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.tinyint_bool_sr_test
+
+streams:
+  mysql.tinyint_bool_sr_test:
+    object: public.tinyint_bool_sr_test
+    mode: full-refresh

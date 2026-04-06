@@ -1554,6 +1554,16 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.Type = fc.Type
 				col.Sourced = fc.Sourced
 			}
+
+			// MySQL/MariaDB/StarRocks: the Go driver reports TINYINT without display
+			// width, so it can't distinguish TINYINT(1) (boolean) from TINYINT (integer).
+			// The metadata query uses COLUMN_TYPE which preserves this distinction.
+			// Use the fetched column type when it differs from the driver-derived type.
+			if g.In(conn.Self().GetType(), dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks) && fc.Type != "" && fc.Type != col.Type {
+				col.Type = fc.Type
+				col.Sourced = fc.Sourced
+			}
+
 			col.Constraint = fc.Constraint
 
 			// fetch decimal info

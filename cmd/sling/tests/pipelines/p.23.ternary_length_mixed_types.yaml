@@ -1,0 +1,139 @@
+# Reproduce: Wildcard transform with type_of + length fails on non-string columns
+# Issue: goval ternary operator does NOT short-circuit, so both branches are always
+# evaluated. When using a wildcard transform like:
+#   type_of(value) == "string" ? (length(value) > 509 ? substring(value,0,505) + "..." : value) : value
+# length(value) is called on ALL columns regardless of type, causing:
+#   "function error: 'length' - cannot get length of type int64"
+#
+# User report: Oracle -> Postgres, wants to truncate long strings via wildcard transform
+# without having to define per-column transforms.
+
+steps:
+  # 0. Cleanup
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TERNARY_LENGTH'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS public.test_ternary_length
+
+  # 1. Create Oracle source table with mixed types (string, integer, date, number)
+  - connection: oracle
+    query: |
+      CREATE TABLE SYSTEM.TEST_TERNARY_LENGTH (
+        id NUMBER(10),
+        short_name VARCHAR2(50),
+        long_description VARCHAR2(4000),
+        amount NUMBER(12,2),
+        created_at DATE
+      )
+
+  - connection: oracle
+    query: |
+      INSERT INTO SYSTEM.TEST_TERNARY_LENGTH VALUES (
+        1,
+        'Alice',
+        'This is a short description',
+        123.45,
+        TO_DATE('2025-01-15', 'YYYY-MM-DD')
+      )
+
+  - connection: oracle
+    query: |
+      INSERT INTO SYSTEM.TEST_TERNARY_LENGTH VALUES (
+        2,
+        'Bob',
+        RPAD('Very long text that exceeds 509 characters. ', 600, 'ABCDEFGHIJ'),
+        99999.99,
+        TO_DATE('2025-06-20', 'YYYY-MM-DD')
+      )
+
+  - connection: oracle
+    query: |
+      INSERT INTO SYSTEM.TEST_TERNARY_LENGTH VALUES (
+        3,
+        'Charlie',
+        NULL,
+        0.00,
+        NULL
+      )
+
+  - connection: oracle
+    query: COMMIT
+
+  - log: "Created Oracle source table with mixed types (integer, string, number, date)"
+
+  # 2. Replicate Oracle -> Postgres with wildcard transform using type_of + length
+  #    This should fail because goval evaluates length(value) even on non-string columns
+  - replication:
+      source: oracle
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        SYSTEM.TEST_TERNARY_LENGTH:
+          object: public.test_ternary_length
+          transforms:
+            - '*': 'type_of(value) == "string" ? (length(value) > 509 ? substring(value,0,505) + "..." : value) : value'
+    on_failure: warn
+
+  # 3. Verify data landed in Postgres
+  - connection: POSTGRES
+    query: SELECT count(*) as cnt FROM public.test_ternary_length
+    into: row_count
+
+  - log: "Row count => {store.row_count[0].cnt}"
+
+  - check: int_parse(store.row_count[0].cnt) == 3
+    failure_message: "Expected 3 rows, got {store.row_count[0].cnt}"
+
+  # 4. Verify long string was truncated (505 chars + "..." = 508 chars)
+  #    Note: wildcard transform converts all columns to string type,
+  #    so we use string comparisons for the id column.
+  - connection: POSTGRES
+    query: |
+      SELECT id, length(long_description) as desc_len
+      FROM public.test_ternary_length
+      WHERE id = '2'
+    into: long_row
+
+  - log: "Long string length for id=2 => {store.long_row[0].desc_len}"
+
+  - check: int_parse(store.long_row[0].desc_len) == 508
+    failure_message: "Expected truncated length 508, got {store.long_row[0].desc_len}"
+
+  # 5. Verify short string was NOT truncated
+  - connection: POSTGRES
+    query: |
+      SELECT long_description
+      FROM public.test_ternary_length
+      WHERE id = '1'
+    into: short_row
+
+  - check: store.short_row[0].long_description == "This is a short description"
+    failure_message: "Short string was incorrectly modified"
+
+  # 6. Verify integer and numeric columns survived the transform
+  - connection: POSTGRES
+    query: |
+      SELECT id, amount
+      FROM public.test_ternary_length
+      WHERE id = '1'
+    into: numeric_row
+
+  - log: "Numeric values => id={store.numeric_row[0].id}, amount={store.numeric_row[0].amount}"
+
+  - check: store.numeric_row[0].id == "1"
+    failure_message: "Integer column 'id' value incorrect, got {store.numeric_row[0].id}"
+
+  - log: "SUCCESS: Wildcard transform with type_of + length works on mixed-type columns"
+
+  # 7. Cleanup
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_TERNARY_LENGTH'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS public.test_ternary_length
+
+  - log: "Ternary length mixed types test complete"

@@ -4,7 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -51,15 +51,15 @@ var (
 	GetOAuthMap  = func() map[string]map[string]any {
 		return map[string]map[string]any{}
 	}
-	ExecFolder      = func() string { return path.Join(HomeDir, "executions", ExecID) }
-	QueueFolder     = func() string { return path.Join(ExecFolder(), "queues") }
-	RuntimeFolder   = func() string { return path.Join(ExecFolder(), "runtime") }
+	ExecFolder      = func() string { return filepath.Join(HomeDir, "executions", ExecID) }
+	QueueFolder     = func() string { return filepath.Join(ExecFolder(), "queues") }
+	RuntimeFolder   = func() string { return filepath.Join(ExecFolder(), "runtime") }
 	RuntimeFilePath = func(name string) string {
 		name = strings.ReplaceAll(name, "\\", "_")
 		name = strings.ReplaceAll(name, "/", "_")
 		name = strings.ReplaceAll(name, ":", "_")
 		os.MkdirAll(RuntimeFolder(), 0755) // make folder
-		return path.Join(RuntimeFolder(), g.F("%s.json", name))
+		return filepath.Join(RuntimeFolder(), g.F("%s.json", name))
 	}
 	setupOtel = func() {}
 
@@ -130,7 +130,7 @@ func LoadHomeDir() {
 	envKey := "SLING_HOME_DIR"
 	HomeDir = CleanWindowsPath(os.Getenv(envKey))
 	if HomeDir == "" {
-		HomeDir = CleanWindowsPath(path.Join(g.UserHomeDir(), ".sling"))
+		HomeDir = CleanWindowsPath(filepath.Join(g.UserHomeDir(), ".sling"))
 		os.Setenv(envKey, HomeDir)
 	}
 
@@ -145,7 +145,7 @@ func LoadHomeDir() {
 }
 
 func HomeBinDir() string {
-	return path.Join(HomeDir, "bin")
+	return filepath.Join(HomeDir, "bin")
 }
 
 // IsInteractiveTerminal checks if the current process is running in an interactive terminal
@@ -285,13 +285,13 @@ func setupFileLogging() {
 	if logDir := os.Getenv("SLING_LOG_DIR"); logDir != "" && debugLogFile == nil {
 		// Expand ~ to home directory
 		if strings.HasPrefix(logDir, "~/") {
-			logDir = path.Join(g.UserHomeDir(), logDir[2:])
+			logDir = filepath.Join(g.UserHomeDir(), logDir[2:])
 		}
 		if err := os.MkdirAll(logDir, 0755); err != nil {
 			g.Warn("could not create log directory: %s", err.Error())
 		} else {
 			logFileName := "sling_debug_" + time.Now().Format("2006_01_02") + ".log"
-			logPath := path.Join(logDir, logFileName)
+			logPath := filepath.Join(logDir, logFileName)
 
 			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			if err != nil {
@@ -349,7 +349,7 @@ func cleanupOldLogFiles(dir string, keep int) {
 
 	if len(logFiles) > keep {
 		for _, name := range logFiles[:len(logFiles)-keep] {
-			if err := os.Remove(path.Join(dir, name)); err != nil {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
 				g.Warn("could not remove old log file %s: %s", name, err.Error())
 			}
 		}
@@ -704,7 +704,7 @@ func RemoveAllLocalTempFile(localPath string) {
 }
 
 func WriteTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
-	sqlPath = path.Join(GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
+	sqlPath = filepath.Join(GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
 
 	err = os.WriteFile(sqlPath, []byte(sql), 0777)
 	if err != nil {

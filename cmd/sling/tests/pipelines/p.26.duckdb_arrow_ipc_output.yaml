@@ -1,0 +1,26 @@
+steps:
+  # Read local parquet via Arrow IPC mode and write to temp CSV
+  - replication:
+      source: LOCAL
+      target: LOCAL
+      defaults:
+        mode: full-refresh
+      streams:
+        cmd/sling/tests/files/test1.parquet:
+          object: file:///tmp/sling/arrow_test_output.csv
+
+  # Verify the output file has data rows (header + data rows)
+  # test1.parquet has 1000 data rows, CSV output has 1 header + 1000 rows
+  - type: command
+    command: |
+      data_lines=$(tail -n +2 /tmp/sling/arrow_test_output.csv | grep -c .)
+      echo "Arrow IPC output data row count: $data_lines"
+      if [ "$data_lines" -ge 999 ]; then
+        echo "SUCCESS: DuckDB Arrow IPC output produced correct row count"
+      else
+        echo "FAIL: Expected at least 999 data rows, got $data_lines"
+        exit 1
+      fi
+
+  - type: log
+    message: "DuckDB Arrow IPC output test complete"

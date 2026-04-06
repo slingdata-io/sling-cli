@@ -131,6 +131,133 @@ func TestDuckDb(t *testing.T) {
 	})
 }
 
+func TestDuckDbStreamArrow(t *testing.T) {
+	t.Run("StreamArrow basic query", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+
+		// Ensure arrow extension is added and connection is open
+		duck.AddExtension("arrow from community")
+		err := duck.Open()
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer duck.Close()
+
+		// Use inline VALUES — the Arrow process is separate and has no access to in-memory tables
+		sql := "SELECT * FROM (VALUES (1, 'Alice', 10.5, true), (2, 'Bob', 20.7, false), (3, 'Charlie', 30.9, true)) AS t(id, name, value, flag) ORDER BY id"
+
+		reader, cleanup, err := duck.StreamArrow(context.Background(), sql)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer cleanup()
+
+		// Consume the Arrow stream into a Datastream
+		ds := NewDatastreamContext(context.Background(), nil)
+		err = ds.ConsumeArrowReaderStream(reader)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		data, err := ds.Collect(0)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		records := data.Records()
+		if !assert.Equal(t, 3, len(records)) {
+			return
+		}
+
+		// Verify data (Arrow may return different Go types depending on DuckDB inference)
+		assert.EqualValues(t, 1, records[0]["id"])
+		assert.Equal(t, "Alice", records[0]["name"])
+		assert.EqualValues(t, 3, records[2]["id"])
+		assert.Equal(t, "Charlie", records[2]["name"])
+	})
+
+	t.Run("StreamContext with DUCKDB_USE_ARROW", func(t *testing.T) {
+		t.Setenv("DUCKDB_USE_ARROW", "true")
+
+		duck := NewDuckDb(context.Background())
+
+		sql := "SELECT * FROM (VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35)) AS t(id, name, age) ORDER BY id"
+
+		// StreamContext should use Arrow path
+		ds, err := duck.StreamContext(context.Background(), sql)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		data, err := ds.Collect(0)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		records := data.Records()
+		if !assert.Equal(t, 3, len(records)) {
+			return
+		}
+
+		assert.EqualValues(t, 1, records[0]["id"])
+		assert.Equal(t, "Alice", records[0]["name"])
+		assert.EqualValues(t, 30, records[0]["age"])
+
+		assert.EqualValues(t, 3, records[2]["id"])
+		assert.Equal(t, "Charlie", records[2]["name"])
+		assert.EqualValues(t, 35, records[2]["age"])
+
+		ds.Close()
+	})
+
+	t.Run("StreamArrow with file-based instance", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		instancePath := tmpDir + "/test_arrow.duckdb"
+
+		// Create and populate a file-based database, then close to release lock
+		setupDuck := NewDuckDb(context.Background(), "instance="+instancePath)
+		_, err := setupDuck.ExecMultiContext(
+			context.Background(),
+			"CREATE TABLE arrow_file_test (id INT, name VARCHAR, amount DECIMAL(10,2))",
+			"INSERT INTO arrow_file_test VALUES (1, 'Alice', 100.50),(2, 'Bob', 200.75),(3, 'Charlie', 300.25)",
+		)
+		if !assert.NoError(t, err) {
+			return
+		}
+		setupDuck.Close()
+		time.Sleep(200 * time.Millisecond) // ensure lock is fully released
+
+		// StreamArrow on the file-based instance (no interactive process needed)
+		duck := NewDuckDb(context.Background(), "instance="+instancePath)
+		duck.AddExtension("arrow from community")
+
+		reader, cleanup, err := duck.StreamArrow(context.Background(), "SELECT * FROM arrow_file_test ORDER BY id")
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer cleanup()
+
+		ds := NewDatastreamContext(context.Background(), nil)
+		err = ds.ConsumeArrowReaderStream(reader)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		data, err := ds.Collect(0)
+		if !assert.NoError(t, err) {
+			return
+		}
+
+		records := data.Records()
+		if !assert.Equal(t, 3, len(records)) {
+			return
+		}
+
+		assert.EqualValues(t, 1, records[0]["id"])
+		assert.Equal(t, "Alice", records[0]["name"])
+	})
+}
+
 func TestDuckDbDataflowToHttpStream(t *testing.T) {
 	t.Run("CSV streaming - verifies streaming without io.ReadAll", func(t *testing.T) {
 		// This test confirms that DataflowToHttpStream now streams data

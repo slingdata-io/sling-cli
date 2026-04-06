@@ -39,7 +39,7 @@ func TestDecimal(t *testing.T) {
 func TestNewParquetReader(t *testing.T) {
 	// Test file paths - you may need to adjust these
 	testFiles := []string{
-		"/Users/fritz/__/Git/sling-cli/core/dbio/filesys/test/test1/parquet/test1.1.parquet",
+		"./core/dbio/filesys/test/test1/parquet/test1.1.parquet",
 		"/tmp/test.parquet", // Will use the file created by TestNewParquetWriter
 	}
 

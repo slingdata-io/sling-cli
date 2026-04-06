@@ -451,7 +451,7 @@ func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateA
 		if err == nil {
 			state.Token = newTok.AccessToken
 			state.Headers = map[string]string{"Authorization": g.F("Bearer %s", newTok.AccessToken)}
-			if newTok.RefreshToken != storedTok.RefreshToken && !env.IsAgentMode {
+			if newTok.RefreshToken != storedTok.RefreshToken {
 				a.SaveToken(newTok) // Save if rotated
 			}
 			g.Debug("Used refreshed token from storage")
@@ -672,8 +672,14 @@ func generateRandomState() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// openBrowser opens the default browser to the given URL (unchanged from original).
+// openBrowser opens the default browser to the given URL.
+// If the BROWSER environment variable is set, it is used as the browser command.
 func (a *AuthenticatorOAuth2) openBrowser(url string) error {
+	// Respect BROWSER env var for session-level browser override
+	if browserEnv := os.Getenv("BROWSER"); browserEnv != "" {
+		return exec.Command(browserEnv, url).Start()
+	}
+
 	var cmd string
 	var args []string
 
