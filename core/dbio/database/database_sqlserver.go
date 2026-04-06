@@ -15,6 +15,8 @@ import (
 
 	"cloud.google.com/go/cloudsqlconn"
 	cloudsqlmssql "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -573,13 +575,17 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	}
 
-	if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
-		// need to az cli tool
-		_, err = exec.LookPath(conn.azCliPath())
-		if err != nil {
-			g.Warn("unable to use bcp since the Azure CLI tool is not found in path. bcp needs an Access Token obtained via the Azure CLI tool for fed_auth=%s. Using cursor...", fedAuth)
-			return conn.BaseConn.InsertBatchStream(tableFName, ds)
+	if fedAuth := conn.FedAuth(); fedAuth != "" {
+		if g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+			// need az cli tool for AzCli auth
+			_, err = exec.LookPath(conn.azCliPath())
+			if err != nil {
+				g.Warn("unable to use bcp since the Azure CLI tool is not found in path. bcp needs an Access Token obtained via the Azure CLI tool for fed_auth=%s. Using cursor...", fedAuth)
+				return conn.BaseConn.InsertBatchStream(tableFName, ds)
+			}
 		}
+		// other Entra ID methods (ActiveDirectoryDefault, ActiveDirectoryManagedIdentity, etc.)
+		// will obtain tokens via azidentity in BcpImportFile
 	}
 
 	// needs to get columns to shape stream
@@ -820,6 +826,59 @@ func (conn *MsSQLServerConn) azCliPath() string {
 	return "az"
 }
 
+// bcpEntraIDMethods returns the fed_auth methods that can obtain tokens via azidentity for BCP
+func bcpEntraIDMethods() []string {
+	return []string{
+		azuread.ActiveDirectoryDefault,
+		azuread.ActiveDirectoryManagedIdentity,
+		azuread.ActiveDirectoryMSI,
+		azuread.ActiveDirectoryServicePrincipal,
+		azuread.ActiveDirectoryApplication,
+	}
+}
+
+// getEntraIDToken obtains an access token using azidentity (DefaultAzureCredential).
+// This supports Workload Identity, Managed Identity, environment credentials, and more
+// without requiring the Azure CLI.
+func (conn *MsSQLServerConn) getEntraIDToken() (string, error) {
+	resource := conn.GetProp("bcp_azure_token_resource")
+	if resource == "" {
+		resource = "https://database.windows.net"
+	}
+	scope := resource + "/.default"
+
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return "", g.Error(err, "could not create Azure credential for BCP token")
+	}
+
+	token, err := cred.GetToken(context.Background(), policy.TokenRequestOptions{
+		Scopes: []string{scope},
+	})
+	if err != nil {
+		return "", g.Error(err, "could not obtain Azure access token for BCP")
+	}
+
+	return token.Token, nil
+}
+
+// writeBcpTokenFile writes an access token as UTF-16LE to a temp file for BCP -P flag
+func (conn *MsSQLServerConn) writeBcpTokenFile(token string) (string, error) {
+	utf16Token := utf16.Encode([]rune(token))
+	var leBytes []byte
+	for _, u := range utf16Token {
+		leBytes = append(leBytes, byte(u), byte(u>>8))
+	}
+
+	tokenFilePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver.token")+".txt")
+	err := os.WriteFile(tokenFilePath, leBytes, 0600)
+	if err != nil {
+		return "", g.Error(err, "could not write token to temp file")
+	}
+
+	return tokenFilePath, nil
+}
+
 // BcpImportFile Import using bcp tool
 // https://docs.microsoft.com/en-us/sql/tools/bcp-utility?view=sql-server-ver15
 // bcp dbo.test1 in '/tmp/LargeDataset.csv' -S tcp:sqlserver.host,51433 -d master -U sa -P 'password' -c -t ',' -b 5000
@@ -896,20 +955,15 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 			return
 		}
 		bcpArgs = append(bcpArgs, bcpAuthParts...)
-	} else if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+	} else if fedAuth := conn.FedAuth(); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+		// obtain token via Azure CLI tool
 		azCliTokenResource := conn.GetProp("bcp_azure_token_resource")
 		if azCliTokenResource == "" {
 			azCliTokenResource = "https://database.windows.net"
 		}
 		azCliArgs := []string{"account", "get-access-token", "--resource", azCliTokenResource, "--query", "accessToken", "--output", "tsv"}
 
-		// need to run
-		// az account get-access-token --resource https://database.windows.net --query accessToken --output tsv
 		azCmd := exec.Command(conn.azCliPath(), azCliArgs...)
-		if err != nil {
-			return 0, g.Error(err, "could not create az cli command")
-		}
-
 		g.Debug(conn.azCliPath() + " " + strings.Join(azCliArgs, ` `))
 		output, err := azCmd.Output()
 		if err != nil {
@@ -918,23 +972,27 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		}
 
 		token := strings.TrimSpace(string(output))
-
-		// convert token to UTF-16LE bytes
-		utf16Token := utf16.Encode([]rune(token))
-		var leBytes []byte
-		for _, u := range utf16Token {
-			leBytes = append(leBytes, byte(u), byte(u>>8))
-		}
-
-		// now write the UTF-16LE token bytes to a temp file
-		tokenFilePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver.token")+".txt")
-		err = os.WriteFile(tokenFilePath, leBytes, 0600)
+		tokenFilePath, err := conn.writeBcpTokenFile(token)
 		if err != nil {
-			return 0, g.Error(err, "could not write token to temp file")
+			return 0, g.Error(err, "could not write BCP token file")
 		}
 		defer os.Remove(tokenFilePath)
 
-		// add BCP authentication args for Azure AD with token file
+		bcpArgs = append(bcpArgs, "-G", "-P", tokenFilePath)
+	} else if fedAuth := conn.FedAuth(); g.In(fedAuth, bcpEntraIDMethods()...) {
+		// obtain token via azidentity (supports Workload Identity, Managed Identity, env credentials, etc.)
+		g.Debug("obtaining Entra ID token via azidentity for BCP (fed_auth=%s)", fedAuth)
+		token, err := conn.getEntraIDToken()
+		if err != nil {
+			return 0, g.Error(err, "could not obtain Entra ID token for BCP via azidentity (fed_auth=%s)", fedAuth)
+		}
+
+		tokenFilePath, err := conn.writeBcpTokenFile(token)
+		if err != nil {
+			return 0, g.Error(err, "could not write BCP token file")
+		}
+		defer os.Remove(tokenFilePath)
+
 		bcpArgs = append(bcpArgs, "-G", "-P", tokenFilePath)
 	} else {
 		if g.In(conn.GetProp("authenticator"), "winsspi") || conn.isTrusted() {
