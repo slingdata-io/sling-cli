@@ -100,9 +100,10 @@ tools:
     **For `action: "query"`**:
     - `connection` (string, required): The name of the database connection to execute the query on
     - `query` (string, required): The SQL query to execute
+    - `description` (string, required): A brief description of the intent and expected result of this query. Explain *why* you are running this query and what the result should tell you. Always provide this when executing a query.
     - `limit` (number, optional): The limit of rows to return (defaults to 100)
     - `transient` (boolean, optional): Whether to use a transient connection (default: false)
-      
+
       This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
 
       *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
@@ -126,7 +127,8 @@ tools:
       "action": "query",
       "input": {
         "connection": "MY_PG",
-        "query": "SELECT * FROM users LIMIT 10"
+        "query": "SELECT * FROM users LIMIT 10",
+        "description": "Preview first 10 user records to understand table structure and data format"
       }
     }
     
@@ -183,16 +185,18 @@ tools:
       "input": {
         "connection": "MY_PG",
         "query": "SELECT status, COUNT(*) as count FROM orders WHERE created_date >= '2024-01-01' GROUP BY status ORDER BY count DESC LIMIT 50",
+        "description": "Get order count breakdown by status for 2024 to identify distribution of order states",
         "limit": 50
       }
     }
-    
+
     # Use transient connection for one-off query
     {
       "action": "query",
       "input": {
         "connection": "MY_PG",
         "query": "SELECT version()",
+        "description": "Check the PostgreSQL server version for compatibility verification",
         "transient": true
       }
     }
