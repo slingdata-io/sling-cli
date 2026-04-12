@@ -128,7 +128,17 @@ func (conn *OracleConn) ConnString() string {
 	// infinite timeout by default
 	options := map[string]string{"TIMEOUT": "0"}
 
+	// When service_name is explicitly provided, do not forward `sid` as an
+	// option — go-ora's ConnectionConfig prefers SID over ServiceName when
+	// both are set, which causes ORA-12505 against PDBs/services like
+	// FREEPDB1. The `sid` prop is often auto-populated from the URL path
+	// (see connection.setURL), so dropping it here is the safe choice when
+	// the caller asked for service-name semantics.
+	serviceName := conn.GetProp("service_name")
 	for key, new_key := range propMapping {
+		if key == "sid" && serviceName != "" {
+			continue
+		}
 		if val := conn.GetProp(key); val != "" {
 			options[new_key] = val
 		}
