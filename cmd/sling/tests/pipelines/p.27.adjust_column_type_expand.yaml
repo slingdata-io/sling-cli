@@ -1,0 +1,114 @@
+# Test that adjust_column_type expands varchar and decimal columns when
+# the source schema widens. Source starts with VARCHAR(50)/NUMERIC(10,2),
+# then grows to VARCHAR(200)/NUMERIC(18,6). The target should expand
+# column types to match, avoiding truncation or precision loss.
+
+steps:
+  # 1. Create source table with narrow types
+  - id: setup_source
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS public.adjust_type_src CASCADE;
+      CREATE TABLE public.adjust_type_src (
+        id INT PRIMARY KEY,
+        name VARCHAR(50),
+        amount NUMERIC(10,2),
+        description VARCHAR(100)
+      );
+      INSERT INTO public.adjust_type_src VALUES
+      (1, 'short', 123.45, 'short desc'),
+      (2, 'test', 678.90, 'another desc');
+
+  # 2. Create target table with same narrow types (simulating existing target)
+  - id: setup_target
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS public.adjust_type_tgt CASCADE;
+      CREATE TABLE public.adjust_type_tgt (
+        id INT,
+        name VARCHAR(50),
+        amount NUMERIC(10,2),
+        description VARCHAR(100)
+      );
+      INSERT INTO public.adjust_type_tgt VALUES
+      (1, 'short', 123.45, 'short desc'),
+      (2, 'test', 678.90, 'another desc');
+
+  # 3. Widen source columns and insert data that needs wider columns
+  - id: widen_source
+    connection: POSTGRES
+    query: |
+      ALTER TABLE public.adjust_type_src ALTER COLUMN name TYPE VARCHAR(200);
+      ALTER TABLE public.adjust_type_src ALTER COLUMN amount TYPE NUMERIC(18,6);
+      ALTER TABLE public.adjust_type_src ALTER COLUMN description TYPE VARCHAR(500);
+      INSERT INTO public.adjust_type_src VALUES
+      (3, 'this is a much longer name that exceeds fifty characters easily and needs expansion', 123456789.123456, 'this description is long enough to exceed one hundred characters and requires the target column to be expanded to avoid any truncation errors in the database');
+
+  - log: "Source setup complete: narrow types widened, wide data inserted"
+
+  # 4. Run replication with adjust_column_type enabled
+  - id: replicate
+    replication:
+      source: POSTGRES
+      target: POSTGRES
+      streams:
+        public.adjust_type_src:
+          object: public.adjust_type_tgt
+          mode: full-refresh
+          target_options:
+            adjust_column_type: true
+    on_failure: abort
+
+  - log: "Replication completed"
+
+  # 5. Verify row count
+  - connection: POSTGRES
+    query: SELECT COUNT(*) as count FROM public.adjust_type_tgt
+    into: target_count
+
+  - check: int_parse(store.target_count[0].count) == 3
+    failure_message: "Expected 3 rows, got {store.target_count[0].count}"
+
+  # 6. Verify the wide data was inserted without truncation
+  - connection: POSTGRES
+    query: SELECT id, name, amount, description FROM public.adjust_type_tgt WHERE id = 3
+    into: wide_row
+
+  - log: |
+      Wide row data:
+      name length: {length(store.wide_row[0].name)}
+      amount: {store.wide_row[0].amount}
+      description length: {length(store.wide_row[0].description)}
+
+  # Verify string was not truncated (original is 85 chars, wider than VARCHAR(50))
+  - check: length(store.wide_row[0].name) > 50
+    failure_message: "Name was truncated: length={length(store.wide_row[0].name)}, expected > 50"
+
+  # Verify decimal precision was preserved
+  - check: float_parse(store.wide_row[0].amount) == 123456789.123456
+    failure_message: "Amount precision lost: got {store.wide_row[0].amount}, expected 123456789.123456"
+
+  # Verify description was not truncated (original is > 100 chars)
+  - check: length(store.wide_row[0].description) > 100
+    failure_message: "Description was truncated: length={length(store.wide_row[0].description)}, expected > 100"
+
+  # 7. Verify target column types were expanded
+  - connection: POSTGRES
+    query: |
+      SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'adjust_type_tgt'
+      ORDER BY ordinal_position
+    into: target_cols
+
+  - log: |
+      Target column types after replication:
+      {pretty_table(store.target_cols)}
+
+  - log: "SUCCESS: adjust_column_type correctly expanded varchar and decimal columns"
+
+  # 8. Clean up
+  - connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS public.adjust_type_src CASCADE;
+      DROP TABLE IF EXISTS public.adjust_type_tgt CASCADE;

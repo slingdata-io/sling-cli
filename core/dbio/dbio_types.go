@@ -256,6 +256,11 @@ func (t Type) IsMySQLLike() bool {
 	return g.In(t, TypeDbMySQL, TypeDbMariaDB, TypeDbStarRocks)
 }
 
+// IsPostgresLike returns true if postgres flavor
+func (t Type) IsPostgresLike() bool {
+	return g.In(t, TypeDbPostgres)
+}
+
 // IsSQLServer returns true is sql server flavor
 func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)

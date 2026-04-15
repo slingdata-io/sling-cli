@@ -222,6 +222,7 @@ Run read-only SQL queries on database connections:
   "input": {
     "connection": "MY_POSTGRES",
     "query": "SELECT * FROM public.users LIMIT 10",
+    "description": "Preview first 10 user records to understand table structure and data format",
     "limit": 100,
     "transient": false
   }
@@ -231,6 +232,7 @@ Run read-only SQL queries on database connections:
 **Parameters:**
 - `connection` (required) - Database connection name
 - `query` (required) - SQL query to execute
+- `description` (optional but strongly recommended) - A brief description of the intent and expected result of this query. Explain *why* you are running this query and what the result should tell you. This is logged for observability so that query activity can be understood in context. **Always provide this when executing a query.**
 - `limit` (optional) - Maximum rows to return (default: 100)
 - `transient` (optional) - Use transient connection (default: false)
 
@@ -279,6 +281,7 @@ If a destructive operation is deemed necessary:
   "input": {
     "connection": "MY_POSTGRES",
     "query": "SELECT * FROM public.users LIMIT 5",
+    "description": "Preview first 5 user records to understand table structure and sample data",
     "limit": 5
   }
 }
@@ -291,6 +294,7 @@ If a destructive operation is deemed necessary:
   "input": {
     "connection": "MY_POSTGRES",
     "query": "SELECT status, COUNT(*) as count FROM orders WHERE created_date >= '2024-01-01' GROUP BY status ORDER BY count DESC LIMIT 20",
+    "description": "Get order count breakdown by status for 2024 to identify distribution of order states",
     "limit": 20
   }
 }
@@ -303,6 +307,7 @@ If a destructive operation is deemed necessary:
   "input": {
     "connection": "MY_POSTGRES",
     "query": "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' LIMIT 50",
+    "description": "Retrieve column metadata for all public schema tables to map data types",
     "limit": 50
   }
 }
@@ -315,6 +320,7 @@ If a destructive operation is deemed necessary:
   "input": {
     "connection": "MY_POSTGRES",
     "query": "SELECT version()",
+    "description": "Check PostgreSQL server version for compatibility verification",
     "transient": true
   }
 }
@@ -365,7 +371,8 @@ If a destructive operation is deemed necessary:
   "action": "query",
   "input": {
     "connection": "MY_DB",
-    "query": "SELECT * FROM production.users LIMIT 3"
+    "query": "SELECT * FROM production.users LIMIT 3",
+    "description": "Sample 3 rows from production.users to inspect data values and format"
   }
 }
 ```
@@ -378,7 +385,8 @@ If a destructive operation is deemed necessary:
   "action": "query",
   "input": {
     "connection": "MY_DB",
-    "query": "SELECT COUNT(*) as total_records FROM sales.orders"
+    "query": "SELECT COUNT(*) as total_records FROM sales.orders",
+    "description": "Get total row count of sales.orders to understand data volume"
   }
 }
 ```
@@ -389,7 +397,8 @@ If a destructive operation is deemed necessary:
   "action": "query",
   "input": {
     "connection": "MY_DB",
-    "query": "SELECT status, COUNT(*) as count FROM sales.orders GROUP BY status ORDER BY count DESC LIMIT 10"
+    "query": "SELECT status, COUNT(*) as count FROM sales.orders GROUP BY status ORDER BY count DESC LIMIT 10",
+    "description": "Analyze order status distribution to understand the breakdown of order states"
   }
 }
 ```
@@ -400,7 +409,8 @@ If a destructive operation is deemed necessary:
   "action": "query",
   "input": {
     "connection": "MY_DB",
-    "query": "SELECT COUNT(*) as nulls FROM sales.orders WHERE customer_id IS NULL"
+    "query": "SELECT COUNT(*) as nulls FROM sales.orders WHERE customer_id IS NULL",
+    "description": "Check for null customer_id values in orders to assess data quality"
   }
 }
 ```
@@ -434,7 +444,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "SOURCE_DB",
-    "query": "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM public.users"
+    "query": "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM public.users",
+    "description": "Get row count and date range of source users table for cross-database comparison"
   }
 }
 ```
@@ -451,7 +462,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_POSTGRES",
-    "query": "SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10"
+    "query": "SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10",
+    "description": "Get top 10 largest tables in public schema by total size for capacity planning"
   }
 }
 
@@ -460,7 +472,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_POSTGRES",
-    "query": "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'users' LIMIT 20"
+    "query": "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'users' LIMIT 20",
+    "description": "List indexes on users table to review indexing strategy"
   }
 }
 ```
@@ -473,7 +486,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_MYSQL",
-    "query": "SELECT table_schema, ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'DB Size in MB' FROM information_schema.tables GROUP BY table_schema"
+    "query": "SELECT table_schema, ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'DB Size in MB' FROM information_schema.tables GROUP BY table_schema",
+    "description": "Get size of each database schema in MB for storage overview"
   }
 }
 ```
@@ -486,7 +500,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_SNOWFLAKE",
-    "query": "SHOW WAREHOUSES"
+    "query": "SHOW WAREHOUSES",
+    "description": "List available Snowflake warehouses and their current status"
   }
 }
 
@@ -495,7 +510,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_SNOWFLAKE",
-    "query": "SELECT * FROM information_schema.tables WHERE table_schema = 'PUBLIC' LIMIT 10"
+    "query": "SELECT * FROM information_schema.tables WHERE table_schema = 'PUBLIC' LIMIT 10",
+    "description": "List tables in PUBLIC schema to review table metadata and clustering info"
   }
 }
 ```
@@ -508,7 +524,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_BIGQUERY",
-    "query": "SELECT schema_name, catalog_name FROM INFORMATION_SCHEMA.SCHEMATA LIMIT 20"
+    "query": "SELECT schema_name, catalog_name FROM INFORMATION_SCHEMA.SCHEMATA LIMIT 20",
+    "description": "List available BigQuery datasets and their parent projects"
   }
 }
 
@@ -517,7 +534,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_BIGQUERY",
-    "query": "SELECT table_name, partition_id, total_rows FROM `project.dataset.INFORMATION_SCHEMA.PARTITIONS` WHERE table_name = 'my_table' LIMIT 10"
+    "query": "SELECT table_name, partition_id, total_rows FROM `project.dataset.INFORMATION_SCHEMA.PARTITIONS` WHERE table_name = 'my_table' LIMIT 10",
+    "description": "Check partition layout and row counts for my_table to understand data distribution"
   }
 }
 ```
@@ -530,7 +548,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_CLICKHOUSE",
-    "query": "SELECT * FROM system.databases LIMIT 20"
+    "query": "SELECT * FROM system.databases LIMIT 20",
+    "description": "List ClickHouse databases to discover available data stores"
   }
 }
 
@@ -539,7 +558,8 @@ When working with multiple databases:
   "action": "query",
   "input": {
     "connection": "MY_CLICKHOUSE",
-    "query": "SELECT database, name, engine, total_rows FROM system.tables WHERE database = 'default' LIMIT 20"
+    "query": "SELECT database, name, engine, total_rows FROM system.tables WHERE database = 'default' LIMIT 20",
+    "description": "List tables in default database with engine types and row counts for overview"
   }
 }
 ```

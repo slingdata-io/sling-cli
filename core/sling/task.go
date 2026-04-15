@@ -130,6 +130,9 @@ func (t *TaskExecution) SetProgress(text string, args ...interface{}) {
 	progressText := g.F(text, args...)
 	t.ProgressHist = append(t.ProgressHist, progressText)
 	t.Progress = progressText
+	if t.Replication == nil {
+		return
+	}
 	if !t.PBar.started || t.PBar.finished {
 		if strings.Contains(text, "execution failed") {
 			text = env.RedString(text)

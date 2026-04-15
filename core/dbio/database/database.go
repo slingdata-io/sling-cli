@@ -3295,57 +3295,76 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
 			continue
-		} else if col.Type == newCol.Type {
-			continue
-		}
-		msg := g.F("optimizing existing '%s' (%s) vs new '%s' (%s) => ", col.Name, col.Type, newCol.Name, newCol.Type)
-		switch {
-		case col.Type.IsDecimal() && newCol.Type.IsDecimal():
-			continue
-		case col.Type.IsDatetime() && newCol.Type.IsDatetime():
-			newCol.Type = iop.TimestampType
-		case col.Type.IsDatetime() && newCol.Type.IsDate():
-			newCol.Type = iop.TimestampType
-		case col.Type.IsInteger() && newCol.Type.IsDecimal():
-			newCol.Type = iop.DecimalType
-		case col.Type.IsInteger() && newCol.Type.IsFloat():
-			newCol.Type = iop.FloatType
-		case col.Type.IsDecimal() && newCol.Type.IsInteger():
-			newCol.Type = iop.DecimalType
-		case col.Type.IsInteger() && newCol.Type == iop.BigIntType:
-			newCol.Type = iop.BigIntType
-		case col.Type == iop.BigIntType && newCol.Type.IsInteger():
-			newCol.Type = iop.BigIntType
-		case col.Type == iop.SmallIntType && newCol.Type == iop.IntegerType:
-			newCol.Type = iop.IntegerType
-		case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
-			newCol.Type = iop.IntegerType
-		case col.Type.IsInteger() && newCol.Type.IsBool():
-			// integer and bool are compatible when bool_as is integer
-			// check if the database stores bools as integers
-			if conn.GetTemplateValue("variable.bool_as") == "integer" {
-				continue // no change needed, keep integer type
-			}
-			newCol.Type = iop.StringType // otherwise convert to string
-		case col.Type.IsBool() && newCol.Type.IsInteger():
-			// bool and integer are compatible when bool_as is integer
-			if conn.GetTemplateValue("variable.bool_as") == "integer" {
-				continue // no change needed, keep bool type
-			}
-			newCol.Type = iop.StringType // otherwise convert to string
-		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsDate() || newCol.IsNumber() || newCol.IsBool()):
-			// use new type
-		case col.Type == iop.TextType || newCol.Type == iop.TextType:
-			newCol.Type = iop.TextType
-		default:
-			newCol.Type = iop.StringType
 		}
 
+		needTypeExpansion := false
 		if col.Type == newCol.Type {
-			continue
+			// Same general type — check if precision/length needs expanding
+			switch {
+			case col.IsString() && col.Sourced && newCol.Sourced && col.DbPrecision > 0 && newCol.DbPrecision > 0:
+				if newCol.DbPrecision > col.DbPrecision {
+					needTypeExpansion = true // source varchar grew, need to expand target
+				}
+			case col.IsDecimal() && col.Sourced && newCol.Sourced:
+				if newCol.DbPrecision > col.DbPrecision || newCol.DbScale > col.DbScale {
+					// use max of both for safety
+					newCol.DbPrecision = max(col.DbPrecision, newCol.DbPrecision)
+					newCol.DbScale = max(col.DbScale, newCol.DbScale)
+					needTypeExpansion = true
+				}
+			}
+			if !needTypeExpansion {
+				continue
+			}
 		}
 
-		g.Debug(msg + string(newCol.Type))
+		if !needTypeExpansion {
+			switch {
+			case col.Type.IsDecimal() && newCol.Type.IsDecimal():
+				continue
+			case col.Type.IsDatetime() && newCol.Type.IsDatetime():
+				newCol.Type = iop.TimestampType
+			case col.Type.IsDatetime() && newCol.Type.IsDate():
+				newCol.Type = iop.TimestampType
+			case col.Type.IsInteger() && newCol.Type.IsDecimal():
+				newCol.Type = iop.DecimalType
+			case col.Type.IsInteger() && newCol.Type.IsFloat():
+				newCol.Type = iop.FloatType
+			case col.Type.IsDecimal() && newCol.Type.IsInteger():
+				newCol.Type = iop.DecimalType
+			case col.Type.IsInteger() && newCol.Type == iop.BigIntType:
+				newCol.Type = iop.BigIntType
+			case col.Type == iop.BigIntType && newCol.Type.IsInteger():
+				newCol.Type = iop.BigIntType
+			case col.Type == iop.SmallIntType && newCol.Type == iop.IntegerType:
+				newCol.Type = iop.IntegerType
+			case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
+				newCol.Type = iop.IntegerType
+			case col.Type.IsInteger() && newCol.Type.IsBool():
+				// integer and bool are compatible when bool_as is integer
+				// check if the database stores bools as integers
+				if conn.GetTemplateValue("variable.bool_as") == "integer" {
+					continue // no change needed, keep integer type
+				}
+				newCol.Type = iop.StringType // otherwise convert to string
+			case col.Type.IsBool() && newCol.Type.IsInteger():
+				// bool and integer are compatible when bool_as is integer
+				if conn.GetTemplateValue("variable.bool_as") == "integer" {
+					continue // no change needed, keep bool type
+				}
+				newCol.Type = iop.StringType // otherwise convert to string
+			case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsDate() || newCol.IsNumber() || newCol.IsBool()):
+				// use new type
+			case col.Type == iop.TextType || newCol.Type == iop.TextType:
+				newCol.Type = iop.TextType
+			default:
+				newCol.Type = iop.StringType
+			}
+
+			if col.Type == newCol.Type {
+				continue
+			}
+		}
 
 		oldNativeType, err := conn.GetNativeType(col)
 		if err != nil {
@@ -3361,7 +3380,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			continue
 		}
 
+		g.Debug("optimizing existing '%s' (%s) vs new '%s' (%s) => %s", col.Name, col.Type, newCol.Name, newCol.Type, newNativeType)
+
 		table.Columns[i].Type = newCol.Type
+		table.Columns[i].DbPrecision = newCol.DbPrecision
+		table.Columns[i].DbScale = newCol.DbScale
 		table.Columns[i].DbType = newNativeType
 		colsChanging = append(colsChanging, table.Columns[i])
 		oldCols = append(oldCols, col)

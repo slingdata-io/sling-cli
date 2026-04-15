@@ -1534,14 +1534,14 @@ remap:
 			}
 		}
 
-		nativeType = strings.ReplaceAll(
-			nativeType,
-			"(,)",
-			fmt.Sprintf("(%d,%d)", precision, scale),
-		)
-
-		// BigQuery: use BIGNUMERIC if scale > 9 or precision > 38
-		if t == dbio.TypeDbBigQuery && strings.EqualFold(nativeType, "numeric") &&
+		if strings.Contains(nativeType, "(,)") {
+			nativeType = strings.ReplaceAll(
+				nativeType,
+				"(,)",
+				fmt.Sprintf("(%d,%d)", precision, scale),
+			)
+		} else if t == dbio.TypeDbBigQuery && strings.EqualFold(nativeType, "numeric") &&
+			// BigQuery: use BIGNUMERIC if scale > 9 or precision > 38
 			(scale > 9 || precision > 38) {
 			nativeType = "bignumeric"
 		}

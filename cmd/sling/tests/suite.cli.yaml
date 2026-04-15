@@ -2194,3 +2194,12 @@
   output_contains:
     - 'SUCCESS: DuckDB Arrow IPC output produced correct row count'
     - 'DuckDB Arrow IPC output test complete'
+
+# adjust_column_type: expand varchar and decimal columns when source types widen
+# Source starts with VARCHAR(50)/NUMERIC(10,2), then grows to VARCHAR(200)/NUMERIC(18,6).
+# The target should expand column types to match, avoiding truncation or precision loss.
+- id: 229
+  name: 'adjust_column_type expands varchar and decimal columns'
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.27.adjust_column_type_expand.yaml'
+  output_contains:
+    - 'SUCCESS: adjust_column_type correctly expanded varchar and decimal columns'
