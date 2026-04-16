@@ -48,12 +48,12 @@ func (hm HookMap) IsEmpty() bool {
 }
 
 type ParseOptions struct {
-	stage     HookStage
-	kind      HookKind
-	index     int
-	state     RuntimeState
-	md5       string
-	context   *g.Context
+	stage    HookStage
+	kind     HookKind
+	index    int
+	state    RuntimeState
+	md5      string
+	context  *g.Context
 	yamlNode *yaml.Node
 }
 
@@ -70,6 +70,17 @@ const (
 
 var ParseHook = func(any, ParseOptions) (Hook, error) {
 	return nil, g.Error("please use the official sling-cli release for using hooks and pipelines")
+}
+
+// NewParseOptions creates ParseOption
+func NewParseOptions(stage HookStage, kind HookKind, index int, state RuntimeState, ctx *g.Context) ParseOptions {
+	return ParseOptions{
+		stage:   stage,
+		kind:    kind,
+		index:   index,
+		state:   state,
+		context: ctx,
+	}
 }
 
 func (hs Hooks) Execute() (err error) {
