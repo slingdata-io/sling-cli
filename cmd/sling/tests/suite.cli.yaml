@@ -2203,3 +2203,12 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.27.adjust_column_type_expand.yaml'
   output_contains:
     - 'SUCCESS: adjust_column_type correctly expanded varchar and decimal columns'
+
+# Platform CLI: exercises `sling project jobs/exec/files/connections` via a
+# self-contained pipeline that runs each command and asserts against stdout.
+# Relies on SLING_PROJECT_TOKEN being set (typically via ~/.sling/env.yaml).
+- id: 230
+  name: 'sling project CLI (jobs/exec/files/connections)'
+  run: 'sling run -p cmd/sling/tests/pipelines/p.28.platform_cli.yaml'
+  output_contains:
+    - 'Platform CLI: all checks passed'

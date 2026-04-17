@@ -1,0 +1,127 @@
+env:
+  JOB_ID: job_0vnx9sjkjzmd95nh
+
+steps:
+  - log: '=== Platform CLI: jobs list (table default) ==='
+
+  - id: jobs_list_table
+    command: sling project jobs list
+
+  - check: 'contains(state.jobs_list_table.output.stdout, "FILE NAME")'
+    failure_message: 'jobs list (table) did not include column header'
+
+  - check: 'contains(state.jobs_list_table.output.stdout, "job_0vnx9sjkjzmd95nh")'
+    failure_message: 'jobs list (table) missing known job id'
+
+  - log: '=== Platform CLI: jobs list -o json ==='
+
+  - id: jobs_list_json
+    command: sling project jobs list -o json
+
+  - check: 'contains(state.jobs_list_json.output.stdout, "job_0vnx9sjkjzmd95nh")'
+    failure_message: 'jobs list (json) missing known job id'
+
+  - check: contains(state.jobs_list_json.output.stdout, "replication")
+    failure_message: 'jobs list (json) missing type field'
+
+  - log: '=== Platform CLI: jobs list --file-name filter ==='
+
+  - id: jobs_list_filter
+    command: sling project jobs list --file-name replications/hackernews.yaml
+
+  - check: 'contains(state.jobs_list_filter.output.stdout, "Hacker News")'
+    failure_message: 'jobs list --file-name filter did not return expected row'
+
+  - log: '=== Platform CLI: jobs get ==='
+
+  - id: jobs_get
+    command: sling project jobs get {env.JOB_ID}
+
+  - check: 'contains(state.jobs_get.output.stdout, "job_0vnx9sjkjzmd95nh")'
+    failure_message: 'jobs get missing expected id'
+
+  - check: 'contains(state.jobs_get.output.stdout, "replications/hackernews.yaml")'
+    failure_message: 'jobs get missing expected file_name'
+
+  - log: '=== Platform CLI: exec list default ==='
+
+  - id: exec_list_table
+    command: sling project execs list
+
+  - check: 'contains(state.exec_list_table.output.stdout, "EXEC ID")'
+    failure_message: 'exec list (table) missing header'
+
+  - log: '=== Platform CLI: exec list -o json ==='
+
+  - id: exec_list_json
+    command: sling project execs list -o json --limit 5
+
+  - check: contains(state.exec_list_json.output.stdout, "exec_id")
+    failure_message: 'exec list (json) missing exec_id key'
+
+  - log: '=== Platform CLI: exec list --job-id filter ==='
+
+  - id: exec_list_jobfilter
+    command: sling project execs list --job-id {env.JOB_ID} --limit 3
+
+  - check: 'contains(state.exec_list_jobfilter.output.stdout, "job_0vnx9sjkjzmd95nh")'
+    failure_message: 'exec list --job-id filter missing job id in results'
+
+  - log: '=== Platform CLI: files list (table + json) ==='
+
+  - id: files_list_table
+    command: sling project files list
+
+  - check: 'contains(state.files_list_table.output.stdout, "replications/hackernews.yaml")'
+    failure_message: 'files list (table) missing known file'
+
+  - id: files_list_json
+    command: sling project files list -o json
+
+  - check: 'contains(state.files_list_json.output.stdout, "replications/hackernews.yaml")'
+    failure_message: 'files list (json) missing known file'
+
+  - log: '=== Platform CLI: files get prints raw body to stdout ==='
+
+  - id: files_get
+    command: sling project files get replications/hackernews.yaml
+
+  - check: 'contains(state.files_get.output.stdout, "source:")'
+    failure_message: 'files get did not print YAML body to stdout'
+
+  - check: 'contains(state.files_get.output.stdout, "HACKERNEWS")'
+    failure_message: 'files get body missing expected connection reference'
+
+  - log: '=== Platform CLI: connections list (table + json) ==='
+
+  - id: conns_list_table
+    command: sling project connections list
+
+  - check: 'contains(state.conns_list_table.output.stdout, "NAME")'
+    failure_message: 'connections list (table) missing header'
+
+  - id: conns_list_json
+    command: sling project connections list -o json
+
+  - check: contains(state.conns_list_json.output.stdout, "database")
+    failure_message: 'connections list (json) missing type key'
+
+  - log: '=== Platform CLI: invalid output format rejected ==='
+
+  - id: jobs_list_bad_format
+    command: sling project jobs list -o xml
+    on_failure: quiet
+
+  - check: 'contains(state.jobs_list_bad_format.output.combined, "invalid output format")'
+    failure_message: 'invalid -o value was not rejected with clear error'
+
+  - log: '=== Platform CLI: jobs delete without -f aborts on N ==='
+
+  - id: jobs_delete_prompt
+    command: echo N | sling project jobs delete job_nonexistent_xxx
+    on_failure: quiet
+
+  - check: 'contains(state.jobs_delete_prompt.output.combined, "cancelled by user")'
+    failure_message: 'jobs delete did not honor N prompt'
+
+  - log: '=== Platform CLI: all checks passed ==='

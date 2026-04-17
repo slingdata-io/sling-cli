@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -78,6 +79,18 @@ func TestCLI(t *testing.T) {
 	bin = "cmd/sling/" + bin
 
 	defaultEnv := g.KVArrToMap(os.Environ()...)
+
+	// Prepend the directory holding the freshly-built sling binary to PATH so
+	// any child process (e.g. bash spawned by pipeline `command` steps that
+	// run `sling ...`) resolves `sling` to the test binary rather than a
+	// system-installed one. The test wrapper itself aliases `sling` to the
+	// absolute path, but aliases don't propagate to child shells. The `bin`
+	// path is relative to the wrapper's WorkDir (repo root = ../..).
+	if wd, err := os.Getwd(); err == nil {
+		repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+		absBin := filepath.Clean(filepath.Join(repoRoot, bin))
+		defaultEnv["PATH"] = filepath.Dir(absBin) + string(os.PathListSeparator) + defaultEnv["PATH"]
+	}
 
 	// Load tests from suite.cli.yaml
 	filePath := "tests/suite.cli.yaml"
