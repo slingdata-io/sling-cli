@@ -1292,8 +1292,13 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 	}
 
 	// set state to prevent mutation by next_state
+	// Lock iter.context: other goroutines (e.g. EvaluatePaginationNext) may be
+	// writing to iter.state concurrently; copying while writes occur causes
+	// "concurrent map iteration and map write" at high concurrency.
 	state := StateMap{}
+	iter.context.Lock()
 	maps.Copy(state, iter.state)
+	iter.context.Unlock()
 
 	return &SingleRequest{
 		id:        id,
