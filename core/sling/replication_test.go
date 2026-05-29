@@ -1,6 +1,8 @@
 package sling
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -35,6 +37,64 @@ streams:
 	assert.NoError(t, err)
 
 	g.PP(replication)
+}
+
+func TestLoadReplicationConfigFromFileQuotedPath(t *testing.T) {
+	t.Setenv("SLING_REPLICATION_TASKS", "")
+
+	cfgPath := filepath.Join(t.TempDir(), "replication.yaml")
+	cfgBody := strings.TrimSpace(`
+source: local
+target: local
+streams:
+  test_stream:
+`) + "\n"
+	assert.NoError(t, os.WriteFile(cfgPath, []byte(cfgBody), 0644))
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "normal", path: cfgPath},
+		{name: "double quoted", path: `"` + cfgPath + `"`},
+		{name: "single quoted", path: `'` + cfgPath + `'`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := LoadReplicationConfigFromFile(tt.path)
+			if assert.NoError(t, err) {
+				assert.Equal(t, cfgPath, config.Env["SLING_CONFIG_PATH"])
+			}
+		})
+	}
+}
+
+func TestLoadReplicationConfigFromFileQuotedPathErrors(t *testing.T) {
+	t.Setenv("SLING_REPLICATION_TASKS", "")
+
+	cfgPath := filepath.Join(t.TempDir(), "replication.yaml")
+	cfgBody := strings.TrimSpace(`
+source: local
+target: local
+streams:
+  test_stream:
+`) + "\n"
+	assert.NoError(t, os.WriteFile(cfgPath, []byte(cfgBody), 0644))
+
+	mismatched := `"` + cfgPath + `'`
+	_, err := LoadReplicationConfigFromFile(mismatched)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), mismatched)
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+	quotedMissing := `"` + missingPath + `"`
+	_, err = LoadReplicationConfigFromFile(quotedMissing)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), missingPath)
+		assert.Contains(t, err.Error(), quotedMissing)
+	}
 }
 
 func TestReplicationWildcards(t *testing.T) {

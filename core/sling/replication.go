@@ -1886,10 +1886,44 @@ func cleanMergePrefixes(cols any) any {
 	return cleaned
 }
 
+func normalizeReplicationConfigPathArg(cfgPath string) string {
+	cfgPath = strings.TrimSpace(cfgPath)
+	if cfgPath == "" {
+		return cfgPath
+	}
+
+	if _, err := os.Stat(cfgPath); err == nil {
+		return cfgPath
+	}
+
+	if len(cfgPath) < 2 {
+		return cfgPath
+	}
+
+	quote := cfgPath[0]
+	if (quote != '"' && quote != '\'') || cfgPath[len(cfgPath)-1] != quote {
+		return cfgPath
+	}
+
+	unquotedPath := cfgPath[1 : len(cfgPath)-1]
+	if unquotedPath == "" {
+		return cfgPath
+	}
+
+	return unquotedPath
+}
+
 func LoadReplicationConfigFromFile(cfgPath string) (config ReplicationConfig, err error) {
+	originalCfgPath := strings.TrimSpace(cfgPath)
+	cfgPath = normalizeReplicationConfigPathArg(cfgPath)
+
 	cfgFile, err := os.Open(cfgPath)
 	if err != nil {
-		err = g.Error(err, "Unable to open replication path: "+cfgPath)
+		if originalCfgPath != cfgPath {
+			err = g.Error(err, "Unable to open replication path: %s (from %s)", cfgPath, originalCfgPath)
+		} else {
+			err = g.Error(err, "Unable to open replication path: "+cfgPath)
+		}
 		return
 	}
 
