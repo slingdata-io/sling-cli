@@ -1,0 +1,89 @@
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop materialized view if exists {view}
+  create_schema: >-
+    create keyspace if not exists {schema}
+    with replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+  create_table: create table if not exists {table} ({col_types})
+
+metadata:
+  columns: |
+    select column_name, type as data_type
+    from system_schema.columns
+    where keyspace_name = '{schema}' and table_name = '{table}'
+  schemata: |
+    select keyspace_name as schema_name, table_name, column_name, type as data_type, position
+    from system_schema.columns
+    {{if .schema -}}
+    where keyspace_name = '{schema}'
+    {{- end}}
+
+variable:
+  bind_string: '?'
+  quote_char: '"'
+  default_merge_strategy: insert
+  batch_rows: 100
+  max_string_type: text
+  max_string_length: 2147483647
+  max_column_length: 192
+
+native_type_map:
+  ascii: string
+  bigint: bigint
+  blob: binary
+  boolean: bool
+  counter: bigint
+  date: date
+  decimal: decimal
+  double: float
+  duration: string
+  float: float
+  inet: string
+  int: integer
+  smallint: smallint
+  text: text
+  time: time
+  timestamp: timestamp
+  timeuuid: uuid
+  tinyint: smallint
+  uuid: uuid
+  varchar: text
+  varint: decimal
+  list: json
+  set: json
+  map: json
+  frozen: json
+  tuple: json
+  vector: json
+
+general_type_map:
+  bigint: bigint
+  binary: blob
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: decimal
+  float: double
+  integer: int
+  json: text
+  smallint: smallint
+  string: varchar
+  text: text
+  time: time
+  timestamp: timestamp
+  timestampz: timestamp
+  timez: time
+  uuid: uuid
+
+default_value_map:
+  to_general:
+    "currenttimestamp()": "current_timestamp"
+    "currentTimestamp()": "current_timestamp"
+    "true": "true"
+    "false": "false"
+  from_general:
+    "current_timestamp": "currentTimestamp()"
+    "current_timestamp_utc": "currentTimestamp()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"
