@@ -1276,7 +1276,6 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
 		ddl = ddl[:closeParen] + g.F(", %s (%s)%s", prefix, strings.Join(quotedNames, ", "), suffix) + ddl[closeParen:]
 	}
-
 	return ddl, nil
 }
 

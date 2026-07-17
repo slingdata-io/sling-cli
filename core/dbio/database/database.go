@@ -326,6 +326,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ArrowDBConn{URL: URL}
 	} else if strings.HasPrefix(URL, "odbc:") {
 		conn = &ODBCConn{URL: URL}
+	} else if strings.HasPrefix(URL, "scylladb:") {
+		conn = &ScyllaDBConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}

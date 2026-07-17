@@ -998,5 +998,5 @@ id,first_name,last_name,email,target,create_dt,date,rating,code,update_dt
 996,Myriam,Dysart,mdysartrn@apple.com,true,2019-04-13 17:19:19.000,2019-04-13,96.472,996,2019-04-13 17:19:19.000
 997,Phillis,Shier,pshierro@free.fr,true,2019-07-06 22:36:51.000,2019-07-06,36.414,997,2019-07-06 22:36:51.000
 998,Corny,Greenless,cgreenlessrp@zdnet.com,true,2019-04-09 16:34:37.000,2019-04-09,84.883,998,2019-04-09 16:34:37.000
-999,Olivette,Posse,oposserq@arstechnica.com,true,2019-03-08 17:14:06.000,2019-03-08,34.207,999.1,2019-03-08 17:14:06.000
+999,Olivette,Posse,oposserq@arstechnica.com,true,2019-03-08 17:14:06.000,2019-03-08,34.207,999,2019-03-08 17:14:06.000
 1000,Blayne,Livsey,blivseyrr@nytimes.com,true,2019-04-23 19:31:25.000,2019-04-23,28.686,1000,2019-04-23 19:31:25.000

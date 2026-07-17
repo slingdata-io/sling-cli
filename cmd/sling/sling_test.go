@@ -117,6 +117,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbScyllaDB:          {name: "scylladb", schema: "default"},
 
 	dbio.TypeFileLocal:       {name: "local"},
 	dbio.TypeFileSftp:        {name: "sftp"},
@@ -857,7 +858,7 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB) ||
 				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
 				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
 				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
@@ -1055,8 +1056,14 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in fabric
 				}
+			case tgtType == dbio.TypeDbScyllaDB:
+				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
+					correctType = iop.TimestampType // scylladb uses timestamp
+				}
+				if correctType == iop.DecimalType {
+					continue // scylladb sometimes detects decimal as bigint
+				}
 			}
-
 			col := columns.GetColumn(colName)
 			if assert.NotEmpty(t, col, "missing column: %s", colName) {
 				if !assert.Equal(t, correctType, col.Type, "column type must match for %s (src-db-type = %s ,  tgt-db-type=%s)", col.Name, srcType, tgtType) {
@@ -1244,6 +1251,11 @@ func TestSuiteDatabaseAzureTable(t *testing.T) {
 func TestSuiteDatabasePrometheus(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbPrometheus, "discover_schemas")
+}
+
+func TestSuiteDatabaseScylladb(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbScyllaDB, "1,6-8")
 }
 
 // generate large dataset or use cache
