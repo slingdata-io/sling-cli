@@ -147,6 +147,10 @@ func (rd *ReplicationConfig) SetRuntimeState(state *ReplicationState) {
 func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	rd.initRuntimeState(nil)
 
+	// The state mutex makes concurrent callers safe.
+	rd.state.lock()
+	defer rd.state.unlock()
+
 	rd.state.Timestamp.Update()
 
 	if rd.Compiled {
