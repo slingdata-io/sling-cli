@@ -76,6 +76,9 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
+	github.com/slingdata-io/godbc v0.0.9
+	github.com/slingdata-io/golyglot v1.0.14
+	github.com/slingdata-io/sling v0.0.0-20260715135102-01cd9a07a3c8
 	github.com/snowflakedb/gosnowflake v1.17.1
 	github.com/spf13/cast v1.7.1
 	github.com/stretchr/testify v1.11.1
@@ -330,6 +333,8 @@ require (
 )
 
 // replace github.com/slingdata-io/golyglot => ../golyglot
+
+replace github.com/slingdata-io/sling => ../sling
 
 replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20260105175128-f16b74585ee2
 
