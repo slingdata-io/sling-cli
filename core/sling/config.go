@@ -1518,6 +1518,15 @@ func (cfg *Config) StreamID() string {
 	return g.MD5(cfg.Source.Conn, cfg.Target.Conn, cfg.StreamName, cfg.Target.Object)
 }
 
+// CDCChangeFeed returns the configured change_feed name (the pre-provisioned,
+// DBA-managed CDC object to read from), or "" if unset (use engine default).
+func (cfg *Config) CDCChangeFeed() string {
+	if cfg.ReplicationStream != nil && cfg.ReplicationStream.CDCOptions != nil {
+		return g.PtrVal(cfg.ReplicationStream.CDCOptions.ChangeFeed)
+	}
+	return ""
+}
+
 // CDCSlotLevel returns the effective slot level after applying defaults
 func (cfg *Config) CDCSlotLevel() database.CDCSlotLevel {
 	supported := cfg.SrcConn.Type.IsPostgresLike() || cfg.SrcConn.Type.IsMySQLLike()
@@ -1757,6 +1766,12 @@ type CDCOptions struct {
 
 	// SlotLevel controls how the replication slot/reader is scoped for sources
 	SlotLevel *database.CDCSlotLevel `json:"slot_level,omitempty" yaml:"slot_level,omitempty"`
+
+	// ChangeFeed names a pre-provisioned, DBA-managed server-side CDC object to
+	// read from. Engine-neutral; maps to: PostgreSQL publication, SQL Server
+	// capture_instance, Oracle GoldenGate data stream. Empty means "use the
+	// engine default" (derive or expect the conventional object).
+	ChangeFeed *string `json:"change_feed,omitempty" yaml:"change_feed,omitempty"`
 }
 
 // SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
@@ -1794,6 +1809,9 @@ func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	}
 	if o.SlotLevel == nil {
 		o.SlotLevel = cdcOptions.SlotLevel
+	}
+	if o.ChangeFeed == nil {
+		o.ChangeFeed = cdcOptions.ChangeFeed
 	}
 }
 
