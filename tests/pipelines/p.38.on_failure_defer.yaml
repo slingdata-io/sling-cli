@@ -1,0 +1,36 @@
+# Verifies on_failure: defer inside a group with a loop.
+#
+# When one loop item fails a step with on_failure: defer:
+# - remaining group steps for that iteration still run (does not fail early / abort)
+# - subsequent loop items still run their full step list
+# - the deferred error is raised only at the end of the group (pipeline fails)
+#
+# failme is first so we prove later items (alpha, beta) are not skipped.
+#
+# See: https://docs.slingdata.io/concepts/pipeline#on-failure-behaviors
+steps:
+  - type: group
+    id: defer_loop_group
+    loop: [failme, alpha, beta]
+    steps:
+      - type: log
+        message: "defer-loop start value={loop.value}"
+
+      # Fails only for "failme"; with on_failure: defer the rest of the
+      # group steps below still run for that iteration, and later loop
+      # items continue.
+      - type: check
+        id: maybe_fail
+        check: loop.value != "failme"
+        failure_message: "intentional deferred failure for {loop.value}"
+        on_failure: defer
+
+      - type: log
+        message: "defer-loop mid step still ran value={loop.value}"
+
+      - type: log
+        message: "defer-loop end step still ran value={loop.value}"
+
+  # Must not run: deferred error should surface when the group ends.
+  - type: log
+    message: "should-not-reach after deferred group failure"

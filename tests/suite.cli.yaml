@@ -2536,3 +2536,25 @@
     - 'execution succeeded'
   output_does_not_contain:
     - 'column type change for rowid'
+
+# on_failure: defer inside a group loop — one loop item fails a step, but all
+# remaining group steps for that iteration still run AND later loop items
+# continue (does not fail early). Error surfaces at end of the group.
+- id: 309
+  name: 'Test on_failure:defer runs remaining group steps after loop item fails'
+  run: 'sling run -p tests/pipelines/p.38.on_failure_defer.yaml'
+  err: true
+  output_contains:
+    - 'defer-loop start value=failme'
+    - 'failed (defering)'
+    - 'intentional deferred failure for failme'
+    - 'defer-loop mid step still ran value=failme'
+    - 'defer-loop end step still ran value=failme'
+    - 'defer-loop start value=alpha'
+    - 'defer-loop mid step still ran value=alpha'
+    - 'defer-loop end step still ran value=alpha'
+    - 'defer-loop start value=beta'
+    - 'defer-loop mid step still ran value=beta'
+    - 'defer-loop end step still ran value=beta'
+  output_does_not_contain:
+    - 'should-not-reach after deferred group failure'
