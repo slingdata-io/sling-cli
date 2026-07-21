@@ -100,6 +100,10 @@ func (conn *RedshiftConn) getS3Props() []string {
 	awsRole := conn.GetProp("AWS_ROLE_ARN")
 	awsProfile := conn.GetProp("AWS_PROFILE")
 
+	if strings.EqualFold(awsRole, "default") {
+		awsRole = ""
+	}
+
 	if awsID != "" {
 		s3Props = append(s3Props, "ACCESS_KEY_ID="+awsID)
 	}
@@ -136,7 +140,11 @@ func (conn *RedshiftConn) makeCopyCredentialString() (cred string) {
 	}
 
 	if AwsRole != "" {
-		template = template + "\n" + `iam_role '{aws_role_arn}'`
+		if strings.EqualFold(AwsRole, "default") {
+			template = template + "\n" + `iam_role default`
+		} else {
+			template = template + "\n" + `iam_role '{aws_role_arn}'`
+		}
 	}
 
 	cred = g.R(
@@ -447,7 +455,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	AwsRole := conn.GetProp("AWS_ROLE_ARN")
 
 	if (AwsID == "" || AwsAccessKey == "") && AwsSessionToken == "" && AwsRole == "" {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', or 'AWS_ROLE_ARN' to copy to redshift from S3")
+		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', or 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role) to copy to redshift from S3")
 		return
 	}
 	credentialExpr := conn.makeCopyCredentialString()
