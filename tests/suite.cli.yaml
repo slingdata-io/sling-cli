@@ -2558,3 +2558,15 @@
     - 'defer-loop end step still ran value=beta'
   output_does_not_contain:
     - 'should-not-reach after deferred group failure'
+
+# CLI input flags (e.g. --streams) must be accessible inside a pipeline via
+# execution.cli_args.<flag> (discord report: pipeline could not read the value
+# passed via `sling run -p ... --streams tag:xxx`).
+- id: 310
+  name: 'Pipeline can read CLI flags via execution.cli_args (array/scalar/hyphenated/missing keys)'
+  run: 'sling run -p tests/pipelines/p.41.cli_args_streams.yaml --streams tag:transactions --mode full-refresh --limit 5 --src-conn PG'
+  output_contains:
+    - '"streams":["tag:transactions"]'
+    - '"mode":"full-refresh"'
+    - '"src_conn":"PG"'
+    - '✓ execution.cli_args scalar/array/hyphenated/missing keys all behave correctly'
