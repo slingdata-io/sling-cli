@@ -97,6 +97,8 @@ func (conn *RedshiftConn) getS3Props() []string {
 	awsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	awsKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
 	awsToken := conn.GetProp("AWS_SESSION_TOKEN")
+	awsRole := conn.GetProp("AWS_ROLE_ARN")
+	awsProfile := conn.GetProp("AWS_PROFILE")
 
 	if awsID != "" {
 		s3Props = append(s3Props, "ACCESS_KEY_ID="+awsID)
@@ -107,10 +109,11 @@ func (conn *RedshiftConn) getS3Props() []string {
 	if awsToken != "" {
 		s3Props = append(s3Props, "SESSION_TOKEN="+awsToken)
 	}
-
-	// If no AWS credentials are provided, instruct S3 client to use environment credentials
-	if awsID == "" && awsKey == "" {
-		s3Props = append(s3Props, "USE_ENVIRONMENT=true")
+	if awsRole != "" {
+		s3Props = append(s3Props, "ROLE_ARN="+awsRole)
+	}
+	if awsProfile != "" {
+		s3Props = append(s3Props, "PROFILE="+awsProfile)
 	}
 	return s3Props
 }
@@ -441,8 +444,10 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
 	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
-	if (AwsID == "" || AwsAccessKey == "") && (AwsSessionToken == "") {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' or 'AWS_SESSION_TOKEN' to copy to redshift from S3")
+	AwsRole := conn.GetProp("AWS_ROLE_ARN")
+
+	if (AwsID == "" || AwsAccessKey == "") && AwsSessionToken == "" && AwsRole == "" {
+		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', or 'AWS_ROLE_ARN' to copy to redshift from S3")
 		return
 	}
 	credentialExpr := conn.makeCopyCredentialString()
