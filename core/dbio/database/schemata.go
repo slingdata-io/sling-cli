@@ -142,6 +142,10 @@ func (t *Table) SetKeys(sourcePKCols []string, updateCol string, tableKeys Table
 				eG.Capture(t.Columns.SetKeys(tableKey, tableKeys.IndexColumnNames()...))
 				continue
 			}
+			if tableKey == iop.UniqueKey {
+				eG.Capture(t.Columns.SetKeys(tableKey, tableKeys.UniqueColumnNames()...))
+				continue
+			}
 			eG.Capture(t.Columns.SetKeys(tableKey, keys...))
 		}
 	}
