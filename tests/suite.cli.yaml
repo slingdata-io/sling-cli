@@ -1809,7 +1809,7 @@
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
   run: 'sling run -d tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
-  group: schema_migration
+  group: duckdb
   output_contains:
     - 'PK constraints found'
     - 'execution succeeded'
