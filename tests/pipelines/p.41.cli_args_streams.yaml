@@ -1,0 +1,72 @@
+# Verifies that CLI input flags (e.g. --streams) are accessible inside a pipeline
+# via execution.cli_args.<flag>. This backs the ability for a pipeline to know
+# which streams tag/name was passed on the command line (discord report: pipeline
+# could not read the value passed via `sling run -p ... --streams tag:xxx`).
+#
+# Note: hyphens in flag names are replaced with underscores, so --src-conn is
+# accessible as execution.cli_args.src_conn.
+#
+# Invoked as:
+#   sling run -p tests/pipelines/p.41.cli_args_streams.yaml \
+#     --streams tag:transactions --mode full-refresh --limit 5 --src-conn PG
+steps:
+  - type: log
+    id: show
+    message: 'cli_args => {execution.cli_args}'
+
+  # --streams is parsed into an ARRAY of stream selectors
+  - type: check
+    id: streams_present
+    check: execution.cli_args.streams[0] == "tag:transactions"
+    message: 'expected cli_args.streams[0] "tag:transactions", got "{execution.cli_args.streams[0]}"'
+
+  # scalar string flag
+  - type: check
+    id: mode_present
+    check: execution.cli_args.mode == "full-refresh"
+    message: 'expected cli_args.mode "full-refresh", got "{execution.cli_args.mode}"'
+
+  # scalar numeric flag
+  - type: check
+    id: limit_present
+    check: execution.cli_args.limit == 5
+    message: 'expected cli_args.limit 5, got "{execution.cli_args.limit}"'
+
+  # hyphenated flag (--src-conn) is accessible with an underscore (src_conn)
+  - type: check
+    id: hyphen_key_present
+    check: execution.cli_args.src_conn == "PG"
+    message: 'expected cli_args.src_conn "PG", got "{execution.cli_args.src_conn}"'
+
+  # the -p pipeline path flag is always present
+  - type: check
+    id: pipeline_present
+    check: contains(execution.cli_args.pipeline, "p.41.cli_args_streams.yaml")
+    message: 'expected cli_args.pipeline to reference the pipeline file, got "{execution.cli_args.pipeline}"'
+
+  # A flag that was NOT passed on the command line has no key in cli_args.
+  # Referencing it directly in an expression is a hard error, so use jmespath()
+  # to safely read a possibly-missing key (returns empty when absent).
+  - type: check
+    id: missing_key_absent
+    check: is_empty(jmespath(execution.cli_args, "where"))
+    message: 'expected cli_args.where to be absent (not passed on CLI)'
+
+  # execution-level context is populated (mirrors replication runtime state)
+  - type: check
+    id: execution_id_present
+    check: execution.id != ""
+    message: 'expected execution.id to be populated'
+
+  - type: check
+    id: execution_file_name_present
+    check: execution.file_name == "p.41.cli_args_streams.yaml"
+    message: 'expected execution.file_name "p.41.cli_args_streams.yaml", got "{execution.file_name}"'
+
+  - type: check
+    id: execution_status_present
+    check: execution.status.count > 0
+    message: 'expected execution.status.count > 0, got "{execution.status.count}"'
+
+  - type: log
+    message: "✓ execution.cli_args scalar/array/hyphenated/missing keys all behave correctly"

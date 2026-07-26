@@ -368,18 +368,18 @@ steps:
     check: int_parse(store.anon_expr[0].cnt) == 1
     failure_message: "expected composite index mixing col1 and LOWER(col2)"
 
-  # 4c. table_keys.primary / table_keys.unique composite (wrapped-list) form.
-  # primary: [[user_id, brand_id]] must be accepted the same as the flat list
-  # form and produce a composite PRIMARY KEY. Previously this errored with
-  # "could not set primary key. Did not find column".
+  # 4c. composite primary / unique (wrapped-list form)
   - type: query
     connection: postgres
     query: |
       DROP TABLE IF EXISTS public.tk_pk_src;
-      CREATE TABLE public.tk_pk_src (id bigint, user_id bigint, brand_id bigint, name text);
-      INSERT INTO public.tk_pk_src (id, user_id, brand_id, name) VALUES
-      (1, 10, 100, 'alice'),
-      (2, 20, 200, 'bob');
+      CREATE TABLE public.tk_pk_src (
+        id bigint, user_id bigint, brand_id bigint,
+        org_id bigint, project_id bigint, name text
+      );
+      INSERT INTO public.tk_pk_src (id, user_id, brand_id, org_id, project_id, name) VALUES
+      (1, 10, 100, 1, 10, 'alice'),
+      (2, 20, 200, 1, 20, 'bob');
 
   - type: query
     connection: postgres
@@ -398,13 +398,12 @@ steps:
           target_options:
             table_keys:
               primary: [[user_id, brand_id]]
-              unique: [[name]]
+              unique: [[name], [org_id, project_id]]
 
   - type: check
     check: state.repl_tk_primary.status == "success"
     failure_message: "table_keys primary/unique composite replication failed: {state.repl_tk_primary.error}"
 
-  # composite PRIMARY KEY on (user_id, brand_id)
   - type: query
     connection: postgres
     query: |
@@ -418,7 +417,6 @@ steps:
     check: store.tk_pk[0].cols == "user_id,brand_id"
     failure_message: "expected composite PRIMARY KEY (user_id,brand_id), got {store.tk_pk[0].cols}"
 
-  # unique key on name -> unique index
   - type: query
     connection: postgres
     query: |
@@ -429,6 +427,36 @@ steps:
   - type: check
     check: int_parse(store.tk_uniq[0].cnt) >= 1
     failure_message: "expected a UNIQUE index on name from table_keys.unique"
+
+  - type: query
+    connection: postgres
+    query: |
+      SELECT count(*) as cnt FROM pg_indexes
+      WHERE tablename = 'tk_pk_dest'
+        AND indexdef ILIKE '%UNIQUE%'
+        AND indexdef ILIKE '%org_id%'
+        AND indexdef ILIKE '%project_id%'
+    into: tk_uniq_comp
+
+  - type: check
+    check: int_parse(store.tk_uniq_comp[0].cnt) >= 1
+    failure_message: "expected a composite UNIQUE index on (org_id, project_id)"
+
+  - type: query
+    connection: postgres
+    query: |
+      SELECT count(*) as cnt FROM pg_indexes
+      WHERE tablename = 'tk_pk_dest'
+        AND indexdef ILIKE '%UNIQUE%'
+        AND (
+          (indexdef ILIKE '%(org_id)%' AND indexdef NOT ILIKE '%project_id%')
+          OR (indexdef ILIKE '%(project_id)%' AND indexdef NOT ILIKE '%org_id%')
+        )
+    into: tk_uniq_sep
+
+  - type: check
+    check: int_parse(store.tk_uniq_sep[0].cnt) == 0
+    failure_message: "expected no separate unique indexes on org_id/project_id alone, got {store.tk_uniq_sep[0].cnt}"
 
   # 5. Reserved-but-unsupported modifier — auto_increment must fail fast at
   # config prep with a clear "not yet supported" error. on_failure: warn lets

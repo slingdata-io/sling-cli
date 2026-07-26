@@ -17,10 +17,16 @@ type TableKeys map[iop.KeyType][]string
 // []string-typed TableKeys map and can be decoded by ParseIndexes.
 const indexEntryPrefix = "\x00idx:"
 
+// uniqueEntryPrefix marks a multi-column unique group (unique: [[a, b]]).
+const uniqueEntryPrefix = "\x00uq:"
+
 // UnmarshalJSON allows the `index` key to accept rich entry shapes (bare column
 // names, composite lists, named simple maps, named complex maps) while keeping
 // every other key as a plain []string. Complex index entries are JSON-encoded
 // behind indexEntryPrefix so the map stays []string-typed for all existing code.
+// Nested unique lists are preserved as composite groups (unique: [[a, b]]).
+// Other keys (primary, partition, ...) flatten nested lists so primary: [[a, b]]
+// is treated identically to primary: [a, b].
 func (tk *TableKeys) UnmarshalJSON(data []byte) error {
 	raw := map[iop.KeyType]any{}
 	if err := g.JSONUnmarshal(data, &raw); err != nil {
@@ -49,9 +55,12 @@ func (tk *TableKeys) UnmarshalJSON(data []byte) error {
 			continue
 		}
 
-		// all other keys (primary, unique, partition, ...): plain []string.
-		// Flatten nested lists so the composite form (e.g. primary: [[a, b]])
-		// is treated identically to the flat form (primary: [a, b]).
+		if kt == iop.UniqueKey {
+			out[kt] = encodeUniqueEntries(val)
+			continue
+		}
+
+		// primary/partition/...: flatten nested lists (primary: [[a, b]] == [a, b])
 		switch v := val.(type) {
 		case []any:
 			out[kt] = flattenToStrings(v)
@@ -64,6 +73,42 @@ func (tk *TableKeys) UnmarshalJSON(data []byte) error {
 
 	*tk = out
 	return nil
+}
+
+func encodeUniqueEntries(val any) []string {
+	entries, ok := val.([]any)
+	if !ok {
+		if val == nil {
+			return []string{}
+		}
+		entries = []any{val}
+	}
+
+	encoded := []string{}
+	for _, entry := range entries {
+		switch e := entry.(type) {
+		case string:
+			s := strings.TrimSpace(e)
+			if s != "" {
+				encoded = append(encoded, s)
+			}
+		case []any:
+			cols := flattenToStrings(e)
+			switch len(cols) {
+			case 0:
+			case 1:
+				encoded = append(encoded, cols[0])
+			default:
+				encoded = append(encoded, uniqueEntryPrefix+g.Marshal(cols))
+			}
+		default:
+			s := strings.TrimSpace(cast.ToString(e))
+			if s != "" {
+				encoded = append(encoded, s)
+			}
+		}
+	}
+	return encoded
 }
 
 // flattenToStrings turns an arbitrarily-nested list value into a flat []string.
@@ -102,6 +147,34 @@ func (tk TableKeys) IndexColumnNames() (names []string) {
 	for _, entry := range tk[iop.IndexKey] {
 		if !strings.HasPrefix(entry, indexEntryPrefix) {
 			names = append(names, entry)
+		}
+	}
+	return
+}
+
+// UniqueColumnNames expands unique groups to a flat column list for SetKeys.
+func (tk TableKeys) UniqueColumnNames() (names []string) {
+	for _, group := range tk.UniqueGroups() {
+		names = append(names, group...)
+	}
+	return
+}
+
+// UniqueGroups returns unique key groups (one unique index per group).
+func (tk TableKeys) UniqueGroups() (groups [][]string) {
+	for _, entry := range tk[iop.UniqueKey] {
+		if strings.HasPrefix(entry, uniqueEntryPrefix) {
+			var cols []string
+			if err := g.Unmarshal(strings.TrimPrefix(entry, uniqueEntryPrefix), &cols); err != nil {
+				continue
+			}
+			if len(cols) > 0 {
+				groups = append(groups, cols)
+			}
+			continue
+		}
+		if s := strings.TrimSpace(entry); s != "" {
+			groups = append(groups, []string{s})
 		}
 	}
 	return
@@ -469,13 +542,35 @@ func (t *Table) Indexes(columns iop.Columns) (indexes []TableIndex) {
 		}
 	}
 
-	// 3. legacy unique-key columns -> single-column unique indexes
-	for _, col := range columns.GetKeys(iop.UniqueKey) {
-		add(iop.IndexDef{
-			Name:    iop.MakeIndexName(t.Name, []string{col.Name}, maxLength),
-			Columns: []iop.IndexColumn{{Name: col.Name}},
-			Unique:  true,
-		})
+	// 3. table_keys.unique groups (or UniqueKey column metadata fallback)
+	if groups := t.Keys.UniqueGroups(); len(groups) > 0 {
+		for _, group := range groups {
+			idxCols := make([]iop.IndexColumn, 0, len(group))
+			names := make([]string, 0, len(group))
+			for _, name := range group {
+				if c := columns.GetColumn(name); c != nil {
+					name = c.Name
+				}
+				idxCols = append(idxCols, iop.IndexColumn{Name: name})
+				names = append(names, name)
+			}
+			if len(idxCols) == 0 {
+				continue
+			}
+			add(iop.IndexDef{
+				Name:    iop.MakeIndexName(t.Name, names, maxLength),
+				Columns: idxCols,
+				Unique:  true,
+			})
+		}
+	} else {
+		for _, col := range columns.GetKeys(iop.UniqueKey) {
+			add(iop.IndexDef{
+				Name:    iop.MakeIndexName(t.Name, []string{col.Name}, maxLength),
+				Columns: []iop.IndexColumn{{Name: col.Name}},
+				Unique:  true,
+			})
+		}
 	}
 
 	return

@@ -89,6 +89,7 @@ const (
 	TypeDbExasol        Type = "exasol"
 	TypeDbArrowDBC      Type = "adbc"
 	TypeDbODBC          Type = "odbc"
+	TypeDbScyllaDB      Type = "scylladb"
 )
 
 var AllType = []struct {
@@ -138,6 +139,7 @@ var AllType = []struct {
 	{TypeDbAzureTable, "TypeDbAzureTable"},
 	{TypeDbArrowDBC, "TypeDbArrowDBC"},
 	{TypeDbODBC, "TypeDbODBC"},
+	{TypeDbScyllaDB, "TypeDbScyllaDB"},
 }
 
 // ValidateType returns true is type is valid
@@ -159,7 +161,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return t, true
 	}
 
@@ -195,6 +197,7 @@ func (t Type) DefPort() int {
 		TypeDbExasol:        8563,
 		TypeFileFtp:         21,
 		TypeFileSftp:        22,
+		TypeDbScyllaDB:      9042,
 	}
 	return connTypesDefPort[t]
 }
@@ -212,7 +215,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -230,7 +233,7 @@ func (t Type) IsDb() bool {
 // IsDb returns true if database connection
 func (t Type) IsNoSQL() bool {
 	switch t {
-	case TypeDbBigTable, TypeDbAzureTable, TypeDbMongoDB, TypeDbElasticsearch:
+	case TypeDbBigTable, TypeDbAzureTable, TypeDbMongoDB, TypeDbElasticsearch, TypeDbScyllaDB:
 		return true
 	}
 	return false
@@ -312,6 +315,7 @@ func (t Type) NameLong() string {
 		TypeDbAzureTable:    "DB - Azure Table",
 		TypeDbArrowDBC:      "DB - Arrow DBC",
 		TypeDbODBC:          "DB - ODBC",
+		TypeDbScyllaDB:      "DB - ScyllaDB",
 	}
 
 	return mapping[t]

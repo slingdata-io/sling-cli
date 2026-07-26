@@ -199,57 +199,60 @@ table_keys:
 	assert.Equal(t, "idx_x", defs[0].Name)
 }
 
-// TestTableKeysPrimaryUniqueComposite verifies that the composite/wrapped-list
-// form (e.g. primary: [[user_id, brand_id]]) is accepted for the primary and
-// unique keys and flattened to the same flat []string as the plain list form.
-// This is the shape reported failing in datatype.go SetKeys ("could not set
-// primary key. Did not find column").
 func TestTableKeysPrimaryUniqueComposite(t *testing.T) {
-	// wrapped composite form
 	tk := tkFromYAML(t, `
 table_keys:
   primary: [[user_id, brand_id]]
   unique: [[org_id, project_id]]
 `)
 	assert.Equal(t, []string{"user_id", "brand_id"}, []string(tk[iop.PrimaryKey]))
-	assert.Equal(t, []string{"org_id", "project_id"}, []string(tk[iop.UniqueKey]))
+	assert.Equal(t, []string{"org_id", "project_id"}, tk.UniqueColumnNames())
+	require.Len(t, tk.UniqueGroups(), 1)
+	assert.Equal(t, []string{"org_id", "project_id"}, tk.UniqueGroups()[0])
 
-	// flat form still works identically
 	tkFlat := tkFromYAML(t, `
 table_keys:
   primary: [user_id, brand_id]
   unique: [org_id, project_id]
 `)
 	assert.Equal(t, []string(tk[iop.PrimaryKey]), []string(tkFlat[iop.PrimaryKey]))
-	assert.Equal(t, []string(tk[iop.UniqueKey]), []string(tkFlat[iop.UniqueKey]))
+	assert.Equal(t, []string{"org_id", "project_id"}, tkFlat.UniqueColumnNames())
+	require.Len(t, tkFlat.UniqueGroups(), 2)
+	assert.Equal(t, []string{"org_id"}, tkFlat.UniqueGroups()[0])
+	assert.Equal(t, []string{"project_id"}, tkFlat.UniqueGroups()[1])
 
-	// single-column scalar form
 	tkScalar := tkFromYAML(t, `
 table_keys:
   primary: user_id
 `)
 	assert.Equal(t, []string{"user_id"}, []string(tkScalar[iop.PrimaryKey]))
 
-	// deeply-nested lists flatten too (robustness)
 	tkNested := tkFromYAML(t, `
 table_keys:
   primary: [[user_id], [brand_id]]
 `)
 	assert.Equal(t, []string{"user_id", "brand_id"}, []string(tkNested[iop.PrimaryKey]))
+
+	tkMixed := tkFromYAML(t, `
+table_keys:
+  unique: [email, [org_id, project_id]]
+`)
+	require.Len(t, tkMixed.UniqueGroups(), 2)
+	assert.Equal(t, []string{"email"}, tkMixed.UniqueGroups()[0])
+	assert.Equal(t, []string{"org_id", "project_id"}, tkMixed.UniqueGroups()[1])
+	assert.Equal(t, []string{"email", "org_id", "project_id"}, tkMixed.UniqueColumnNames())
 }
 
-// TestTableKeysCompositeSetKeys verifies that after parsing the composite form,
-// SetKeys successfully marks the columns (previously failed with a phantom
-// "[user_id brand_id]" column name).
 func TestTableKeysCompositeSetKeys(t *testing.T) {
 	tk := tkFromYAML(t, `
 table_keys:
   primary: [[user_id, brand_id]]
-  unique: [[org_id]]
+  unique: [[org_id, project_id]]
 `)
 
 	cols := iop.Columns{
-		{Name: "id"}, {Name: "user_id"}, {Name: "brand_id"}, {Name: "org_id"},
+		{Name: "id"}, {Name: "user_id"}, {Name: "brand_id"},
+		{Name: "org_id"}, {Name: "project_id"},
 	}
 
 	tbl := &Table{Name: "mytable", Schema: "public", Dialect: dbio.TypeDbPostgres, Columns: cols}
@@ -258,7 +261,56 @@ table_keys:
 	assert.True(t, tbl.Columns.GetColumn("user_id").IsKeyType(iop.PrimaryKey))
 	assert.True(t, tbl.Columns.GetColumn("brand_id").IsKeyType(iop.PrimaryKey))
 	assert.True(t, tbl.Columns.GetColumn("org_id").IsKeyType(iop.UniqueKey))
+	assert.True(t, tbl.Columns.GetColumn("project_id").IsKeyType(iop.UniqueKey))
 	assert.False(t, tbl.Columns.GetColumn("id").IsKeyType(iop.PrimaryKey))
+}
+
+func TestTableKeysUniqueCompositeIndexes(t *testing.T) {
+	cols := iop.Columns{
+		{Name: "id"}, {Name: "org_id"}, {Name: "project_id"}, {Name: "email"},
+	}
+
+	tkComp := tkFromYAML(t, `
+table_keys:
+  unique: [[org_id, project_id]]
+`)
+	tbl := &Table{Name: "mytable", Schema: "public", Dialect: dbio.TypeDbPostgres, Columns: cols, Keys: tkComp}
+	require.NoError(t, tbl.SetKeys(nil, "", tkComp))
+	indexes := tbl.Indexes(tbl.Columns)
+	require.Len(t, indexes, 1)
+	assert.True(t, indexes[0].Def.Unique)
+	require.Len(t, indexes[0].Def.Columns, 2)
+	assert.Equal(t, "org_id", indexes[0].Def.Columns[0].Name)
+	assert.Equal(t, "project_id", indexes[0].Def.Columns[1].Name)
+	assert.Equal(t, "idx_mytable_org_id_project_id", indexes[0].Def.Name)
+
+	tkFlat := tkFromYAML(t, `
+table_keys:
+  unique: [org_id, project_id]
+`)
+	tblFlat := &Table{Name: "mytable", Schema: "public", Dialect: dbio.TypeDbPostgres, Columns: cols, Keys: tkFlat}
+	require.NoError(t, tblFlat.SetKeys(nil, "", tkFlat))
+	indexesFlat := tblFlat.Indexes(tblFlat.Columns)
+	require.Len(t, indexesFlat, 2)
+	assert.True(t, indexesFlat[0].Def.Unique)
+	assert.True(t, indexesFlat[1].Def.Unique)
+	require.Len(t, indexesFlat[0].Def.Columns, 1)
+	require.Len(t, indexesFlat[1].Def.Columns, 1)
+	assert.Equal(t, "org_id", indexesFlat[0].Def.Columns[0].Name)
+	assert.Equal(t, "project_id", indexesFlat[1].Def.Columns[0].Name)
+
+	tkMixed := tkFromYAML(t, `
+table_keys:
+  unique: [email, [org_id, project_id]]
+`)
+	tblMixed := &Table{Name: "mytable", Schema: "public", Dialect: dbio.TypeDbPostgres, Columns: cols, Keys: tkMixed}
+	require.NoError(t, tblMixed.SetKeys(nil, "", tkMixed))
+	indexesMixed := tblMixed.Indexes(tblMixed.Columns)
+	require.Len(t, indexesMixed, 2)
+	assert.Equal(t, []string{"email"}, indexesMixed[0].Def.ColumnNames())
+	assert.Equal(t, []string{"org_id", "project_id"}, indexesMixed[1].Def.ColumnNames())
+	assert.True(t, indexesMixed[0].Def.Unique)
+	assert.True(t, indexesMixed[1].Def.Unique)
 }
 
 func TestParseIndexesMutualExclusion(t *testing.T) {

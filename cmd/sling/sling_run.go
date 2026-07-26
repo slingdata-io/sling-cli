@@ -74,7 +74,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	env.SetTelVal("stage", "0 - init")
 	env.SetTelVal("run_mode", "cli")
 
-	for k, v := range c.Vals {
+	keys := lo.Keys(c.Vals)
+	for _, k := range keys {
+		v := c.Vals[k]
+
 		switch k {
 		case "replication":
 			env.SetTelVal("run_mode", "replication")
@@ -144,6 +147,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 		case "primary-key":
 			cfg.Source.PrimaryKeyI = strings.Split(cast.ToString(v), ",")
+			c.Vals[k] = strings.Split(cast.ToString(v), ",")
 
 		case "update-key":
 			cfg.Source.UpdateKey = cast.ToString(v)
@@ -204,10 +208,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
+			c.Vals[k] = strings.Split(cast.ToString(v), ",")
 		case "where":
 			cfg.Source.Where = cast.ToString(v)
 		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
+			c.Vals[k] = strings.Split(cast.ToString(v), ",")
 		case "examples":
 			showExamples = cast.ToBool(v)
 		case "home-dir":
@@ -227,6 +233,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			if err != nil {
 				return ok, g.Error(err, "invalid cdc options -> %s", payload)
 			}
+		}
+
+		// replace `-` with `_` in c.Vals for args map
+		if strings.Contains(k, "-") {
+			delete(c.Vals, k)
+			c.Vals[strings.ReplaceAll(k, "-", "_")] = v
 		}
 	}
 
@@ -254,6 +266,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
+	os.Setenv("SLING_CLI_ARGS_MAP", g.Marshal(c.Vals))
 
 	// set run mode
 	if os.Getenv("SLING_RUN_MODE") == "" {

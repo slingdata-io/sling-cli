@@ -1014,6 +1014,12 @@ func (c *Connection) setURL() (err error) {
 		// The actual URL formatting is handled by ODBCConn.GetURL()
 		setIfMissing("conn_string", "")
 		template = "odbc://"
+	case dbio.TypeDbScyllaDB:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("keyspace", "")
+		template = "scylladb://{username}:{password}@{host}:{port}/{keyspace}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

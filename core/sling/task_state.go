@@ -138,16 +138,17 @@ func (dts *DateTimeState) Update() {
 }
 
 type ExecutionState struct {
-	ID         string     `json:"id"`
-	FilePath   string     `json:"file_path"`
-	FileName   string     `json:"file_name"`
-	TotalBytes uint64     `json:"total_bytes"`
-	TotalRows  uint64     `json:"total_rows"`
-	Status     StatusMap  `json:"status"`
-	StartTime  *time.Time `json:"start_time"`
-	EndTime    *time.Time `json:"end_time"`
-	Duration   int64      `json:"duration"`
-	Error      *string    `json:"error"`
+	ID         string         `json:"id"`
+	FilePath   string         `json:"file_path"`
+	FileName   string         `json:"file_name"`
+	TotalBytes uint64         `json:"total_bytes"`
+	TotalRows  uint64         `json:"total_rows"`
+	Status     StatusMap      `json:"status"`
+	StartTime  *time.Time     `json:"start_time"`
+	EndTime    *time.Time     `json:"end_time"`
+	Duration   int64          `json:"duration"`
+	Error      *string        `json:"error"`
+	CLIArgs    map[string]any `json:"cli_args"` // cli input args
 }
 
 func (es *ExecutionState) Map() (m map[string]any) {
@@ -240,6 +241,11 @@ func (t *TaskExecution) StateSet() {
 
 		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
 		state.Execution.FileName = path.Base(state.Execution.FilePath)
+		state.Execution.CLIArgs = map[string]any{
+			`streams`: nil, `select`: nil, `limit`: nil, `range`: nil, `where`: nil}
+		if args := os.Getenv("SLING_CLI_ARGS_MAP"); args != "" {
+			g.Unmarshal(args, &state.Execution.CLIArgs)
+		}
 
 		fMap, _ := t.Config.GetFormatMap()
 

@@ -142,6 +142,10 @@ func (t *Table) SetKeys(sourcePKCols []string, updateCol string, tableKeys Table
 				eG.Capture(t.Columns.SetKeys(tableKey, tableKeys.IndexColumnNames()...))
 				continue
 			}
+			if tableKey == iop.UniqueKey {
+				eG.Capture(t.Columns.SetKeys(tableKey, tableKeys.UniqueColumnNames()...))
+				continue
+			}
 			eG.Capture(t.Columns.SetKeys(tableKey, keys...))
 		}
 	}
@@ -1276,7 +1280,6 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
 		ddl = ddl[:closeParen] + g.F(", %s (%s)%s", prefix, strings.Join(quotedNames, ", "), suffix) + ddl[closeParen:]
 	}
-
 	return ddl, nil
 }
 

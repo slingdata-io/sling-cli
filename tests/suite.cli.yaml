@@ -1809,7 +1809,7 @@
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
   run: 'sling run -d tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
-  group: schema_migration
+  group: duckdb
   output_contains:
     - 'PK constraints found'
     - 'execution succeeded'
@@ -2536,3 +2536,37 @@
     - 'execution succeeded'
   output_does_not_contain:
     - 'column type change for rowid'
+
+# on_failure: defer inside a group loop — one loop item fails a step, but all
+# remaining group steps for that iteration still run AND later loop items
+# continue (does not fail early). Error surfaces at end of the group.
+- id: 309
+  name: 'Test on_failure:defer runs remaining group steps after loop item fails'
+  run: 'sling run -p tests/pipelines/p.38.on_failure_defer.yaml'
+  err: true
+  output_contains:
+    - 'defer-loop start value=failme'
+    - 'failed (defering)'
+    - 'intentional deferred failure for failme'
+    - 'defer-loop mid step still ran value=failme'
+    - 'defer-loop end step still ran value=failme'
+    - 'defer-loop start value=alpha'
+    - 'defer-loop mid step still ran value=alpha'
+    - 'defer-loop end step still ran value=alpha'
+    - 'defer-loop start value=beta'
+    - 'defer-loop mid step still ran value=beta'
+    - 'defer-loop end step still ran value=beta'
+  output_does_not_contain:
+    - 'should-not-reach after deferred group failure'
+
+# CLI input flags (e.g. --streams) must be accessible inside a pipeline via
+# execution.cli_args.<flag> (discord report: pipeline could not read the value
+# passed via `sling run -p ... --streams tag:xxx`).
+- id: 310
+  name: 'Pipeline can read CLI flags via execution.cli_args (array/scalar/hyphenated/missing keys)'
+  run: 'sling run -p tests/pipelines/p.41.cli_args_streams.yaml --streams tag:transactions --mode full-refresh --limit 5 --src-conn PG'
+  output_contains:
+    - '"streams":["tag:transactions"]'
+    - '"mode":"full-refresh"'
+    - '"src_conn":"PG"'
+    - '✓ execution.cli_args scalar/array/hyphenated/missing keys all behave correctly'

@@ -3,6 +3,7 @@ package sling
 import (
 	"io"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -138,6 +139,8 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		}
 	}
 
+	pipeline.execID = env.ExecID
+
 	state, err := pipeline.RuntimeState()
 	if err != nil {
 		return nil, g.Error(err, "could not render runtime state")
@@ -176,8 +179,6 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		}
 		seenIDs[id] = i
 	}
-
-	pipeline.execID = env.ExecID
 
 	return
 }
@@ -445,6 +446,19 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 			Runs:  map[string]*RunState{},
 			mu:    &sync.RWMutex{},
 		}
+
+		// populate execution-level context (mirrors ReplicationState.Execution).
+		// FilePath/FileName are set in updateExecutionState since pl.FileName is
+		// assigned by the caller after the pipeline is parsed.
+		pl.state.Execution.ID = pl.execID
+		pl.state.Execution.StartTime = g.Ptr(time.Now())
+
+		// populate cli args from env (set in processRun via SLING_CLI_ARGS_MAP)
+		pl.state.Execution.CLIArgs = map[string]any{
+			`streams`: nil, `select`: nil, `limit`: nil, `range`: nil, `where`: nil}
+		if args := os.Getenv("SLING_CLI_ARGS_MAP"); args != "" {
+			g.Unmarshal(args, &pl.state.Execution.CLIArgs)
+		}
 	}
 
 	if pl.CurrentStep != nil {
@@ -459,8 +473,62 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 	}
 
 	pl.state.Timestamp.Update()
+	pl.updateExecutionState()
 
 	return pl.state, nil
+}
+
+// updateExecutionState aggregates step statuses and errors into the
+// execution-level state (mirrors the aggregation in TaskExecution.StateSet).
+func (pl *Pipeline) updateExecutionState() {
+	es := &pl.state.Execution
+
+	// FileName is assigned by the caller after the pipeline is parsed, so
+	// refresh the file path/name here once it becomes available.
+	if es.FilePath == "" && pl.FileName != "" {
+		es.FilePath = pl.FileName
+		es.FileName = path.Base(pl.FileName)
+	}
+
+	es.Status = StatusMap{}
+	errGroup := g.ErrorGroup{}
+
+	for _, step := range pl.steps {
+		es.Status.Count++
+		switch step.Status() {
+		case ExecStatusSuccess:
+			es.Status.Success++
+		case ExecStatusError:
+			es.Status.Error++
+		case ExecStatusWarning:
+			es.Status.Warning++
+		case ExecStatusSkipped:
+			es.Status.Skipped++
+		case ExecStatusCancelled:
+			es.Status.Cancelled++
+		case ExecStatusRunning:
+			es.Status.Running++
+		}
+
+		if stepData, ok := pl.state.State[step.ID()]; ok {
+			if errMsg := cast.ToString(stepData["error"]); errMsg != "" {
+				errGroup.Add(g.Error(errMsg))
+			}
+		}
+	}
+
+	if err := errGroup.Err(); err != nil {
+		es.Error = g.Ptr(err.Error())
+	}
+
+	// determine if ended (nothing running and every step accounted for)
+	finished := es.Status.Count == (es.Status.Success + es.Status.Error + es.Status.Warning + es.Status.Skipped + es.Status.Cancelled)
+	if finished && es.Status.Running == 0 && es.StartTime != nil {
+		es.EndTime = g.Ptr(time.Now())
+		es.Duration = es.EndTime.Unix() - es.StartTime.Unix()
+	} else if es.StartTime != nil {
+		es.Duration = time.Now().Unix() - es.StartTime.Unix()
+	}
 }
 
 type PipelineState struct {
@@ -468,6 +536,7 @@ type PipelineState struct {
 	Store     map[string]any            `json:"store,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
+	Execution ExecutionState            `json:"execution,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
 
