@@ -2570,3 +2570,22 @@
     - '"mode":"full-refresh"'
     - '"src_conn":"PG"'
     - '✓ execution.cli_args scalar/array/hyphenated/missing keys all behave correctly'
+
+# Command hook output with `print: true` must be emitted via the logger so it
+# reaches log sinks (platform step output). Previously it was written straight
+# to os.Stdout/os.Stderr, which bypassed them and left the platform step output
+# empty. `print: false` must remain out of the log but still be captured.
+- id: 311
+  name: 'Command hook print output routes through the logger (log sink)'
+  run: 'sling run -p tests/pipelines/p.42.command_print_log_sink.yaml'
+  output_contains:
+    - 'cmd-stdout-line-A'
+    - 'cmd-stdout-line-B'
+    - 'cmd-stderr-line'
+    - 'cmd-no-trailing-newline'
+    - 'cmd-uncaptured-line'
+    - 'quiet captured => cmd-quiet-line'
+  output_does_not_contain:
+    # `print: false` must emit nothing; the only occurrence is the log step's
+    # "quiet captured => " relay, never a bare line of its own
+    - "\ncmd-quiet-line"
