@@ -287,8 +287,9 @@ steps:
         ORACLE.XDB_ORDERS_SRC:
           object: 'somedb.public.xdb_orders'
 
+  # on_failure:warn rewrites status to "warning", so assert on the recorded error
   - type: check
-    check: state.pg_three_part_rejected.status == "error"
+    check: contains(state.pg_three_part_rejected.error, "is not supported for postgres")
     message: 'postgres must reject a 3-part object name, not silently drop the database'
 
   - type: log
