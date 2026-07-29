@@ -997,6 +997,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					}
 				}
 
+				// inherit the object's database so the temp table lands alongside it
+				if tableTmp.Database == "" {
+					tableTmp.Database = table.Database
+				}
+
 				if dbType.DBNameUpperCase() {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}

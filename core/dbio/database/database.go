@@ -1707,7 +1707,7 @@ func (conn *BaseConn) TableExists(table Table) (exists bool, err error) {
 
 	colData, err := conn.SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 
 	if err != nil && !strings.Contains(err.Error(), "does not exist") && !strings.Contains(err.Error(), "cannot be found") {
@@ -1731,7 +1731,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	columns = iop.Columns{}
 	colData, err := conn.Self().SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 	if err != nil {
 		return columns, g.Error(err, "could not get list of columns for %s", table.FullName())
@@ -1837,7 +1837,7 @@ func (conn *BaseConn) GetColumnsFull(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "columns_full",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1850,7 +1850,7 @@ func (conn *BaseConn) GetPrimaryKeys(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "primary_keys",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1863,7 +1863,7 @@ func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "indexes",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1915,7 +1915,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 	ddlArr := []string{}
 	data, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_view",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 
 	for _, row := range data.Rows {
@@ -1929,7 +1929,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
 	data, err = conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_table",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 	if err != nil {
 		return "", err
@@ -3176,17 +3176,17 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"src_upd_pk_equal":     strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
 			"src_del_pk_equal":     strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "del."),
 			"src_tgt_pk_equal_tbl": strings.ReplaceAll(strings.Join(pkEqualFields, " and "), "tgt.", tgtTable+"."),
-			"src_fields":          strings.Join(srcFields, ", "),
-			"tgt_fields":          strings.Join(tgtFields, ", "),
-			"insert_fields":       strings.Join(insertFields, ", "),
-			"src_insert_fields":   strings.Join(srcInsertFields, ", "),
-			"pk_fields":           strings.Join(pkFields, ", "),
-			"src_pk_fields":       strings.Join(srcPkFields, ", "),
-			"tgt_pk_fields":       strings.Join(tgtPkFields, ", "),
-			"set_fields":          strings.Join(setFields, ", "),
-			"set_fields_excluded": setFieldsExcluded,
-			"set_fields_values":   strings.Join(setFieldsValues, ", "),
-			"placeholder_fields":  strings.Join(placeholderFields, ", "),
+			"src_fields":           strings.Join(srcFields, ", "),
+			"tgt_fields":           strings.Join(tgtFields, ", "),
+			"insert_fields":        strings.Join(insertFields, ", "),
+			"src_insert_fields":    strings.Join(srcInsertFields, ", "),
+			"pk_fields":            strings.Join(pkFields, ", "),
+			"src_pk_fields":        strings.Join(srcPkFields, ", "),
+			"tgt_pk_fields":        strings.Join(tgtPkFields, ", "),
+			"set_fields":           strings.Join(setFields, ", "),
+			"set_fields_excluded":  setFieldsExcluded,
+			"set_fields_values":    strings.Join(setFieldsValues, ", "),
+			"placeholder_fields":   strings.Join(placeholderFields, ", "),
 		},
 	}
 

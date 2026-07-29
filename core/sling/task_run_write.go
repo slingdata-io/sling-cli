@@ -768,6 +768,11 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 		if err != nil {
 			return database.Table{}, g.Error(err, "could not parse temp table name")
 		}
+
+		// inherit the target's database so the temp table lands alongside it
+		if tableTmp.Database == "" {
+			tableTmp.Database = targetTable.Database
+		}
 	}
 
 	// Set DDL for temp table
