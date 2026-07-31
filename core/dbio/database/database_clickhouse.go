@@ -687,6 +687,28 @@ retry:
 	return rowAffCnt, err
 }
 
+// DropTable kills pending mutations referencing the table before dropping it.
+func (conn *ClickhouseConn) DropTable(tableNames ...string) (err error) {
+	for _, tableName := range tableNames {
+		table, pErr := ParseTableName(tableName, conn.GetType())
+		if pErr != nil || table.Schema == "" || table.Name == "" {
+			continue
+		}
+
+		// clickhouse has no schema layer; Table.Schema holds the database name
+		killSQL := g.F(
+			"kill mutation where database = '%s' and table = '%s' and not is_done"+env.NoDebugKey,
+			strings.ReplaceAll(table.Schema, "'", "''"),
+			strings.ReplaceAll(table.Name, "'", "''"),
+		)
+		if _, kErr := conn.Self().Exec(killSQL); kErr != nil {
+			g.Debug("DropTable: KILL MUTATION for %s failed (continuing): %v", tableName, kErr)
+		}
+	}
+
+	return conn.BaseConn.DropTable(tableNames...)
+}
+
 // GenerateMergeSQL generates the upsert SQL using the database default strategy (delete_insert).
 func (conn *ClickhouseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 	return conn.GenerateMergeSQLWithStrategy(srcTable, tgtTable, pkFields, nil)
