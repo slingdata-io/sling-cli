@@ -66,8 +66,8 @@ core:
     MERGE INTO {tgt_table} tgt
     USING (SELECT {src_fields} FROM {src_table}) src
     ON ({src_tgt_pk_equal})
-    WHEN MATCHED THEN UPDATE SET {set_fields}
-    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields});
+    WHEN MATCHED THEN UPDATE SET {set_fields_casted}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields_casted});
 
   merge_delete_insert: |
     DELETE tgt FROM {tgt_table} tgt

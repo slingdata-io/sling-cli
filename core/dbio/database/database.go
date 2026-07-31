@@ -3015,10 +3015,12 @@ func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable str
 		"src_pk_fields", mc.Map["src_pk_fields"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
+		"set_fields_casted", mc.Map["set_fields_casted"],
 		"set_fields_excluded", mc.Map["set_fields_excluded"],
 		"set_fields_values", mc.Map["set_fields_values"],
 		"insert_fields", mc.Map["insert_fields"],
 		"src_insert_fields", mc.Map["src_insert_fields"],
+		"src_insert_fields_casted", mc.Map["src_insert_fields_casted"],
 		"src_fields", mc.Map["src_fields"],
 		"tgt_fields", mc.Map["tgt_fields"],
 		"placeholder_fields", mc.Map["placeholder_fields"],
@@ -3104,6 +3106,11 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	insertFields := []string{}
 	placeholderFields := []string{}
 	srcInsertFields := []string{}
+	// used when `src` is a derived table already projecting {src_fields} (cast applied there).
+	// re-casting those columns would apply the cast twice.
+	setFieldsCasted := []string{}
+	setFieldsAllCasted := []string{}
+	srcInsertFieldsCasted := []string{}
 	for _, tgtColName := range tgtCols.Names() {
 		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
 		tgtCol := tgtColumns.GetColumn(tgtColName)
@@ -3125,20 +3132,30 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		srcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
 		srcInsertFields = append(srcInsertFields, srcExpr)
 
+		// derived-table variant: column is already cast by {src_fields}
+		srcColRef := g.F("src.%s", srcColNameQ)
+		srcInsertFieldsCasted = append(srcInsertFieldsCasted, srcColRef)
+
 		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+
+		setSrcExprCasted := srcColRef
 
 		// set sync operation to `U` for update, except for CDC which preserves the original op
 		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
 			if !g.In(g.PtrVal(strategy), MergeStrategyChangeCapture, MergeStrategyChangeCaptureSoft) {
 				setSrcExpr = "'U'"
+				setSrcExprCasted = "'U'"
 			}
 		}
 
 		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
+		setFieldCasted := g.F("%s = %s", tgtColNameQ, setSrcExprCasted)
 		setFieldsAll = append(setFieldsAll, setField)
+		setFieldsAllCasted = append(setFieldsAllCasted, setFieldCasted)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
 			setFields = append(setFields, setField)
+			setFieldsCasted = append(setFieldsCasted, setFieldCasted)
 			setFieldsValues = append(setFieldsValues, g.F("%s = VALUES(%s)", tgtColNameQ, tgtColNameQ))
 		}
 	}
@@ -3146,6 +3163,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	// if PK is all the available columns
 	if len(setFields) == 0 && len(setFieldsAll) > 0 {
 		setFields = setFieldsAll
+		setFieldsCasted = setFieldsAllCasted
 		// rebuild VALUES-style fields for all columns
 		setFieldsValues = setFieldsValues[:0]
 		for _, tgtColName := range tgtCols.Names() {
@@ -3184,9 +3202,12 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"src_pk_fields":        strings.Join(srcPkFields, ", "),
 			"tgt_pk_fields":        strings.Join(tgtPkFields, ", "),
 			"set_fields":           strings.Join(setFields, ", "),
-			"set_fields_excluded":  setFieldsExcluded,
-			"set_fields_values":    strings.Join(setFieldsValues, ", "),
-			"placeholder_fields":   strings.Join(placeholderFields, ", "),
+			// for templates where `src` is a derived table already projecting {src_fields}
+			"set_fields_casted":        strings.Join(setFieldsCasted, ", "),
+			"src_insert_fields_casted": strings.Join(srcInsertFieldsCasted, ", "),
+			"set_fields_excluded":      setFieldsExcluded,
+			"set_fields_values":        strings.Join(setFieldsValues, ", "),
+			"placeholder_fields":       strings.Join(placeholderFields, ", "),
 		},
 	}
 
