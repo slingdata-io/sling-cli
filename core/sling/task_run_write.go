@@ -206,15 +206,17 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Source.PrimaryKeyI = pkCols.Names()
 	}
 
-	// write directly for iceberg full-refresh
+	// write directly for iceberg / NoSQL (no SQL temp-table merge)
 	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB)
+	// INSERT is upsert-by-PK for these stores
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
 
 	// set direct insert mode
 	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
 
 	// write directly to the final table (no temp table)
 	if directInsert || writeDirectly {
-		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 && !upsertByInsert {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else if cfg.Mode == DefinitionOnlyMode {
 			// continue as normal, since only definition
@@ -489,9 +491,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 }
 
 func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
-	// writing directly does not support incremental/backfill with a primary key
-	// (which requires a merge/upsert). We can only insert.
-	if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+	// incremental+PK needs merge unless INSERT is upsert-by-PK
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
+	if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 && !upsertByInsert {
 		return 0, g.Error("mode '%s' with a primary-key is not supported for direct write.", cfg.Mode)
 	}
 
