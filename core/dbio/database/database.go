@@ -953,6 +953,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	var result *sqlx.Rows
 	if conn.tx != nil {
 		result, err = conn.tx.QueryContext(queryContext.Ctx, query)
+	} else if conn.db == nil {
+		queryContext.Cancel()
+		return ds, g.Error("no connection instance")
 	} else {
 		result, err = conn.db.QueryxContext(queryContext.Ctx, query)
 	}
