@@ -215,6 +215,8 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 			dbConn := clickhouse.OpenDB(&chOptions)
 			dbConn.SetMaxIdleConns(5)
 			dbConn.SetMaxOpenConns(10)
+			dbConn.SetConnMaxLifetime(30 * time.Minute)
+			dbConn.SetConnMaxIdleTime(5 * time.Minute)
 
 			db = sqlx.NewDb(dbConn, driver)
 		} else {
