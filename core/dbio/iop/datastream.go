@@ -1557,21 +1557,22 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 			return false
 		}
 
-		if len(row) > len(it.ds.Columns) {
-			it.addNewColumns(len(row))
-		}
-
 		it.Row = make([]any, len(row))
 		var val any
 		for i, val0 := range row {
-			if !it.ds.Columns[i].IsString() {
-				val0 = strings.TrimSpace(val0)
-				if val0 == "" {
-					val = nil
+			if i < len(it.ds.Columns) {
+				if !it.ds.Columns[i].IsString() {
+					val0 = strings.TrimSpace(val0)
+					if val0 == "" {
+						val = nil
+					} else {
+						val = val0
+					}
 				} else {
 					val = val0
 				}
 			} else {
+				it.addNewColumns(len(row))
 				val = val0
 			}
 			it.Row[i] = val
@@ -3112,13 +3113,26 @@ func (it *Iterator) addNewColumns(newRowLen int) {
 	}
 
 	mux.Lock()
-	for j := len(it.ds.Columns); j < newRowLen; j++ {
-		newColName := g.RandSuffix("col_", 3)
+
+	for len(it.ds.Columns) < newRowLen {
+		before := len(it.ds.Columns)
+		newColName := g.F("col_%d", before+1)
 		it.ds.AddColumns(Columns{Column{
 			Name:     newColName,
 			Type:     StringType,
-			Position: len(it.ds.Columns) + 1,
+			Position: before + 1,
 		}}, false)
+		if len(it.ds.Columns) == before {
+			// Real header already named col_N — force unique.
+			it.ds.AddColumns(Columns{Column{
+				Name:     g.F("col_%d_%s", before+1, g.RandSuffix("", 4)),
+				Type:     StringType,
+				Position: before + 1,
+			}}, false)
+			if len(it.ds.Columns) == before {
+				break // avoid infinite loop; caller is bounds-safe
+			}
+		}
 	}
 	mux.Unlock()
 }
