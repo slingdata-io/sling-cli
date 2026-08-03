@@ -226,14 +226,14 @@ metadata:
     show views in {{if .schema -}} schema "{schema}" {{else}} account {{end}}
 
   columns: |
-    show columns in table "{schema}"."{table}"
+    show columns in table {{if .database -}} "{database}". {{- end}}"{schema}"."{table}"
 
   primary_keys: |
     select tco.constraint_name as pk_name,
            1 as position,
            kcu.column_name as column_name
-    from information_schema.table_constraints tco
-    join information_schema.key_column_usage kcu 
+    from {{if .database -}} "{database}". {{- end}}information_schema.table_constraints tco
+    join {{if .database -}} "{database}". {{- end}}information_schema.key_column_usage kcu
          on kcu.constraint_name = tco.constraint_name
          and kcu.constraint_schema = tco.constraint_schema
          and kcu.constraint_name = tco.constraint_name
@@ -243,7 +243,7 @@ metadata:
              kcu.table_name,
              position
 
-  columns_full: show columns in table "{schema}"."{table}"
+  columns_full: show columns in table {{if .database -}} "{database}". {{- end}}"{schema}"."{table}"
 
   schemata: |
     with tables as (
@@ -274,10 +274,10 @@ metadata:
       and tables.table_name = cols.table_name
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
 
-  ddl_table: select get_ddl('table', '{schema}.{table}')
+  ddl_table: select get_ddl('table', '{{if .database -}} {database}. {{- end}}{schema}.{table}')
 
   ddl_view: |
-    select get_ddl('view', '{schema}.{table}')
+    select get_ddl('view', '{{if .database -}} {database}. {{- end}}{schema}.{table}')
 
   # Extended column attributes for schema migration
   columns_extended: |

@@ -226,7 +226,7 @@ func decodeBase64Any(s string) []byte {
 	return nil
 }
 
-func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
+func (conn *SnowflakeConn) getOrCreateStage(schema string, database ...string) string {
 	internalStage := conn.GetProp("internal_stage")
 
 createNew:
@@ -240,6 +240,11 @@ createNew:
 			Schema:  schema,
 			Name:    "SLING_STAGING",
 			Dialect: dbio.TypeDbSnowflake,
+		}
+
+		// qualify with the target's database, needed when session has no default
+		if len(database) > 0 && database[0] != "" {
+			defStaging.Database = database[0]
 		}
 
 		_, err := conn.Exec("CREATE STAGE IF NOT EXISTS " + defStaging.FDQN())
@@ -316,7 +321,7 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 				return
 			}
 		default:
-			if stage := conn.getOrCreateStage(table.Schema); stage != "" {
+			if stage := conn.getOrCreateStage(table.Schema, table.Database); stage != "" {
 				var unloaded int64
 				filePath, unloaded, err = conn.UnloadViaStage(fileFormat, table)
 				if err != nil {
@@ -551,7 +556,7 @@ func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 			return 0, g.Error(err, "could not parse table name: "+tableFName)
 		}
 
-		stage := conn.getOrCreateStage(table.Schema)
+		stage := conn.getOrCreateStage(table.Schema, table.Database)
 		if stage != "" {
 			return conn.CopyViaStage(table, df)
 		}
@@ -1107,7 +1112,7 @@ func (conn *SnowflakeConn) GetColumnsFull(tableFName string) (data iop.Dataset, 
 
 	data1, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "columns_full",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 	if err != nil {
 		return data1, err

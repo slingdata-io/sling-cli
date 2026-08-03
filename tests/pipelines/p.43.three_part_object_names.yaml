@@ -1,0 +1,325 @@
+# 3-part object names (database.schema.table) across dialects.
+# See: https://github.com/slingdata-io/sling-cli/issues/686
+#
+# Table.FullName() historically rendered only "schema"."table", dropping
+# Table.Database, so the qualifier was lost on the write path.
+#
+# Covers:
+#   1. Snowflake cross-database target (Oracle source)
+#   2. Snowflake temp table inherits the target database
+#   3. Snowflake explicit 2-part table_tmp with a 3-part object
+#   4. BigQuery cross-project target
+#   5. BigQuery wildcard streams keep 2-part keys (explicit override must win)
+#   6. Unsupported dialects reject a 3-part name instead of dropping it
+
+env:
+  sf_database: SLING_XDB_TEST
+  sf_schema: XDB_TGT
+  bq_project: proven-cider-633
+  bq_dataset: sling_test
+
+steps:
+  # ---------------------------------------------------------------- setup
+  - type: query
+    connection: ORACLE
+    query: |
+      BEGIN
+        EXECUTE IMMEDIATE 'DROP TABLE ORACLE.XDB_ORDERS_SRC PURGE';
+      EXCEPTION
+        WHEN OTHERS THEN
+          IF SQLCODE != -942 THEN RAISE; END IF;
+      END;
+
+  - type: query
+    connection: ORACLE
+    query: |
+      CREATE TABLE ORACLE.XDB_ORDERS_SRC (
+        order_id NUMBER(10) PRIMARY KEY,
+        customer VARCHAR2(100),
+        amount NUMBER(12,2)
+      )
+
+  - type: query
+    connection: ORACLE
+    query: |
+      INSERT ALL
+        INTO ORACLE.XDB_ORDERS_SRC (order_id, customer, amount) VALUES (1, 'alpha', 10.50)
+        INTO ORACLE.XDB_ORDERS_SRC (order_id, customer, amount) VALUES (2, 'bravo', 20.25)
+        INTO ORACLE.XDB_ORDERS_SRC (order_id, customer, amount) VALUES (3, 'charlie', 30.75)
+      SELECT * FROM dual
+
+  # target database is deliberately NOT the connection default (SLING)
+  - type: query
+    connection: SNOWFLAKE
+    query: CREATE DATABASE IF NOT EXISTS {env.sf_database}
+
+  - type: query
+    connection: SNOWFLAKE
+    query: CREATE SCHEMA IF NOT EXISTS {env.sf_database}.{env.sf_schema}
+
+  - type: query
+    connection: SNOWFLAKE
+    query: CREATE SCHEMA IF NOT EXISTS SLING.{env.sf_schema}
+
+  - type: query
+    connection: SNOWFLAKE
+    query: DROP TABLE IF EXISTS {env.sf_database}.{env.sf_schema}.ORDERS
+
+  # same schema.table in the default database, to detect a misdirected write
+  - type: query
+    connection: SNOWFLAKE
+    query: DROP TABLE IF EXISTS SLING.{env.sf_schema}.ORDERS
+
+  # ------------------------------------------- 1. snowflake cross-database
+  - type: replication
+    id: sf_cross_db
+    on_failure: abort
+    replication:
+      source: ORACLE
+      target: SNOWFLAKE
+      defaults:
+        mode: full-refresh
+      streams:
+        ORACLE.XDB_ORDERS_SRC:
+          object: 'SLING_XDB_TEST.XDB_TGT.ORDERS'
+
+  - type: query
+    connection: SNOWFLAKE
+    query: |
+      SELECT count(*) AS cnt
+      FROM {env.sf_database}.information_schema.tables
+      WHERE table_schema = '{env.sf_schema}' AND table_name = 'ORDERS'
+    into: sf_in_requested
+
+  - type: query
+    connection: SNOWFLAKE
+    query: |
+      SELECT count(*) AS cnt
+      FROM SLING.information_schema.tables
+      WHERE table_schema = '{env.sf_schema}' AND table_name = 'ORDERS'
+    into: sf_in_default
+
+  - type: log
+    message: |
+      snowflake in requested db => {store.sf_in_requested[0].cnt}
+      snowflake in default  db => {store.sf_in_default[0].cnt}
+
+  - type: check
+    check: int_parse(store.sf_in_requested[0].cnt) == 1
+    message: 'table should exist in {env.sf_database}'
+
+  - type: check
+    check: int_parse(store.sf_in_default[0].cnt) == 0
+    message: 'table must NOT leak into the connection default database (SLING)'
+
+  - type: query
+    connection: SNOWFLAKE
+    query: |
+      SELECT order_id, customer, amount
+      FROM {env.sf_database}.{env.sf_schema}.ORDERS ORDER BY order_id
+    into: sf_rows
+
+  - type: check
+    check: length(store.sf_rows) == 3
+    message: 'should have transferred 3 rows'
+
+  - type: check
+    check: store.sf_rows[0].customer == "alpha"
+    message: 'row contents should match the Oracle source'
+
+  - type: check
+    check: float_parse(store.sf_rows[2].amount) == 30.75
+    message: 'numeric values should be preserved'
+
+  - type: log
+    message: 'OK-1: snowflake 3-part object honored the database qualifier'
+
+  # ------------------------- 2. incremental reuses temp table in same database
+  - type: replication
+    id: sf_incremental
+    on_failure: abort
+    replication:
+      source: ORACLE
+      target: SNOWFLAKE
+      defaults:
+        mode: incremental
+        primary_key: [order_id]
+        update_key: order_id
+      streams:
+        ORACLE.XDB_ORDERS_SRC:
+          object: 'SLING_XDB_TEST.XDB_TGT.ORDERS'
+
+  - type: query
+    connection: SNOWFLAKE
+    query: |
+      SELECT count(*) AS cnt
+      FROM SLING.information_schema.tables
+      WHERE table_schema = '{env.sf_schema}' AND table_name like 'ORDERS%'
+    into: sf_tmp_leak
+
+  - type: check
+    check: int_parse(store.sf_tmp_leak[0].cnt) == 0
+    message: 'temp table must not be created in the default database'
+
+  - type: log
+    message: 'OK-2: snowflake temp table inherited the target database'
+
+  # ---------------------------- 3. explicit 2-part table_tmp with 3-part object
+  - type: replication
+    id: sf_explicit_tmp
+    on_failure: abort
+    replication:
+      source: ORACLE
+      target: SNOWFLAKE
+      defaults:
+        mode: full-refresh
+        target_options:
+          table_tmp: 'XDB_TGT.ORDERS_CUSTOM_TMP'
+      streams:
+        ORACLE.XDB_ORDERS_SRC:
+          object: 'SLING_XDB_TEST.XDB_TGT.ORDERS'
+
+  - type: query
+    connection: SNOWFLAKE
+    query: |
+      SELECT count(*) AS cnt
+      FROM SLING.information_schema.tables
+      WHERE table_schema = '{env.sf_schema}' AND table_name = 'ORDERS_CUSTOM_TMP'
+    into: sf_custom_tmp_leak
+
+  - type: check
+    check: int_parse(store.sf_custom_tmp_leak[0].cnt) == 0
+    message: 'explicit 2-part table_tmp must inherit the object database'
+
+  - type: log
+    message: 'OK-3: explicit table_tmp inherited the target database'
+
+  # ------------------------------------------- 4. bigquery cross-project target
+  - type: query
+    connection: BIGQUERY
+    query: DROP TABLE IF EXISTS `{env.bq_project}.{env.bq_dataset}.xdb_orders`
+
+  - type: replication
+    id: bq_three_part
+    on_failure: abort
+    replication:
+      source: ORACLE
+      target: BIGQUERY
+      defaults:
+        mode: full-refresh
+      streams:
+        ORACLE.XDB_ORDERS_SRC:
+          object: 'proven-cider-633.sling_test.xdb_orders'
+
+  - type: query
+    connection: BIGQUERY
+    query: |
+      SELECT count(*) AS cnt
+      FROM `{env.bq_project}.{env.bq_dataset}.xdb_orders`
+    into: bq_rows
+
+  - type: check
+    check: int_parse(store.bq_rows[0].cnt) == 3
+    message: 'bigquery 3-part object should receive 3 rows'
+
+  - type: log
+    message: 'OK-4: bigquery 3-part object worked'
+
+  # ------------------- 5. wildcards keep 2-part keys so explicit configs match
+  # Discovery populates Table.Database for bigquery. If that leaked into the
+  # stream key, the explicit `disabled` entry below would no longer match its
+  # wildcard-expanded twin and would silently run anyway.
+  - type: command
+    command: rm -rf /tmp/sling_xdb_wildcard
+
+  - type: replication
+    id: bq_wildcard
+    on_failure: abort
+    replication:
+      source: BIGQUERY
+      target: LOCAL
+      defaults:
+        mode: full-refresh
+        object: 'file:///tmp/sling_xdb_wildcard/{stream_table}.csv'
+      streams:
+        sling_test.*:
+        sling_test.xdb_orders:
+          disabled: true
+
+  - type: list
+    id: wildcard_all
+    location: 'file:///tmp/sling_xdb_wildcard/'
+    only: files
+
+  - type: list
+    id: wildcard_disabled
+    location: 'file:///tmp/sling_xdb_wildcard/xdb_orders.csv'
+    only: files
+
+  - type: log
+    message: |
+      wildcard produced {length(state.wildcard_all.result)} files
+      disabled stream files => {length(state.wildcard_disabled.result)}
+
+  # the wildcard must still expand to the other streams
+  - type: check
+    check: length(state.wildcard_all.result) > 0
+    message: 'wildcard should have produced files'
+
+  # the disabled stream must not have produced a file
+  - type: check
+    check: length(state.wildcard_disabled.result) == 0
+    message: 'explicit disabled stream must override its wildcard match'
+
+  - type: log
+    message: 'OK-5: wildcard streams kept 2-part keys, explicit override won'
+
+  # ------------------------ 6. unsupported dialect rejects a 3-part name
+  - type: replication
+    id: pg_three_part_rejected
+    on_failure: warn
+    replication:
+      source: ORACLE
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        ORACLE.XDB_ORDERS_SRC:
+          object: 'somedb.public.xdb_orders'
+
+  # on_failure:warn rewrites status to "warning", so assert on the recorded error
+  - type: check
+    check: contains(state.pg_three_part_rejected.error, "is not supported for postgres")
+    message: 'postgres must reject a 3-part object name, not silently drop the database'
+
+  - type: log
+    message: 'OK-6: unsupported dialect rejected the 3-part name'
+
+  # ---------------------------------------------------------------- teardown
+  - type: query
+    connection: ORACLE
+    query: |
+      BEGIN
+        EXECUTE IMMEDIATE 'DROP TABLE ORACLE.XDB_ORDERS_SRC PURGE';
+      EXCEPTION
+        WHEN OTHERS THEN
+          IF SQLCODE != -942 THEN RAISE; END IF;
+      END;
+
+  - type: query
+    connection: SNOWFLAKE
+    query: DROP TABLE IF EXISTS {env.sf_database}.{env.sf_schema}.ORDERS
+
+  - type: query
+    connection: SNOWFLAKE
+    query: DROP SCHEMA IF EXISTS SLING.{env.sf_schema}
+
+  - type: query
+    connection: BIGQUERY
+    query: DROP TABLE IF EXISTS `{env.bq_project}.{env.bq_dataset}.xdb_orders`
+
+  - type: command
+    command: rm -rf /tmp/sling_xdb_wildcard
+
+  - type: log
+    message: 'SUCCESS: all 3-part object name cases passed'

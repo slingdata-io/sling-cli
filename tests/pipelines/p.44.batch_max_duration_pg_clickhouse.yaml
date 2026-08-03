@@ -1,0 +1,74 @@
+# Prove target_options.batch_max_duration forces mid-stream commits.
+# Postgres → ClickHouse with a large source and a 1s ceiling; batch_limit is
+# set huge so only the wall-clock trigger can split batches.
+#
+# Expectation (with -d): multiple "closing batch … by max_duration=1s" lines,
+# and the final ClickHouse row count matches the Postgres source.
+
+env:
+  SRC_SCHEMA: public
+  SRC_TABLE: sling_batch_dur_src
+  TGT_TABLE: default.sling_batch_dur_tgt
+  ROW_COUNT: 500000
+
+steps:
+  - type: log
+    message: "=== batch_max_duration PG → CH: setup ==="
+
+  - id: setup_src
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS {env.SRC_SCHEMA}.{env.SRC_TABLE};
+      CREATE TABLE {env.SRC_SCHEMA}.{env.SRC_TABLE} AS
+      SELECT
+        g AS id,
+        md5(g::text) AS payload
+      FROM generate_series(1, {env.ROW_COUNT}) AS g;
+
+  - id: src_count
+    connection: POSTGRES
+    query: SELECT count(*) AS cnt FROM {env.SRC_SCHEMA}.{env.SRC_TABLE}
+    into: src_count
+
+  - type: check
+    check: int_parse(store.src_count[0].cnt) == int_parse(env.ROW_COUNT)
+    failure_message: 'source setup failed: got {store.src_count[0].cnt} rows, want {env.ROW_COUNT}'
+
+  - id: cleanup_tgt
+    connection: CLICKHOUSE
+    query: DROP TABLE IF EXISTS {env.TGT_TABLE}
+
+  - type: log
+    message: "=== batch_max_duration PG → CH: replicate (batch_max_duration=1s) ==="
+
+  - id: replicate
+    replication:
+      source: POSTGRES
+      target: CLICKHOUSE
+      defaults:
+        mode: full-refresh
+        target_options:
+          # Huge row ceiling so only the 1s wall-clock can close batches.
+          batch_limit: 1000000
+          batch_max_duration: 1s
+      streams:
+        "{env.SRC_SCHEMA}.{env.SRC_TABLE}":
+          object: "{env.TGT_TABLE}"
+
+  - id: tgt_count
+    connection: CLICKHOUSE
+    query: SELECT count(*) AS cnt FROM {env.TGT_TABLE}
+    into: tgt_count
+
+  - type: check
+    check: int_parse(store.tgt_count[0].cnt) == int_parse(env.ROW_COUNT)
+    failure_message: 'row count mismatch: clickhouse={store.tgt_count[0].cnt} postgres={env.ROW_COUNT}'
+
+  - type: log
+    message: "SUCCESS: batch_max_duration committed multiple batches (rows={env.ROW_COUNT})"
+
+  # Cleanup
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS {env.SRC_SCHEMA}.{env.SRC_TABLE}
+  - connection: CLICKHOUSE
+    query: DROP TABLE IF EXISTS {env.TGT_TABLE}

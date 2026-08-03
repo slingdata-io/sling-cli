@@ -1462,10 +1462,12 @@ func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.C
 		// assume bool, convert from true/false to 1/0
 		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else cast({col} as bigint) end`
 		selectStr = g.R(sql, "col", qName)
-	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
-		// assume bool, convert from 1/0 to true/false
+	case srcCol.IsBool() && tgtCol.IsString():
+		// convert from 1/0 to true/false
 		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else cast({col} as varchar) end`
 		selectStr = g.R(sql, "col", qName)
+	case srcCol.IsInteger() && tgtCol.IsString():
+		selectStr = g.F("cast(%s as varchar)", qName)
 	default:
 		selectStr = qName
 	}

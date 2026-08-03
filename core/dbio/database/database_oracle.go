@@ -119,14 +119,17 @@ func (conn *OracleConn) ConnString() string {
 		"proxy_client_name": "proxy client name",
 		"dba_privilege":     "dba privilege",
 		"lob_fetch":         "lob fetch",
+		"prefetch_rows":     "PREFETCH_ROWS",
 		"client_charset":    "client charset",
 		"language":          "language",
 		"territory":         "territory",
 		"trace_file":        "trace file",
 	}
 
-	// infinite timeout by default
-	options := map[string]string{"TIMEOUT": "0"}
+	// infinite timeout by default. go-ora defaults PrefetchRows to 25, which
+	// forces a network round-trip every 25 rows and cripples large reads.
+	// Overridden below when `prefetch_rows` is set (lower it for LOB-heavy tables).
+	options := map[string]string{"TIMEOUT": "0", "PREFETCH_ROWS": "100"}
 
 	// When service_name is explicitly provided, do not forward `sid` as an
 	// option — go-ora's ConnectionConfig prefers SID over ServiceName when

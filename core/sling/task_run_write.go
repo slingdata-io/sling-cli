@@ -206,15 +206,17 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Source.PrimaryKeyI = pkCols.Names()
 	}
 
-	// write directly for iceberg full-refresh
+	// write directly for iceberg / NoSQL (no SQL temp-table merge)
 	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB)
+	// INSERT is upsert-by-PK for these stores
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
 
 	// set direct insert mode
 	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
 
 	// write directly to the final table (no temp table)
 	if directInsert || writeDirectly {
-		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 && !upsertByInsert {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else if cfg.Mode == DefinitionOnlyMode {
 			// continue as normal, since only definition
@@ -341,13 +343,20 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	}
 
-	df.Unpause() // Resume dataflow
-	t.SetProgress("streaming data")
-
-	// Set batch limit if specified
+	// Set batch limits BEFORE Unpause so NewBatch / in-flight batches see them.
 	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
 		df.SetBatchLimit(*batchLimit)
 	}
+	if dStr := cfg.Target.Options.BatchMaxDuration; dStr != nil && *dStr != "" {
+		d, err := time.ParseDuration(*dStr)
+		if err != nil {
+			return 0, g.Error(err, "could not parse batch_max_duration: %s", *dStr)
+		}
+		df.SetBatchMaxDuration(d)
+	}
+
+	df.Unpause() // Resume dataflow
+	t.SetProgress("streaming data")
 
 	// Bulk import data into temp table
 	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
@@ -489,9 +498,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 }
 
 func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
-	// writing directly does not support incremental/backfill with a primary key
-	// (which requires a merge/upsert). We can only insert.
-	if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+	// incremental+PK needs merge unless INSERT is upsert-by-PK
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
+	if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 && !upsertByInsert {
 		return 0, g.Error("mode '%s' with a primary-key is not supported for direct write.", cfg.Mode)
 	}
 
@@ -559,13 +568,20 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
-	df.Unpause() // Resume dataflow
-	t.SetProgress("streaming data (direct insert)")
-
-	// Set batch limit if specified
+	// Set batch limits BEFORE Unpause so NewBatch / in-flight batches see them.
 	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
 		df.SetBatchLimit(*batchLimit)
 	}
+	if dStr := cfg.Target.Options.BatchMaxDuration; dStr != nil && *dStr != "" {
+		d, err := time.ParseDuration(*dStr)
+		if err != nil {
+			return 0, g.Error(err, "could not parse batch_max_duration: %s", *dStr)
+		}
+		df.SetBatchMaxDuration(d)
+	}
+
+	df.Unpause() // Resume dataflow
+	t.SetProgress("streaming data (direct insert)")
 
 	// Bulk import data directly into final table
 	cnt, err = tgtConn.BulkImportFlow(targetTable.FullName(), df)
@@ -767,6 +783,11 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 		tableTmp, err = database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
 		if err != nil {
 			return database.Table{}, g.Error(err, "could not parse temp table name")
+		}
+
+		// inherit the target's database so the temp table lands alongside it
+		if tableTmp.Database == "" {
+			tableTmp.Database = targetTable.Database
 		}
 	}
 

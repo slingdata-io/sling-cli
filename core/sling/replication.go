@@ -377,8 +377,12 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 					if conn.Connection.Type.IsDb() {
 						table := wildcard.TableMap[wsn]
 
-						// check if table name exists
-						_, streamCfg, found := rd.GetStream(table.FullName())
+						// match on Key() (schema.table) so an explicit 2-part stream
+						// still matches when FullName() renders a database qualifier
+						_, streamCfg, found := rd.GetStream(table.Key())
+						if !found {
+							_, streamCfg, found = rd.GetStream(table.FullName())
+						}
 						if found {
 							// if the explicit stream is disabled, skip it entirely
 							if streamCfg != nil && streamCfg.Disabled {

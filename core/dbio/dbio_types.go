@@ -202,6 +202,18 @@ func (t Type) DefPort() int {
 	return connTypesDefPort[t]
 }
 
+// SupportsThreePartName returns true if the dialect can reference an object as
+// database.schema.table (catalog/project/attached-db as the first qualifier).
+// Dialects excluded here either can't query across databases (postgres, sqlite)
+// or treat `database` as the schema itself (mysql) or a service (oracle).
+func (t Type) SupportsThreePartName() bool {
+	return g.In(t,
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbTrino, TypeDbBigQuery,
+		TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbFabric,
+		TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH,
+	)
+}
+
 // DBNameUpperCase returns true is upper case is default
 func (t Type) DBNameUpperCase() bool {
 	tp, _ := t.Template()

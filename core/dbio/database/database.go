@@ -953,6 +953,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	var result *sqlx.Rows
 	if conn.tx != nil {
 		result, err = conn.tx.QueryContext(queryContext.Ctx, query)
+	} else if conn.db == nil {
+		queryContext.Cancel()
+		return ds, g.Error("no connection instance")
 	} else {
 		result, err = conn.db.QueryxContext(queryContext.Ctx, query)
 	}
@@ -1707,7 +1710,7 @@ func (conn *BaseConn) TableExists(table Table) (exists bool, err error) {
 
 	colData, err := conn.SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 
 	if err != nil && !strings.Contains(err.Error(), "does not exist") && !strings.Contains(err.Error(), "cannot be found") {
@@ -1731,7 +1734,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	columns = iop.Columns{}
 	colData, err := conn.Self().SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 	if err != nil {
 		return columns, g.Error(err, "could not get list of columns for %s", table.FullName())
@@ -1837,7 +1840,7 @@ func (conn *BaseConn) GetColumnsFull(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "columns_full",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1850,7 +1853,7 @@ func (conn *BaseConn) GetPrimaryKeys(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "primary_keys",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1863,7 +1866,7 @@ func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
 
 	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "indexes",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 }
 
@@ -1915,7 +1918,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 	ddlArr := []string{}
 	data, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_view",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 
 	for _, row := range data.Rows {
@@ -1929,7 +1932,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
 	data, err = conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_table",
-		g.M("schema", table.Schema, "table", table.Name),
+		g.M("schema", table.Schema, "table", table.Name, "database", table.Database),
 	)
 	if err != nil {
 		return "", err
@@ -3015,10 +3018,12 @@ func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable str
 		"src_pk_fields", mc.Map["src_pk_fields"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
+		"set_fields_casted", mc.Map["set_fields_casted"],
 		"set_fields_excluded", mc.Map["set_fields_excluded"],
 		"set_fields_values", mc.Map["set_fields_values"],
 		"insert_fields", mc.Map["insert_fields"],
 		"src_insert_fields", mc.Map["src_insert_fields"],
+		"src_insert_fields_casted", mc.Map["src_insert_fields_casted"],
 		"src_fields", mc.Map["src_fields"],
 		"tgt_fields", mc.Map["tgt_fields"],
 		"placeholder_fields", mc.Map["placeholder_fields"],
@@ -3104,6 +3109,11 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	insertFields := []string{}
 	placeholderFields := []string{}
 	srcInsertFields := []string{}
+	// used when `src` is a derived table already projecting {src_fields} (cast applied there).
+	// re-casting those columns would apply the cast twice.
+	setFieldsCasted := []string{}
+	setFieldsAllCasted := []string{}
+	srcInsertFieldsCasted := []string{}
 	for _, tgtColName := range tgtCols.Names() {
 		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
 		tgtCol := tgtColumns.GetColumn(tgtColName)
@@ -3125,20 +3135,30 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		srcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
 		srcInsertFields = append(srcInsertFields, srcExpr)
 
+		// derived-table variant: column is already cast by {src_fields}
+		srcColRef := g.F("src.%s", srcColNameQ)
+		srcInsertFieldsCasted = append(srcInsertFieldsCasted, srcColRef)
+
 		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+
+		setSrcExprCasted := srcColRef
 
 		// set sync operation to `U` for update, except for CDC which preserves the original op
 		if strings.EqualFold(tgtCol.Name, env.ReservedFields.SyncedOp) {
 			if !g.In(g.PtrVal(strategy), MergeStrategyChangeCapture, MergeStrategyChangeCaptureSoft) {
 				setSrcExpr = "'U'"
+				setSrcExprCasted = "'U'"
 			}
 		}
 
 		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
+		setFieldCasted := g.F("%s = %s", tgtColNameQ, setSrcExprCasted)
 		setFieldsAll = append(setFieldsAll, setField)
+		setFieldsAllCasted = append(setFieldsAllCasted, setFieldCasted)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
 			setFields = append(setFields, setField)
+			setFieldsCasted = append(setFieldsCasted, setFieldCasted)
 			setFieldsValues = append(setFieldsValues, g.F("%s = VALUES(%s)", tgtColNameQ, tgtColNameQ))
 		}
 	}
@@ -3146,6 +3166,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	// if PK is all the available columns
 	if len(setFields) == 0 && len(setFieldsAll) > 0 {
 		setFields = setFieldsAll
+		setFieldsCasted = setFieldsAllCasted
 		// rebuild VALUES-style fields for all columns
 		setFieldsValues = setFieldsValues[:0]
 		for _, tgtColName := range tgtCols.Names() {
@@ -3176,17 +3197,20 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"src_upd_pk_equal":     strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
 			"src_del_pk_equal":     strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "del."),
 			"src_tgt_pk_equal_tbl": strings.ReplaceAll(strings.Join(pkEqualFields, " and "), "tgt.", tgtTable+"."),
-			"src_fields":          strings.Join(srcFields, ", "),
-			"tgt_fields":          strings.Join(tgtFields, ", "),
-			"insert_fields":       strings.Join(insertFields, ", "),
-			"src_insert_fields":   strings.Join(srcInsertFields, ", "),
-			"pk_fields":           strings.Join(pkFields, ", "),
-			"src_pk_fields":       strings.Join(srcPkFields, ", "),
-			"tgt_pk_fields":       strings.Join(tgtPkFields, ", "),
-			"set_fields":          strings.Join(setFields, ", "),
-			"set_fields_excluded": setFieldsExcluded,
-			"set_fields_values":   strings.Join(setFieldsValues, ", "),
-			"placeholder_fields":  strings.Join(placeholderFields, ", "),
+			"src_fields":           strings.Join(srcFields, ", "),
+			"tgt_fields":           strings.Join(tgtFields, ", "),
+			"insert_fields":        strings.Join(insertFields, ", "),
+			"src_insert_fields":    strings.Join(srcInsertFields, ", "),
+			"pk_fields":            strings.Join(pkFields, ", "),
+			"src_pk_fields":        strings.Join(srcPkFields, ", "),
+			"tgt_pk_fields":        strings.Join(tgtPkFields, ", "),
+			"set_fields":           strings.Join(setFields, ", "),
+			// for templates where `src` is a derived table already projecting {src_fields}
+			"set_fields_casted":        strings.Join(setFieldsCasted, ", "),
+			"src_insert_fields_casted": strings.Join(srcInsertFieldsCasted, ", "),
+			"set_fields_excluded":      setFieldsExcluded,
+			"set_fields_values":        strings.Join(setFieldsValues, ", "),
+			"placeholder_fields":       strings.Join(placeholderFields, ", "),
 		},
 	}
 

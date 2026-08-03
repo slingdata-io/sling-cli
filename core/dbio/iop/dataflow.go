@@ -145,6 +145,25 @@ func (df *Dataflow) SetBatchLimit(limit int64) {
 	}
 }
 
+// SetBatchMaxDuration sets a wall-clock ceiling for each batch (commit cadence).
+func (df *Dataflow) SetBatchMaxDuration(d time.Duration) {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		ds.Sp.Config.BatchMaxDuration = d
+		// Apply to every open batch — CurrentBatch alone is not enough if
+		// NewBatch ran before this setter (common: schema/sample before Unpause).
+		for _, b := range ds.Batches {
+			if b != nil && !b.closed {
+				b.MaxDuration = d
+			}
+		}
+		if ds.CurrentBatch != nil {
+			ds.CurrentBatch.MaxDuration = d
+		}
+	}
+}
+
 // Defer runs a given function as close of Dataflow
 func (df *Dataflow) Defer(f func()) {
 	df.mux.Lock()

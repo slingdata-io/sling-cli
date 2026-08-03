@@ -3,10 +3,28 @@ core:
   drop_view: drop materialized view if exists {view}
   create_schema: >-
     create keyspace if not exists {schema}
-    with replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+    with replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}
   create_table: create table if not exists {table} ({col_types})
+  truncate_table: truncate table {table}
+  add_column: alter table {table} add {column} {type}
+  drop_column: alter table {table} drop {column}
 
 metadata:
+  schemas: |
+    select keyspace_name as schema_name
+    from system_schema.keyspaces
+  tables: |
+    select keyspace_name as schema_name, table_name
+    from system_schema.tables
+    {{if .schema -}}
+    where keyspace_name = '{schema}'
+    {{- end}}
+  views: |
+    select keyspace_name as schema_name, view_name as table_name
+    from system_schema.views
+    {{if .schema -}}
+    where keyspace_name = '{schema}'
+    {{- end}}
   columns: |
     select column_name, type as data_type
     from system_schema.columns
@@ -16,6 +34,7 @@ metadata:
     from system_schema.columns
     {{if .schema -}}
     where keyspace_name = '{schema}'
+      {{if .tables -}} and table_name in ({tables}) {{- end}}
     {{- end}}
 
 variable:

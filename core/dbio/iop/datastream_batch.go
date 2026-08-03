@@ -9,32 +9,36 @@ import (
 )
 
 type Batch struct {
-	id         int
-	Columns    Columns
-	Rows       chan []any
-	Previous   *Batch
-	Count      int64
-	Limit      int64
-	ds         *Datastream
-	closed     bool
-	closeChan  chan struct{}
-	transforms []func(row []any) []any
-	context    *g.Context
+	id          int
+	Columns     Columns
+	Rows        chan []any
+	Previous    *Batch
+	Count       int64
+	Limit       int64
+	MaxDuration time.Duration
+	started     time.Time
+	ds          *Datastream
+	closed      bool
+	closeChan   chan struct{}
+	transforms  []func(row []any) []any
+	context     *g.Context
 }
 
 // NewBatch create new batch with fixed columns
 // should be used each time column type changes, or columns are added
 func (ds *Datastream) NewBatch(columns Columns) *Batch {
 	batch := &Batch{
-		id:         len(ds.Batches),
-		Columns:    columns,
-		Rows:       MakeRowsChan(),
-		Previous:   ds.LatestBatch(),
-		ds:         ds,
-		Limit:      ds.Sp.Config.BatchLimit,
-		closeChan:  make(chan struct{}),
-		transforms: []func(row []any) []any{},
-		context:    g.NewContext(ds.Context.Ctx),
+		id:          len(ds.Batches),
+		Columns:     columns,
+		Rows:        MakeRowsChan(),
+		Previous:    ds.LatestBatch(),
+		ds:          ds,
+		Limit:       ds.Sp.Config.BatchLimit,
+		MaxDuration: ds.Sp.Config.BatchMaxDuration,
+		started:     time.Now(),
+		closeChan:   make(chan struct{}),
+		transforms:  []func(row []any) []any{},
+		context:     g.NewContext(ds.Context.Ctx),
 	}
 
 	if batch.Previous != nil && !batch.Previous.closed {
@@ -97,6 +101,10 @@ func (b *Batch) Close() {
 			g.Trace("closed %s", b.ID())
 		}
 	}
+}
+
+func (b *Batch) Closed() bool {
+	return b != nil && b.closed
 }
 
 func (b *Batch) ColumnsChanged() bool {
@@ -210,7 +218,18 @@ func (b *Batch) Push(row []any) {
 		b.ds.bwRows <- newRow
 		b.ds.Sp.commitChecksum()
 
+		// Start the wall-clock on the first row so setup delays between
+		// NewBatch and the first Push don't burn the max-duration budget.
+		if b.Count == 1 {
+			b.started = time.Now()
+		}
+
 		if b.Limit > 0 && b.Count == b.Limit {
+			b.Close()
+		} else if b.MaxDuration > 0 && time.Since(b.started) >= b.MaxDuration {
+			if !b.ds.NoDebug {
+				g.Debug("closing batch %s by max_duration=%s rows=%d", b.ID(), b.MaxDuration, b.Count)
+			}
 			b.Close()
 		}
 	}

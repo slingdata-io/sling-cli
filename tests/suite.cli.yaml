@@ -2520,11 +2520,7 @@
     - 'execution succeeded'
     - 'SUCCESS: Oracle sqlldr UTF-8 fidelity test passed'
 
-# discussion #763: an explicit column cast (columns: modifier DSL) must be honored
-# end-to-end. The stream processor used to silently revert a user-declared
-# datetime/timestamp column back to string ("column type change for X") when a
-# value didn't parse, making the temp table text while the final DDL kept the
-# declared type. Fix: sourced (explicitly typed) columns keep their type.
+
 - id: 307
   name: 'Explicit datetime cast honored end-to-end (discussion #763)'
   group: duckdb
@@ -2559,9 +2555,6 @@
   output_does_not_contain:
     - 'should-not-reach after deferred group failure'
 
-# CLI input flags (e.g. --streams) must be accessible inside a pipeline via
-# execution.cli_args.<flag> (discord report: pipeline could not read the value
-# passed via `sling run -p ... --streams tag:xxx`).
 - id: 310
   name: 'Pipeline can read CLI flags via execution.cli_args (array/scalar/hyphenated/missing keys)'
   run: 'sling run -p tests/pipelines/p.41.cli_args_streams.yaml --streams tag:transactions --mode full-refresh --limit 5 --src-conn PG'
@@ -2570,3 +2563,49 @@
     - '"mode":"full-refresh"'
     - '"src_conn":"PG"'
     - '✓ execution.cli_args scalar/array/hyphenated/missing keys all behave correctly'
+
+- id: 311
+  name: 'Command hook print output routes through the logger (log sink)'
+  run: 'sling run -p tests/pipelines/p.42.command_print_log_sink.yaml'
+  output_contains:
+    - 'cmd-stdout-line-A'
+    - 'cmd-stdout-line-B'
+    - 'cmd-stderr-line'
+    - 'cmd-no-trailing-newline'
+    - 'cmd-uncaptured-line'
+    - 'quiet captured => cmd-quiet-line'
+  output_does_not_contain:
+    # `print: false` must emit nothing; the only occurrence is the log step's
+    # "quiet captured => " relay, never a bare line of its own
+    - "\ncmd-quiet-line"
+
+- id: 312
+  name: '3-part object names across dialects (snowflake, bigquery, wildcards)'
+  run: 'sling run -d -p tests/pipelines/p.43.three_part_object_names.yaml'
+  output_contains:
+    - 'OK-1: snowflake 3-part object honored the database qualifier'
+    - 'OK-2: snowflake temp table inherited the target database'
+    - 'OK-3: explicit table_tmp inherited the target database'
+    - 'OK-4: bigquery 3-part object worked'
+    - 'OK-5: wildcard streams kept 2-part keys, explicit override won'
+    - 'OK-6: unsupported dialect rejected the 3-part name'
+    - 'SUCCESS: all 3-part object name cases passed'
+
+- id: 313
+  name: 'batch_max_duration mid-stream commits (postgres → clickhouse)'
+  run: |
+    set -o pipefail
+    sling run -d -p tests/pipelines/p.44.batch_max_duration_pg_clickhouse.yaml 2>&1 | tee /tmp/sling_cli_test_313.out
+    closes=$(grep -c 'committed clickhouse batch by max_duration' /tmp/sling_cli_test_313.out || true)
+    echo "duration_batch_commits=$closes"
+    test "$closes" -ge 1
+    # Prove the commit was mid-stream (not only at EOS): rows_so_far < final count
+    mid=$(grep -oE 'rows_so_far=[0-9]+' /tmp/sling_cli_test_313.out | head -1 | cut -d= -f2)
+    echo "mid_stream_rows_so_far=$mid"
+    test -n "$mid"
+    test "$mid" -lt 500000
+  output_contains:
+    - 'committed clickhouse batch by max_duration=1s'
+    - 'duration_batch_commits='
+    - 'mid_stream_rows_so_far='
+    - 'SUCCESS: batch_max_duration committed multiple batches'

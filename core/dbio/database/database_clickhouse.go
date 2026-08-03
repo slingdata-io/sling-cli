@@ -215,6 +215,8 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 			dbConn := clickhouse.OpenDB(&chOptions)
 			dbConn.SetMaxIdleConns(5)
 			dbConn.SetMaxOpenConns(10)
+			dbConn.SetConnMaxLifetime(30 * time.Minute)
+			dbConn.SetConnMaxIdleTime(5 * time.Minute)
 
 			db = sqlx.NewDb(dbConn, driver)
 		} else {
@@ -515,6 +517,9 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				}
 			}
 
+			batchStart := time.Now()
+			maxDur := ds.Sp.Config.BatchMaxDuration
+
 			for row := range batch.Rows {
 				var eG g.ErrorGroup
 
@@ -591,6 +596,28 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					g.Trace("error for row: %#v", row)
 					return g.Error(err, "could not execute statement")
+				}
+
+				// clickhouse-go may buffer Exec inside the TX and only flush on
+				// Commit — so producer-side batch_max_duration alone can miss.
+				// Commit on a wall-clock ceiling here so slow/long loads still
+				// release the connection periodically.
+				if maxDur > 0 && time.Since(batchStart) >= maxDur {
+					if err = stmt.Close(); err != nil {
+						return g.Error(err, "could not close statement before duration commit")
+					}
+					if err = conn.Commit(); err != nil {
+						return g.Error(err, "could not commit transaction (max_duration)")
+					}
+					g.Debug("committed clickhouse batch by max_duration=%s rows_so_far=%d", maxDur, count)
+					if err = conn.Begin(&sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
+						return g.Error(err, "could not begin after duration commit")
+					}
+					stmt, err = conn.Prepare(insertStatement)
+					if err != nil {
+						return g.Error(err, "could not prepare statement after duration commit")
+					}
+					batchStart = time.Now()
 				}
 			}
 
@@ -685,6 +712,28 @@ retry:
 	}
 
 	return rowAffCnt, err
+}
+
+// DropTable kills pending mutations referencing the table before dropping it.
+func (conn *ClickhouseConn) DropTable(tableNames ...string) (err error) {
+	for _, tableName := range tableNames {
+		table, pErr := ParseTableName(tableName, conn.GetType())
+		if pErr != nil || table.Schema == "" || table.Name == "" {
+			continue
+		}
+
+		// clickhouse has no schema layer; Table.Schema holds the database name
+		killSQL := g.F(
+			"kill mutation where database = '%s' and table = '%s' and not is_done"+env.NoDebugKey,
+			strings.ReplaceAll(table.Schema, "'", "''"),
+			strings.ReplaceAll(table.Name, "'", "''"),
+		)
+		if _, kErr := conn.Self().Exec(killSQL); kErr != nil {
+			g.Debug("DropTable: KILL MUTATION for %s failed (continuing): %v", tableName, kErr)
+		}
+	}
+
+	return conn.BaseConn.DropTable(tableNames...)
 }
 
 // GenerateMergeSQL generates the upsert SQL using the database default strategy (delete_insert).

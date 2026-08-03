@@ -183,10 +183,11 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		region = defaultRegion
 	}
 
-	// Configure HTTP client with connection settings to handle "connection reset by peer" errors
-	// These settings help with connection pooling and timeouts
+	// Configure HTTP client with connection settings to handle "connection reset by peer" errors.
+	// No client-wide Timeout: it caps the whole request including body reads, which truncates
+	// large/slow object transfers. The Transport timeouts below bound the connect/handshake/
+	// header phases that actually need it.
 	httpClient := &http.Client{
-		Timeout: 300 * time.Second, // Default timeout
 		Transport: &http.Transport{
 			MaxIdleConns:          100,              // Maximum idle connections across all hosts
 			MaxIdleConnsPerHost:   20,               // Maximum idle connections per host
@@ -197,7 +198,7 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		},
 	}
 
-	// Allow custom timeout configuration
+	// Allow opting into a whole-request deadline
 	if timeoutStr := fs.GetProp("HTTP_TIMEOUT"); timeoutStr != "" {
 		if timeout, err := time.ParseDuration(timeoutStr); err == nil {
 			httpClient.Timeout = timeout

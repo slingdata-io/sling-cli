@@ -146,6 +146,11 @@ func (cfg *Config) SetDefault() {
 			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
 			cfg.Target.Options.BatchLimit = g.Int64(100000)
 		}
+		if cfg.Target.Options.BatchMaxDuration == nil {
+			// Cap TX wall-clock so slow pipes don't hold one commit open for hours
+			// (proxy/server idle → driver: bad connection at final Commit).
+			cfg.Target.Options.BatchMaxDuration = g.String("5m")
+		}
 	}
 
 	// set default metadata
@@ -997,6 +1002,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					}
 				}
 
+				// inherit the object's database so the temp table lands alongside it
+				if tableTmp.Database == "" {
+					tableTmp.Database = table.Database
+				}
+
 				if dbType.DBNameUpperCase() {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
@@ -1121,6 +1131,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
 		}
 	}
+
+	// Nested maps (source.type, target.type, stream.table, …) must exist
+	cfg.applyNestedFormatMaps(m, execStateMap, storeMap, stateMap)
 
 	if cfg.TgtConn.Type.IsDb() {
 		// pre-render
@@ -1291,15 +1304,22 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		g.Trace("Could not successfully get format values. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
+	// Refresh nested maps so object_* / file stream keys added above are included
+	cfg.applyNestedFormatMaps(m, execStateMap, storeMap, stateMap)
+
+	return
+}
+
+// applyNestedFormatMaps builds jmespath-friendly nested maps (source.type, stream.table, …)
+// from flat keys (source_type, stream_table, …) and writes them onto m.
+func (cfg *Config) applyNestedFormatMaps(m map[string]any, execStateMap, storeMap, stateMap map[string]any) {
 	now := time.Now()
 
-	// Convert cfg.Env (map[string]string) to map[string]any for JMESPath
 	envMap := make(map[string]any, len(cfg.Env))
 	for k, v := range cfg.Env {
 		envMap[k] = v
 	}
 
-	// nested formatting for jmespath lookup
 	nm := map[string]map[string]any{
 		"timestamp": {
 			"file_name": now.Format("2006_01_02_150405"),
@@ -1336,8 +1356,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	for k, v := range nm {
 		m[k] = v
 	}
-
-	return
 }
 
 // Config is the new config struct
@@ -1717,6 +1735,7 @@ type TargetOptions struct {
 	Compression      *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	BatchLimit       *int64              `json:"batch_limit,omitempty" yaml:"batch_limit,omitempty"`
+	BatchMaxDuration *string             `json:"batch_max_duration,omitempty" yaml:"batch_max_duration,omitempty"`
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
@@ -2057,6 +2076,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.BatchLimit == nil {
 		o.BatchLimit = targetOptions.BatchLimit
+	}
+	if o.BatchMaxDuration == nil {
+		o.BatchMaxDuration = targetOptions.BatchMaxDuration
 	}
 	if o.FileMaxRows == nil {
 		o.FileMaxRows = targetOptions.FileMaxRows

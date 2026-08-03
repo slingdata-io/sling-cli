@@ -157,6 +157,9 @@ func (t *Table) FullName() string {
 	q := GetQualifierQuote(t.Dialect)
 
 	fdqnArr := []string{}
+	if t.Database != "" && t.Dialect.SupportsThreePartName() {
+		fdqnArr = append(fdqnArr, q+t.Database+q)
+	}
 	if t.Schema != "" {
 		fdqnArr = append(fdqnArr, q+t.Schema+q)
 	}
@@ -936,6 +939,10 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 		table.Database = words[0]
 		table.Schema = words[1]
 		table.Name = words[2]
+		if !dialect.SupportsThreePartName() {
+			err = g.Error("3-part table name (database.schema.table) is not supported for %s: %s", dialect, text)
+			return
+		}
 	} else {
 		table.SQL = strings.TrimSpace(text)
 	}

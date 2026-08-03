@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"reflect"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/flarco/g"
@@ -33,16 +35,12 @@ type scyllaResult struct{}
 
 func (r scyllaResult) LastInsertId() (int64, error) { return 0, nil }
 
-// no support for rows affected in scylladb
 func (r scyllaResult) RowsAffected() (int64, error) { return 0, nil }
 
-// Init initiates the object.
 func (conn *ScyllaDBConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbScyllaDB
 
-	// ScyllaDB/Cassandra batches are not a generic bulk-load primitive. Keep
-	// Sling's bulk flags off and use the native prepared insert path below.
 	conn.BaseConn.SetProp("allow_bulk_export", "false")
 	conn.BaseConn.SetProp("use_bulk", "false")
 
@@ -51,33 +49,102 @@ func (conn *ScyllaDBConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
-// Connect opens a native gocql session.
 func (conn *ScyllaDBConn) Connect(timeOut ...int) (err error) {
-	to := time.Duration(15) * time.Second
-	if len(timeOut) > 0 {
+	to := 15 * time.Second
+	if len(timeOut) > 0 && timeOut[0] > 0 {
 		to = time.Duration(timeOut[0]) * time.Second
 	}
-	url, err := url.Parse(conn.BaseConn.URL)
+	if v := conn.GetProp("timeout"); v != "" {
+		if secs := cast.ToInt(v); secs > 0 {
+			to = time.Duration(secs) * time.Second
+		}
+	}
+	connectTo := to
+	if v := conn.GetProp("connect_timeout"); v != "" {
+		if secs := cast.ToInt(v); secs > 0 {
+			connectTo = time.Duration(secs) * time.Second
+		}
+	}
+
+	u, err := url.Parse(conn.BaseConn.URL)
 	if err != nil {
 		return g.Error(err, "Failed to parse URL")
 	}
-	hosts := []string{url.Host}
+
+	hosts := []string{}
+	seen := map[string]bool{}
+	addHost := func(h string) {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			return
+		}
+		if hostOnly, _, err := net.SplitHostPort(h); err == nil {
+			h = hostOnly
+		}
+		if !seen[h] {
+			seen[h] = true
+			hosts = append(hosts, h)
+		}
+	}
+	addHost(u.Hostname())
 	if configHosts := conn.GetProp("hosts"); configHosts != "" {
-		hosts = append(hosts, strings.Split(configHosts, ",")...)
+		for _, h := range strings.Split(configHosts, ",") {
+			addHost(h)
+		}
 	}
+	if len(hosts) == 0 {
+		return g.Error("no ScyllaDB hosts configured (set host or hosts)")
+	}
+
 	cluster := gocql.NewCluster(hosts...)
-	if port, err := strconv.Atoi(url.Port()); err == nil {
-		cluster.Port = port
+	if portStr := u.Port(); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			cluster.Port = port
+		}
+	} else if p := cast.ToInt(conn.GetProp("port")); p > 0 {
+		cluster.Port = p
 	}
+
 	if keyspace := conn.GetProp("keyspace", "database", "schema"); keyspace != "" {
 		conn.keyspace = keyspace
 		cluster.Keyspace = keyspace
 	}
+
 	cluster.Timeout = to
-	cluster.ConnectTimeout = to
-	cluster.DisableInitialHostLookup = true
+	cluster.ConnectTimeout = connectTo
+
+	disableLookup := true // default true for docker/k8s unreachable broadcast IPs
+	if v := conn.GetProp("disable_initial_host_lookup"); v != "" {
+		disableLookup = cast.ToBool(v)
+	}
+	cluster.DisableInitialHostLookup = disableLookup
+
 	if username, password := conn.GetProp("username"), conn.GetProp("password"); username != "" || password != "" {
+		if username == "" {
+			username = conn.GetProp("user")
+		}
 		cluster.Authenticator = gocql.PasswordAuthenticator{Username: username, Password: password}
+	}
+
+	if c := conn.GetProp("consistency"); c != "" {
+		if cons, err := gocql.ParseConsistencyWrapper(c); err == nil {
+			cluster.Consistency = cons
+		} else {
+			return g.Error(err, "invalid consistency %q (use ONE, LOCAL_ONE, QUORUM, LOCAL_QUORUM, ALL, ...)", c)
+		}
+	}
+
+	if n := cast.ToInt(conn.GetProp("num_conns")); n > 0 {
+		cluster.NumConns = n
+	}
+	if n := cast.ToInt(conn.GetProp("page_size")); n > 0 {
+		cluster.PageSize = n
+	}
+
+	if localDC := conn.GetProp("local_dc", "datacenter"); localDC != "" {
+		cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(
+			gocql.DCAwareRoundRobinPolicy(localDC),
+		)
 	}
 
 	tlsConfig, err := conn.makeTlsConfig()
@@ -85,10 +152,13 @@ func (conn *ScyllaDBConn) Connect(timeOut ...int) (err error) {
 		return g.Error(err, "Failed to make TLS config")
 	}
 	if tlsConfig != nil {
-		cluster.SslOpts = &gocql.SslOptions{Config: tlsConfig}
+		cluster.SslOpts = &gocql.SslOptions{
+			Config:                 tlsConfig,
+			EnableHostVerification: !tlsConfig.InsecureSkipVerify,
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(conn.Context().Ctx, cluster.Timeout)
+	ctx, cancel := context.WithTimeout(conn.Context().Ctx, cluster.ConnectTimeout)
 	defer cancel()
 
 	session, err := cluster.CreateSession()
@@ -111,7 +181,6 @@ func (conn *ScyllaDBConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
-// Close closes the native gocql session and marks the Sling connection closed.
 func (conn *ScyllaDBConn) Close() error {
 	if conn.session != nil {
 		conn.session.Close()
@@ -122,7 +191,6 @@ func (conn *ScyllaDBConn) Close() error {
 }
 
 func (conn *ScyllaDBConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
-	// does not support transaction
 	return
 }
 
@@ -133,7 +201,6 @@ func (conn *ScyllaDBConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	}
 
 	if pkCols := data.Columns.GetKeys(iop.PrimaryKey); len(pkCols) == 0 {
-		// scylladb doesn't support tables without primary key
 		err = makeColumnPk(data.Columns)
 		if err != nil {
 			return "", g.Error(err)
@@ -147,7 +214,6 @@ func (conn *ScyllaDBConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	return strings.TrimSpace(ddl), nil
 }
 
-// Makes a first matching column primary key.
 func makeColumnPk(columns iop.Columns) error {
 	for i, col := range columns {
 		if strings.ToLower(col.Name) == "id" {
@@ -171,7 +237,6 @@ func makeColumnPk(columns iop.Columns) error {
 	return g.Error("no column suitable to make primary key")
 }
 
-// ExecContext executes a CQL statement.
 func (conn *ScyllaDBConn) ExecContext(ctx context.Context, cql string, args ...interface{}) (sql.Result, error) {
 	err := reconnectIfClosed(conn)
 	if err != nil {
@@ -206,7 +271,6 @@ func (conn *ScyllaDBConn) GetCount(tableFName string) (int64, error) {
 	return cnt, nil
 }
 
-// StreamRowsContext streams the rows of a CQL query through gocql paging.
 func (conn *ScyllaDBConn) StreamRowsContext(ctx context.Context, cql string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
@@ -274,13 +338,49 @@ func (conn *ScyllaDBConn) StreamRowsContext(ctx context.Context, cql string, opt
 	return ds, nil
 }
 
-// BulkExportStream exports from ScyllaDB through the regular native cursor path.
 func (conn *ScyllaDBConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	return conn.StreamRows(table.Select(), g.M("columns", table.Columns))
 }
 
 func (conn *ScyllaDBConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
-	cql := g.F(`select * from "%s"."%s" limit 1`, table.Schema, table.Name)
+	if table.Schema != "" && table.Name != "" && !table.IsQuery() {
+		cql := g.F(
+			`select column_name, type from system_schema.columns where keyspace_name = '%s' and table_name = '%s'`,
+			table.Schema, table.Name,
+		)
+		iter := conn.session.QueryWithContext(conn.context.Ctx, cql).Iter()
+		var name, typ string
+		i := 0
+		for iter.Scan(&name, &typ) {
+			dbTy, colTy := nativeCQLTypeStringToIop(typ)
+			columns = append(columns, iop.Column{
+				Name:     name,
+				Type:     colTy,
+				DbType:   dbTy,
+				Position: i + 1,
+			})
+			i++
+		}
+		if closeErr := iter.Close(); closeErr != nil {
+			return columns, g.Error(closeErr, "could not get columns list with cql: %s", cql)
+		}
+		if len(columns) > 0 {
+			return columns, nil
+		}
+	}
+
+	// fallback via SELECT * LIMIT 1
+	schema, name := table.Schema, table.Name
+	if schema == "" || name == "" {
+		parsed, perr := ParseTableName(table.FullName(), conn.GetType())
+		if perr == nil {
+			schema, name = parsed.Schema, parsed.Name
+		}
+	}
+	if schema == "" {
+		schema = conn.keyspace
+	}
+	cql := g.F(`select * from "%s"."%s" limit 1`, schema, name)
 	iter := conn.session.QueryWithContext(conn.context.Ctx, cql).Iter()
 	colInfo := iter.Columns()
 	columns = conn.columnsFromGocqlInfo(colInfo)
@@ -291,7 +391,7 @@ func (conn *ScyllaDBConn) GetTableColumns(table *Table, fields ...string) (colum
 	return
 }
 
-// GetSQLColumns override, because scylladb doesn't suport inner queries
+// GetSQLColumns: no inner-query support
 func (conn *ScyllaDBConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
 	if !table.IsQuery() {
 		return conn.GetColumns(table.FullName())
@@ -312,17 +412,28 @@ func (conn *ScyllaDBConn) GetSQLColumns(table Table) (columns iop.Columns, err e
 	return ds.Columns, nil
 }
 
-// BulkImportStream imports into ScyllaDB using native gocql INSERT statements.
 func (conn *ScyllaDBConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	columns, err := conn.GetTableColumns(&Table{Name: tableFName})
+	table, err := ParseTableName(tableFName, conn.GetType())
+	if err != nil {
+		return count, g.Error(err, "could not parse table name %s", tableFName)
+	}
+	if table.Schema == "" {
+		table.Schema = conn.keyspace
+	}
+
+	columns, err := conn.GetTableColumns(&table)
 	if err != nil {
 		return count, g.Error(err, "could not get column list")
+	}
+	if len(columns) == 0 {
+		columns = ds.Columns
 	}
 
 	ds, err = ds.Shape(columns)
 	if err != nil {
 		return count, g.Error(err, "could not shape stream")
 	}
+	ds.Columns = columns
 
 	return conn.InsertStream(tableFName, ds)
 }
@@ -340,27 +451,72 @@ func (conn *ScyllaDBConn) InsertStream(tableFName string, ds *iop.Datastream) (c
 		return count, g.Error("cannot insert into ScyllaDB with no columns")
 	}
 
-	cql := conn.GenerateInsertStatement(tableFName, ds.Columns, 1)
+	// prefer live table types for decimal/bool marshaling
+	insertCols := ds.Columns
+	if table, perr := ParseTableName(tableFName, conn.GetType()); perr == nil {
+		if table.Schema == "" {
+			table.Schema = conn.keyspace
+		}
+		if tCols, terr := conn.GetTableColumns(&table); terr == nil && len(tCols) > 0 {
+			byName := map[string]iop.Column{}
+			for _, c := range tCols {
+				byName[strings.ToLower(c.Name)] = c
+			}
+			merged := make(iop.Columns, len(insertCols))
+			for i, c := range insertCols {
+				if tc, ok := byName[strings.ToLower(c.Name)]; ok {
+					c.Type = tc.Type
+					c.DbType = tc.DbType
+				}
+				merged[i] = c
+			}
+			insertCols = merged
+		}
+	}
+
+	cql := conn.GenerateInsertStatement(tableFName, insertCols, 1)
 	g.Trace("ScyllaDB insert query: %s", cql)
-	query := conn.session.QueryWithContext(ds.Context.Ctx, cql)
+
+	concurrency := 16
+	if v := conn.GetProp("insert_concurrency"); v != "" {
+		if n := cast.ToInt(v); n > 0 {
+			concurrency = n
+		}
+	}
+	insertCtx := g.NewContext(ds.Context.Ctx, concurrency)
+	var rowCount atomic.Uint64
 
 	for row := range ds.Rows() {
-		if len(row) != len(ds.Columns) {
-			return count, g.Error("row has %d fields, expected %d", len(row), len(ds.Columns))
+		if insertCtx.Err() != nil {
+			break
+		}
+		if len(row) != len(insertCols) {
+			insertCtx.CaptureErr(g.Error("row has %d fields, expected %d", len(row), len(insertCols)))
+			break
 		}
 
 		args := make([]any, len(row))
 		for i, val := range row {
-			args[i] = normalizeInsertValue(val, ds.Columns[i])
+			args[i] = normalizeInsertValue(val, insertCols[i])
 		}
 
-		err = query.Bind(args...).Exec()
-		if err != nil {
-			return count, g.Error(err, "could not insert row into ScyllaDB table %s", tableFName)
-		}
-		count++
+		insertCtx.Wg.Write.Add()
+		go func(args []any) {
+			defer insertCtx.Wg.Write.Done()
+			if err := conn.session.Query(cql).WithContext(ds.Context.Ctx).Bind(args...).Exec(); err != nil {
+				insertCtx.CaptureErr(g.Error(err, "could not insert row into ScyllaDB table %s", tableFName))
+				return
+			}
+			rowCount.Add(1)
+		}(args)
 	}
 
+	insertCtx.Wg.Write.Wait()
+	count = rowCount.Load()
+
+	if err = insertCtx.Err(); err != nil {
+		return count, err
+	}
 	if err = ds.Err(); err != nil {
 		return count, g.Error(err, "datastream error during ScyllaDB insert")
 	}
@@ -368,7 +524,6 @@ func (conn *ScyllaDBConn) InsertStream(tableFName string, ds *iop.Datastream) (c
 	return count, nil
 }
 
-// GenerateInsertStatement generates a CQL INSERT statement.
 func (conn *ScyllaDBConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 	names := make([]string, len(cols))
 	placeholders := make([]string, len(cols))
@@ -392,7 +547,6 @@ func (conn *ScyllaDBConn) GetSchemas() (iop.Dataset, error) {
 	return data, nil
 }
 
-// CurrentDatabase returns the configured keyspace.
 func (conn *ScyllaDBConn) CurrentDatabase() (string, error) {
 	if conn.keyspace != "" {
 		return conn.keyspace, nil
@@ -403,9 +557,7 @@ func (conn *ScyllaDBConn) CurrentDatabase() (string, error) {
 	return "", nil
 }
 
-// Scylladb doesn't support functions used in comparisons so need to write its own
 func (conn *ScyllaDBConn) CompareChecksums(tableName string, columns iop.Columns) (err error) {
-	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
 			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
@@ -423,7 +575,6 @@ func (conn *ScyllaDBConn) CompareChecksums(tableName string, columns iop.Columns
 		return
 	}
 
-	// make sure columns exist in table, get common columns into cols
 	cols, err := conn.ValidateColumnNames(tColumns, columns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
@@ -482,7 +633,7 @@ func sumColumns(data iop.Dataset) map[string]uint64 {
 			}
 			switch {
 			case col.Type.IsJSON():
-				sum += uint64(len(strings.Replace(g.F("%s", val), " ", "", -1)))
+				sum += uint64(len(strings.ReplaceAll(g.F("%s", val), " ", "")))
 			case col.IsNumber(), col.Type == iop.BigIntType:
 				sum += uint64(math.Abs(cast.ToFloat64(val)))
 			case col.IsString():
@@ -513,6 +664,59 @@ func (conn *ScyllaDBConn) columnsFromGocqlInfo(colInfo []gocql.ColumnInfo) iop.C
 		}
 	}
 	return columns
+}
+
+func nativeCQLTypeStringToIop(typ string) (string, iop.ColumnType) {
+	base := strings.ToLower(strings.TrimSpace(typ))
+	if i := strings.Index(base, "<"); i > 0 {
+		base = base[:i]
+	}
+	switch base {
+	case "ascii":
+		return "ascii", iop.TextType
+	case "bigint":
+		return "bigint", iop.BigIntType
+	case "blob":
+		return "blob", iop.BinaryType
+	case "boolean":
+		return "bool", iop.BoolType
+	case "counter":
+		return "counter", iop.BigIntType
+	case "date":
+		return "date", iop.DateType
+	case "decimal":
+		return "decimal", iop.DecimalType
+	case "double":
+		return "double", iop.FloatType
+	case "float":
+		return "float", iop.FloatType
+	case "inet":
+		return "inet", iop.StringType
+	case "int":
+		return "int", iop.IntegerType
+	case "smallint":
+		return "smallint", iop.SmallIntType
+	case "text":
+		return "text", iop.TextType
+	case "time":
+		return "time", iop.TimeType
+	case "timestamp":
+		return "timestamp", iop.TimestampType
+	case "timeuuid", "uuid":
+		return "uuid", iop.UUIDType
+	case "tinyint":
+		return "tinyint", iop.SmallIntType
+	case "varchar":
+		return "varchar", iop.StringType
+	case "varint":
+		return "varint", iop.IntegerType
+	case "duration":
+		return "duration", iop.TimeType
+	case "list", "set", "map", "tuple", "udt", "frozen", "vector":
+		return base, iop.JsonType
+	default:
+		return typ, iop.StringType
+	}
 }
 
 func cqlTypeToIopType(dbType gocql.TypeInfo) (string, iop.ColumnType) {
@@ -578,18 +782,27 @@ func cqlTypeToIopType(dbType gocql.TypeInfo) (string, iop.ColumnType) {
 	return "missing", iop.JsonType
 }
 
-// parses the value to match targeted column type if possible
 func normalizeInsertValue(val any, col iop.Column) any {
 	if val == nil {
 		return nil
 	}
-	if col.Type == iop.BoolType {
+	if col.Type == iop.BoolType || strings.EqualFold(col.DbType, "boolean") || strings.EqualFold(col.DbType, "bool") {
 		return cast.ToBool(val)
 	}
-	if col.Type == iop.DecimalType && g.GetType(val) == "string" {
-		d := inf.Dec{}
-		val, _ = d.SetString(val.(string))
-		return val
+	// gocql decimal only accepts string or *inf.Dec
+	if col.Type == iop.DecimalType || strings.EqualFold(col.DbType, "decimal") || strings.EqualFold(col.DbType, "varint") {
+		switch v := val.(type) {
+		case *inf.Dec:
+			return v
+		case inf.Dec:
+			return &v
+		default:
+			d := new(inf.Dec)
+			if _, ok := d.SetString(cast.ToString(val)); ok {
+				return d
+			}
+			return cast.ToString(val)
+		}
 	}
 	if col.Type == iop.JsonType {
 		switch val.(type) {
@@ -602,7 +815,7 @@ func normalizeInsertValue(val any, col iop.Column) any {
 	return val
 }
 
-// assigns non default types so scylladb driver assigns nils instead of zero values
+// setupRowDataForNulls uses pointer types so gocql yields nil not zero values
 func setupRowDataForNulls(colInfo []gocql.ColumnInfo) map[string]any {
 	rowData := map[string]any{}
 	for i := range colInfo {

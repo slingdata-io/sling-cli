@@ -35,17 +35,17 @@ streams:
       range: '1,800'
       chunk_size: 200
   
-  postgres.public.test1k_clickhouse_pg:
+  public.test1k_clickhouse_pg:
     update_key: update_dt
     source_options:
       chunk_count: 3
     
-  postgres.public.test1k_duckdb_pg:
+  public.test1k_duckdb_pg:
     update_key: date
     source_options:
       chunk_count: 4
 
-  postgres.public.test1k_ducklake_pg:
+  public.test1k_ducklake_pg:
     update_key: id
     source_options:
       chunk_count: 6

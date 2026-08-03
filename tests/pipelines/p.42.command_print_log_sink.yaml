@@ -1,0 +1,26 @@
+# Command hook output with `print: true` must go through the logger (so it
+# reaches log sinks such as the platform step output), not straight to
+# os.Stdout/os.Stderr. `print: false` must stay out of the log entirely.
+steps:
+  - type: command
+    command: ["bash", "-c", "printf 'cmd-stdout-line-A\ncmd-stdout-line-B\n'; echo cmd-stderr-line >&2; printf 'cmd-no-trailing-newline'"]
+    print: true
+    capture: true
+    id: printed
+
+  - type: command
+    command: echo cmd-quiet-line
+    print: false
+    capture: true
+    id: quiet
+
+  # printed but not captured: output still reaches the log, state stays empty
+  - type: command
+    command: echo cmd-uncaptured-line
+    print: true
+    capture: false
+    id: uncaptured
+
+  # captured output is still available in state regardless of print
+  - type: log
+    message: 'quiet captured => {state.quiet.output.stdout}'
