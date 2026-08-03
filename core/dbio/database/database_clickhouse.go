@@ -517,6 +517,9 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				}
 			}
 
+			batchStart := time.Now()
+			maxDur := ds.Sp.Config.BatchMaxDuration
+
 			for row := range batch.Rows {
 				var eG g.ErrorGroup
 
@@ -593,6 +596,28 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					g.Trace("error for row: %#v", row)
 					return g.Error(err, "could not execute statement")
+				}
+
+				// clickhouse-go may buffer Exec inside the TX and only flush on
+				// Commit — so producer-side batch_max_duration alone can miss.
+				// Commit on a wall-clock ceiling here so slow/long loads still
+				// release the connection periodically.
+				if maxDur > 0 && time.Since(batchStart) >= maxDur {
+					if err = stmt.Close(); err != nil {
+						return g.Error(err, "could not close statement before duration commit")
+					}
+					if err = conn.Commit(); err != nil {
+						return g.Error(err, "could not commit transaction (max_duration)")
+					}
+					g.Debug("committed clickhouse batch by max_duration=%s rows_so_far=%d", maxDur, count)
+					if err = conn.Begin(&sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
+						return g.Error(err, "could not begin after duration commit")
+					}
+					stmt, err = conn.Prepare(insertStatement)
+					if err != nil {
+						return g.Error(err, "could not prepare statement after duration commit")
+					}
+					batchStart = time.Now()
 				}
 			}
 

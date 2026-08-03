@@ -343,13 +343,20 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	}
 
-	df.Unpause() // Resume dataflow
-	t.SetProgress("streaming data")
-
-	// Set batch limit if specified
+	// Set batch limits BEFORE Unpause so NewBatch / in-flight batches see them.
 	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
 		df.SetBatchLimit(*batchLimit)
 	}
+	if dStr := cfg.Target.Options.BatchMaxDuration; dStr != nil && *dStr != "" {
+		d, err := time.ParseDuration(*dStr)
+		if err != nil {
+			return 0, g.Error(err, "could not parse batch_max_duration: %s", *dStr)
+		}
+		df.SetBatchMaxDuration(d)
+	}
+
+	df.Unpause() // Resume dataflow
+	t.SetProgress("streaming data")
 
 	// Bulk import data into temp table
 	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
@@ -561,13 +568,20 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
-	df.Unpause() // Resume dataflow
-	t.SetProgress("streaming data (direct insert)")
-
-	// Set batch limit if specified
+	// Set batch limits BEFORE Unpause so NewBatch / in-flight batches see them.
 	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
 		df.SetBatchLimit(*batchLimit)
 	}
+	if dStr := cfg.Target.Options.BatchMaxDuration; dStr != nil && *dStr != "" {
+		d, err := time.ParseDuration(*dStr)
+		if err != nil {
+			return 0, g.Error(err, "could not parse batch_max_duration: %s", *dStr)
+		}
+		df.SetBatchMaxDuration(d)
+	}
+
+	df.Unpause() // Resume dataflow
+	t.SetProgress("streaming data (direct insert)")
 
 	// Bulk import data directly into final table
 	cnt, err = tgtConn.BulkImportFlow(targetTable.FullName(), df)

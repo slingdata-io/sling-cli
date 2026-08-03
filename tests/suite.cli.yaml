@@ -2590,3 +2590,22 @@
     - 'OK-5: wildcard streams kept 2-part keys, explicit override won'
     - 'OK-6: unsupported dialect rejected the 3-part name'
     - 'SUCCESS: all 3-part object name cases passed'
+
+- id: 313
+  name: 'batch_max_duration mid-stream commits (postgres → clickhouse)'
+  run: |
+    set -o pipefail
+    sling run -d -p tests/pipelines/p.44.batch_max_duration_pg_clickhouse.yaml 2>&1 | tee /tmp/sling_cli_test_313.out
+    closes=$(grep -c 'committed clickhouse batch by max_duration' /tmp/sling_cli_test_313.out || true)
+    echo "duration_batch_commits=$closes"
+    test "$closes" -ge 1
+    # Prove the commit was mid-stream (not only at EOS): rows_so_far < final count
+    mid=$(grep -oE 'rows_so_far=[0-9]+' /tmp/sling_cli_test_313.out | head -1 | cut -d= -f2)
+    echo "mid_stream_rows_so_far=$mid"
+    test -n "$mid"
+    test "$mid" -lt 500000
+  output_contains:
+    - 'committed clickhouse batch by max_duration=1s'
+    - 'duration_batch_commits='
+    - 'mid_stream_rows_so_far='
+    - 'SUCCESS: batch_max_duration committed multiple batches'

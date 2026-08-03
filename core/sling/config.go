@@ -146,6 +146,11 @@ func (cfg *Config) SetDefault() {
 			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
 			cfg.Target.Options.BatchLimit = g.Int64(100000)
 		}
+		if cfg.Target.Options.BatchMaxDuration == nil {
+			// Cap TX wall-clock so slow pipes don't hold one commit open for hours
+			// (proxy/server idle → driver: bad connection at final Commit).
+			cfg.Target.Options.BatchMaxDuration = g.String("5m")
+		}
 	}
 
 	// set default metadata
@@ -1730,6 +1735,7 @@ type TargetOptions struct {
 	Compression      *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	BatchLimit       *int64              `json:"batch_limit,omitempty" yaml:"batch_limit,omitempty"`
+	BatchMaxDuration *string             `json:"batch_max_duration,omitempty" yaml:"batch_max_duration,omitempty"`
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
@@ -2070,6 +2076,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.BatchLimit == nil {
 		o.BatchLimit = targetOptions.BatchLimit
+	}
+	if o.BatchMaxDuration == nil {
+		o.BatchMaxDuration = targetOptions.BatchMaxDuration
 	}
 	if o.FileMaxRows == nil {
 		o.FileMaxRows = targetOptions.FileMaxRows
