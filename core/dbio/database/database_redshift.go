@@ -92,6 +92,8 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 // adding fallbacks for credentials for wider compatibility.
 // See: https://github.com/slingdata-io/sling-cli/issues/571
 func (conn *RedshiftConn) getS3Props() []string {
+	conn.ensureAWSCredentials()
+
 	s3Props := conn.PropArr()
 
 	awsID := conn.GetProp("AWS_ACCESS_KEY_ID")
@@ -119,10 +121,46 @@ func (conn *RedshiftConn) getS3Props() []string {
 	if awsProfile != "" {
 		s3Props = append(s3Props, "PROFILE="+awsProfile)
 	}
+	if awsRegion := conn.GetProp("AWS_REGION", "AWS_DEFAULT_REGION", "REGION", "DEFAULT_REGION"); awsRegion != "" {
+		s3Props = append(s3Props, "REGION="+awsRegion)
+	}
 	return s3Props
 }
 
+// ensureAWSCredentials ensures AWS credentials are available for Redshift's COPY/UNLOAD
+// commands and the S3 filesystem. When no explicit credentials or role are provided, it
+// falls back to the default AWS credential chain (environment variables, shared config
+// profiles, IAM roles), similar to the USE_ENVIRONMENT option for S3. This allows
+// Redshift clusters in private subnets to avoid STS-based role assumption and instead use
+// static credentials resolved from the environment.
+func (conn *RedshiftConn) ensureAWSCredentials() (ok bool, err error) {
+	awsID := conn.GetProp("AWS_ACCESS_KEY_ID")
+	awsKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	awsToken := conn.GetProp("AWS_SESSION_TOKEN")
+	awsRole := conn.GetProp("AWS_ROLE_ARN")
+
+	// explicit credentials or role already provided, nothing to do
+	if (awsID != "" && awsKey != "") || awsToken != "" || awsRole != "" {
+		return true, nil
+	}
+
+	// explicitly opted out of using the environment credential chain
+	if strings.EqualFold(conn.GetProp("USE_ENVIRONMENT"), "false") {
+		return false, nil
+	}
+
+	// fall back to the default AWS credential chain
+	err = loadAWSCredentialsFromChain(conn)
+	if err != nil {
+		return false, g.Error(err, "Could not load AWS credentials. Set 'AWS_ACCESS_KEY_ID'/'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN', or set 'USE_ENVIRONMENT=true' to use the AWS credential chain")
+	}
+
+	return true, nil
+}
+
 func (conn *RedshiftConn) makeCopyCredentialString() (cred string) {
+
+	conn.ensureAWSCredentials()
 
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
@@ -163,6 +201,13 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 	if conn.GetProp("AWS_BUCKET") == "" {
 		return "", g.Error("need to set AWS_BUCKET")
+	}
+
+	ok, err := conn.ensureAWSCredentials()
+	if err != nil {
+		return "", g.Error(err, "Could not load AWS credentials for Redshift")
+	} else if !ok {
+		return "", g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or set 'USE_ENVIRONMENT=true' to use the AWS credential chain to unload from redshift to S3")
 	}
 
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
@@ -449,15 +494,14 @@ func (conn *RedshiftConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable
 
 // CopyFromS3 uses the COPY INTO Table command from AWS S3
 func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
-	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
-	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
-	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
-	AwsRole := conn.GetProp("AWS_ROLE_ARN")
-
-	if (AwsID == "" || AwsAccessKey == "") && AwsSessionToken == "" && AwsRole == "" {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', or 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role) to copy to redshift from S3")
+	ok, err := conn.ensureAWSCredentials()
+	if err != nil {
+		return 0, g.Error(err, "Could not load AWS credentials for Redshift")
+	} else if !ok {
+		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or set 'USE_ENVIRONMENT=true' to use the AWS credential chain to copy to redshift from S3")
 		return
 	}
+
 	credentialExpr := conn.makeCopyCredentialString()
 
 	tgtColumns := conn.Template().QuoteNames(columns.Names()...)
