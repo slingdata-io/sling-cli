@@ -2385,8 +2385,8 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 		castExpr := g.R(castFuncInt, "field", qName, "type", intType)
 		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else {col_as_int} end`
 		selectStr = g.R(sql, "col", qName, "col_as_int", castExpr)
-	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
-		// assume bool, convert from 1/0 to true/false
+	case srcCol.IsInteger() && tgtCol.IsString():
+		// assume bool-as-int, convert from 1/0 to true/false
 		stringType := conn.GetType().GetTemplateValue("general_type_map.string")
 		if g.In(conn.GetType(), dbio.TypeDbMySQL, dbio.TypeDbMariaDB) {
 			// MySQL/MariaDB needs `CAST(column AS CHAR(length))`
@@ -2397,6 +2397,11 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 		castExpr := g.R(castFunc, "field", qName, "type", stringType)
 		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col_as_string} end`
 		selectStr = g.R(sql, "col", qName, "col_as_string", castExpr)
+	case srcCol.IsBool() && tgtCol.IsString():
+		// Genuine boolean: PG-family rejects `boolean = integer`, and Redshift
+		// rejects `CAST(boolean AS varchar)`. Use truthiness (no = 1 / no cast).
+		sql := `case when {col} is null then null when {col} then 'true' else 'false' end`
+		selectStr = g.R(sql, "col", qName)
 	default:
 		selectStr = qName
 	}
