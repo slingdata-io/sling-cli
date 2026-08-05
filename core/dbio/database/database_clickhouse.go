@@ -729,7 +729,7 @@ func (conn *ClickhouseConn) DropTable(tableNames ...string) (err error) {
 			strings.ReplaceAll(table.Name, "'", "''"),
 		)
 		if _, kErr := conn.Self().Exec(killSQL); kErr != nil {
-			g.Debug("DropTable: KILL MUTATION for %s failed (continuing): %v", tableName, kErr)
+			g.Trace("DropTable: KILL MUTATION for %s failed (continuing): %v", tableName, kErr)
 		}
 	}
 
