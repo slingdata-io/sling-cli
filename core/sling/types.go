@@ -117,7 +117,7 @@ func (s ExecStatus) IsFinished() bool {
 	case ExecStatusSuccess, ExecStatusError,
 		ExecStatusTerminated, ExecStatusStalled,
 		ExecStatusInterrupted, ExecStatusTimedOut,
-		ExecStatusWarning:
+		ExecStatusWarning, ExecStatusSkipped:
 		return true
 	}
 	return false
