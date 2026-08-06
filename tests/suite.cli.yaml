@@ -2609,3 +2609,9 @@
     - 'duration_batch_commits='
     - 'mid_stream_rows_so_far='
     - 'SUCCESS: batch_max_duration committed multiple batches'
+
+- id: 314
+  name: 'SLING_STATE timestamp format is RFC3339 (oracle TIMESTAMP WITH TIME ZONE → postgres)'
+  run: 'sling run -d -p tests/pipelines/p.47.oracle_date_state_format.yaml'
+  output_contains:
+    - 'SUCCESS: Oracle DATE state value is RFC3339 and resumes correctly'
