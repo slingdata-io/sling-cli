@@ -209,6 +209,10 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 			col.DbType = "TIMESTAMP"
 			if tsType, ok := field.Type.(*arrow.TimestampType); ok {
 				col.Metadata["timeUnit"] = tsType.Unit.String()
+				if tsType.TimeZone != "" {
+					col.Type = TimestampzType
+					col.DbType = "TIMESTAMPTZ"
+				}
 			}
 		case arrow.STRING, arrow.LARGE_STRING:
 			col.Type = StringType

@@ -27,8 +27,8 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.5.2"
-	DuckDbVersionMD    = "1.5.2"
+	DuckDbVersion      = "1.5.5"
+	DuckDbVersionMD    = "1.5.5"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -43,20 +43,75 @@ type DuckDb struct {
 	extensions  []string
 	secrets     []DuckDbSecret
 	initialized bool
+	queryMu     sync.RWMutex
 	query       *duckDbQuery // only one active query at a time
 	version     int
 }
 
+func (duck *DuckDb) getQuery() *duckDbQuery {
+	duck.queryMu.RLock()
+	defer duck.queryMu.RUnlock()
+	return duck.query
+}
+
+func (duck *DuckDb) setQuery(dq *duckDbQuery) {
+	duck.queryMu.Lock()
+	defer duck.queryMu.Unlock()
+	duck.query = dq
+}
+
+// duckDbQuery holds the state of one query. err/started/done are written by the
+// scanner and watcher goroutines, so use the accessors below.
 type duckDbQuery struct {
 	SQL       string
 	Context   *g.Context
 	reader    *io.PipeReader
 	writer    *io.PipeWriter
+	mu        sync.RWMutex
 	err       error
 	started   bool
 	done      bool
 	closed    chan struct{} // closed when the query finishes, to stop the watcher
 	closeOnce sync.Once
+}
+
+func (dq *duckDbQuery) getErr() error {
+	dq.mu.RLock()
+	defer dq.mu.RUnlock()
+	return dq.err
+}
+
+// setErr keeps the first error; later ones would mask it
+func (dq *duckDbQuery) setErr(err error) {
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	if dq.err == nil {
+		dq.err = err
+	}
+}
+
+func (dq *duckDbQuery) isDone() bool {
+	dq.mu.RLock()
+	defer dq.mu.RUnlock()
+	return dq.done
+}
+
+func (dq *duckDbQuery) setDone() {
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	dq.done = true
+}
+
+func (dq *duckDbQuery) isStarted() bool {
+	dq.mu.RLock()
+	defer dq.mu.RUnlock()
+	return dq.started
+}
+
+func (dq *duckDbQuery) setStarted() {
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	dq.started = true
 }
 
 // finish stops the watcher goroutine started in newQuery. Safe to call multiple times.
@@ -374,10 +429,11 @@ func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
 // getLoadExtensionSQL generates SQL statements to load extensions
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
+		name := strings.TrimSpace(strings.TrimSuffix(extension, "from community"))
 		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
-			sql += fmt.Sprintf("LOAD %s;", strings.TrimSuffix(extension, "from community"))
+			sql += fmt.Sprintf("LOAD %s;", name)
 		} else {
-			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
+			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, name)
 		}
 	}
 	return
@@ -702,18 +758,18 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...any) (r
 
 func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuery) {
 	stdOutReader, stdOutWriter := io.Pipe() // new pipe
-	duck.query = &duckDbQuery{
+	dq := &duckDbQuery{
 		SQL:     sql,
 		Context: g.NewContext(ctx),
 		reader:  stdOutReader,
 		writer:  stdOutWriter,
 		closed:  make(chan struct{}),
 	}
+	duck.setQuery(dq)
 
 	// watcher: unblock a stuck reader (and release duck.Context's lock) when the
 	// query context is cancelled, or the process dies / its stdout scanner stops
 	// before the EOF marker arrives. Otherwise ConsumeCsvReader blocks forever.
-	dq := duck.query
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
@@ -723,19 +779,19 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 				return
 			case <-dq.Context.Ctx.Done():
 				err := g.Error(dq.Context.Ctx.Err(), "duckdb query context cancelled")
-				dq.err = err
+				dq.setErr(err)
 				dq.writer.CloseWithError(err)
 				dq.reader.CloseWithError(err)
 				duck.kill() // kill the proc so it won't block subsequent queries
 				return
 			case <-ticker.C:
-				if duck.Proc != nil && !dq.done && (duck.Proc.Exited() || duck.Proc.ScanErr != nil) {
+				if duck.Proc != nil && !dq.isDone() && (duck.Proc.Exited() || duck.Proc.GetScanErr() != nil) {
 					reason := "duckdb process exited before query completed"
-					if duck.Proc.ScanErr != nil {
+					if duck.Proc.GetScanErr() != nil {
 						reason = "duckdb stdout scanner stopped before query completed"
 					}
 					err := g.Error("%s: %s", reason, duck.Proc.CmdErrorText())
-					dq.err = err
+					dq.setErr(err)
 					dq.writer.CloseWithError(err)
 					dq.reader.CloseWithError(err)
 					return
@@ -744,7 +800,7 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 		}
 	}()
 
-	return duck.query
+	return dq
 }
 
 // waitForResult waits for the execution of a SQL query and returns the result
@@ -761,15 +817,15 @@ func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error
 	for {
 		time.Sleep(10 * time.Millisecond)
 
-		if dq.err != nil {
-			return result, dq.err
+		if err := dq.getErr(); err != nil {
+			return result, err
 		}
 
-		if dq.done {
+		if dq.isDone() {
 			return result, nil
 		}
 
-		if !dq.started {
+		if !dq.isStarted() {
 			continue
 		}
 
@@ -884,10 +940,19 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	sqlLower := strings.TrimSpace(strings.ToLower(sqlStripped))
 	isSelectQuery := strings.HasPrefix(sqlLower, "select") || strings.HasPrefix(sqlLower, "with")
 	useArrow := cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) && isSelectQuery
+
+	// the interactive process locks a file instance exclusively, so a second
+	// process can't attach, not even read-only
+	if useArrow && duck.GetProp("instance") != "" && duck.Proc != nil && !duck.Proc.Exited() {
+		g.Debug("arrow mode unavailable: duckdb instance is locked by the interactive process, using csv mode")
+		useArrow = false
+	}
+
 	if useArrow {
+		// duck.AddExtension("nanoarrow from community")
 		duck.AddExtension("arrow from community")
 
-		arrowReader, arrowCleanup, err := duck.StreamArrow(queryCtx.Ctx, sql)
+		arrowReader, arrowCleanup, arrowErr, err := duck.StreamArrow(queryCtx.Ctx, sql)
 		if err != nil {
 			return nil, g.Error(err, "Failed to start Arrow stream")
 		}
@@ -909,6 +974,14 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 		err = ds.ConsumeArrowReaderStream(arrowReader)
 		if err != nil {
+			// the subprocess error beats a bare EOF from a truncated stream
+			if procErr := arrowErr(); procErr != nil {
+				err = g.Error(procErr, err.Error())
+			}
+			// cancel before Close, which drains readyChn instead of signaling
+			// it, leaving WaitReady blocked forever
+			ds.Context.CaptureErr(err)
+			ds.Context.Cancel()
 			ds.Close()
 			return ds, g.Error(err, "could not read Arrow output stream")
 		}
@@ -973,8 +1046,8 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		return ds, g.Error(err, "could not read output stream")
 	}
 
-	if dq.err != nil {
-		return ds, dq.err
+	if err := dq.getErr(); err != nil {
+		return ds, err
 	} else if describeErr != nil {
 		// should never occur, since if Describe fails, SubmitSQL should fail
 		// to get better error. but just in case it does, log error
@@ -986,10 +1059,11 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 // StreamArrow launches a separate DuckDB CLI process that outputs Arrow IPC binary data to stdout.
 // This bypasses the interactive CSV process entirely, avoiding line-based scanning issues with binary data.
-func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.ReadCloser, cleanup func(), err error) {
+// procErr reports what the subprocess wrote to stderr, once the stream ends.
+func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.ReadCloser, cleanup func(), procErr func() error, err error) {
 	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
-		return nil, nil, g.Error(err, "could not get duckdb binary")
+		return nil, nil, nil, g.Error(err, "could not get duckdb binary")
 	}
 
 	// Build args (no -csv or -nullvalue flags for Arrow mode)
@@ -1029,7 +1103,7 @@ func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.Read
 		// Windows: use temp file since /dev/stdout doesn't exist
 		tmpFile, tmpErr := os.CreateTemp("", "sling-arrow-*.ipc")
 		if tmpErr != nil {
-			return nil, nil, g.Error(tmpErr, "could not create temp file for Arrow output")
+			return nil, nil, nil, g.Error(tmpErr, "could not create temp file for Arrow output")
 		}
 		tmpPath := tmpFile.Name()
 		tmpFile.Close()
@@ -1059,22 +1133,22 @@ func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.Read
 			os.Remove(tmpPath)
 			errMsg := stderrBuf.String()
 			if errMsg != "" {
-				return nil, nil, g.Error("Arrow DuckDB process failed: %s\n%s", runErr, errMsg)
+				return nil, nil, nil, g.Error("Arrow DuckDB process failed: %s\n%s", runErr, errMsg)
 			}
-			return nil, nil, g.Error(runErr, "Arrow DuckDB process failed")
+			return nil, nil, nil, g.Error(runErr, "Arrow DuckDB process failed")
 		}
 
 		file, openErr := os.Open(tmpPath)
 		if openErr != nil {
 			os.Remove(tmpPath)
-			return nil, nil, g.Error(openErr, "could not open Arrow temp file")
+			return nil, nil, nil, g.Error(openErr, "could not open Arrow temp file")
 		}
 
 		cleanup = func() {
 			file.Close()
 			os.Remove(tmpPath)
 		}
-		return file, cleanup, nil
+		return file, cleanup, func() error { return nil }, nil
 	}
 
 	// Unix: pipe Arrow IPC directly through /dev/stdout
@@ -1098,22 +1172,27 @@ func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.Read
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, g.Error(err, "could not get stdout pipe for Arrow DuckDB process")
+		return nil, nil, nil, g.Error(err, "could not get stdout pipe for Arrow DuckDB process")
 	}
 
+	var stderrMux sync.Mutex
 	var stderrBuf strings.Builder
+	stderrDone := make(chan struct{})
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, nil, g.Error(err, "could not get stderr pipe for Arrow DuckDB process")
+		return nil, nil, nil, g.Error(err, "could not get stderr pipe for Arrow DuckDB process")
 	}
 
 	// capture stderr in background
 	go func() {
+		defer close(stderrDone)
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := stderrPipe.Read(buf)
 			if n > 0 {
+				stderrMux.Lock()
 				stderrBuf.Write(buf[:n])
+				stderrMux.Unlock()
 			}
 			if readErr != nil {
 				break
@@ -1122,13 +1201,29 @@ func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.Read
 	}()
 
 	if err = cmd.Start(); err != nil {
-		return nil, nil, g.Error(err, "could not start Arrow DuckDB process")
+		return nil, nil, nil, g.Error(err, "could not start Arrow DuckDB process")
+	}
+
+	// on a truncated stream, stderr holds the real cause
+	procErr = func() error {
+		select {
+		case <-stderrDone:
+		case <-time.After(2 * time.Second): // in case the pipe is stuck
+		}
+		stderrMux.Lock()
+		defer stderrMux.Unlock()
+		if msg := strings.TrimSpace(stderrBuf.String()); msg != "" {
+			return g.Error(msg)
+		}
+		return nil
 	}
 
 	cleanup = func() {
 		waitErr := cmd.Wait()
 		if waitErr != nil {
+			stderrMux.Lock()
 			errMsg := stderrBuf.String()
+			stderrMux.Unlock()
 			if errMsg != "" {
 				g.Warn("Arrow DuckDB process error: %s\n%s", waitErr, errMsg)
 			} else {
@@ -1137,34 +1232,43 @@ func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.Read
 		}
 	}
 
-	return stdoutPipe, cleanup, nil
+	return stdoutPipe, cleanup, procErr, nil
 }
 
 // initScanner is set only once
 func (duck *DuckDb) initScanner() {
 
+	// mu guards the state below, shared with the debounce timer callbacks. Each
+	// callback takes its own query, so a late timer can't touch a newer one.
+	var mu sync.Mutex
 	errString := strings.Builder{}
 	var errTimer, eofTimer *time.Timer
-
 	var stdOutWriter *io.PipeWriter
-	resetWriter := func() {
+
+	// call with mu held
+	resetWriter := func(dq *duckDbQuery) {
 		if stdOutWriter != nil {
 			stdOutWriter.Close()
 		}
 		stdOutWriter = nil // set as nil until next query start
-		duck.query.done = true
+		if dq != nil {
+			dq.setDone()
+		}
 	}
 
 	duck.Proc.SetScanner(func(stderr bool, line string) {
-		// g.Warn("stderr:%v done:%v | %s", stderr, duck.query.done, line)
-
-		if duck.query == nil || duck.query.done {
+		// snapshot once, newQuery can swap it concurrently
+		dq := duck.getQuery()
+		if dq == nil || dq.isDone() {
 			return
 		}
 
+		mu.Lock()
+		defer mu.Unlock()
+
 		select {
-		case <-duck.query.Context.Ctx.Done():
-			resetWriter()
+		case <-dq.Context.Ctx.Done():
+			resetWriter(dq)
 			return
 		default:
 		}
@@ -1184,26 +1288,30 @@ func (duck *DuckDb) initScanner() {
 
 			errString.WriteString(line)
 			errTimer = time.AfterFunc(25*time.Millisecond, func() {
-				suffix := g.F("For query => %s", duck.query.SQL)
-				duck.query.err = g.Error(errString.String() + "\n" + suffix)
+				mu.Lock()
+				defer mu.Unlock()
+				suffix := g.F("For query => %s", dq.SQL)
+				dq.setErr(g.Error(errString.String() + "\n" + suffix))
 				errString.Reset()
-				resetWriter() // in case writer is active
+				resetWriter(dq) // in case writer is active
 			})
 		} else {
 			if strings.Contains(line, duckDbEOFMarker) {
 				g.Trace("duckdb scanner: EOF marker seen")
 				eofTimer = time.AfterFunc(25*time.Millisecond, func() {
-					resetWriter() // since result set ended
+					mu.Lock()
+					defer mu.Unlock()
+					resetWriter(dq) // since result set ended
 				})
 			} else if strings.Contains(line, duckDbSOFMarker) {
 				g.Trace("duckdb scanner: SOF marker seen")
-				stdOutWriter = duck.query.writer
-				duck.query.started = true
+				stdOutWriter = dq.writer
+				dq.setStarted()
 			} else if stdOutWriter != nil {
 				_, err := stdOutWriter.Write([]byte(line + "\n"))
 				if err != nil {
-					duck.query.err = g.Error(err, "Failed to write to stdout pipe")
-					resetWriter() // since we errored
+					dq.setErr(g.Error(err, "Failed to write to stdout pipe"))
+					resetWriter(dq) // since we errored
 				}
 			}
 		}
@@ -1505,10 +1613,10 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	}
 
 	// A failing describe (e.g. a missing table) emits its real error
-	if len(data.Rows) == 0 && duck.query != nil {
+	if dq := duck.getQuery(); len(data.Rows) == 0 && dq != nil {
 		deadline := time.Now().Add(500 * time.Millisecond)
 		for time.Now().Before(deadline) {
-			if qErr := duck.query.err; qErr != nil {
+			if qErr := dq.getErr(); qErr != nil {
 				return nil, g.Error(qErr, "could not describe query")
 			}
 			time.Sleep(20 * time.Millisecond)

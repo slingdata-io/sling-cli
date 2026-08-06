@@ -1158,21 +1158,24 @@ func TestSuiteDatabaseD1(t *testing.T) {
 
 func TestSuiteDatabaseDuckDb(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbDuckDb)
-}
 
-func TestSuiteDatabaseDuckLake(t *testing.T) {
-	t.Parallel()
+	// DUCKDB
+	testSuite(t, dbio.TypeDbDuckDb)
+	if os.Getenv("DUCKDB_USE_ARROW") == "" {
+		os.Setenv("DUCKDB_USE_ARROW", "true")
+		testSuite(t, dbio.TypeDbDuckDb)
+		os.Setenv("DUCKDB_USE_ARROW", "false")
+	}
+
+	// MOTHERDUCK
+	testSuite(t, dbio.TypeDbMotherDuck)
+
+	// DUCKLAKE
 	tests := "1-17,19+" // soft-delete is not supported
 	testSuite(t, dbio.TypeDbDuckLake, tests)
 	// testSuite(t, dbio.Type("ducklake_az"), tests)
 	testSuite(t, dbio.Type("ducklake_r2"), tests)
 	testSuite(t, dbio.Type("ducklake_s3"), tests)
-}
-
-func TestSuiteDatabaseMotherDuck(t *testing.T) {
-	t.Parallel()
-	testSuite(t, dbio.TypeDbMotherDuck)
 }
 
 func TestSuiteDatabaseExasol(t *testing.T) {

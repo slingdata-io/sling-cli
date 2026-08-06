@@ -54,7 +54,7 @@ metadata:
            replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
     from duckdb_constraints()
     where database_name = current_database()
-      and table_schema = '{schema}'
+      and schema_name = '{schema}'
       and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
 
@@ -63,7 +63,7 @@ metadata:
            sql as column_name
     from duckdb_indexes()
     where database_name = current_database()
-      and table_schema = '{schema}'
+      and schema_name = '{schema}'
       and table_name = '{table}'
 
   columns_full: |

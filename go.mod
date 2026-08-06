@@ -36,7 +36,7 @@ require (
 	github.com/exasol/exasol-driver-go v1.0.14
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.177
+	github.com/flarco/g v0.1.178
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gobwas/glob v0.2.3
@@ -409,3 +409,5 @@ replace github.com/apache/arrow-adbc/go/adbc => github.com/slingdata-io/arrow-ad
 // replace github.com/apache/arrow-adbc/go/adbc => ../arrow-adbc/go/adbc
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.18.0
+
+replace github.com/flarco/g => ../g
