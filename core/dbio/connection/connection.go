@@ -480,6 +480,47 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 	return c.API, nil
 }
 
+// setUseADBC turns on ADBC for supported databases when SLING_USE_ADBC is set,
+// so a whole environment can be switched over without editing every connection.
+// An explicit use_adbc on the connection always wins.
+func (c *Connection) setUseADBC() {
+
+	// adbcSupportedTypes are the database types that can be driven over ADBC.
+	// Must stay in sync with the switch in database.NewAdbcConn.
+	var adbcSupportedTypes = []dbio.Type{
+		dbio.TypeDbPostgres,
+		dbio.TypeDbSQLServer,
+		dbio.TypeDbSnowflake,
+		dbio.TypeDbSQLite,
+		dbio.TypeDbDuckDb,
+		dbio.TypeDbBigQuery,
+		dbio.TypeDbMySQL,
+		dbio.TypeDbTrino,
+	}
+
+	if !cast.ToBool(os.Getenv("SLING_USE_ADBC")) {
+		return
+	}
+
+	if _, ok := c.Data["use_adbc"]; ok {
+		return // explicitly set on the connection, leave it alone
+	}
+
+	// c.Type is not resolved yet at this point, so derive it
+	connType := c.Type
+	if connType == "" {
+		if t, ok := c.Data["type"]; ok {
+			connType = dbio.Type(cast.ToString(t))
+		} else if url := c.URL(); url != "" {
+			connType = SchemeType(url)
+		}
+	}
+
+	if g.In(connType, adbcSupportedTypes...) {
+		c.Data["use_adbc"] = true
+	}
+}
+
 func (c *Connection) setFromEnv() {
 	if c.Name == "" && strings.HasPrefix(c.URL(), "$") {
 		c.Name = strings.TrimLeft(c.URL(), "$")
@@ -513,6 +554,7 @@ func (c *Connection) ConnSetDatabase(dbName string) *Connection {
 
 func (c *Connection) setURL() (err error) {
 	c.setFromEnv()
+	c.setUseADBC()
 
 	// setIfMissing sets a default value if key is not present
 	setIfMissing := func(key string, val interface{}) {

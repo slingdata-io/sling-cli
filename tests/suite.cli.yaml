@@ -2621,3 +2621,15 @@
   run: 'sling run -d -r tests/replications/r.100.select_expr_literal_star.yaml'
   output_contains:
     - "SUCCESS: select expressions with literal '*' are preserved"
+
+# Requires the ADBC drivers for each database (sling installs them via dbc)
+- id: 316
+  name: 'SLING_USE_ADBC routes supported databases through ADBC'
+  run: 'sling run -d -p tests/pipelines/p.48.adbc_use_adbc_env.yaml'
+  env:
+    SLING_USE_ADBC: 'true'
+  output_contains:
+    - 'postgres-adbc'
+    - 'snowflake-adbc'
+    - 'bigquery-adbc'
+    - 'SUCCESS: SLING_USE_ADBC routed postgres, mysql, sqlserver, duckdb, snowflake and bigquery through ADBC'

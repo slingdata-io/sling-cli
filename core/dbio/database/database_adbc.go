@@ -66,11 +66,11 @@ func (conn *ArrowDBConn) Init() error {
 		"adbc.postgresql.connection_string": "uri",
 		"adbc.sqlserver.connection_string":  "uri",
 		"adbc.mssql.connection_string":      "uri",
-		"adbc.snowflake.connection_string":  "adbc.snowflake.sql.uri",
+		"adbc.snowflake.connection_string":  "uri",
 		"adbc.sqlite.connection_string":     "uri",
 		"adbc.duckdb.connection_string":     "path",
 		"adbc.mysql.connection_string":      "uri",
-		"adbc.trino.connection_string":      "url",
+		"adbc.trino.connection_string":      "uri",
 	}
 
 	for key, val := range conn.properties {
@@ -1486,7 +1486,9 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 
 	case dbio.TypeDbSnowflake:
 		connMap["driver_name"] = "snowflake"
-		connMap["adbc.snowflake.sql.uri"] = buildSnowflakeAdbcURI(info, getProp)
+		// the driver has no "adbc.snowflake.sql.uri" option; the generic "uri"
+		// is parsed with gosnowflake.ParseDSN
+		connMap["uri"] = buildSnowflakeAdbcURI(info, getProp)
 
 	case dbio.TypeDbSQLite:
 		connMap["driver_name"] = "sqlite"
@@ -1517,7 +1519,15 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 	}
 
 	if uri := parentConn.GetProp("adbc_uri"); uri != "" {
-		connMap["uri"] = uri
+		switch parentConn.GetType() {
+		case dbio.TypeDbDuckDb:
+			connMap["path"] = uri
+		case dbio.TypeDbBigQuery:
+			// no uri option exists, and unknown keys are rejected
+			g.Warn("adbc_uri is not supported for BigQuery, ignoring")
+		default:
+			connMap["uri"] = uri
+		}
 	}
 
 	props := g.MapToKVArr(connMap)
@@ -1603,12 +1613,21 @@ func buildPostgresAdbcURI(info ConnInfo, getProp func(string) string) string {
 func buildSnowflakeAdbcURI(info ConnInfo, getProp func(string) string) string {
 	var uri strings.Builder
 
-	// User and password
+	// User and secret. A programmatic access token is carried in the password
+	// position, which is where gosnowflake expects it.
+	authenticator := getProp("authenticator")
+	secret := info.Password
+	if strings.EqualFold(authenticator, "programmatic_access_token") {
+		if token := getProp("token"); token != "" {
+			secret = token
+		}
+	}
+
 	if info.User != "" {
 		uri.WriteString(url.QueryEscape(info.User))
-		if info.Password != "" {
+		if secret != "" {
 			uri.WriteString(":")
-			uri.WriteString(url.QueryEscape(info.Password))
+			uri.WriteString(url.QueryEscape(secret))
 		}
 		uri.WriteString("@")
 	}
@@ -1639,8 +1658,13 @@ func buildSnowflakeAdbcURI(info ConnInfo, getProp func(string) string) string {
 	if info.Role != "" {
 		params.Set("role", info.Role)
 	}
-	if val := getProp("authenticator"); val != "" {
-		params.Set("authenticator", val)
+	if authenticator != "" {
+		params.Set("authenticator", authenticator)
+	}
+	// key-pair auth: gosnowflake reads the DER key from the DSN
+	if epk := getProp("encoded_private_key"); epk != "" {
+		params.Set("authenticator", "SNOWFLAKE_JWT")
+		params.Set("privateKey", epk)
 	}
 
 	if len(params) > 0 {
@@ -1689,47 +1713,66 @@ func buildDuckDbAdbcPath(info ConnInfo, getProp func(string) string) string {
 	return dbPath
 }
 
+// BigQuery ADBC option keys and auth_type values. The driver rejects unknown
+// options outright, and auth_type values are fully qualified, not bare words.
+const (
+	bqOptProjectID       = "adbc.bigquery.sql.project_id"
+	bqOptDatasetID       = "adbc.bigquery.sql.dataset_id"
+	bqOptLocation        = "adbc.bigquery.sql.location"
+	bqOptAuthType        = "adbc.bigquery.sql.auth_type"
+	bqOptAuthCredentials = "adbc.bigquery.sql.auth_credentials"
+
+	bqAuthJSONFile   = "adbc.bigquery.sql.auth_type.json_credential_file"
+	bqAuthJSONString = "adbc.bigquery.sql.auth_type.json_credential_string"
+	bqAuthDefault    = "adbc.bigquery.sql.auth_type.app_default_credentials"
+)
+
 // buildBigQueryAdbcConfig populates ADBC BigQuery configuration parameters
 // BigQuery uses configuration parameters instead of URI format
 func buildBigQueryAdbcConfig(getProp func(string) string, connMap map[string]string) {
 	// Required: Project ID
 	if projectID := getProp("project"); projectID != "" {
-		connMap["adbc.bigquery.project_id"] = projectID
+		connMap[bqOptProjectID] = projectID
 	} else if projectID := getProp("project_id"); projectID != "" {
-		connMap["adbc.bigquery.project_id"] = projectID
+		connMap[bqOptProjectID] = projectID
 	}
 
-	// Auth type - determine from available credentials
+	// Auth type and credentials travel together: auth_type says how to read
+	// the single auth_credentials value.
+	keyBody, keyFile := getProp("GC_KEY_BODY"), getProp("GC_KEY_FILE")
 	authType := getProp("auth_type")
-	if authType == "" {
-		// Determine based on available credentials
-		if getProp("GC_KEY_BODY") != "" {
-			authType = "service"
-		} else if getProp("GC_KEY_FILE") != "" {
-			authType = "service"
-		} else {
-			authType = "user"
+	switch {
+	case authType != "":
+		// allow a bare value to be passed through in qualified form
+		if !strings.HasPrefix(authType, "adbc.bigquery.sql.auth_type.") {
+			authType = "adbc.bigquery.sql.auth_type." + authType
 		}
+		if keyBody != "" {
+			connMap[bqOptAuthCredentials] = keyBody
+		} else if keyFile != "" {
+			connMap[bqOptAuthCredentials] = keyFile
+		}
+	case keyBody != "":
+		authType = bqAuthJSONString
+		connMap[bqOptAuthCredentials] = keyBody
+	case keyFile != "":
+		authType = bqAuthJSONFile
+		connMap[bqOptAuthCredentials] = keyFile
+	default:
+		authType = bqAuthDefault
 	}
-	connMap["adbc.bigquery.auth_type"] = authType
-
-	// Credentials
-	if keyBody := getProp("GC_KEY_BODY"); keyBody != "" {
-		connMap["adbc.bigquery.auth_credentials"] = keyBody
-	} else if keyFile := getProp("GC_KEY_FILE"); keyFile != "" {
-		connMap["adbc.bigquery.auth_credentials_file"] = keyFile
-	}
+	connMap[bqOptAuthType] = authType
 
 	// Optional: Dataset/Schema
 	if dataset := getProp("dataset"); dataset != "" {
-		connMap["adbc.bigquery.dataset_id"] = dataset
+		connMap[bqOptDatasetID] = dataset
 	} else if schema := getProp("schema"); schema != "" {
-		connMap["adbc.bigquery.dataset_id"] = schema
+		connMap[bqOptDatasetID] = schema
 	}
 
 	// Optional: Location/Region
 	if location := getProp("location"); location != "" {
-		connMap["adbc.bigquery.location"] = location
+		connMap[bqOptLocation] = location
 	}
 
 	g.Debug("Built BigQuery ADBC configuration with auth_type=%s", authType)
