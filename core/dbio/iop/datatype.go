@@ -2206,7 +2206,7 @@ func ApplySelect(fields []string, selectExprs []string) (newFields []string, err
 			renames[strings.ToLower(field)] = newName
 			continue
 		}
-		if !strings.Contains(field, "*") && field != "" {
+		if !isSelectGlob(field, newName) && field != "" {
 			pinned[strings.ToLower(field)] = struct{}{}
 		}
 	}
@@ -2265,7 +2265,8 @@ func ApplySelect(fields []string, selectExprs []string) (newFields []string, err
 		}
 
 		fieldLower := strings.ToLower(field)
-		if strings.Contains(field, "*") {
+		matchedGlob := false
+		if isSelectGlob(field, newName) {
 			for _, f := range fields {
 				fl := strings.ToLower(f)
 				if _, done := emitted[fl]; done {
@@ -2278,9 +2279,13 @@ func ApplySelect(fields []string, selectExprs []string) (newFields []string, err
 					continue
 				}
 				if MatchesSelectGlob(fl, fieldLower) {
+					matchedGlob = true
 					emitted[fl] = struct{}{}
 					newFields = append(newFields, displayName(f, fl))
 				}
+			}
+			if !matchedGlob {
+				g.Warn("select pattern '%s' matched 0 columns", field)
 			}
 			continue
 		}
@@ -2297,7 +2302,17 @@ func ApplySelect(fields []string, selectExprs []string) (newFields []string, err
 		}
 		if matched == "" {
 			if newName != "" {
-				return nil, g.Error("field '%s' not found for rename", field)
+				// computed expression: contributes the alias as an output
+				// column name. A bare name is a typo, and still errors.
+				if !isSQLExpr(field) {
+					return nil, g.Error("field '%s' not found for rename", field)
+				}
+				if _, done := emitted[strings.ToLower(newName)]; done {
+					continue
+				}
+				emitted[strings.ToLower(newName)] = struct{}{}
+				newFields = append(newFields, newName)
+				continue
 			}
 			if !hasSelectAll {
 				return nil, g.Error("field '%s' not found", field)
@@ -2333,6 +2348,7 @@ func ApplySelectExprs(fields []string, selectExprs []string) (newFields []string
 	excludedExact := map[string]struct{}{}
 	excludeGlobs := []string{}
 	renames := map[string]string{}
+	exprAliases := map[string]struct{}{}
 	pinned := map[string]struct{}{}
 	for _, expr := range selectExprs {
 		field, newName, isExclude, perr := ParseSelectExpr(strings.TrimSpace(expr))
@@ -2348,16 +2364,25 @@ func ApplySelectExprs(fields []string, selectExprs []string) (newFields []string
 			continue
 		}
 		if newName != "" {
+			// a computed expression aliased over an existing column name
+			// replaces it; `*` must not also emit the raw column
+			if isSQLExpr(field) {
+				exprAliases[strings.ToLower(newName)] = struct{}{}
+				continue
+			}
 			renames[strings.ToLower(field)] = newName
 			continue
 		}
-		if !strings.Contains(field, "*") && field != "" {
+		if !isSelectGlob(field, newName) && field != "" {
 			pinned[strings.ToLower(field)] = struct{}{}
 		}
 	}
 
 	isExcluded := func(nameLower string) bool {
 		if _, ok := excludedExact[nameLower]; ok {
+			return true
+		}
+		if _, ok := exprAliases[nameLower]; ok {
 			return true
 		}
 		for _, pattern := range excludeGlobs {
@@ -2410,7 +2435,8 @@ func ApplySelectExprs(fields []string, selectExprs []string) (newFields []string
 		}
 
 		fieldLower := strings.ToLower(field)
-		if strings.Contains(field, "*") {
+		matchedGlob := false
+		if isSelectGlob(field, newName) {
 			for _, f := range fields {
 				fl := strings.ToLower(f)
 				if _, done := emitted[fl]; done {
@@ -2423,9 +2449,13 @@ func ApplySelectExprs(fields []string, selectExprs []string) (newFields []string
 					continue
 				}
 				if MatchesSelectGlob(fl, fieldLower) {
+					matchedGlob = true
 					emitted[fl] = struct{}{}
 					newFields = append(newFields, emitExpr(f, fl))
 				}
+			}
+			if !matchedGlob {
+				g.Warn("select pattern '%s' matched 0 columns", field)
 			}
 			continue
 		}
@@ -2483,6 +2513,23 @@ func ParseSelectExpr(expr string) (field string, newName string, exclude bool, e
 
 	field = strings.TrimSpace(expr)
 	return field, "", exclude, nil
+}
+
+// isSQLExpr reports whether field is a computed SQL expression rather than a
+// bare column reference. Parens or quotes mean the text can't be an identifier,
+// so a `*` inside it (`concat('a*', id)`, JSONPath `'$[*].amount'`) is data,
+// not a glob — and an unmatched name is intentional, not a typo.
+func isSQLExpr(field string) bool {
+	return strings.ContainsAny(field, "('\"`")
+}
+
+// isSelectGlob reports whether field should be treated as a column-name glob.
+// An aliased SQL expression is never a glob.
+func isSelectGlob(field, newName string) bool {
+	if newName != "" && isSQLExpr(field) {
+		return false
+	}
+	return strings.Contains(field, "*")
 }
 
 // MatchesSelectGlob matches name against a simple glob (prefix*, *suffix,

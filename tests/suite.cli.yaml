@@ -2615,3 +2615,9 @@
   run: 'sling run -d -p tests/pipelines/p.47.oracle_date_state_format.yaml'
   output_contains:
     - 'SUCCESS: Oracle DATE state value is RFC3339 and resumes correctly'
+
+- id: 315
+  name: 'select expressions containing a literal * are not dropped as globs'
+  run: 'sling run -d -r tests/replications/r.100.select_expr_literal_star.yaml'
+  output_contains:
+    - "SUCCESS: select expressions with literal '*' are preserved"
