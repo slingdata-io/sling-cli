@@ -136,7 +136,8 @@ func (conn *ArrowDBConn) Init() error {
 
 	db, err := drivermgr.Driver{}.NewDatabase(adbcProps)
 	if err != nil {
-		return g.Error(err, "could not init new ADBC database. See https://docs.slingdata.io/connections/database-connections/adbc")
+		return g.Error(err, "could not init new ADBC database.%s See https://docs.slingdata.io/connections/database-connections/adbc",
+			diagnoseADBCLoadError(err))
 	}
 
 	conn.db = db
@@ -154,6 +155,104 @@ func (conn *ArrowDBConn) Init() error {
 	// Reload templates with driver-specific overrides
 	// (BaseConn.Init() loaded the default ADBC template)
 	return conn.LoadTemplates()
+}
+
+// isCxxABIError reports whether a load failure is due to the system libstdc++
+// being older than the ADBC driver manager requires.
+func isCxxABIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "GLIBCXX_") || strings.Contains(msg, "CXXABI_")
+}
+
+// diagnoseADBCLoadError turns a cryptic dynamic-loader failure into actionable
+// advice. The prebuilt ADBC libraries are built against newer toolchains than
+// some supported distros ship, and the raw loader message ("version
+// `GLIBCXX_3.4.29' not found") doesn't say what to do about it.
+// Returns a leading-space message, or "" when nothing specific applies.
+func diagnoseADBCLoadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+
+	switch {
+	case isCxxABIError(err):
+		return g.F(" The ADBC driver manager needs a newer C++ runtime (libstdc++) than this system provides%s.%s",
+			neededVersion(msg, "GLIBCXX_", "CXXABI_"), libStdCxxRemedy())
+
+	case strings.Contains(msg, "GLIBC_"):
+		return g.F(" The ADBC driver manager needs a newer C runtime (glibc) than this system provides%s."+
+			" Upgrade the OS, or point ADBC_DRIVER_MANAGER_LIB at a build compatible with this system.",
+			neededVersion(msg, "GLIBC_"))
+
+	case strings.Contains(msg, "wrong ELF class"),
+		strings.Contains(msg, "incompatible architecture"),
+		strings.Contains(msg, "but wrong architecture"):
+		return g.F(" The ADBC driver manager was built for a different CPU architecture than this machine (%s/%s)."+
+			" Remove the cached copy under %s and retry, or set ADBC_DRIVER_MANAGER_LIB explicitly.",
+			runtime.GOOS, runtime.GOARCH, filepath.Join(env.HomeBinDir(), "adbc"))
+
+	case strings.Contains(msg, "ADBC_DRIVER_MANAGER_LIB"):
+		// the fork already suggests the env var; don't repeat it
+		return ""
+	}
+
+	return ""
+}
+
+// libStdCxxRemedy fetches a compatible libstdc++ and returns the exact command
+// to use it. LD_PRELOAD is the only reliable fix: the loader resolves the
+// manager's DT_NEEDED against whichever libstdc++.so.6 is already in the global
+// scope, and by the time sling can dlopen anything the system copy is loaded —
+// so the newer library must be in place before the process starts.
+func libStdCxxRemedy() string {
+	generic := " Install a newer libstdc++ (e.g. `apt install libstdc++6` on a current release," +
+		" or `conda install -c conda-forge libstdcxx`), or point ADBC_DRIVER_MANAGER_LIB" +
+		" at a build compatible with this system."
+
+	if runtime.GOOS != "linux" {
+		return generic
+	}
+
+	cacheDir := filepath.Join(env.HomeBinDir(), "adbc", AdbcDriverManagerVersion)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return generic
+	}
+	libPath, err := ensureCompatibleLibStdCxx(cacheDir)
+	if err != nil {
+		g.Debug("could not fetch a compatible libstdc++: %s", err.Error())
+		return generic
+	}
+
+	return g.F(" A compatible libstdc++ has been downloaded to %s —"+
+		" re-run with it preloaded:\n\n    LD_PRELOAD=%s %s\n\n"+
+		" To make this permanent, export LD_PRELOAD in your shell profile."+
+		" Alternatively install a newer system libstdc++, or point"+
+		" ADBC_DRIVER_MANAGER_LIB at a build compatible with this system.",
+		libPath, libPath, strings.Join(os.Args, " "))
+}
+
+// neededVersion extracts the first required symbol version (e.g. GLIBCXX_3.4.29)
+// mentioned in a loader error, formatted for inclusion in a sentence.
+func neededVersion(msg string, prefixes ...string) string {
+	for _, prefix := range prefixes {
+		idx := strings.Index(msg, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := msg[idx:]
+		end := strings.IndexFunc(rest, func(r rune) bool {
+			return !(r >= '0' && r <= '9') && r != '.' && r != '_' &&
+				!(r >= 'A' && r <= 'Z')
+		})
+		if end > 0 {
+			return " (requires " + strings.TrimRight(rest[:end], "._") + ")"
+		}
+	}
+	return ""
 }
 
 // getDefaultEntrypoint returns the ADBC driver init function name for known drivers.
@@ -560,12 +659,79 @@ func ensureDriverManagerLib() (libPath string, err error) {
 	return libPath, nil
 }
 
+// CondaLibStdCxxVersion is the conda-forge libstdcxx version providing a
+// libstdc++ new enough for the ADBC driver manager on distros with an older
+// system copy.
+const CondaLibStdCxxVersion = "16.1.0"
+
+// conda build hashes differ per architecture, so they must be listed
+// explicitly. Update alongside CondaLibStdCxxVersion.
+var condaLibStdCxxBuilds = map[string]struct{ subdir, build string }{
+	"amd64": {"linux-64", "h934c35e_1"},
+	"arm64": {"linux-aarch64", "hef695bb_1"},
+}
+
+// ensureCompatibleLibStdCxx downloads a libstdc++ new enough for the ADBC
+// driver manager (it needs GLIBCXX_3.4.29; Ubuntu 20.04 ships 3.4.28) and
+// returns its path, for the caller to suggest via LD_PRELOAD.
+//
+// It cannot be applied in-process: the loader resolves the manager's DT_NEEDED
+// against whatever libstdc++.so.6 is already in the global scope, and the
+// system copy is loaded before sling runs any code. Neither dlopen(RTLD_GLOBAL)
+// nor os.Setenv("LD_LIBRARY_PATH") overrides an already-loaded soname.
+//
+// Called only after a C++ ABI load failure, so a system with a new enough
+// libstdc++ never downloads anything.
+func ensureCompatibleLibStdCxx(folderPath string) (libStdCxx string, err error) {
+	libStdCxx = filepath.Join(folderPath, "libstdc++.so.6")
+
+	if !g.PathExists(libStdCxx) {
+		build, ok := condaLibStdCxxBuilds[runtime.GOARCH]
+		if !ok {
+			return "", g.Error("no libstdc++ build available for linux/%s", runtime.GOARCH)
+		}
+
+		pkgName := g.F("libstdcxx-%s-%s", CondaLibStdCxxVersion, build.build)
+		pkgURL := g.F("https://conda.anaconda.org/conda-forge/%s/%s.conda", build.subdir, pkgName)
+
+		pkgPath := filepath.Join(os.TempDir(), pkgName+".conda")
+		defer os.Remove(pkgPath)
+
+		g.Info("downloading a compatible libstdc++ for the ADBC driver manager")
+		if err = net.DownloadFile(pkgURL, pkgPath); err != nil {
+			return "", g.Error(err, "unable to download libstdc++")
+		}
+
+		if err = extractCondaLib(pkgPath, folderPath, "libstdc++.so.6"); err != nil {
+			return "", g.Error(err, "could not extract libstdc++")
+		}
+
+		if !g.PathExists(libStdCxx) {
+			return "", g.Error("libstdc++ not found after extraction")
+		}
+	}
+
+	return libStdCxx, nil
+}
+
 // isSharedLibName reports whether a file name is a shared library, including
 // versioned forms like libfoo.so.1.2.3 and libfoo.112.0.0.dylib.
 func isSharedLibName(name string) bool {
 	return strings.HasSuffix(name, ".dll") ||
 		strings.HasSuffix(name, ".dylib") ||
 		strings.Contains(name, ".so")
+}
+
+// libStem returns the part of a library file name before the extension, so
+// versioned siblings can be matched: libstdc++.so.6 -> libstdc++, and
+// libadbc_driver_manager.dylib -> libadbc_driver_manager.
+func libStem(libName string) string {
+	for _, ext := range []string{".so", ".dylib", ".dll"} {
+		if i := strings.Index(libName, ext); i > 0 {
+			return libName[:i]
+		}
+	}
+	return libName
 }
 
 // extractCondaLib pulls libName out of a .conda package into destDir.
@@ -614,9 +780,11 @@ func extractCondaLib(condaPath, destDir, libName string) (err error) {
 			return g.Error(err, "could not read conda tar entry")
 		}
 
-		// only the shared library itself (and its versioned siblings), not headers
+		// only the shared library itself (and its versioned siblings), not headers.
+		// libName is e.g. libadbc_driver_manager.so or libstdc++.so.6; matching on
+		// the stem catches libfoo.so.1.2.3 and libfoo.112.0.0.dylib alike.
 		base := filepath.Base(header.Name)
-		if !strings.Contains(base, "adbc_driver_manager") || !isSharedLibName(base) {
+		if !strings.HasPrefix(base, libStem(libName)) || !isSharedLibName(base) {
 			continue
 		}
 
