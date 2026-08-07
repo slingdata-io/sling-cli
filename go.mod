@@ -404,7 +404,7 @@ replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-2026
 
 replace github.com/databricks/databricks-sql-go => github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad
 
-replace github.com/apache/arrow-adbc/go/adbc => github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260225105818-efcf366e7dd4
+replace github.com/apache/arrow-adbc/go/adbc => github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260806214312-6da3e7189c98
 
 // replace github.com/apache/arrow-adbc/go/adbc => ../arrow-adbc/go/adbc
 

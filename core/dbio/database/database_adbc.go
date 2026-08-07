@@ -202,8 +202,75 @@ func resolveDriverManagerLib() {
 				searchPaths = append(searchPaths, matches...)
 			}
 		}
+	case "windows":
+		libName = "adbc_driver_manager.dll"
+		// Conda puts DLLs in <prefix>\Library\bin, not <prefix>\lib.
+		condaRoots := []string{}
+		if home != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(home, "mambaforge"),
+				filepath.Join(home, "miniforge3"),
+				filepath.Join(home, "miniconda3"),
+				filepath.Join(home, "anaconda3"),
+			)
+		}
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(localAppData, "mambaforge"),
+				filepath.Join(localAppData, "miniforge3"),
+				filepath.Join(localAppData, "miniconda3"),
+				filepath.Join(localAppData, "Continuum", "anaconda3"),
+			)
+		}
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(programData, "mambaforge"),
+				filepath.Join(programData, "miniforge3"),
+				filepath.Join(programData, "miniconda3"),
+				filepath.Join(programData, "anaconda3"),
+			)
+		}
+		for _, root := range condaRoots {
+			searchPaths = append(searchPaths,
+				filepath.Join(root, "Library", "bin"),
+				// Active conda env rather than the base install
+				filepath.Join(root, "envs", "*", "Library", "bin"),
+			)
+		}
+		// An activated conda env exports its own prefix
+		if prefix := os.Getenv("CONDA_PREFIX"); prefix != "" {
+			searchPaths = append([]string{filepath.Join(prefix, "Library", "bin")}, searchPaths...)
+		}
+		// pip puts the DLL in site-packages
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(localAppData, "Programs", "Python", "Python3*", "Lib", "site-packages", "adbc_driver_manager"),
+			)
+		}
+		if home != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(home, "AppData", "Roaming", "Python", "Python3*", "site-packages", "adbc_driver_manager"),
+			)
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			searchPaths = append(searchPaths, filepath.Join(programFiles, "ADBC", "bin"))
+		}
 	default:
 		return
+	}
+
+	// Windows paths may contain globs (conda envs, versioned Python dirs)
+	if runtime.GOOS == "windows" {
+		expanded := make([]string, 0, len(searchPaths))
+		for _, dir := range searchPaths {
+			if strings.ContainsAny(dir, "*?") {
+				matches, _ := filepath.Glob(dir)
+				expanded = append(expanded, matches...)
+				continue
+			}
+			expanded = append(expanded, dir)
+		}
+		searchPaths = expanded
 	}
 
 	for _, dir := range searchPaths {
