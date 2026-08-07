@@ -2,7 +2,7 @@ package database
 
 import (
 	"archive/tar"
-	"compress/gzip"
+	"archive/zip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -21,6 +21,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/klauspost/compress/zstd"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -121,6 +122,17 @@ func (conn *ArrowDBConn) Init() error {
 
 	// Resolve the ADBC driver manager library path if not already set
 	resolveDriverManagerLib()
+
+	// not found on the system, so download it (conda-forge is the only channel
+	// shipping prebuilt driver-manager binaries; dbc only provides drivers)
+	if os.Getenv("ADBC_DRIVER_MANAGER_LIB") == "" && !cast.ToBool(os.Getenv("SLING_DISABLE_DBC_AUTO_INSTALL")) {
+		if libPath, err := ensureDriverManagerLib(); err != nil {
+			g.Debug("could not auto-download ADBC driver manager: %s", err.Error())
+		} else {
+			os.Setenv("ADBC_DRIVER_MANAGER_LIB", libPath)
+			g.Trace("using downloaded ADBC driver manager: %s", libPath)
+		}
+	}
 
 	db, err := drivermgr.Driver{}.NewDatabase(adbcProps)
 	if err != nil {
@@ -476,6 +488,172 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 // DbcVersion is the version of the dbc CLI to download when it's not installed
 const DbcVersion = "0.3.0"
 
+// AdbcDriverManagerVersion is the version of the ADBC driver manager to download.
+// conda-forge is the only channel publishing prebuilt driver-manager shared
+// libraries for every platform we support; dbc distributes drivers, not the manager.
+const AdbcDriverManagerVersion = "1.12.0"
+
+// condaDriverManagerBuilds maps GOOS/GOARCH to the conda-forge subdir and build
+// string for libadbc-driver-manager. Build strings are version-specific, so these
+// must be updated alongside AdbcDriverManagerVersion.
+var condaDriverManagerBuilds = map[string]struct{ subdir, build string }{
+	"linux/amd64":   {"linux-64", "hb700be7_0"},
+	"linux/arm64":   {"linux-aarch64", "hfefdfc9_0"},
+	"darwin/amd64":  {"osx-64", "h9536453_0"},
+	"darwin/arm64":  {"osx-arm64", "hdf8b884_0"},
+	"windows/amd64": {"win-64", "h49e36cd_0"},
+}
+
+// ensureDriverManagerLib downloads the ADBC driver manager shared library if it
+// isn't already present, and returns its path. The manager is the library that
+// sling's bindings dlopen; it then loads the individual database drivers.
+func ensureDriverManagerLib() (libPath string, err error) {
+	version := AdbcDriverManagerVersion
+	if val := os.Getenv("ADBC_DRIVER_MANAGER_VERSION"); val != "" {
+		version = val
+	}
+
+	var libName string
+	switch runtime.GOOS {
+	case "windows":
+		libName = "adbc_driver_manager.dll"
+	case "darwin":
+		libName = "libadbc_driver_manager.dylib"
+	default:
+		libName = "libadbc_driver_manager.so"
+	}
+
+	folderPath := filepath.Join(env.HomeBinDir(), "adbc", version)
+	libPath = filepath.Join(folderPath, libName)
+	if g.PathExists(libPath) {
+		return libPath, nil
+	}
+
+	build, ok := condaDriverManagerBuilds[runtime.GOOS+"/"+runtime.GOARCH]
+	if !ok {
+		return "", g.Error("no ADBC driver manager build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	pkgURL := g.F("https://conda.anaconda.org/conda-forge/%s/libadbc-driver-manager-%s-%s.conda",
+		build.subdir, version, build.build)
+
+	pkgPath := filepath.Join(os.TempDir(), g.F("libadbc-driver-manager-%s.conda", version))
+	defer os.Remove(pkgPath)
+
+	g.Info("downloading ADBC driver manager %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
+	if err = net.DownloadFile(pkgURL, pkgPath); err != nil {
+		return "", g.Error(err, "unable to download ADBC driver manager")
+	}
+
+	if err = os.MkdirAll(folderPath, 0755); err != nil {
+		return "", g.Error(err, "could not create adbc folder")
+	}
+
+	if err = extractCondaLib(pkgPath, folderPath, libName); err != nil {
+		return "", g.Error(err, "could not extract ADBC driver manager")
+	}
+
+	if !g.PathExists(libPath) {
+		return "", g.Error("cannot find %s after extracting driver manager", libPath)
+	}
+
+	return libPath, nil
+}
+
+// isSharedLibName reports whether a file name is a shared library, including
+// versioned forms like libfoo.so.1.2.3 and libfoo.112.0.0.dylib.
+func isSharedLibName(name string) bool {
+	return strings.HasSuffix(name, ".dll") ||
+		strings.HasSuffix(name, ".dylib") ||
+		strings.Contains(name, ".so")
+}
+
+// extractCondaLib pulls libName out of a .conda package into destDir.
+// A .conda file is a zip containing zstd-compressed tarballs; the payload we want
+// is the "pkg-" entry. Libraries live under Library/bin on Windows and lib elsewhere.
+func extractCondaLib(condaPath, destDir, libName string) (err error) {
+	zr, err := zip.OpenReader(condaPath)
+	if err != nil {
+		return g.Error(err, "could not open conda package")
+	}
+	defer zr.Close()
+
+	var pkgEntry *zip.File
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "pkg-") && strings.HasSuffix(f.Name, ".tar.zst") {
+			pkgEntry = f
+			break
+		}
+	}
+	if pkgEntry == nil {
+		return g.Error("no pkg payload found in conda package")
+	}
+
+	rc, err := pkgEntry.Open()
+	if err != nil {
+		return g.Error(err, "could not open conda payload")
+	}
+	defer rc.Close()
+
+	zstdReader, err := zstd.NewReader(rc)
+	if err != nil {
+		return g.Error(err, "could not create zstd reader")
+	}
+	defer zstdReader.Close()
+
+	// resolved lazily: the versioned file is the real library, the plain name a symlink to it
+	symlinks := map[string]string{}
+	extracted := map[string]bool{}
+
+	tr := tar.NewReader(zstdReader)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return g.Error(err, "could not read conda tar entry")
+		}
+
+		// only the shared library itself (and its versioned siblings), not headers
+		base := filepath.Base(header.Name)
+		if !strings.Contains(base, "adbc_driver_manager") || !isSharedLibName(base) {
+			continue
+		}
+
+		switch header.Typeflag {
+		case tar.TypeSymlink:
+			symlinks[base] = filepath.Base(header.Linkname)
+		case tar.TypeReg:
+			target := filepath.Join(destDir, base)
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+			if err != nil {
+				return g.Error(err, "could not create %s", target)
+			}
+			if _, err = io.Copy(out, tr); err != nil {
+				out.Close()
+				return g.Error(err, "could not write %s", target)
+			}
+			out.Close()
+			extracted[base] = true
+		}
+	}
+
+	// the plain library name is a symlink in the package; copy the real file into place
+	if !extracted[libName] {
+		if link, ok := symlinks[libName]; ok && extracted[link] {
+			data, err := os.ReadFile(filepath.Join(destDir, link))
+			if err != nil {
+				return g.Error(err, "could not read %s", link)
+			}
+			if err = os.WriteFile(filepath.Join(destDir, libName), data, 0755); err != nil {
+				return g.Error(err, "could not write %s", libName)
+			}
+		}
+	}
+
+	return nil
+}
+
 // EnsureBinDbc returns the path to the dbc CLI, downloading it if missing.
 // dbc (https://columnar.tech/dbc) installs and manages ADBC drivers.
 func EnsureBinDbc() (binPath string, err error) {
@@ -553,7 +731,7 @@ func EnsureBinDbc() (binPath string, err error) {
 		if _, err = iop.Unzip(archivePath, folderPath); err != nil {
 			return "", g.Error(err, "error unzipping dbc archive")
 		}
-	} else if err = extractTarGz(archivePath, folderPath); err != nil {
+	} else if err = g.ExtractTarGz(archivePath, folderPath); err != nil {
 		return "", g.Error(err, "error extracting dbc archive")
 	}
 
@@ -566,57 +744,6 @@ func EnsureBinDbc() (binPath string, err error) {
 	}
 
 	return binPath, nil
-}
-
-// extractTarGz extracts a .tar.gz archive into destDir.
-func extractTarGz(src, destDir string) (err error) {
-	f, err := os.Open(src)
-	if err != nil {
-		return g.Error(err, "could not open archive")
-	}
-	defer f.Close()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return g.Error(err, "could not read gzip archive")
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			return nil
-		} else if err != nil {
-			return g.Error(err, "could not read tar entry")
-		}
-
-		// guard against path traversal (zip-slip)
-		target := filepath.Join(destDir, filepath.Clean(header.Name))
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return g.Error("illegal path in archive: %s", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err = os.MkdirAll(target, 0755); err != nil {
-				return g.Error(err, "could not create dir %s", target)
-			}
-		case tar.TypeReg:
-			if err = os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return g.Error(err, "could not create parent dir for %s", target)
-			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode))
-			if err != nil {
-				return g.Error(err, "could not create %s", target)
-			}
-			if _, err = io.Copy(out, tr); err != nil {
-				out.Close()
-				return g.Error(err, "could not write %s", target)
-			}
-			out.Close()
-		}
-	}
 }
 
 // installDriverWithDbc installs an ADBC driver via the dbc CLI, downloading dbc if needed.
