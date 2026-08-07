@@ -1,11 +1,15 @@
 package database
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,8 +20,11 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -85,7 +92,20 @@ func (conn *ArrowDBConn) Init() error {
 
 	// Resolve driver path if not explicitly provided
 	if adbcProps["driver"] == "" {
-		if driverPath := conn.resolveDriverPath(); driverPath != "" {
+		driverPath := conn.resolveDriverPath()
+
+		// not found locally, so install it with dbc (which is downloaded if missing)
+		if driverPath == "" {
+			if driverName := conn.GetProp("driver_name"); driverName != "" && !cast.ToBool(os.Getenv("SLING_DISABLE_DBC_AUTO_INSTALL")) {
+				if err := installDriverWithDbc(driverName); err != nil {
+					g.Debug("could not auto-install ADBC driver %s: %s", driverName, err.Error())
+				} else {
+					driverPath = conn.resolveDriverPath()
+				}
+			}
+		}
+
+		if driverPath != "" {
 			adbcProps["driver"] = driverPath
 			g.Trace("auto-detected ADBC driver: %s", driverPath)
 		}
@@ -451,6 +471,169 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 	}
 
 	return ""
+}
+
+// DbcVersion is the version of the dbc CLI to download when it's not installed
+const DbcVersion = "0.3.0"
+
+// EnsureBinDbc returns the path to the dbc CLI, downloading it if missing.
+// dbc (https://columnar.tech/dbc) installs and manages ADBC drivers.
+func EnsureBinDbc() (binPath string, err error) {
+	version := DbcVersion
+	if val := os.Getenv("DBC_VERSION"); val != "" {
+		version = val
+	}
+
+	// use specified path to dbc binary
+	if envPath := os.Getenv("DBC_PATH"); envPath != "" {
+		if !g.PathExists(envPath) {
+			return "", g.Error("dbc binary not found: %s", envPath)
+		}
+		if stat, _ := os.Stat(envPath); stat.IsDir() {
+			return "", g.Error("DBC_PATH provided is a directory, should be a file: %s", envPath)
+		}
+		return envPath, nil
+	}
+
+	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
+
+	// an existing dbc on PATH is preferred over downloading our own
+	if p, err := exec.LookPath("dbc" + extension); err == nil {
+		return p, nil
+	}
+
+	folderPath := filepath.Join(env.HomeBinDir(), "dbc", version)
+	binPath = filepath.Join(folderPath, "dbc"+extension)
+	if g.PathExists(binPath) {
+		return binPath, nil
+	}
+
+	// archives are flat, with the binary at the root
+	const baseURL = "https://github.com/columnar-tech/dbc/releases/download/v{version}/dbc-{os}-{arch}-{version}.{ext}"
+
+	var arch, archiveExt string
+	switch runtime.GOARCH {
+	case "amd64":
+		arch = "amd64"
+	case "arm64":
+		arch = "arm64"
+	default:
+		return "", g.Error("dbc is not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		archiveExt = "zip"
+		if arch != "amd64" {
+			// no windows/arm64 build; the amd64 binary runs under emulation
+			arch = "amd64"
+		}
+	case "darwin", "linux":
+		archiveExt = "tar.gz"
+	default:
+		return "", g.Error("dbc is not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	downloadURL := g.R(baseURL,
+		"version", version, "os", runtime.GOOS, "arch", arch, "ext", archiveExt)
+
+	archivePath := filepath.Join(os.TempDir(), g.F("dbc-%s.%s", version, archiveExt))
+	defer os.Remove(archivePath)
+
+	g.Info("downloading dbc %s for %s/%s", version, runtime.GOOS, arch)
+	if err = net.DownloadFile(downloadURL, archivePath); err != nil {
+		return "", g.Error(err, "unable to download dbc binary")
+	}
+
+	if err = os.MkdirAll(folderPath, 0755); err != nil {
+		return "", g.Error(err, "could not create dbc folder")
+	}
+
+	if archiveExt == "zip" {
+		if _, err = iop.Unzip(archivePath, folderPath); err != nil {
+			return "", g.Error(err, "error unzipping dbc archive")
+		}
+	} else if err = extractTarGz(archivePath, folderPath); err != nil {
+		return "", g.Error(err, "error extracting dbc archive")
+	}
+
+	if !g.PathExists(binPath) {
+		return "", g.Error("cannot find dbc binary at %s after extraction", binPath)
+	}
+
+	if err = os.Chmod(binPath, 0755); err != nil {
+		return "", g.Error(err, "could not make dbc executable")
+	}
+
+	return binPath, nil
+}
+
+// extractTarGz extracts a .tar.gz archive into destDir.
+func extractTarGz(src, destDir string) (err error) {
+	f, err := os.Open(src)
+	if err != nil {
+		return g.Error(err, "could not open archive")
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return g.Error(err, "could not read gzip archive")
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			return g.Error(err, "could not read tar entry")
+		}
+
+		// guard against path traversal (zip-slip)
+		target := filepath.Join(destDir, filepath.Clean(header.Name))
+		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return g.Error("illegal path in archive: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err = os.MkdirAll(target, 0755); err != nil {
+				return g.Error(err, "could not create dir %s", target)
+			}
+		case tar.TypeReg:
+			if err = os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return g.Error(err, "could not create parent dir for %s", target)
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				return g.Error(err, "could not create %s", target)
+			}
+			if _, err = io.Copy(out, tr); err != nil {
+				out.Close()
+				return g.Error(err, "could not write %s", target)
+			}
+			out.Close()
+		}
+	}
+}
+
+// installDriverWithDbc installs an ADBC driver via the dbc CLI, downloading dbc if needed.
+func installDriverWithDbc(driverName string) (err error) {
+	dbcPath, err := EnsureBinDbc()
+	if err != nil {
+		return g.Error(err, "could not obtain dbc CLI")
+	}
+
+	g.Info("installing ADBC driver %s via dbc", driverName)
+	out, err := exec.Command(dbcPath, "install", "--level", "user", driverName).CombinedOutput()
+	if err != nil {
+		return g.Error(err, "could not install ADBC driver %s: %s", driverName, string(out))
+	}
+
+	g.Debug("dbc install %s: %s", driverName, strings.TrimSpace(string(out)))
+	return nil
 }
 
 // Connect opens the ADBC connection
