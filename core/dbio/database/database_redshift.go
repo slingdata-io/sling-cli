@@ -1,12 +1,14 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
@@ -39,6 +41,48 @@ func (conn *RedshiftConn) Init() error {
 func (conn *RedshiftConn) ConnString() string {
 	return strings.ReplaceAll(conn.URL, "redshift://", "postgres://")
 }
+
+// loadAWSCredentialsFromChain loads AWS credentials from the default credential chain
+// (environment variables, shared config profiles, IAM roles, etc.) and populates the
+// connection properties so they can be used by the database or filesystem clients.
+func loadAWSCredentialsFromChain(conn Connection) error {
+	g.Debug("Loading AWS credentials from default credential chain")
+
+	ctx := context.Background()
+	if conn.Context() != nil && conn.Context().Ctx != nil {
+		ctx = conn.Context().Ctx
+	}
+
+	configOptions := []func(*config.LoadOptions) error{}
+	if profile := conn.GetProp("AWS_PROFILE", "PROFILE"); profile != "" {
+		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, configOptions...)
+	if err != nil {
+		return g.Error(err, "Failed to load AWS configuration from credential chain")
+	}
+
+	creds, err := cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		return g.Error(err, "Failed to retrieve AWS credentials from credential chain")
+	}
+
+	conn.SetProp("AWS_ACCESS_KEY_ID", creds.AccessKeyID)
+	conn.SetProp("AWS_SECRET_ACCESS_KEY", creds.SecretAccessKey)
+	if creds.SessionToken != "" {
+		conn.SetProp("AWS_SESSION_TOKEN", creds.SessionToken)
+	}
+
+	// Set region if not already set
+	if conn.GetProp("AWS_REGION", "AWS_DEFAULT_REGION", "REGION", "DEFAULT_REGION") == "" && cfg.Region != "" {
+		conn.SetProp("AWS_REGION", cfg.Region)
+	}
+
+	g.Debug("Successfully loaded AWS credentials from credential chain")
+	return nil
+}
+
 
 func isRedshift(URL string) (isRs bool) {
 	db, err := sqlx.Open("postgres", URL)
@@ -92,7 +136,9 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 // adding fallbacks for credentials for wider compatibility.
 // See: https://github.com/slingdata-io/sling-cli/issues/571
 func (conn *RedshiftConn) getS3Props() []string {
-	conn.ensureAWSCredentials()
+	if _, err := conn.ensureAWSCredentials(); err != nil {
+		g.Warn("could not resolve AWS credentials for S3: %s", err.Error())
+	}
 
 	s3Props := conn.PropArr()
 
@@ -127,12 +173,22 @@ func (conn *RedshiftConn) getS3Props() []string {
 	return s3Props
 }
 
+// redactCredentials masks AWS secrets in a SQL string, for safe logging.
+func (conn *RedshiftConn) redactCredentials(sql string) string {
+	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN"} {
+		if val := conn.GetProp(key); val != "" {
+			sql = strings.ReplaceAll(sql, val, "*****")
+		}
+	}
+	return sql
+}
+
 // ensureAWSCredentials ensures AWS credentials are available for Redshift's COPY/UNLOAD
 // commands and the S3 filesystem. When no explicit credentials or role are provided, it
 // falls back to the default AWS credential chain (environment variables, shared config
-// profiles, IAM roles), similar to the USE_ENVIRONMENT option for S3. This allows
-// Redshift clusters in private subnets to avoid STS-based role assumption and instead use
-// static credentials resolved from the environment.
+// profiles, IAM roles). This lets Redshift clusters in private subnets use static
+// credentials from the environment, instead of STS-based role assumption.
+// Set USE_ENVIRONMENT=false to disable the fallback.
 func (conn *RedshiftConn) ensureAWSCredentials() (ok bool, err error) {
 	awsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	awsKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
@@ -145,14 +201,14 @@ func (conn *RedshiftConn) ensureAWSCredentials() (ok bool, err error) {
 	}
 
 	// explicitly opted out of using the environment credential chain
-	if strings.EqualFold(conn.GetProp("USE_ENVIRONMENT"), "false") {
+	if val := conn.GetProp("USE_ENVIRONMENT"); val != "" && !cast.ToBool(val) {
 		return false, nil
 	}
 
 	// fall back to the default AWS credential chain
 	err = loadAWSCredentialsFromChain(conn)
 	if err != nil {
-		return false, g.Error(err, "Could not load AWS credentials. Set 'AWS_ACCESS_KEY_ID'/'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN', or set 'USE_ENVIRONMENT=true' to use the AWS credential chain")
+		return false, g.Error(err, "Could not load AWS credentials. Set 'AWS_ACCESS_KEY_ID'/'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN' or 'AWS_ROLE_ARN', or set 'USE_ENVIRONMENT=false' to disable the AWS credential chain")
 	}
 
 	return true, nil
@@ -160,7 +216,9 @@ func (conn *RedshiftConn) ensureAWSCredentials() (ok bool, err error) {
 
 func (conn *RedshiftConn) makeCopyCredentialString() (cred string) {
 
-	conn.ensureAWSCredentials()
+	if _, err := conn.ensureAWSCredentials(); err != nil {
+		g.Warn("could not resolve AWS credentials: %s", err.Error())
+	}
 
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
@@ -207,12 +265,9 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 	if err != nil {
 		return "", g.Error(err, "Could not load AWS credentials for Redshift")
 	} else if !ok {
-		return "", g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or set 'USE_ENVIRONMENT=true' to use the AWS credential chain to unload from redshift to S3")
+		return "", g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN' or 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or remove 'USE_ENVIRONMENT=false' to use the AWS credential chain, to unload from redshift to S3")
 	}
 
-	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
-	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
-	AwsRole := conn.GetProp("AWS_ROLE_ARN")
 	credentialExpr := conn.makeCopyCredentialString()
 
 	// set format options based on fileformat
@@ -272,9 +327,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 			_, err = conn.Exec(unloadSQL)
 			if err != nil {
-				cleanSQL := strings.ReplaceAll(unloadSQL, AwsID, "*****")
-				cleanSQL = strings.ReplaceAll(cleanSQL, AwsAccessKey, "*****")
-				cleanSQL = strings.ReplaceAll(cleanSQL, AwsRole, "*****")
+				cleanSQL := conn.redactCredentials(unloadSQL)
 				err = g.Error(err, fmt.Sprintf("SQL Error for %s:\n%s", s3PathPart, cleanSQL))
 				queryContext.CaptureErr(err)
 			}
@@ -498,7 +551,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	if err != nil {
 		return 0, g.Error(err, "Could not load AWS credentials for Redshift")
 	} else if !ok {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or set 'USE_ENVIRONMENT=true' to use the AWS credential chain to copy to redshift from S3")
+		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN' or 'AWS_ROLE_ARN' (use 'default' for the cluster's default IAM role), or remove 'USE_ENVIRONMENT=false' to use the AWS credential chain, to copy to redshift from S3")
 		return
 	}
 

@@ -1448,3 +1448,127 @@ func TestInteractiveMotherDuck(t *testing.T) {
 		log.Fatalln("Error while running :", err)
 	}
 }
+
+func newTestRedshiftConn(t *testing.T) *RedshiftConn {
+	t.Helper()
+	conn, err := NewConnContext(
+		context.Background(),
+		"redshift://testuser:testpass@testhost.example.com:5439/testdb",
+	)
+	if err != nil {
+		t.Fatalf("could not create redshift conn: %s", err)
+	}
+	rs, ok := conn.(*RedshiftConn)
+	if !ok {
+		t.Fatalf("expected *RedshiftConn, got %T", conn)
+	}
+	return rs
+}
+
+// ensureAWSCredentials should short-circuit when explicit credentials are provided,
+// without attempting to load from the AWS credential chain.
+func TestRedshiftEnsureAWSCredentialsExplicit(t *testing.T) {
+	conn := newTestRedshiftConn(t)
+	conn.SetProp("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+	conn.SetProp("AWS_SECRET_ACCESS_KEY", "secretkey")
+
+	ok, err := conn.ensureAWSCredentials()
+	assert.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// ensureAWSCredentials should honor USE_ENVIRONMENT=false and not attempt the chain.
+func TestRedshiftEnsureAWSCredentialsOptedOut(t *testing.T) {
+	for _, val := range []string{"false", "FALSE", "0", "no"} {
+		conn := newTestRedshiftConn(t)
+		conn.SetProp("USE_ENVIRONMENT", val)
+
+		ok, err := conn.ensureAWSCredentials()
+		assert.NoError(t, err, val)
+		assert.False(t, ok, val)
+	}
+}
+
+func TestRedshiftMakeCopyCredentialString(t *testing.T) {
+	t.Run("static credentials with session token", func(t *testing.T) {
+		conn := newTestRedshiftConn(t)
+		conn.SetProp("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+		conn.SetProp("AWS_SECRET_ACCESS_KEY", "secretkey")
+		conn.SetProp("AWS_SESSION_TOKEN", "sessiontoken")
+
+		cred := conn.makeCopyCredentialString()
+		assert.Equal(t,
+			"credentials 'aws_access_key_id=AKIAEXAMPLE;aws_secret_access_key=secretkey;token=sessiontoken'",
+			cred,
+		)
+	})
+
+	t.Run("iam role arn", func(t *testing.T) {
+		conn := newTestRedshiftConn(t)
+		conn.SetProp("AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/MyRole")
+
+		cred := conn.makeCopyCredentialString()
+		assert.Equal(t,
+			"iam_role 'arn:aws:iam::123456789012:role/MyRole'",
+			cred,
+		)
+	})
+
+	t.Run("iam role default", func(t *testing.T) {
+		conn := newTestRedshiftConn(t)
+		conn.SetProp("AWS_ROLE_ARN", "default")
+
+		cred := conn.makeCopyCredentialString()
+		assert.Equal(t, "iam_role default", cred)
+	})
+}
+
+// getS3Props should include the region and propagate explicit credentials.
+func TestRedshiftGetS3Props(t *testing.T) {
+	conn := newTestRedshiftConn(t)
+	conn.SetProp("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+	conn.SetProp("AWS_SECRET_ACCESS_KEY", "secretkey")
+	conn.SetProp("AWS_REGION", "eu-west-1")
+
+	props := conn.getS3Props()
+	joined := strings.Join(props, " ")
+
+	assert.Contains(t, joined, "ACCESS_KEY_ID=AKIAEXAMPLE")
+	assert.Contains(t, joined, "SECRET_ACCESS_KEY=secretkey")
+	assert.Contains(t, joined, "REGION=eu-west-1")
+}
+
+// redactCredentials should mask all AWS secrets, and leave the SQL intact
+// when a credential prop is unset (an empty value must not match everywhere).
+func TestRedshiftRedactCredentials(t *testing.T) {
+	conn := newTestRedshiftConn(t)
+	conn.SetProp("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+	conn.SetProp("AWS_SECRET_ACCESS_KEY", "secretkey")
+	conn.SetProp("AWS_SESSION_TOKEN", "sessiontoken")
+
+	sql := "unload ('select 1') to 's3://b/p' credentials 'aws_access_key_id=AKIAEXAMPLE;aws_secret_access_key=secretkey;token=sessiontoken'"
+	clean := conn.redactCredentials(sql)
+
+	assert.NotContains(t, clean, "AKIAEXAMPLE")
+	assert.NotContains(t, clean, "secretkey")
+	assert.NotContains(t, clean, "sessiontoken")
+	assert.Contains(t, clean, "s3://b/p")
+
+	// AWS_ROLE_ARN is unset here, so the SQL must not be mangled
+	conn2 := newTestRedshiftConn(t)
+	conn2.SetProp("USE_ENVIRONMENT", "false")
+	assert.Equal(t, sql, conn2.redactCredentials(sql))
+}
+
+// env.Clean should mask the session token under either property name.
+func TestCleanRedactsSessionToken(t *testing.T) {
+	props := map[string]string{
+		"aws_session_token":     "tokenABC",
+		"aws_secret_access_key": "secretXYZ",
+	}
+	line := "copy tbl from 's3://b/p' credentials 'aws_secret_access_key=secretXYZ;token=tokenABC'"
+	clean := env.Clean(props, line)
+
+	assert.NotContains(t, clean, "tokenABC")
+	assert.NotContains(t, clean, "secretXYZ")
+}
