@@ -1994,6 +1994,7 @@
   run: 'sling run -d -p tests/pipelines/cdc/p.30.cdc_merge_postgres.yaml'
   output_contains:
     - 'CDC merge_cdc PostgreSQL test PASSED'
+    - 'CDC change_capture_soft PostgreSQL test PASSED'
 
 - id: 207
   name: CDC merge_cdc strategy - MySQL target

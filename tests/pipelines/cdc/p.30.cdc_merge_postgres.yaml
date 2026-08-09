@@ -111,3 +111,67 @@ steps:
   # Clean up
   - connection: '{env.TARGET}'
     query: DROP TABLE IF EXISTS public.cdc_merge_test;
+
+  # ---------------------------------------------------------------------------
+  # change_capture_soft: rows that pre-date CDC have a NULL _sling_synced_op.
+  # The soft-mark guard must be NULL-safe, otherwise `_sling_synced_op != 'D'`
+  # evaluates to NULL for those rows and the delete is silently never recorded.
+  # ---------------------------------------------------------------------------
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.cdc_soft_test;
+
+  - connection: '{env.TARGET}'
+    query: |
+      CREATE TABLE public.cdc_soft_test (
+        id INT PRIMARY KEY,
+        name VARCHAR(100),
+        amount INT,
+        _sling_synced_op VARCHAR(1),
+        _sling_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO public.cdc_soft_test (id, name, amount) VALUES
+        (1, 'Alice', 100),
+        (2, 'Bob', 200);
+
+  - replication:
+      source: postgres
+      target: '{env.TARGET}'
+
+      defaults:
+        mode: incremental
+        primary_key: id
+
+      streams:
+        cdc_soft_staging:
+          sql: |
+            SELECT 1 as id, 'Alice Updated' as name, 150 as amount, 'U' as _sling_synced_op, 1::bigint as _sling_cdc_seq, CURRENT_TIMESTAMP as _sling_synced_at
+            UNION ALL SELECT 2, 'Bob', 200, 'D', 2, CURRENT_TIMESTAMP
+          object: public.cdc_soft_test
+          target_options:
+            merge_strategy: change_capture_soft
+
+  # id=2 was a delete op: the row must remain, marked 'D'
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT _sling_synced_op as op FROM public.cdc_soft_test WHERE id = 2
+    into: soft_2
+
+  - type: check
+    check: length(store.soft_2) == 1 && store.soft_2[0].op == "D"
+    message: "id=2 should be soft-deleted (row kept, _sling_synced_op='D'), got {store.soft_2}"
+
+  # id=1 was an update op
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT name FROM public.cdc_soft_test WHERE id = 1
+    into: soft_1
+
+  - type: check
+    check: store.soft_1[0].name == "Alice Updated"
+    message: "id=1 should be updated to 'Alice Updated', got '{store.soft_1[0].name}'"
+
+  - type: log
+    message: "CDC change_capture_soft PostgreSQL test PASSED"
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS public.cdc_soft_test;

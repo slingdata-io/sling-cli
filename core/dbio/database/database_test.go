@@ -16,6 +16,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -1571,4 +1572,45 @@ func TestCleanRedactsSessionToken(t *testing.T) {
 
 	assert.NotContains(t, clean, "tokenABC")
 	assert.NotContains(t, clean, "secretXYZ")
+}
+
+// The change_capture_soft soft-mark guard must be NULL-safe on every dialect.
+// Target rows loaded before CDC started have a NULL _sling_synced_op, and
+// `_sling_synced_op != 'D'` evaluates to NULL (not TRUE) for those rows, so a
+// bare comparison silently skips them and deletes are never recorded.
+func TestSoftMergeGuardIsNullSafe(t *testing.T) {
+	types := []dbio.Type{
+		dbio.TypeDbPostgres, dbio.TypeDbRedshift, dbio.TypeDbSnowflake,
+		dbio.TypeDbBigQuery, dbio.TypeDbSQLServer, dbio.TypeDbDuckDb,
+		dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbClickhouse,
+		dbio.TypeDbSQLite, dbio.TypeDbOracle, dbio.TypeDbDatabricks,
+		dbio.TypeDbStarRocks, dbio.TypeDbD1, dbio.TypeDbExasol,
+	}
+
+	for _, ty := range types {
+		tmpl, err := ty.Template()
+		if !assert.NoError(t, err, ty) {
+			continue
+		}
+
+		sql := tmpl.Core["merge_change_capture_soft"]
+		if strings.TrimSpace(sql) == "" || sql == "null" {
+			continue // dialect does not support the strategy
+		}
+
+		// locate the soft-mark statement (the one setting _sling_synced_op = 'D')
+		var mark string
+		for _, stmt := range strings.Split(sql, ";") {
+			up := strings.ReplaceAll(strings.ToUpper(stmt), `"`, "")
+			if strings.Contains(up, "UPDATE") && strings.Contains(up, "_SLING_SYNCED_OP = 'D'") {
+				mark = stmt
+				break
+			}
+		}
+
+		if assert.NotEmpty(t, mark, "%s: no soft-mark statement found", ty) {
+			assert.Contains(t, strings.ToUpper(mark), "COALESCE",
+				"%s: soft-mark guard is not NULL-safe:\n%s", ty, mark)
+		}
+	}
 }

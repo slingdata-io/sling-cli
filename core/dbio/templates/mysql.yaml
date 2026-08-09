@@ -60,7 +60,7 @@ core:
       WHERE _rn = 1 AND _sling_synced_op = 'D'
     ) src ON {src_tgt_pk_equal}
     SET tgt._sling_synced_at = CURRENT_TIMESTAMP, tgt._sling_synced_op = 'D'
-    WHERE tgt._sling_synced_op != 'D';
+    WHERE COALESCE(tgt._sling_synced_op, '') != 'D';
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
