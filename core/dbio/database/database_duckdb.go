@@ -151,7 +151,7 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	// set opy_method
 	if conn.GetProp("copy_method") == "" && cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) {
-		conn.SetProp("copy_methody", "arrow_http")
+		conn.SetProp("copy_method", "arrow_http")
 	}
 
 	// add extensions

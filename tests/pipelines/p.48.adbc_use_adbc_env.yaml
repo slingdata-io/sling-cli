@@ -1,0 +1,69 @@
+# Exercises SLING_USE_ADBC=true across the ADBC-compatible databases.
+# The suite entry sets the env var, so every connection below routes through
+# ADBC without any use_adbc in the connection itself. Each query is a real
+# round-trip: a wrong driver option key fails the connection outright, which
+# is how the snowflake/bigquery option-key bugs surfaced.
+steps:
+  - type: log
+    message: 'starting SLING_USE_ADBC pipeline test'
+
+  - type: query
+    connection: POSTGRES
+    query: select 1 as id, 'postgres' as src
+    into: pg
+
+  - type: check
+    check: store.pg[0].src == "postgres"
+    failure_message: 'postgres over ADBC returned {store.pg}'
+
+  - type: query
+    connection: MYSQL
+    query: select 1 as id, 'mysql' as src
+    into: my
+
+  - type: check
+    check: store.my[0].src == "mysql"
+    failure_message: 'mysql over ADBC returned {store.my}'
+
+  - type: query
+    connection: MSSQL
+    query: select 1 as id, 'mssql' as src
+    into: ms
+
+  - type: check
+    check: store.ms[0].src == "mssql"
+    failure_message: 'sqlserver over ADBC returned {store.ms}'
+
+  - type: query
+    connection: DUCKDB
+    query: select 1 as id, 'duckdb' as src
+    into: duck
+
+  - type: check
+    check: store.duck[0].src == "duckdb"
+    failure_message: 'duckdb over ADBC returned {store.duck}'
+
+  # snowflake has no "adbc.snowflake.sql.uri" option; the generic "uri" key is
+  # what carries the account. The wrong key yields "260000: account is empty".
+  - type: query
+    connection: SNOWFLAKE
+    query: select 1 as id, 'snowflake' as src
+    into: snow
+
+  - type: check
+    check: store.snow[0].src == "snowflake"
+    failure_message: 'snowflake over ADBC returned {store.snow}'
+
+  # bigquery rejects unknown options, so the adbc.bigquery.sql.* prefix and the
+  # fully-qualified auth_type value both have to be right or init fails.
+  - type: query
+    connection: BIGQUERY
+    query: select 1 as id, 'bigquery' as src
+    into: bq
+
+  - type: check
+    check: store.bq[0].src == "bigquery"
+    failure_message: 'bigquery over ADBC returned {store.bq}'
+
+  - type: log
+    message: 'SUCCESS: SLING_USE_ADBC routed postgres, mysql, sqlserver, duckdb, snowflake and bigquery through ADBC'

@@ -1994,6 +1994,7 @@
   run: 'sling run -d -p tests/pipelines/cdc/p.30.cdc_merge_postgres.yaml'
   output_contains:
     - 'CDC merge_cdc PostgreSQL test PASSED'
+    - 'CDC change_capture_soft PostgreSQL test PASSED'
 
 - id: 207
   name: CDC merge_cdc strategy - MySQL target
@@ -2609,3 +2610,27 @@
     - 'duration_batch_commits='
     - 'mid_stream_rows_so_far='
     - 'SUCCESS: batch_max_duration committed multiple batches'
+
+- id: 314
+  name: 'SLING_STATE timestamp format is RFC3339 (oracle TIMESTAMP WITH TIME ZONE → postgres)'
+  run: 'sling run -d -p tests/pipelines/p.47.oracle_date_state_format.yaml'
+  output_contains:
+    - 'SUCCESS: Oracle DATE state value is RFC3339 and resumes correctly'
+
+- id: 315
+  name: 'select expressions containing a literal * are not dropped as globs'
+  run: 'sling run -d -r tests/replications/r.100.select_expr_literal_star.yaml'
+  output_contains:
+    - "SUCCESS: select expressions with literal '*' are preserved"
+
+# Requires the ADBC drivers for each database (sling installs them via dbc)
+- id: 316
+  name: 'SLING_USE_ADBC routes supported databases through ADBC'
+  run: 'sling run -d -p tests/pipelines/p.48.adbc_use_adbc_env.yaml'
+  env:
+    SLING_USE_ADBC: 'true'
+  output_contains:
+    - 'postgres-adbc'
+    - 'snowflake-adbc'
+    - 'bigquery-adbc'
+    - 'SUCCESS: SLING_USE_ADBC routed postgres, mysql, sqlserver, duckdb, snowflake and bigquery through ADBC'

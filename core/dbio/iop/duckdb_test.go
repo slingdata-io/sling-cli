@@ -2,6 +2,7 @@ package iop
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -181,6 +182,12 @@ func TestDuckDbNoDeadlock(t *testing.T) {
 	t.Run("oversized line does not hang", func(t *testing.T) {
 		// a ~200KB line exceeds the scan buffer, so the stdout scanner stops on
 		// bufio.ErrTooLong; the watcher must detect it and unblock the reader.
+		// Arrow mode pipes binary IPC from a separate process and never uses the
+		// line scanner, so there is no oversized line to trip on.
+		if cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) {
+			t.Skip("scanner-specific: arrow mode bypasses the stdout line scanner")
+		}
+
 		duck := NewDuckDb(context.Background(), "max_buffer_size=1024")
 
 		runWithDeadline(t, 30*time.Second, func() {
@@ -215,7 +222,7 @@ func TestDuckDbStreamArrow(t *testing.T) {
 		// Use inline VALUES — the Arrow process is separate and has no access to in-memory tables
 		sql := "SELECT * FROM (VALUES (1, 'Alice', 10.5, true), (2, 'Bob', 20.7, false), (3, 'Charlie', 30.9, true)) AS t(id, name, value, flag) ORDER BY id"
 
-		reader, cleanup, err := duck.StreamArrow(context.Background(), sql)
+		reader, cleanup, _, err := duck.StreamArrow(context.Background(), sql)
 		if !assert.NoError(t, err) {
 			return
 		}
@@ -300,7 +307,7 @@ func TestDuckDbStreamArrow(t *testing.T) {
 		duck := NewDuckDb(context.Background(), "instance="+instancePath)
 		duck.AddExtension("arrow from community")
 
-		reader, cleanup, err := duck.StreamArrow(context.Background(), "SELECT * FROM arrow_file_test ORDER BY id")
+		reader, cleanup, _, err := duck.StreamArrow(context.Background(), "SELECT * FROM arrow_file_test ORDER BY id")
 		if !assert.NoError(t, err) {
 			return
 		}

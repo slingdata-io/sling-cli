@@ -73,19 +73,21 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	var authOption option.ClientOption
 	var credJsonBody string
 
-	if val := fs.GetProp("KEY_BODY"); val != "" {
+	// Prefer KEY_* / GC_KEY_* aliases (Init already maps GC_* → KEY_*, but Connect
+	// accepts both so Unload-via-PropArr and direct GCS clients behave the same).
+	if val := fs.GetProp("KEY_BODY", "GC_KEY_BODY"); val != "" {
 		decodedCredJSON, err := iop.DecodeJSONIfBase64(val)
 		if err != nil {
 			return g.Error(err, "could not decode GCP credentials")
 		}
 		credJsonBody = decodedCredJSON
-	} else if val := fs.GetProp("KEY_FILE"); val != "" {
+	} else if val := fs.GetProp("KEY_FILE", "GC_KEY_FILE", "KEYFILE"); val != "" {
 		b, err := os.ReadFile(val)
 		if err != nil {
 			return g.Error(err, "could not read google cloud key file")
 		}
 		credJsonBody = string(b)
-	} else if val := fs.GetProp("CRED_API_KEY"); val != "" {
+	} else if val := fs.GetProp("CRED_API_KEY", "GC_CRED_API_KEY"); val != "" {
 		authOption = option.WithAPIKey(val)
 	} else if val := fs.GetProp("GOOGLE_APPLICATION_CREDENTIALS"); val != "" {
 		b, err := os.ReadFile(val)
@@ -94,11 +96,14 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 		}
 		credJsonBody = string(b)
 	} else {
-		creds, err := google.FindDefaultCredentials(fs.Context().Ctx)
+		creds, err := google.FindDefaultCredentials(fs.Context().Ctx, gcstorage.ScopeReadWrite)
 		if err != nil {
 			return g.Error(err, "No Google credentials provided or could not find Application Default Credentials.")
 		}
-		authOption = option.WithCredentials(creds)
+		// Do NOT use option.WithCredentials — storage.NewClient appends
+		// WithAuthCredentials internally (google.golang.org/api >= v0.258.0) and
+		// collides with "multiple credential options provided".
+		authOption = option.WithTokenSource(creds.TokenSource)
 	}
 
 	fs.bucket = fs.GetProp("BUCKET")

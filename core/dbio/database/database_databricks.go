@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/databricks/databricks-sql-go/driverctx"
@@ -267,34 +266,7 @@ func (conn *DatabricksConn) generateSessionToken() error {
 
 // loadAWSCredentialsFromChain attempts to load credentials using the default AWS credential chain
 func (conn *DatabricksConn) loadAWSCredentialsFromChain() error {
-	g.Debug("Loading AWS credentials from default credential chain")
-
-	// Load default AWS config (will use IAM roles, profiles, env vars, etc.)
-	cfg, err := config.LoadDefaultConfig(context.Background())
-	if err != nil {
-		return g.Error(err, "Failed to load AWS configuration from credential chain")
-	}
-
-	// Get credentials
-	creds, err := cfg.Credentials.Retrieve(context.Background())
-	if err != nil {
-		return g.Error(err, "Failed to retrieve AWS credentials from credential chain")
-	}
-
-	// Set the credentials
-	conn.SetProp("AWS_ACCESS_KEY_ID", creds.AccessKeyID)
-	conn.SetProp("AWS_SECRET_ACCESS_KEY", creds.SecretAccessKey)
-	if creds.SessionToken != "" {
-		conn.SetProp("AWS_SESSION_TOKEN", creds.SessionToken)
-	}
-
-	// Set region if not already set
-	if conn.GetProp("AWS_REGION") == "" && cfg.Region != "" {
-		conn.SetProp("AWS_REGION", cfg.Region)
-	}
-
-	g.Debug("Successfully loaded AWS credentials from credential chain")
-	return nil
+	return loadAWSCredentialsFromChain(conn)
 }
 
 // CopyViaS3 uses the Databricks COPY INTO command from AWS S3

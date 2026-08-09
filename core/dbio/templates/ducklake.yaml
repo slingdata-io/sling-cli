@@ -166,7 +166,7 @@ metadata:
            constraint_index as position,
            replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
     from duckdb_constraints()
-    where table_schema = '{schema}'
+    where schema_name = '{schema}'
       and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
   
@@ -174,7 +174,7 @@ metadata:
     select index_name as index_name,
            sql as column_name
     from duckdb_indexes()
-    where table_schema = '{schema}'
+    where schema_name = '{schema}'
       and table_name = '{table}'
 
   columns_full: |

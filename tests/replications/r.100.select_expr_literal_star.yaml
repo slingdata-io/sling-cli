@@ -1,0 +1,153 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+# Regression: a select expression carrying an alias AND a literal `*` inside a
+# string/JSONPath literal was misread as a column glob, matched 0 columns, and
+# was silently dropped from the output. See suite.cli.yaml id 315.
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_star_expr_src;
+        CREATE TABLE public.test_star_expr_src (
+          purchase_order_id INT,
+          tax JSONB,
+          total DECIMAL(12,2)
+        );
+        INSERT INTO public.test_star_expr_src VALUES
+          (101, '[{"amount": 10.50}, {"amount": 2.10}]', 150.00),
+          (102, '[{"amount": 20.25}]', 250.00),
+          (103, '[]', 75.00);
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_star_expr_src2;
+        CREATE TABLE public.test_star_expr_src2 AS SELECT * FROM public.test_star_expr_src;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_star_expr_aliased;
+        DROP TABLE IF EXISTS public.test_star_expr_selectall;
+        DROP TABLE IF EXISTS public.test_star_expr_glob;
+
+  end:
+    - check: execution.status.error == 0
+      on_failure: break
+
+    #
+    # Test 1: aliased expression containing a literal `*` must be emitted
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_star_expr_aliased' ORDER BY ordinal_position
+      into: aliased_cols
+
+    - log: "Test 1 - aliased star-expr columns: {store.aliased_cols}"
+
+    - check: length(store.aliased_cols) == 3
+
+    - check: store.aliased_cols[0].column_name == "purchase_order_id"
+
+    # the regression: `tax` was silently dropped entirely
+    - check: store.aliased_cols[1].column_name == "tax"
+
+    - check: store.aliased_cols[2].column_name == "total"
+
+    # the expression must actually be evaluated, not passed through raw
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_star_expr_aliased ORDER BY purchase_order_id
+      into: aliased_data
+
+    - check: float_parse(store.aliased_data[0].tax) == 12.60
+
+    - check: float_parse(store.aliased_data[1].tax) == 20.25
+
+    # empty array coalesces to 0
+    - check: float_parse(store.aliased_data[2].tax) == 0.0
+
+    #
+    # Test 2: `*` plus an aliased star-expression — the expression must win,
+    # not be shadowed by the raw source column of the same name
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_star_expr_selectall' ORDER BY ordinal_position
+      into: selectall_cols
+
+    - log: "Test 2 - select-all + star-expr columns: {store.selectall_cols}"
+
+    - check: length(store.selectall_cols) == 3
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_star_expr_selectall ORDER BY purchase_order_id
+      into: selectall_data
+
+    # previously emitted the raw JSONB `tax` column instead of the computed sum
+    - check: float_parse(store.selectall_data[0].tax) == 12.60
+
+    - check: float_parse(store.selectall_data[1].tax) == 20.25
+
+    #
+    # Test 3 (control): genuine column globs must keep working
+    #
+    - type: query
+      connection: '{target.name}'
+      query: SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'test_star_expr_glob' ORDER BY ordinal_position
+      into: glob_cols
+
+    - log: "Test 3 - glob control columns: {store.glob_cols}"
+
+    - check: length(store.glob_cols) == 2
+
+    - check: store.glob_cols[0].column_name == "purchase_order_id"
+
+    - check: store.glob_cols[1].column_name == "total"
+
+    - log: "SUCCESS: select expressions with literal '*' are preserved"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_star_expr_src;
+        DROP TABLE IF EXISTS public.test_star_expr_src2;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_star_expr_aliased;
+        DROP TABLE IF EXISTS public.test_star_expr_selectall;
+        DROP TABLE IF EXISTS public.test_star_expr_glob;
+
+streams:
+  # Test 1: Mario's real-world shape — JSONPath wildcard inside an aliased expr
+  test_star_expr_aliased:
+    sql: SELECT {fields} FROM public.test_star_expr_src
+    object: public.test_star_expr_aliased
+    select:
+      - 'purchase_order_id'
+      - "coalesce((select sum((e->>'amount')::numeric) from jsonb_array_elements(tax) e), 0.0) as tax"
+      - 'total'
+
+  # Test 2: `*` alongside an aliased star-expression
+  test_star_expr_selectall:
+    sql: SELECT {fields} FROM public.test_star_expr_src2
+    object: public.test_star_expr_selectall
+    select:
+      - '*'
+      - "coalesce((select sum((e->>'amount')::numeric) from jsonb_array_elements(tax) e), 0.0) as tax"
+
+  # Test 3 (control): real glob exclusion still resolves as a pattern
+  public.test_star_expr_src:
+    object: public.test_star_expr_glob
+    select:
+      - '-tax*'

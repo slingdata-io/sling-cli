@@ -729,7 +729,7 @@ func Clean(props map[string]string, line string) string {
 	for k, v := range props {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
+		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
 			line = strings.ReplaceAll(line, v, "***")
 		}
 	}

@@ -1,11 +1,15 @@
 package database
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,8 +20,12 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
+	"github.com/klauspost/compress/zstd"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -58,11 +66,11 @@ func (conn *ArrowDBConn) Init() error {
 		"adbc.postgresql.connection_string": "uri",
 		"adbc.sqlserver.connection_string":  "uri",
 		"adbc.mssql.connection_string":      "uri",
-		"adbc.snowflake.connection_string":  "adbc.snowflake.sql.uri",
+		"adbc.snowflake.connection_string":  "uri",
 		"adbc.sqlite.connection_string":     "uri",
 		"adbc.duckdb.connection_string":     "path",
 		"adbc.mysql.connection_string":      "uri",
-		"adbc.trino.connection_string":      "url",
+		"adbc.trino.connection_string":      "uri",
 	}
 
 	for key, val := range conn.properties {
@@ -85,7 +93,20 @@ func (conn *ArrowDBConn) Init() error {
 
 	// Resolve driver path if not explicitly provided
 	if adbcProps["driver"] == "" {
-		if driverPath := conn.resolveDriverPath(); driverPath != "" {
+		driverPath := conn.resolveDriverPath()
+
+		// not found locally, so install it with dbc (which is downloaded if missing)
+		if driverPath == "" {
+			if driverName := conn.GetProp("driver_name"); driverName != "" && !cast.ToBool(os.Getenv("SLING_DISABLE_DBC_AUTO_INSTALL")) {
+				if err := installDriverWithDbc(driverName); err != nil {
+					g.Debug("could not auto-install ADBC driver %s: %s", driverName, err.Error())
+				} else {
+					driverPath = conn.resolveDriverPath()
+				}
+			}
+		}
+
+		if driverPath != "" {
 			adbcProps["driver"] = driverPath
 			g.Trace("auto-detected ADBC driver: %s", driverPath)
 		}
@@ -102,9 +123,21 @@ func (conn *ArrowDBConn) Init() error {
 	// Resolve the ADBC driver manager library path if not already set
 	resolveDriverManagerLib()
 
+	// not found on the system, so download it (conda-forge is the only channel
+	// shipping prebuilt driver-manager binaries; dbc only provides drivers)
+	if os.Getenv("ADBC_DRIVER_MANAGER_LIB") == "" && !cast.ToBool(os.Getenv("SLING_DISABLE_DBC_AUTO_INSTALL")) {
+		if libPath, err := ensureDriverManagerLib(); err != nil {
+			g.Debug("could not auto-download ADBC driver manager: %s", err.Error())
+		} else {
+			os.Setenv("ADBC_DRIVER_MANAGER_LIB", libPath)
+			g.Trace("using downloaded ADBC driver manager: %s", libPath)
+		}
+	}
+
 	db, err := drivermgr.Driver{}.NewDatabase(adbcProps)
 	if err != nil {
-		return g.Error(err, "could not init new ADBC database. See https://docs.slingdata.io/connections/database-connections/adbc")
+		return g.Error(err, "could not init new ADBC database.%s See https://docs.slingdata.io/connections/database-connections/adbc",
+			diagnoseADBCLoadError(err))
 	}
 
 	conn.db = db
@@ -122,6 +155,104 @@ func (conn *ArrowDBConn) Init() error {
 	// Reload templates with driver-specific overrides
 	// (BaseConn.Init() loaded the default ADBC template)
 	return conn.LoadTemplates()
+}
+
+// isCxxABIError reports whether a load failure is due to the system libstdc++
+// being older than the ADBC driver manager requires.
+func isCxxABIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "GLIBCXX_") || strings.Contains(msg, "CXXABI_")
+}
+
+// diagnoseADBCLoadError turns a cryptic dynamic-loader failure into actionable
+// advice. The prebuilt ADBC libraries are built against newer toolchains than
+// some supported distros ship, and the raw loader message ("version
+// `GLIBCXX_3.4.29' not found") doesn't say what to do about it.
+// Returns a leading-space message, or "" when nothing specific applies.
+func diagnoseADBCLoadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+
+	switch {
+	case isCxxABIError(err):
+		return g.F(" The ADBC driver manager needs a newer C++ runtime (libstdc++) than this system provides%s.%s",
+			neededVersion(msg, "GLIBCXX_", "CXXABI_"), libStdCxxRemedy())
+
+	case strings.Contains(msg, "GLIBC_"):
+		return g.F(" The ADBC driver manager needs a newer C runtime (glibc) than this system provides%s."+
+			" Upgrade the OS, or point ADBC_DRIVER_MANAGER_LIB at a build compatible with this system.",
+			neededVersion(msg, "GLIBC_"))
+
+	case strings.Contains(msg, "wrong ELF class"),
+		strings.Contains(msg, "incompatible architecture"),
+		strings.Contains(msg, "but wrong architecture"):
+		return g.F(" The ADBC driver manager was built for a different CPU architecture than this machine (%s/%s)."+
+			" Remove the cached copy under %s and retry, or set ADBC_DRIVER_MANAGER_LIB explicitly.",
+			runtime.GOOS, runtime.GOARCH, filepath.Join(env.HomeBinDir(), "adbc"))
+
+	case strings.Contains(msg, "ADBC_DRIVER_MANAGER_LIB"):
+		// the fork already suggests the env var; don't repeat it
+		return ""
+	}
+
+	return ""
+}
+
+// libStdCxxRemedy fetches a compatible libstdc++ and returns the exact command
+// to use it. LD_PRELOAD is the only reliable fix: the loader resolves the
+// manager's DT_NEEDED against whichever libstdc++.so.6 is already in the global
+// scope, and by the time sling can dlopen anything the system copy is loaded —
+// so the newer library must be in place before the process starts.
+func libStdCxxRemedy() string {
+	generic := " Install a newer libstdc++ (e.g. `apt install libstdc++6` on a current release," +
+		" or `conda install -c conda-forge libstdcxx`), or point ADBC_DRIVER_MANAGER_LIB" +
+		" at a build compatible with this system."
+
+	if runtime.GOOS != "linux" {
+		return generic
+	}
+
+	cacheDir := filepath.Join(env.HomeBinDir(), "adbc", AdbcDriverManagerVersion)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return generic
+	}
+	libPath, err := ensureCompatibleLibStdCxx(cacheDir)
+	if err != nil {
+		g.Debug("could not fetch a compatible libstdc++: %s", err.Error())
+		return generic
+	}
+
+	return g.F(" A compatible libstdc++ has been downloaded to %s —"+
+		" re-run with it preloaded:\n\n    LD_PRELOAD=%s %s\n\n"+
+		" To make this permanent, export LD_PRELOAD in your shell profile."+
+		" Alternatively install a newer system libstdc++, or point"+
+		" ADBC_DRIVER_MANAGER_LIB at a build compatible with this system.",
+		libPath, libPath, strings.Join(os.Args, " "))
+}
+
+// neededVersion extracts the first required symbol version (e.g. GLIBCXX_3.4.29)
+// mentioned in a loader error, formatted for inclusion in a sentence.
+func neededVersion(msg string, prefixes ...string) string {
+	for _, prefix := range prefixes {
+		idx := strings.Index(msg, prefix)
+		if idx < 0 {
+			continue
+		}
+		rest := msg[idx:]
+		end := strings.IndexFunc(rest, func(r rune) bool {
+			return !(r >= '0' && r <= '9') && r != '.' && r != '_' &&
+				!(r >= 'A' && r <= 'Z')
+		})
+		if end > 0 {
+			return " (requires " + strings.TrimRight(rest[:end], "._") + ")"
+		}
+	}
+	return ""
 }
 
 // getDefaultEntrypoint returns the ADBC driver init function name for known drivers.
@@ -202,8 +333,75 @@ func resolveDriverManagerLib() {
 				searchPaths = append(searchPaths, matches...)
 			}
 		}
+	case "windows":
+		libName = "adbc_driver_manager.dll"
+		// Conda puts DLLs in <prefix>\Library\bin, not <prefix>\lib.
+		condaRoots := []string{}
+		if home != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(home, "mambaforge"),
+				filepath.Join(home, "miniforge3"),
+				filepath.Join(home, "miniconda3"),
+				filepath.Join(home, "anaconda3"),
+			)
+		}
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(localAppData, "mambaforge"),
+				filepath.Join(localAppData, "miniforge3"),
+				filepath.Join(localAppData, "miniconda3"),
+				filepath.Join(localAppData, "Continuum", "anaconda3"),
+			)
+		}
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			condaRoots = append(condaRoots,
+				filepath.Join(programData, "mambaforge"),
+				filepath.Join(programData, "miniforge3"),
+				filepath.Join(programData, "miniconda3"),
+				filepath.Join(programData, "anaconda3"),
+			)
+		}
+		for _, root := range condaRoots {
+			searchPaths = append(searchPaths,
+				filepath.Join(root, "Library", "bin"),
+				// Active conda env rather than the base install
+				filepath.Join(root, "envs", "*", "Library", "bin"),
+			)
+		}
+		// An activated conda env exports its own prefix
+		if prefix := os.Getenv("CONDA_PREFIX"); prefix != "" {
+			searchPaths = append([]string{filepath.Join(prefix, "Library", "bin")}, searchPaths...)
+		}
+		// pip puts the DLL in site-packages
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(localAppData, "Programs", "Python", "Python3*", "Lib", "site-packages", "adbc_driver_manager"),
+			)
+		}
+		if home != "" {
+			searchPaths = append(searchPaths,
+				filepath.Join(home, "AppData", "Roaming", "Python", "Python3*", "site-packages", "adbc_driver_manager"),
+			)
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			searchPaths = append(searchPaths, filepath.Join(programFiles, "ADBC", "bin"))
+		}
 	default:
 		return
+	}
+
+	// Windows paths may contain globs (conda envs, versioned Python dirs)
+	if runtime.GOOS == "windows" {
+		expanded := make([]string, 0, len(searchPaths))
+		for _, dir := range searchPaths {
+			if strings.ContainsAny(dir, "*?") {
+				matches, _ := filepath.Glob(dir)
+				expanded = append(expanded, matches...)
+				continue
+			}
+			expanded = append(expanded, dir)
+		}
+		searchPaths = expanded
 	}
 
 	for _, dir := range searchPaths {
@@ -384,6 +582,353 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 	}
 
 	return ""
+}
+
+// DbcVersion is the version of the dbc CLI to download when it's not installed
+const DbcVersion = "0.3.0"
+
+// AdbcDriverManagerVersion is the version of the ADBC driver manager to download.
+// conda-forge is the only channel publishing prebuilt driver-manager shared
+// libraries for every platform we support; dbc distributes drivers, not the manager.
+const AdbcDriverManagerVersion = "1.12.0"
+
+// condaDriverManagerBuilds maps GOOS/GOARCH to the conda-forge subdir and build
+// string for libadbc-driver-manager. Build strings are version-specific, so these
+// must be updated alongside AdbcDriverManagerVersion.
+var condaDriverManagerBuilds = map[string]struct{ subdir, build string }{
+	"linux/amd64":   {"linux-64", "hb700be7_0"},
+	"linux/arm64":   {"linux-aarch64", "hfefdfc9_0"},
+	"darwin/amd64":  {"osx-64", "h9536453_0"},
+	"darwin/arm64":  {"osx-arm64", "hdf8b884_0"},
+	"windows/amd64": {"win-64", "h49e36cd_0"},
+}
+
+// ensureDriverManagerLib downloads the ADBC driver manager shared library if it
+// isn't already present, and returns its path. The manager is the library that
+// sling's bindings dlopen; it then loads the individual database drivers.
+func ensureDriverManagerLib() (libPath string, err error) {
+	version := AdbcDriverManagerVersion
+	if val := os.Getenv("ADBC_DRIVER_MANAGER_VERSION"); val != "" {
+		version = val
+	}
+
+	var libName string
+	switch runtime.GOOS {
+	case "windows":
+		libName = "adbc_driver_manager.dll"
+	case "darwin":
+		libName = "libadbc_driver_manager.dylib"
+	default:
+		libName = "libadbc_driver_manager.so"
+	}
+
+	folderPath := filepath.Join(env.HomeBinDir(), "adbc", version)
+	libPath = filepath.Join(folderPath, libName)
+	if g.PathExists(libPath) {
+		return libPath, nil
+	}
+
+	build, ok := condaDriverManagerBuilds[runtime.GOOS+"/"+runtime.GOARCH]
+	if !ok {
+		return "", g.Error("no ADBC driver manager build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	pkgURL := g.F("https://conda.anaconda.org/conda-forge/%s/libadbc-driver-manager-%s-%s.conda",
+		build.subdir, version, build.build)
+
+	pkgPath := filepath.Join(os.TempDir(), g.F("libadbc-driver-manager-%s.conda", version))
+	defer os.Remove(pkgPath)
+
+	g.Info("downloading ADBC driver manager %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
+	if err = net.DownloadFile(pkgURL, pkgPath); err != nil {
+		return "", g.Error(err, "unable to download ADBC driver manager")
+	}
+
+	if err = os.MkdirAll(folderPath, 0755); err != nil {
+		return "", g.Error(err, "could not create adbc folder")
+	}
+
+	if err = extractCondaLib(pkgPath, folderPath, libName); err != nil {
+		return "", g.Error(err, "could not extract ADBC driver manager")
+	}
+
+	if !g.PathExists(libPath) {
+		return "", g.Error("cannot find %s after extracting driver manager", libPath)
+	}
+
+	return libPath, nil
+}
+
+// CondaLibStdCxxVersion is the conda-forge libstdcxx version providing a
+// libstdc++ new enough for the ADBC driver manager on distros with an older
+// system copy.
+const CondaLibStdCxxVersion = "16.1.0"
+
+// conda build hashes differ per architecture, so they must be listed
+// explicitly. Update alongside CondaLibStdCxxVersion.
+var condaLibStdCxxBuilds = map[string]struct{ subdir, build string }{
+	"amd64": {"linux-64", "h934c35e_1"},
+	"arm64": {"linux-aarch64", "hef695bb_1"},
+}
+
+// ensureCompatibleLibStdCxx downloads a libstdc++ new enough for the ADBC
+// driver manager (it needs GLIBCXX_3.4.29; Ubuntu 20.04 ships 3.4.28) and
+// returns its path, for the caller to suggest via LD_PRELOAD.
+//
+// It cannot be applied in-process: the loader resolves the manager's DT_NEEDED
+// against whatever libstdc++.so.6 is already in the global scope, and the
+// system copy is loaded before sling runs any code. Neither dlopen(RTLD_GLOBAL)
+// nor os.Setenv("LD_LIBRARY_PATH") overrides an already-loaded soname.
+//
+// Called only after a C++ ABI load failure, so a system with a new enough
+// libstdc++ never downloads anything.
+func ensureCompatibleLibStdCxx(folderPath string) (libStdCxx string, err error) {
+	libStdCxx = filepath.Join(folderPath, "libstdc++.so.6")
+
+	if !g.PathExists(libStdCxx) {
+		build, ok := condaLibStdCxxBuilds[runtime.GOARCH]
+		if !ok {
+			return "", g.Error("no libstdc++ build available for linux/%s", runtime.GOARCH)
+		}
+
+		pkgName := g.F("libstdcxx-%s-%s", CondaLibStdCxxVersion, build.build)
+		pkgURL := g.F("https://conda.anaconda.org/conda-forge/%s/%s.conda", build.subdir, pkgName)
+
+		pkgPath := filepath.Join(os.TempDir(), pkgName+".conda")
+		defer os.Remove(pkgPath)
+
+		g.Info("downloading a compatible libstdc++ for the ADBC driver manager")
+		if err = net.DownloadFile(pkgURL, pkgPath); err != nil {
+			return "", g.Error(err, "unable to download libstdc++")
+		}
+
+		if err = extractCondaLib(pkgPath, folderPath, "libstdc++.so.6"); err != nil {
+			return "", g.Error(err, "could not extract libstdc++")
+		}
+
+		if !g.PathExists(libStdCxx) {
+			return "", g.Error("libstdc++ not found after extraction")
+		}
+	}
+
+	return libStdCxx, nil
+}
+
+// isSharedLibName reports whether a file name is a shared library, including
+// versioned forms like libfoo.so.1.2.3 and libfoo.112.0.0.dylib.
+func isSharedLibName(name string) bool {
+	return strings.HasSuffix(name, ".dll") ||
+		strings.HasSuffix(name, ".dylib") ||
+		strings.Contains(name, ".so")
+}
+
+// libStem returns the part of a library file name before the extension, so
+// versioned siblings can be matched: libstdc++.so.6 -> libstdc++, and
+// libadbc_driver_manager.dylib -> libadbc_driver_manager.
+func libStem(libName string) string {
+	for _, ext := range []string{".so", ".dylib", ".dll"} {
+		if i := strings.Index(libName, ext); i > 0 {
+			return libName[:i]
+		}
+	}
+	return libName
+}
+
+// extractCondaLib pulls libName out of a .conda package into destDir.
+// A .conda file is a zip containing zstd-compressed tarballs; the payload we want
+// is the "pkg-" entry. Libraries live under Library/bin on Windows and lib elsewhere.
+func extractCondaLib(condaPath, destDir, libName string) (err error) {
+	zr, err := zip.OpenReader(condaPath)
+	if err != nil {
+		return g.Error(err, "could not open conda package")
+	}
+	defer zr.Close()
+
+	var pkgEntry *zip.File
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "pkg-") && strings.HasSuffix(f.Name, ".tar.zst") {
+			pkgEntry = f
+			break
+		}
+	}
+	if pkgEntry == nil {
+		return g.Error("no pkg payload found in conda package")
+	}
+
+	rc, err := pkgEntry.Open()
+	if err != nil {
+		return g.Error(err, "could not open conda payload")
+	}
+	defer rc.Close()
+
+	zstdReader, err := zstd.NewReader(rc)
+	if err != nil {
+		return g.Error(err, "could not create zstd reader")
+	}
+	defer zstdReader.Close()
+
+	// resolved lazily: the versioned file is the real library, the plain name a symlink to it
+	symlinks := map[string]string{}
+	extracted := map[string]bool{}
+
+	tr := tar.NewReader(zstdReader)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return g.Error(err, "could not read conda tar entry")
+		}
+
+		// only the shared library itself (and its versioned siblings), not headers.
+		// libName is e.g. libadbc_driver_manager.so or libstdc++.so.6; matching on
+		// the stem catches libfoo.so.1.2.3 and libfoo.112.0.0.dylib alike.
+		base := filepath.Base(header.Name)
+		if !strings.HasPrefix(base, libStem(libName)) || !isSharedLibName(base) {
+			continue
+		}
+
+		switch header.Typeflag {
+		case tar.TypeSymlink:
+			symlinks[base] = filepath.Base(header.Linkname)
+		case tar.TypeReg:
+			target := filepath.Join(destDir, base)
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+			if err != nil {
+				return g.Error(err, "could not create %s", target)
+			}
+			if _, err = io.Copy(out, tr); err != nil {
+				out.Close()
+				return g.Error(err, "could not write %s", target)
+			}
+			out.Close()
+			extracted[base] = true
+		}
+	}
+
+	// the plain library name is a symlink in the package; copy the real file into place
+	if !extracted[libName] {
+		if link, ok := symlinks[libName]; ok && extracted[link] {
+			data, err := os.ReadFile(filepath.Join(destDir, link))
+			if err != nil {
+				return g.Error(err, "could not read %s", link)
+			}
+			if err = os.WriteFile(filepath.Join(destDir, libName), data, 0755); err != nil {
+				return g.Error(err, "could not write %s", libName)
+			}
+		}
+	}
+
+	return nil
+}
+
+// EnsureBinDbc returns the path to the dbc CLI, downloading it if missing.
+// dbc (https://columnar.tech/dbc) installs and manages ADBC drivers.
+func EnsureBinDbc() (binPath string, err error) {
+	version := DbcVersion
+	if val := os.Getenv("DBC_VERSION"); val != "" {
+		version = val
+	}
+
+	// use specified path to dbc binary
+	if envPath := os.Getenv("DBC_PATH"); envPath != "" {
+		if !g.PathExists(envPath) {
+			return "", g.Error("dbc binary not found: %s", envPath)
+		}
+		if stat, _ := os.Stat(envPath); stat.IsDir() {
+			return "", g.Error("DBC_PATH provided is a directory, should be a file: %s", envPath)
+		}
+		return envPath, nil
+	}
+
+	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
+
+	// an existing dbc on PATH is preferred over downloading our own
+	if p, err := exec.LookPath("dbc" + extension); err == nil {
+		return p, nil
+	}
+
+	folderPath := filepath.Join(env.HomeBinDir(), "dbc", version)
+	binPath = filepath.Join(folderPath, "dbc"+extension)
+	if g.PathExists(binPath) {
+		return binPath, nil
+	}
+
+	// archives are flat, with the binary at the root
+	const baseURL = "https://github.com/columnar-tech/dbc/releases/download/v{version}/dbc-{os}-{arch}-{version}.{ext}"
+
+	var arch, archiveExt string
+	switch runtime.GOARCH {
+	case "amd64":
+		arch = "amd64"
+	case "arm64":
+		arch = "arm64"
+	default:
+		return "", g.Error("dbc is not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		archiveExt = "zip"
+		if arch != "amd64" {
+			// no windows/arm64 build; the amd64 binary runs under emulation
+			arch = "amd64"
+		}
+	case "darwin", "linux":
+		archiveExt = "tar.gz"
+	default:
+		return "", g.Error("dbc is not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	downloadURL := g.R(baseURL,
+		"version", version, "os", runtime.GOOS, "arch", arch, "ext", archiveExt)
+
+	archivePath := filepath.Join(os.TempDir(), g.F("dbc-%s.%s", version, archiveExt))
+	defer os.Remove(archivePath)
+
+	g.Info("downloading dbc %s for %s/%s", version, runtime.GOOS, arch)
+	if err = net.DownloadFile(downloadURL, archivePath); err != nil {
+		return "", g.Error(err, "unable to download dbc binary")
+	}
+
+	if err = os.MkdirAll(folderPath, 0755); err != nil {
+		return "", g.Error(err, "could not create dbc folder")
+	}
+
+	if archiveExt == "zip" {
+		if _, err = iop.Unzip(archivePath, folderPath); err != nil {
+			return "", g.Error(err, "error unzipping dbc archive")
+		}
+	} else if err = g.ExtractTarGz(archivePath, folderPath); err != nil {
+		return "", g.Error(err, "error extracting dbc archive")
+	}
+
+	if !g.PathExists(binPath) {
+		return "", g.Error("cannot find dbc binary at %s after extraction", binPath)
+	}
+
+	if err = os.Chmod(binPath, 0755); err != nil {
+		return "", g.Error(err, "could not make dbc executable")
+	}
+
+	return binPath, nil
+}
+
+// installDriverWithDbc installs an ADBC driver via the dbc CLI, downloading dbc if needed.
+func installDriverWithDbc(driverName string) (err error) {
+	dbcPath, err := EnsureBinDbc()
+	if err != nil {
+		return g.Error(err, "could not obtain dbc CLI")
+	}
+
+	g.Info("installing ADBC driver %s via dbc", driverName)
+	out, err := exec.Command(dbcPath, "install", "--level", "user", driverName).CombinedOutput()
+	if err != nil {
+		return g.Error(err, "could not install ADBC driver %s: %s", driverName, string(out))
+	}
+
+	g.Debug("dbc install %s: %s", driverName, strings.TrimSpace(string(out)))
+	return nil
 }
 
 // Connect opens the ADBC connection
@@ -941,7 +1486,9 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 
 	case dbio.TypeDbSnowflake:
 		connMap["driver_name"] = "snowflake"
-		connMap["adbc.snowflake.sql.uri"] = buildSnowflakeAdbcURI(info, getProp)
+		// the driver has no "adbc.snowflake.sql.uri" option; the generic "uri"
+		// is parsed with gosnowflake.ParseDSN
+		connMap["uri"] = buildSnowflakeAdbcURI(info, getProp)
 
 	case dbio.TypeDbSQLite:
 		connMap["driver_name"] = "sqlite"
@@ -972,7 +1519,15 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 	}
 
 	if uri := parentConn.GetProp("adbc_uri"); uri != "" {
-		connMap["uri"] = uri
+		switch parentConn.GetType() {
+		case dbio.TypeDbDuckDb:
+			connMap["path"] = uri
+		case dbio.TypeDbBigQuery:
+			// no uri option exists, and unknown keys are rejected
+			g.Warn("adbc_uri is not supported for BigQuery, ignoring")
+		default:
+			connMap["uri"] = uri
+		}
 	}
 
 	props := g.MapToKVArr(connMap)
@@ -1058,12 +1613,21 @@ func buildPostgresAdbcURI(info ConnInfo, getProp func(string) string) string {
 func buildSnowflakeAdbcURI(info ConnInfo, getProp func(string) string) string {
 	var uri strings.Builder
 
-	// User and password
+	// User and secret. A programmatic access token is carried in the password
+	// position, which is where gosnowflake expects it.
+	authenticator := getProp("authenticator")
+	secret := info.Password
+	if strings.EqualFold(authenticator, "programmatic_access_token") {
+		if token := getProp("token"); token != "" {
+			secret = token
+		}
+	}
+
 	if info.User != "" {
 		uri.WriteString(url.QueryEscape(info.User))
-		if info.Password != "" {
+		if secret != "" {
 			uri.WriteString(":")
-			uri.WriteString(url.QueryEscape(info.Password))
+			uri.WriteString(url.QueryEscape(secret))
 		}
 		uri.WriteString("@")
 	}
@@ -1094,8 +1658,13 @@ func buildSnowflakeAdbcURI(info ConnInfo, getProp func(string) string) string {
 	if info.Role != "" {
 		params.Set("role", info.Role)
 	}
-	if val := getProp("authenticator"); val != "" {
-		params.Set("authenticator", val)
+	if authenticator != "" {
+		params.Set("authenticator", authenticator)
+	}
+	// key-pair auth: gosnowflake reads the DER key from the DSN
+	if epk := getProp("encoded_private_key"); epk != "" {
+		params.Set("authenticator", "SNOWFLAKE_JWT")
+		params.Set("privateKey", epk)
 	}
 
 	if len(params) > 0 {
@@ -1144,47 +1713,66 @@ func buildDuckDbAdbcPath(info ConnInfo, getProp func(string) string) string {
 	return dbPath
 }
 
+// BigQuery ADBC option keys and auth_type values. The driver rejects unknown
+// options outright, and auth_type values are fully qualified, not bare words.
+const (
+	bqOptProjectID       = "adbc.bigquery.sql.project_id"
+	bqOptDatasetID       = "adbc.bigquery.sql.dataset_id"
+	bqOptLocation        = "adbc.bigquery.sql.location"
+	bqOptAuthType        = "adbc.bigquery.sql.auth_type"
+	bqOptAuthCredentials = "adbc.bigquery.sql.auth_credentials"
+
+	bqAuthJSONFile   = "adbc.bigquery.sql.auth_type.json_credential_file"
+	bqAuthJSONString = "adbc.bigquery.sql.auth_type.json_credential_string"
+	bqAuthDefault    = "adbc.bigquery.sql.auth_type.app_default_credentials"
+)
+
 // buildBigQueryAdbcConfig populates ADBC BigQuery configuration parameters
 // BigQuery uses configuration parameters instead of URI format
 func buildBigQueryAdbcConfig(getProp func(string) string, connMap map[string]string) {
 	// Required: Project ID
 	if projectID := getProp("project"); projectID != "" {
-		connMap["adbc.bigquery.project_id"] = projectID
+		connMap[bqOptProjectID] = projectID
 	} else if projectID := getProp("project_id"); projectID != "" {
-		connMap["adbc.bigquery.project_id"] = projectID
+		connMap[bqOptProjectID] = projectID
 	}
 
-	// Auth type - determine from available credentials
+	// Auth type and credentials travel together: auth_type says how to read
+	// the single auth_credentials value.
+	keyBody, keyFile := getProp("GC_KEY_BODY"), getProp("GC_KEY_FILE")
 	authType := getProp("auth_type")
-	if authType == "" {
-		// Determine based on available credentials
-		if getProp("GC_KEY_BODY") != "" {
-			authType = "service"
-		} else if getProp("GC_KEY_FILE") != "" {
-			authType = "service"
-		} else {
-			authType = "user"
+	switch {
+	case authType != "":
+		// allow a bare value to be passed through in qualified form
+		if !strings.HasPrefix(authType, "adbc.bigquery.sql.auth_type.") {
+			authType = "adbc.bigquery.sql.auth_type." + authType
 		}
+		if keyBody != "" {
+			connMap[bqOptAuthCredentials] = keyBody
+		} else if keyFile != "" {
+			connMap[bqOptAuthCredentials] = keyFile
+		}
+	case keyBody != "":
+		authType = bqAuthJSONString
+		connMap[bqOptAuthCredentials] = keyBody
+	case keyFile != "":
+		authType = bqAuthJSONFile
+		connMap[bqOptAuthCredentials] = keyFile
+	default:
+		authType = bqAuthDefault
 	}
-	connMap["adbc.bigquery.auth_type"] = authType
-
-	// Credentials
-	if keyBody := getProp("GC_KEY_BODY"); keyBody != "" {
-		connMap["adbc.bigquery.auth_credentials"] = keyBody
-	} else if keyFile := getProp("GC_KEY_FILE"); keyFile != "" {
-		connMap["adbc.bigquery.auth_credentials_file"] = keyFile
-	}
+	connMap[bqOptAuthType] = authType
 
 	// Optional: Dataset/Schema
 	if dataset := getProp("dataset"); dataset != "" {
-		connMap["adbc.bigquery.dataset_id"] = dataset
+		connMap[bqOptDatasetID] = dataset
 	} else if schema := getProp("schema"); schema != "" {
-		connMap["adbc.bigquery.dataset_id"] = schema
+		connMap[bqOptDatasetID] = schema
 	}
 
 	// Optional: Location/Region
 	if location := getProp("location"); location != "" {
-		connMap["adbc.bigquery.location"] = location
+		connMap[bqOptLocation] = location
 	}
 
 	g.Debug("Built BigQuery ADBC configuration with auth_type=%s", authType)

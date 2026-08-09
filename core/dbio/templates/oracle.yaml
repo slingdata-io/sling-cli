@@ -139,7 +139,7 @@ core:
 
   merge_change_capture_soft: |
     UPDATE {tgt_table} tgt SET "_SLING_SYNCED_AT" = CURRENT_TIMESTAMP, "_SLING_SYNCED_OP" = 'D'
-    WHERE "_SLING_SYNCED_AT" IS NULL
+    WHERE COALESCE("_SLING_SYNCED_OP", '') != 'D'
     AND EXISTS (
       SELECT 1 FROM (
         SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as _rn

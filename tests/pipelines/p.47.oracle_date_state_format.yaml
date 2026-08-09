@@ -1,0 +1,146 @@
+# SLING_STATE wrote timestamps via cast.ToString(time.Time), producing Go's default
+# layout (e.g. "2026-08-06 06:45:00 +0200 +02:00"). Any non-UTC time.Location renders
+# as offset AND zone name, which cast.ToTime cannot parse on read -- so the watermark
+# silently reset to zero and every incremental run re-pulled the whole table.
+#
+# TIMESTAMP WITH TIME ZONE is used because the Oracle driver attaches a fixed zone
+# whose name is the offset string ("+02:00"), reproducing the reported value exactly.
+env:
+  SOURCE: oracle
+  TARGET: postgres
+
+steps:
+  - connection: '{env.SOURCE}'
+    on_failure: warn
+    query: DROP TABLE test_date_state
+
+  - connection: '{env.SOURCE}'
+    query: |
+      CREATE TABLE test_date_state (
+        id NUMBER(10) PRIMARY KEY,
+        name VARCHAR2(100),
+        updated TIMESTAMP WITH TIME ZONE
+      )
+
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO test_date_state (id, name, updated) VALUES
+        (1, 'alice', TIMESTAMP '2024-01-15 10:30:00 +02:00')
+
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO test_date_state (id, name, updated) VALUES
+        (2, 'bob', TIMESTAMP '2024-02-20 14:45:00 +02:00')
+
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO test_date_state (id, name, updated) VALUES
+        (3, 'carol', TIMESTAMP '2024-03-10 09:00:00 +02:00')
+
+  - connection: '{env.TARGET}'
+    on_failure: warn
+    query: DROP TABLE IF EXISTS public.test_date_state
+
+  - connection: POSTGRES
+    on_failure: warn
+    query: DELETE FROM sling_state._sling_state WHERE source_stream like '%test_date_state%'
+
+  # First run: loads all 3 rows and writes the state watermark
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      streams:
+        test_date_state:
+          object: public.test_date_state
+          mode: incremental
+          update_key: updated
+      env:
+        SLING_STATE: POSTGRES/sling_state
+        SLING_RETRIES: 1
+
+  - type: query
+    connection: POSTGRES
+    query: |
+      SELECT value, column_type FROM sling_state._sling_state
+      WHERE source_stream like '%test_date_state%'
+    into: state_result
+
+  - type: log
+    message: 'state value => {store.state_result[0].value}'
+
+  - type: check
+    check: length(store.state_result) > 0
+    message: 'Expected state record but found none'
+
+  # Exact expected watermark. The bug produced "2024-03-10 09:00:00 +0200 +02:00"
+  # (offset followed by zone name), which is not a valid timestamp.
+  - type: check
+    check: 'store.state_result[0].value == "2024-03-10T09:00:00+02:00"'
+    message: 'Expected RFC3339 watermark, got: {store.state_result[0].value}'
+
+  # Guard the specific malformation: Go's layout emits offset then zone name
+  - type: check
+    check: '!contains(store.state_result[0].value, "+0200 ")'
+    message: 'State value uses Go default time layout: {store.state_result[0].value}'
+
+  # Add a newer row, then re-run: only the new row should load if the watermark parsed
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO test_date_state (id, name, updated) VALUES
+        (4, 'dave', TIMESTAMP '2024-06-01 08:00:00 +02:00')
+
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      streams:
+        test_date_state:
+          object: public.test_date_state
+          mode: incremental
+          update_key: updated
+      env:
+        SLING_STATE: POSTGRES/sling_state
+        SLING_RETRIES: 1
+
+  # A zeroed watermark would re-pull all 3 old rows, duplicating them to 7
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM public.test_date_state
+    into: result
+
+  - type: log
+    message: 'row count after incremental re-run => {store.result[0].cnt}'
+
+  - type: check
+    check: int_parse(store.result[0].cnt) == 4
+    message: 'Expected 4 rows (no re-pull), got {store.result[0].cnt} -- state watermark did not resume'
+
+  # The watermark must have been READ back and advanced to the new max. A value that
+  # failed to parse would have reset to year 1 (and re-pulled all rows above).
+  - type: query
+    connection: POSTGRES
+    query: |
+      SELECT value FROM sling_state._sling_state
+      WHERE source_stream like '%test_date_state%'
+    into: state_result2
+
+  - type: log
+    message: 'state value after re-run => {store.state_result2[0].value}'
+
+  - type: check
+    check: 'store.state_result2[0].value == "2024-06-01T08:00:00+02:00"'
+    message: 'Watermark did not advance to new max, got: {store.state_result2[0].value}'
+
+  - type: log
+    message: 'SUCCESS: Oracle DATE state value is RFC3339 and resumes correctly'
+
+  - connection: '{env.SOURCE}'
+    on_failure: warn
+    query: DROP TABLE test_date_state
+
+  - connection: '{env.TARGET}'
+    on_failure: warn
+    query: DROP TABLE IF EXISTS public.test_date_state
+
+  - connection: POSTGRES
+    on_failure: warn
+    query: DELETE FROM sling_state._sling_state WHERE source_stream like '%test_date_state%'
