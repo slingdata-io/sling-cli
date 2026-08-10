@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -12,6 +13,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestArrowReadWrite(t *testing.T) {
@@ -207,6 +209,128 @@ func TestArrowColumnsToArrowSchemaTimeUUID(t *testing.T) {
 	assert.IsType(t, &arrow.Time64Type{}, schema.Field(1).Type)
 	_, isUUID := schema.Field(2).Type.(*extensions.UUIDType)
 	assert.True(t, isUUID, "uuid column should map to the arrow.uuid extension type, got %T", schema.Field(2).Type)
+}
+
+// TestArrowTimestampZonePreserved asserts a timestamp survives the arrow round
+// trip with its zone *label* intact, not just its instant.
+//
+// The label matters because values are written out with RFC3339Nano, so it
+// becomes the stored offset in targets like Snowflake TIMESTAMP_TZ. The read
+// path used to force .UTC() on every timestamp, and ColumnsToArrowSchema built
+// the field from the arrow.FixedWidthTypes.Timestamp_* globals, which are
+// hardcoded to "UTC". Together those relabeled every CDC value: rows landed as
+// +00:00 while snapshot rows of the same table kept -07:00/-08:00.
+func TestArrowTimestampZonePreserved(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+
+	col := Column{
+		Name:     "create_time",
+		Type:     TimestampzType,
+		Position: 1,
+		Metadata: map[string]string{"timeUnit": "ns", "timeZone": la.String()},
+	}
+
+	// The schema must carry the zone; otherwise the read path has nothing to
+	// restore from.
+	schema := ColumnsToArrowSchema(Columns{col})
+	tsType, ok := schema.Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok, "expected arrow.TimestampType, got %T", schema.Field(0).Type)
+	assert.Equal(t, la.String(), tsType.TimeZone, "schema must carry the column's zone")
+
+	// 18:49:20 PDT — the wall clock a MySQL DATETIME would hold.
+	orig := time.Date(2026, 8, 9, 18, 49, 20, 0, la)
+
+	builder := array.NewTimestampBuilder(memory.NewGoAllocator(), tsType)
+	defer builder.Release()
+	AppendToBuilder(builder, &col, orig)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+
+	got, ok := GetValueFromArrowArray(arr, 0).(time.Time)
+	require.True(t, ok, "expected time.Time from arrow array")
+
+	assert.True(t, got.Equal(orig), "instant must be unchanged: got %s, want %s", got, orig)
+	assert.Equal(t, orig.Format(time.RFC3339Nano), got.Format(time.RFC3339Nano),
+		"zone label must survive the round trip (this is what reaches Snowflake TIMESTAMP_TZ)")
+}
+
+// A column with no zone metadata must still round-trip as UTC, so existing
+// behaviour is unchanged for producers that never set a zone.
+func TestArrowTimestampDefaultsToUTC(t *testing.T) {
+	col := Column{
+		Name:     "ts",
+		Type:     TimestampType,
+		Position: 1,
+		Metadata: map[string]string{"timeUnit": "ns"},
+	}
+
+	schema := ColumnsToArrowSchema(Columns{col})
+	tsType, ok := schema.Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Equal(t, "UTC", tsType.TimeZone)
+
+	orig := time.Date(2026, 8, 9, 18, 49, 20, 0, time.UTC)
+
+	builder := array.NewTimestampBuilder(memory.NewGoAllocator(), tsType)
+	defer builder.Release()
+	AppendToBuilder(builder, &col, orig)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+
+	got, ok := GetValueFromArrowArray(arr, 0).(time.Time)
+	require.True(t, ok)
+	assert.Equal(t, "2026-08-09T18:49:20Z", got.Format(time.RFC3339Nano))
+}
+
+// A datetime is a zone-less wall clock and must stay one across the arrow round
+// trip. Arrow reads any non-empty TimeZone as "this is an instant", so giving
+// the field a UTC zone by default promoted datetime to timestampz and landed
+// MySQL DATETIME columns in Snowflake as TIMESTAMP_TZ instead of TIMESTAMP_NTZ.
+func TestArrowDatetimeStaysZoneless(t *testing.T) {
+	dt := Column{Name: "new_dt", Type: DatetimeType, Position: 1}
+	tz := Column{
+		Name:     "new_ts",
+		Type:     TimestampzType,
+		Position: 2,
+		Metadata: map[string]string{"timeZone": "America/Los_Angeles"},
+	}
+
+	schema := ColumnsToArrowSchema(Columns{dt, tz})
+
+	dtType, ok := schema.Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Empty(t, dtType.TimeZone, "datetime must not carry a zone")
+
+	tzType, ok := schema.Field(1).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Equal(t, "America/Los_Angeles", tzType.TimeZone, "timestampz must keep its zone")
+
+	// The inferred columns are what drive target DDL.
+	cols := ArrowSchemaToColumns(schema)
+	assert.Equal(t, DatetimeType, cols[0].Type, "datetime must not be promoted to timestampz")
+	assert.Equal(t, TimestampzType, cols[1].Type)
+
+	// A zone-less column stores a wall clock, so the digits must survive even
+	// when the incoming value carries an offset. Taking the epoch here shifted
+	// 23:45 -07:00 to 06:45 in Snowflake TIMESTAMP_NTZ.
+	la, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	orig := time.Date(2026, 8, 9, 23, 45, 0, 0, la)
+
+	builder := array.NewTimestampBuilder(memory.NewGoAllocator(), dtType)
+	defer builder.Release()
+	AppendToBuilder(builder, &dt, orig)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+
+	got, ok := GetValueFromArrowArray(arr, 0).(time.Time)
+	require.True(t, ok)
+	assert.Equal(t, "2026-08-09T23:45:00Z", got.Format(time.RFC3339Nano),
+		"wall clock must be preserved for a zone-less column")
 }
 
 // AppendToBuilder must fill a Time64 builder from a bare time-of-day string (as
