@@ -71,8 +71,23 @@ type duckDbQuery struct {
 	err       error
 	started   bool
 	done      bool
+	activity  time.Time     // last time the scanner saw output; for stall detection
 	closed    chan struct{} // closed when the query finishes, to stop the watcher
 	closeOnce sync.Once
+}
+
+// lastActivity is the last time the scanner saw output for this query.
+func (dq *duckDbQuery) lastActivity() time.Time {
+	dq.mu.RLock()
+	defer dq.mu.RUnlock()
+	return dq.activity
+}
+
+// touch records that the process is still responsive.
+func (dq *duckDbQuery) touch() {
+	dq.mu.Lock()
+	defer dq.mu.Unlock()
+	dq.activity = time.Now()
 }
 
 func (dq *duckDbQuery) getErr() error {
@@ -759,13 +774,24 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...any) (r
 func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuery) {
 	stdOutReader, stdOutWriter := io.Pipe() // new pipe
 	dq := &duckDbQuery{
-		SQL:     sql,
-		Context: g.NewContext(ctx),
-		reader:  stdOutReader,
-		writer:  stdOutWriter,
-		closed:  make(chan struct{}),
+		SQL:      sql,
+		Context:  g.NewContext(ctx),
+		reader:   stdOutReader,
+		writer:   stdOutWriter,
+		activity: time.Now(),
+		closed:   make(chan struct{}),
 	}
 	duck.setQuery(dq)
+
+	// Abort a query whose process stops producing output while still alive.
+	// 0 disables. Generous by default: legitimate long queries emit nothing
+	// while computing, so this is a last-resort backstop, not a query timeout.
+	stallTimeout := 10 * time.Minute
+	if val := os.Getenv("SLING_DUCKDB_STALL_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			stallTimeout = d
+		}
+	}
 
 	// watcher: unblock a stuck reader (and release duck.Context's lock) when the
 	// query context is cancelled, or the process dies / its stdout scanner stops
@@ -785,6 +811,17 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 				duck.kill() // kill the proc so it won't block subsequent queries
 				return
 			case <-ticker.C:
+				// Check the stall first: it needs no Proc lock, so it still fires
+				// if the scanner is wedged holding the process mutex.
+				if !dq.isDone() && stallTimeout > 0 && time.Since(dq.lastActivity()) > stallTimeout {
+					err := g.Error("duckdb query stalled: no output for %s", stallTimeout)
+					dq.setErr(err)
+					dq.writer.CloseWithError(err)
+					dq.reader.CloseWithError(err)
+					duck.kill() // unresponsive; kill so it won't block subsequent queries
+					return
+				}
+
 				if duck.Proc != nil && !dq.isDone() && (duck.Proc.Exited() || duck.Proc.GetScanErr() != nil) {
 					reason := "duckdb process exited before query completed"
 					if duck.Proc.GetScanErr() != nil {
@@ -836,6 +873,9 @@ func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error
 				// No more data available, but EOF marker not found yet
 				goto next
 			}
+			if qErr := dq.getErr(); qErr != nil {
+				return result, qErr // stall/process-death cause, not "closed pipe"
+			}
 			return result, g.Error(err, "could not read output from stdout")
 		}
 
@@ -846,6 +886,9 @@ func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error
 				if err == io.EOF {
 					// No more data available, but EOF marker not found yet
 					goto next
+				}
+				if qErr := dq.getErr(); qErr != nil {
+					return result, qErr // stall/process-death cause, not "closed pipe"
 				}
 				return result, g.Error(err, "could not read output from stdout")
 			}
@@ -1263,6 +1306,8 @@ func (duck *DuckDb) initScanner() {
 			return
 		}
 
+		dq.touch() // process is responsive; reset the stall clock
+
 		mu.Lock()
 		defer mu.Unlock()
 
@@ -1676,6 +1721,12 @@ type HttpStreamPart struct {
 	Index    int
 	FromExpr string
 	Columns  Columns
+
+	// Cancel unblocks the producer goroutine in DataflowToHttpStream. Consumers
+	// MUST defer it when they range over streamPartChn: leaving the loop early
+	// (on an insert error) otherwise strands the producer on an unbuffered send
+	// with no reader, hanging the process.
+	Cancel context.CancelFunc
 }
 
 func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamPartChn chan HttpStreamPart, err error) {
@@ -1723,9 +1774,19 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 
 		// server.Use(middleware.Logger())
 		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
-			reader := <-readerCh
+			var reader io.Reader
+			select {
+			case reader = <-readerCh:
+			case <-importContext.Ctx.Done():
+				return c.NoContent(http.StatusOK)
+			}
 			if reader != nil {
-				defer func() { doneCh <- true }()
+				defer func() {
+					select {
+					case doneCh <- true:
+					case <-importContext.Ctx.Done():
+					}
+				}()
 				return c.Stream(200, contentType, reader)
 			}
 			return c.NoContent(http.StatusOK)
@@ -1765,8 +1826,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		defer close(streamPartChn)
 		defer func() {
 			// Shut down HTTP server immediately after all batches are processed
-			// to prevent interference with subsequent DuckDB queries
-			server.Shutdown(importContext.Ctx)
+			// to prevent interference with subsequent DuckDB queries. Use a fresh
+			// context: importContext may already be cancelled, which would skip
+			// the graceful shutdown entirely.
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			server.Shutdown(shutCtx)
 		}()
 		var partIndex int
 
@@ -1782,10 +1847,17 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				// Use read_arrow for Arrow format
 				fromExpr := g.F(`read_arrow('%s')`, httpURL)
 
-				streamPartChn <- HttpStreamPart{
+				select {
+				case streamPartChn <- HttpStreamPart{
 					Index:    partIndex,
 					FromExpr: fromExpr,
 					Columns:  batchR.Columns,
+					Cancel:   importContext.Cancel,
+				}:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					pipeW.CloseWithError(importContext.Ctx.Err())
+					return
 				}
 
 				// Stream data through pipe
@@ -1797,8 +1869,19 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					}
 				}()
 
-				readerCh <- pipeR
-				<-doneCh
+				select {
+				case readerCh <- pipeR:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					return
+				}
+
+				select {
+				case <-doneCh:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					return
+				}
 
 				partIndex++
 			}
@@ -1827,10 +1910,17 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				// can use this as a from table
 				fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns), maxLineSize)
 
-				streamPartChn <- HttpStreamPart{
+				select {
+				case streamPartChn <- HttpStreamPart{
 					Index:    partIndex,
 					FromExpr: fromExpr,
 					Columns:  batchR.Columns,
+					Cancel:   importContext.Cancel,
+				}:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					pipeW.CloseWithError(importContext.Ctx.Err())
+					return
 				}
 
 				// Stream data through pipe
@@ -1842,8 +1932,19 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					}
 				}()
 
-				readerCh <- pipeR
-				<-doneCh
+				select {
+				case readerCh <- pipeR:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					return
+				}
+
+				select {
+				case <-doneCh:
+				case <-importContext.Ctx.Done():
+					pipeR.CloseWithError(importContext.Ctx.Err())
+					return
+				}
 
 				partIndex++
 			}

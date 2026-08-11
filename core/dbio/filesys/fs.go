@@ -1411,6 +1411,15 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 		return bw, g.Error(err)
 	}
 
+	// Unblock the producer on any early return below (delete failure, copy
+	// error). Otherwise it stays parked on an unbuffered send and hangs.
+	var cancelStream context.CancelFunc
+	defer func() {
+		if cancelStream != nil {
+			cancelStream()
+		}
+	}()
+
 	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	if fileFormat == dbio.FileTypeNone {
 		fileFormat = InferFileFormat(uri)
@@ -1428,6 +1437,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	}
 
 	for streamPart := range streamPartChn {
+		cancelStream = streamPart.Cancel
 		copyOptions := iop.DuckDbCopyOptions{
 			Format:        fileFormat,
 			Compression:   sc.Compression,

@@ -287,8 +287,18 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, forma
 		return 0, g.Error(err, "could not setup http stream")
 	}
 
+	// Unblock the producer if we leave the loop early (insert error). Without
+	// this it stays parked on an unbuffered send and the process hangs.
+	var cancelStream context.CancelFunc
+	defer func() {
+		if cancelStream != nil {
+			cancelStream()
+		}
+	}()
+
 	// Process each stream part
 	for streamPart := range streamPartChn {
+		cancelStream = streamPart.Cancel
 		columnNames := lo.Map(streamPart.Columns.Names(), func(col string, i int) string {
 			return `"` + col + `"`
 		})
