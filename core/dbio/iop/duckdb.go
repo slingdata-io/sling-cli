@@ -784,9 +784,10 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 	duck.setQuery(dq)
 
 	// Abort a query whose process stops producing output while still alive.
-	// 0 disables. Generous by default: legitimate long queries emit nothing
-	// while computing, so this is a last-resort backstop, not a query timeout.
-	stallTimeout := 10 * time.Minute
+	// 0 disables. This is a last-resort backstop, not a query timeout: a single
+	// large direct_insert emits nothing between issue and completion, and runs
+	// past 15 min are normal, so keep it well clear of legitimate work.
+	stallTimeout := 60 * time.Minute
 	if val := os.Getenv("SLING_DUCKDB_STALL_TIMEOUT"); val != "" {
 		if d, err := time.ParseDuration(val); err == nil {
 			stallTimeout = d
@@ -1729,6 +1730,18 @@ type HttpStreamPart struct {
 	Cancel context.CancelFunc
 }
 
+// closeBatchReader stops reading a batch's pipe. The arrow/csv writer flushes
+// the tail of a batch into this pipe; if the consumer abandoned it (duckdb
+// dropped the response), that flush blocks forever. Closing makes it fail fast.
+func closeBatchReader(br *BatchReader) {
+	if br == nil {
+		return
+	}
+	if pr, ok := br.Reader.(*io.PipeReader); ok {
+		pr.CloseWithError(g.Error("batch reader closed by consumer"))
+	}
+}
+
 func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamPartChn chan HttpStreamPart, err error) {
 	// create fromExprChn channel
 	streamPartChn = make(chan HttpStreamPart)
@@ -1761,6 +1774,17 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 
 	// create http server to serve data
 	importContext := g.NewContext(duck.Context.Ctx)
+
+	// The dataflow and the duckdb connection live on separate context trees, so
+	// a failure on the source side would otherwise never reach this producer
+	// (and vice versa), deadlocking the readerCh/doneCh handshake. Bridge them.
+	go func() {
+		select {
+		case <-df.Context.Ctx.Done():
+			importContext.Cancel()
+		case <-importContext.Ctx.Done():
+		}
+	}()
 	httpURL := g.F("http://localhost:%d/data", port)
 	server := echo.New()
 	{
@@ -1833,6 +1857,14 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			defer cancel()
 			server.Shutdown(shutCtx)
 		}()
+		// On an early exit the arrow/csv writer may be blocked flushing into a
+		// pipe this loop will no longer read. Cancelling the merged datastream
+		// breaks that write so its goroutine can finish.
+		defer func() {
+			if importContext.Ctx.Err() != nil {
+				ds.Context.Cancel()
+			}
+		}()
 		var partIndex int
 
 		if format == dbio.FileTypeArrow {
@@ -1857,6 +1889,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
 					pipeW.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
 
@@ -1873,6 +1906,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case readerCh <- pipeR:
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
 
@@ -1880,8 +1914,14 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case <-doneCh:
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
+
+				// Done with this batch. If duckdb dropped the response early,
+				// io.Copy stopped mid-batch and left data buffered in the batch
+				// pipe; the writer's next flush would block on it forever.
+				closeBatchReader(batchR)
 
 				partIndex++
 			}
@@ -1920,6 +1960,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
 					pipeW.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
 
@@ -1936,6 +1977,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case readerCh <- pipeR:
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
 
@@ -1943,8 +1985,14 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				case <-doneCh:
 				case <-importContext.Ctx.Done():
 					pipeR.CloseWithError(importContext.Ctx.Err())
+					closeBatchReader(batchR)
 					return
 				}
+
+				// Done with this batch. If duckdb dropped the response early,
+				// io.Copy stopped mid-batch and left data buffered in the batch
+				// pipe; the writer's next flush would block on it forever.
+				closeBatchReader(batchR)
 
 				partIndex++
 			}

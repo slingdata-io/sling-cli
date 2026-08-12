@@ -2717,6 +2717,25 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 	return readerChn
 }
 
+// closeArrowWriter closes aw, aborting the flush if the stream context is
+// cancelled. Without this, a consumer that stops reading mid-batch (duckdb's
+// read_arrow) leaves the flush blocked on the pipe with no reader forever.
+func (ds *Datastream) closeArrowWriter(aw *ArrowWriter, pipeW *io.PipeWriter) error {
+	done := make(chan error, 1)
+	go func() { done <- aw.Close() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ds.Context.Ctx.Done():
+		if pipeW != nil {
+			pipeW.CloseWithError(ds.Context.Ctx.Err()) // unblock the flush
+		}
+		<-done // it returns once the pipe is broken
+		return ds.Context.Ctx.Err()
+	}
+}
+
 // NewArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
 func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
@@ -2735,8 +2754,11 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 
 		nextPipe := func(batch *Batch) error {
 			if aw != nil {
-				err := aw.Close()
-				if err != nil {
+				// Closing flushes the tail of the batch into the prior pipe. If the
+				// consumer already stopped reading (duckdb's read_arrow stops once
+				// it has what it needs), that write blocks forever, so unblock it
+				// when the stream context is cancelled.
+				if err := ds.closeArrowWriter(aw, pipeW); err != nil {
 					return g.Error(err, "could not close arrow writer")
 				}
 			}
