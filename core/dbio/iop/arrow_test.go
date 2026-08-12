@@ -333,6 +333,46 @@ func TestArrowDatetimeStaysZoneless(t *testing.T) {
 		"wall clock must be preserved for a zone-less column")
 }
 
+// A datetime given a zone keeps that label through the round trip without being
+// promoted to timestampz. The CDC readers set the zone from the connection's
+// `loc` so their rows carry the same offset the snapshot path gets from the
+// driver, while the column still lands as TIMESTAMP_NTZ.
+func TestArrowDatetimeKeepsZoneLabel(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+
+	col := Column{
+		Name:     "create_time",
+		Type:     DatetimeType,
+		Position: 1,
+		Metadata: map[string]string{"timeZone": la.String()},
+	}
+
+	schema := ColumnsToArrowSchema(Columns{col})
+	tsType, ok := schema.Field(0).Type.(*arrow.TimestampType)
+	require.True(t, ok)
+	assert.Equal(t, la.String(), tsType.TimeZone, "zone must reach the schema")
+
+	cols := ArrowSchemaToColumns(schema)
+	assert.Equal(t, DatetimeType, cols[0].Type,
+		"a zone must not promote a datetime to timestampz")
+
+	orig := time.Date(2026, 8, 11, 14, 30, 0, 0, la)
+
+	builder := array.NewTimestampBuilder(memory.NewGoAllocator(), tsType)
+	defer builder.Release()
+	AppendToBuilder(builder, &col, orig)
+
+	arr := builder.NewArray()
+	defer arr.Release()
+
+	got, ok := GetValueFromArrowArray(arr, 0).(time.Time)
+	require.True(t, ok)
+	assert.True(t, got.Equal(orig), "instant must be unchanged")
+	assert.Equal(t, orig.Format(time.RFC3339Nano), got.Format(time.RFC3339Nano),
+		"zone label must survive so CDC rows match snapshot rows")
+}
+
 // AppendToBuilder must fill a Time64 builder from a bare time-of-day string (as
 // emitted by SQL `time` columns). Previously cast.ToTimeE rejected these and the
 // value silently zeroed to 00:00:00.

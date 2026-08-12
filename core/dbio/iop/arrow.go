@@ -214,6 +214,22 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 					col.Type = TimestampzType
 					col.DbType = "TIMESTAMPTZ"
 				}
+				// The declared type wins when present. A datetime may carry a
+				// zone purely to label its values, and that must not turn it
+				// into a timestampz in the target DDL.
+				if declared, ok := field.Metadata.GetValue(arrowDeclaredTypeKey); ok {
+					switch ColumnType(declared) {
+					case DatetimeType:
+						col.Type = DatetimeType
+						col.DbType = "TIMESTAMP"
+					case TimestampType:
+						col.Type = TimestampType
+						col.DbType = "TIMESTAMP"
+					case TimestampzType:
+						col.Type = TimestampzType
+						col.DbType = "TIMESTAMPTZ"
+					}
+				}
 			}
 		case arrow.STRING, arrow.LARGE_STRING:
 			col.Type = StringType
@@ -611,6 +627,15 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 			Type:     arrowType,
 			Nullable: true,
 		}
+
+		// Record the declared type for timestamps. Arrow's TimeZone is the only
+		// zone signal it has, so a zone-carrying datetime is otherwise
+		// indistinguishable from a timestampz on the way back. Keeping the
+		// declared type here lets the zone act purely as a label.
+		if col.Type == DatetimeType || col.Type == TimestampType || col.Type == TimestampzType {
+			fields[i].Metadata = arrow.NewMetadata(
+				[]string{arrowDeclaredTypeKey}, []string{string(col.Type)})
+		}
 	}
 
 	return arrow.NewSchema(fields, nil)
@@ -971,6 +996,10 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 	}
 }
 
+// arrowDeclaredTypeKey names the arrow field metadata that carries a timestamp
+// column's declared iop type across the cache round trip.
+const arrowDeclaredTypeKey = "sling:declaredType"
+
 // arrowSchemaTimeZone returns the zone to record in a timestamp field's schema.
 // Uses the column's "timeZone" metadata when present (set on read, or by
 // producers that know the connection's `loc`), defaulting to UTC so behaviour
@@ -979,9 +1008,9 @@ func arrowSchemaTimeZone(col Column) string {
 	if tz := col.Metadata["timeZone"]; tz != "" {
 		return tz
 	}
-	// A zone-less type must stay zone-less. Arrow treats any non-empty TimeZone
-	// as "this is an instant", so defaulting to UTC here would round-trip a
-	// datetime back as timestampz and land it in targets as TIMESTAMP_TZ.
+	// A datetime with no zone of its own stays zone-less. Defaulting it to UTC
+	// would relabel its wall clock. When a zone is supplied the declared type
+	// keeps it from being promoted to timestampz.
 	if col.Type == DatetimeType {
 		return ""
 	}
