@@ -2634,3 +2634,10 @@
     - 'snowflake-adbc'
     - 'bigquery-adbc'
     - 'SUCCESS: SLING_USE_ADBC routed postgres, mysql, sqlserver, duckdb, snowflake and bigquery through ADBC'
+
+# issue #787: rows larger than duckdb's 2MB read_csv max_line_size failed the stream
+- id: 317
+  name: 'rows larger than the duckdb 2MB max_line_size replicate intact (text + json)'
+  run: 'sling run -d -r tests/replications/r.101.duckdb_max_line_size.yaml'
+  output_contains:
+    - 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'

@@ -1768,7 +1768,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			contentType = "application/vnd.apache.arrow.stream"
 			format = dbio.FileTypeArrow
 		} else {
-			g.Debug("duckdb extension arrow is disabled, using csv")
+			g.Debug("duckdb arrow streaming is disabled via SLING_DUCKDB_ARROW, using csv")
 		}
 	}
 
@@ -1934,18 +1934,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				// Create a pipe to stream data through
 				pipeR, pipeW := io.Pipe()
 
-				// Binary columns are streamed as hex text (2x the byte size) — a
-				// single 64 MB BLOB becomes ~128 MB on the wire. Bump max_line_size
-				// when any binary column is present so large LOBs don't blow up
-				// DuckDB's default 2 MB line limit. 256 MB covers Snowflake's
-				// 64 MB BINARY ceiling with comfortable headroom for hex + quoting.
-				maxLineSize := 2000000
-				for _, c := range batchR.Columns {
-					if c.IsBinary() {
-						maxLineSize = 256 * 1024 * 1024
-						break
-					}
-				}
+				maxLineSize := duck.MaxLineSize(batchR.Columns)
 
 				// can use this as a from table
 				fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns), maxLineSize)
@@ -2012,6 +2001,32 @@ func (duck *DuckDb) DefaultCsvConfig() (config StreamConfig) {
 	config.NullAs = `\N`
 	config.DatetimeFormat = dbio.TypeDbDuckDb.GetTemplateValue("variable.timestampz_layout")
 	return config
+}
+
+const (
+	DuckDbDefaultMaxLineSize = 2000000
+	DuckDbLargeMaxLineSize   = 256 * 1024 * 1024
+)
+
+// MaxLineSize returns the read_csv max_line_size for the given columns.
+// Any column that can hold an unbounded value raises the limit, since one row
+// would otherwise exceed DuckDB's 2 MB default. It is a limit, not an
+// allocation. The `max_line_size` prop overrides it.
+func (duck *DuckDb) MaxLineSize(columns Columns) int {
+	if override := duck.GetProp("max_line_size"); override != "" {
+		if size := cast.ToInt(override); size > 0 {
+			return size
+		}
+		g.Warn("invalid max_line_size value '%s', ignoring", override)
+	}
+
+	for _, c := range columns {
+		if c.IsString() {
+			return DuckDbLargeMaxLineSize
+		}
+	}
+
+	return DuckDbDefaultMaxLineSize
 }
 
 func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
