@@ -508,7 +508,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		}
 
 		// show help text
-		if eh := sling.ErrorHelper(err); eh != "" {
+		if eh := sling.ErrorHelper(err, task.Config.SrcConn.GetType(), task.Config.TgtConn.GetType()); eh != "" {
 			env.Println("")
 			env.Println(env.MagentaString(eh))
 			env.Println("")
