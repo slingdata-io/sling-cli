@@ -1816,9 +1816,11 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				// when any binary column is present so large LOBs don't blow up
 				// DuckDB's default 2 MB line limit. 256 MB covers Snowflake's
 				// 64 MB BINARY ceiling with comfortable headroom for hex + quoting.
+				// Large text-class columns (text, ntext, xml, varchar(max), clob)
+				// can likewise exceed the 2 MB default, so they get the same bump.
 				maxLineSize := 2000000
 				for _, c := range batchR.Columns {
-					if c.IsBinary() {
+					if c.IsBinary() || c.Type == TextType {
 						maxLineSize = 256 * 1024 * 1024
 						break
 					}
