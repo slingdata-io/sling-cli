@@ -525,6 +525,76 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 
 		t.Logf("Test completed - received %d Arrow parts. Implementation uses io.Pipe for streaming.", len(parts))
 	})
+
+	t.Run("CSV streaming - max_line_size raised for binary and text columns", func(t *testing.T) {
+		// Binary columns are hex-encoded (2x byte size) and text-class columns
+		// (text, ntext, xml, varchar(max), clob) can exceed DuckDB's default
+		// 2 MB line limit, so both must bump max_line_size to 256 MB (issue #787).
+		testCases := []struct {
+			name        string
+			columnType  ColumnType
+			maxLineSize string
+		}{
+			{"binary column raises limit", BinaryType, "max_line_size=268435456"},
+			{"text column raises limit", TextType, "max_line_size=268435456"},
+			{"string column keeps default", StringType, "max_line_size=2000000"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				df := NewDataflow()
+				columns := NewColumnsFromFields("id", "payload")
+				columns[0].Type = IntegerType
+				columns[1].Type = tc.columnType
+				df.Columns = columns
+				df.Ready = true
+
+				ds := NewDatastreamContext(ctx, columns)
+				ds.SetConfig(map[string]string{})
+				ds.Buffer = append(ds.Buffer, []any{int64(1), "some payload"})
+				ds.Count = 1
+				ds.Ready = true
+
+				df.Streams = append(df.Streams, ds)
+
+				go func() {
+					defer close(df.StreamCh)
+					df.StreamCh <- ds
+					time.Sleep(50 * time.Millisecond)
+					ds.Close()
+				}()
+
+				duck := NewDuckDb(ctx)
+				defer duck.Close()
+
+				sc := StreamConfig{
+					Format:       dbio.FileTypeCsv,
+					BatchLimit:   10,
+					FileMaxBytes: 1024 * 1024,
+				}
+
+				streamPartChn, err := duck.DataflowToHttpStream(df, sc)
+				assert.NoError(t, err)
+				assert.NotNil(t, streamPartChn)
+
+				select {
+				case part, ok := <-streamPartChn:
+					if assert.True(t, ok, "should have received a stream part") {
+						assert.Contains(t, part.FromExpr, "read_csv")
+						assert.Contains(t, part.FromExpr, tc.maxLineSize)
+						t.Logf("Received part: %s", part.FromExpr)
+					}
+				case <-time.After(3 * time.Second):
+					t.Error("timed out waiting for stream part")
+				}
+
+				cancel()
+			})
+		}
+	})
 }
 
 // regression guard for issue #770: http_timeout must be raised on every DuckDB

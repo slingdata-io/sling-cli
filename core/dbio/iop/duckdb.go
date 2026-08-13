@@ -1704,7 +1704,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			contentType = "application/vnd.apache.arrow.stream"
 			format = dbio.FileTypeArrow
 		} else {
-			g.Debug("duckdb extension arrow is disabled, using csv")
+			g.Debug("duckdb arrow streaming is disabled via SLING_DUCKDB_ARROW, using csv")
 		}
 	}
 
