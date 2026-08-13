@@ -527,9 +527,8 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 	})
 
 	t.Run("CSV streaming - max_line_size raised for binary and text columns", func(t *testing.T) {
-		// Binary columns are hex-encoded (2x byte size) and text-class columns
-		// (text, ntext, xml, varchar(max), clob) can exceed DuckDB's default
-		// 2 MB line limit, so both must bump max_line_size to 256 MB (issue #787).
+		// columns that can hold unbounded values must raise max_line_size,
+		// else a single large row fails the stream (issue #787)
 		testCases := []struct {
 			name        string
 			columnType  ColumnType
@@ -537,7 +536,9 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 		}{
 			{"binary column raises limit", BinaryType, "max_line_size=268435456"},
 			{"text column raises limit", TextType, "max_line_size=268435456"},
-			{"string column keeps default", StringType, "max_line_size=2000000"},
+			{"string column raises limit", StringType, "max_line_size=268435456"},
+			{"json column raises limit", JsonType, "max_line_size=268435456"},
+			{"integer column keeps default", IntegerType, "max_line_size=2000000"},
 		}
 
 		for _, tc := range testCases {
@@ -594,6 +595,44 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 				cancel()
 			})
 		}
+	})
+}
+
+func TestDuckDbMaxLineSize(t *testing.T) {
+	colOf := func(t ColumnType) Columns {
+		cols := NewColumnsFromFields("id", "payload")
+		cols[0].Type = IntegerType
+		cols[1].Type = t
+		return cols
+	}
+
+	duckOf := func(props ...string) *DuckDb {
+		return NewDuckDb(context.Background(), props...)
+	}
+
+	t.Run("unbounded types raise the limit", func(t *testing.T) {
+		duck := duckOf()
+		for _, ct := range []ColumnType{StringType, TextType, JsonType, BinaryType, UUIDType, GeometryType} {
+			assert.Equal(t, DuckDbLargeMaxLineSize, duck.MaxLineSize(colOf(ct)), "colType=%s", ct)
+		}
+	})
+
+	t.Run("bounded types keep the default", func(t *testing.T) {
+		duck := duckOf()
+		for _, ct := range []ColumnType{IntegerType, BigIntType, DecimalType, BoolType, DateType, DatetimeType} {
+			assert.Equal(t, DuckDbDefaultMaxLineSize, duck.MaxLineSize(colOf(ct)), "colType=%s", ct)
+		}
+	})
+
+	t.Run("max_line_size prop overrides", func(t *testing.T) {
+		duck := duckOf("max_line_size=999")
+		assert.Equal(t, 999, duck.MaxLineSize(colOf(TextType)))
+		assert.Equal(t, 999, duck.MaxLineSize(colOf(IntegerType)))
+	})
+
+	t.Run("invalid prop is ignored", func(t *testing.T) {
+		duck := duckOf("max_line_size=abc")
+		assert.Equal(t, DuckDbLargeMaxLineSize, duck.MaxLineSize(colOf(TextType)))
 	})
 }
 

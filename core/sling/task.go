@@ -675,7 +675,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		case contains("CSV") && contains("encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
 		case contains("Maximum line size of", "bytes exceeded"):
-			helpString = "A row's serialized size exceeded the max_line_size limit of Sling's internal DuckDB CSV bridge. Sling raises this limit automatically when binary or large text-class columns are present in the source schema. If you are still seeing this error, please open an issue @ https://github.com/slingdata-io/sling-cli"
+			helpString = "A row exceeded the max_line_size limit of Sling's internal DuckDB CSV bridge. Sling raises this limit to 256MB when the source schema has string, text, json or binary columns. For larger values, set the `max_line_size` property in your connection to a higher byte value."
 		case contains("Invalid Input Error: CSV Error on Line:") && usesDuckDb:
 			helpString = "By default, Sling uses CSV serialization to pipe data into DuckDB. Try setting the `copy_method: arrow_http` property in your DuckDB / MotherDuck connection to avoid serialization errors. See https://docs.slingdata.io/connections/database-connections for more details."
 		case contains("it does not have a replica identity and publishes updates"):

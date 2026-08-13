@@ -15,6 +15,7 @@ func TestErrorHelper(t *testing.T) {
 	t.Run("max_line_size exceeded gets specific help, not arrow_http", func(t *testing.T) {
 		helpString := ErrorHelper(maxLineSizeErr, dbio.TypeDbSQLServer, dbio.TypeFileS3)
 		assert.Contains(t, helpString, "max_line_size")
+		assert.Contains(t, helpString, "max_line_size` property")
 		assert.NotContains(t, helpString, "arrow_http")
 	})
 
