@@ -2641,3 +2641,12 @@
   run: 'sling run -d -r tests/replications/r.101.duckdb_max_line_size.yaml'
   output_contains:
     - 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'
+
+# issue #785: ADBC ingestion never sets the catalog, so a 3-part target name
+# writes the temp table to one database and ingests into the default one.
+# Requires the mssql ADBC driver (dbc install mssql)
+- id: 318
+  name: 'ADBC ingests into a 3-part (database.schema.table) target name'
+  run: 'sling run -d -r tests/replications/r.102.adbc_three_part_name.yaml'
+  output_contains:
+    - 'SUCCESS: ADBC loaded into a 3-part (database.schema.table) target name'
