@@ -3081,6 +3081,12 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		// don't normalize, use raw name
 		srcCol := srcColumns.GetColumn(pkField)
 		tgtCol := tgtColumns.GetColumn(pkField)
+		if srcCol == nil {
+			return mc, g.Error("did not find source PK column: %s (has %s)", pkField, g.Marshal(srcColumns.Names()))
+		}
+		if tgtCol == nil {
+			return mc, g.Error("did not find target PK column: %s (has %s)", pkField, g.Marshal(tgtColumns.Names()))
+		}
 		srcField := conn.Quote(srcCol.Name)
 		tgtField := conn.Quote(tgtCol.Name)
 
