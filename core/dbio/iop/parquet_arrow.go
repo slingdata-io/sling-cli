@@ -283,10 +283,18 @@ func (p *ParquetArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 		return array.NewDate32Builder(p.mem)
 	case arrow.TIMESTAMP:
 		return array.NewTimestampBuilder(p.mem, dtype.(*arrow.TimestampType))
+	case arrow.TIME32:
+		return array.NewTime32Builder(p.mem, dtype.(*arrow.Time32Type))
+	case arrow.TIME64:
+		return array.NewTime64Builder(p.mem, dtype.(*arrow.Time64Type))
 	case arrow.STRING:
 		return array.NewStringBuilder(p.mem)
 	case arrow.BINARY:
 		return array.NewBinaryBuilder(p.mem, dtype.(*arrow.BinaryType))
+	case arrow.EXTENSION:
+		// arrow picks the extension's own builder (e.g. UUIDBuilder), which the
+		// generic ExtensionBuilder would not give us
+		return array.NewBuilder(p.mem, dtype)
 	default:
 		return array.NewStringBuilder(p.mem)
 	}
