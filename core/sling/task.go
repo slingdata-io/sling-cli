@@ -645,6 +645,8 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		switch {
 		case contains("utf8") || contains("ascii"):
 			helpString = "Perhaps the 'encodings' source option could help? See https://docs.slingdata.io/concepts/replication/source-options#supported-encodings. Also try the `replace_non_printable` transform. See https://docs.slingdata.io/concepts/replication/transforms"
+		case contains("sql server browser") || contains("no instance matching"):
+			helpString = "A named instance needs SQL Server Browser (UDP 1434), or set `port` to the instance TCP port and omit `instance`. See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case contains("failed to verify certificate"):
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case contains("ssl is not enabled on the server"):

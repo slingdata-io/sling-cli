@@ -30,4 +30,11 @@ func TestErrorHelper(t *testing.T) {
 		helpString := ErrorHelper(csvErr, dbio.TypeDbSQLServer, dbio.TypeFileS3)
 		assert.NotContains(t, helpString, "arrow_http")
 	})
+
+	t.Run("sql browser timeout explains named instance port", func(t *testing.T) {
+		err := g.Error("unable to get instances from Sql Server Browser on host THEHOST: read udp 127.0.0.1:50533->192.168.0.1:1434: i/o timeout")
+		helpString := ErrorHelper(err, dbio.TypeDbSQLServer)
+		assert.Contains(t, helpString, "UDP 1434")
+		assert.Contains(t, helpString, "instance TCP port")
+	})
 }
