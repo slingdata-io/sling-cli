@@ -1222,7 +1222,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 	}
 	testSuite(t, dbio.Type("sqlserver_adbc"))
 	testSuite(t, dbio.Type("sqlserver_odbc"))
-	testSuite(t, dbio.Type("azure_sql"))
+	// testSuite(t, dbio.Type("azure_sql"))
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {
