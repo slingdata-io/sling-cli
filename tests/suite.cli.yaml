@@ -2650,3 +2650,11 @@
   run: 'sling run -d -r tests/replications/r.102.adbc_three_part_name.yaml'
   output_contains:
     - 'SUCCESS: ADBC loaded into a 3-part (database.schema.table) target name'
+
+# issue #789: row-integrity check across many merged CSV files. The idle-reset
+# guard lives in core/dbio/filesys/fs_merge_readers_test.go (local disk does not reset).
+- id: 319
+  name: 'many merged files read intact (issue #789)'
+  run: 'sling run -d -p tests/pipelines/p.49.merge_readers_many_files.yaml'
+  output_contains:
+    - 'SUCCESS: all 8000 rows read intact from many merged files'

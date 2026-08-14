@@ -1,0 +1,62 @@
+# issue #789: row integrity across many merged CSV files.
+# Idle-reset coverage is in core/dbio/filesys/fs_merge_readers_test.go.
+steps:
+  - type: query
+    connection: POSTGRES
+    query: drop table if exists public.issue789_many_files
+
+  # write many small files, like a redshift unload
+  - type: replication
+    replication:
+      source: POSTGRES
+      target: LOCAL
+      defaults:
+        mode: full-refresh
+        target_options:
+          file_max_rows: 500
+          format: csv
+      streams:
+        gen_data:
+          sql: |
+            select g as id, md5(g::text) as name
+            from generate_series(1, 8000) g
+          object: file://temp/issue789_suite/data.csv
+
+  # read them back through MergeReaders
+  - type: replication
+    replication:
+      source: LOCAL
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        file://temp/issue789_suite/data.csv:
+          object: public.issue789_many_files
+
+  - type: query
+    connection: POSTGRES
+    query: |
+      select count(*) as cnt, count(distinct id) as ids, sum(id) as total
+      from public.issue789_many_files
+    into: result
+
+  - type: log
+    message: 'rows={store.result[0].cnt} distinct={store.result[0].ids} sum={store.result[0].total}'
+
+  - type: check
+    check: int_parse(store.result[0].cnt) == 8000
+    failure_message: 'expected 8000 rows, got {store.result[0].cnt}'
+
+  - type: check
+    check: int_parse(store.result[0].ids) == 8000
+    failure_message: 'expected 8000 distinct ids, got {store.result[0].ids}'
+
+  # 1..8000 sums to 32004000, so nothing is dropped or duplicated
+  - type: check
+    check: int_parse(store.result[0].total) == 32004000
+    failure_message: 'id sum was {store.result[0].total}, expected 32004000'
+    success_message: 'SUCCESS: all 8000 rows read intact from many merged files'
+
+  - type: query
+    connection: POSTGRES
+    query: drop table if exists public.issue789_many_files

@@ -1718,6 +1718,10 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 		concurrency = 3
 	}
 
+	// CSV/JSON are read one file at a time. XML is copied one file at a time.
+	// Open the body at first read so unread remote bodies do not sit idle.
+	channelConsume := g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson)
+
 	g.Debug("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
 	readerChn := make(chan *iop.ReaderReady, concurrency)
 	go func() {
@@ -1729,40 +1733,40 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 				continue
 			}
 
-			ds.Context.Wg.Read.Add()
-			go func(node FileNode) {
-				defer ds.Context.Wg.Read.Done()
+			if !includeAll {
+				_, uriExclude := excludeMap[node.URI]
+				_, pathExclude := excludeMap[node.Path()]
+				_, uriInclude := includeMap[node.URI]
+				_, pathInclude := includeMap[node.Path()]
 
-				if !includeAll {
-					_, uriExclude := excludeMap[node.URI]
-					_, pathExclude := excludeMap[node.Path()]
-					_, uriInclude := includeMap[node.URI]
-					_, pathInclude := includeMap[node.Path()]
-
-					if (uriExclude || pathExclude) || (!uriInclude && !pathInclude) {
-						g.Debug("skipping %s", node.URI)
-						return
-					}
+				if (uriExclude || pathExclude) || (!uriInclude && !pathInclude) {
+					g.Debug("skipping %s", node.URI)
+					continue
 				}
+			}
 
+			node := node
+			r := &iop.ReaderReady{URI: node.URI}
+			r.Open = func() (io.Reader, error) {
 				g.Debug("processing reader from %s", node.URI)
-
 				reader, err := fs.Self().GetReader(node.URI)
 				if err != nil {
-					setError(g.Error(err, "Error getting reader"))
-					return
+					err = g.Error(err, "Error getting reader")
+					setError(err)
+					return nil, err
 				}
+				return reader, nil
+			}
 
-				r := &iop.ReaderReady{Reader: reader, URI: node.URI}
-				readerChn <- r
-			}(node)
+			select {
+			case readerChn <- r:
+			case <-ds.Context.Ctx.Done():
+				return
+			}
 		}
-
-		ds.Context.Wg.Read.Wait()
-
 	}()
 
-	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson) {
+	if channelConsume {
 		pipeW.Close()
 
 		switch fileType {
@@ -1778,13 +1782,30 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 			defer pipeW.Close()
 
 			for reader := range readerChn {
-				_, err = io.Copy(pipeW, reader.Reader)
-				if err != nil {
-					setError(g.Error(err, "Error copying reader to pipe writer"))
+				src, rerr := reader.GetReader()
+				if rerr != nil {
+					reader.Close()
+					setError(g.Error(rerr, "Error getting reader"))
+					for leftover := range readerChn {
+						leftover.Close()
+					}
+					return
+				}
+
+				_, rerr = io.Copy(pipeW, src)
+				reader.Close()
+				if rerr != nil {
+					setError(g.Error(rerr, "Error copying reader to pipe writer"))
+					for leftover := range readerChn {
+						leftover.Close()
+					}
 					return
 				}
 
 				if cfg.Limit > 0 && (ds.Limited(cfg.Limit) || len(ds.Buffer) >= cfg.Limit) {
+					for leftover := range readerChn {
+						leftover.Close()
+					}
 					return
 				}
 			}
