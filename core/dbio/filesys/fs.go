@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1719,19 +1720,27 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 	}
 
 	// CSV/JSON are read one file at a time. XML is copied one file at a time.
-	// Open the body at first read so unread remote bodies do not sit idle.
 	channelConsume := g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson)
 
 	g.Debug("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
+	nodeChn := make(chan *iop.ReaderReady, concurrency)
 	readerChn := make(chan *iop.ReaderReady, concurrency)
 	go func() {
-		defer close(readerChn)
+		defer close(nodeChn)
 
+		seen := map[string]struct{}{}
 		for _, node := range nodes {
 			if strings.HasSuffix(node.URI, "/") {
 				g.Debug("skipping %s because is not file", node.URI)
 				continue
 			}
+
+			// stores like Google Drive can list the same path more than once
+			if _, ok := seen[node.URI]; ok {
+				g.Debug("skipping duplicate listing of %s", node.URI)
+				continue
+			}
+			seen[node.URI] = struct{}{}
 
 			if !includeAll {
 				_, uriExclude := excludeMap[node.URI]
@@ -1751,19 +1760,47 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 				g.Debug("processing reader from %s", node.URI)
 				reader, err := fs.Self().GetReader(node.URI)
 				if err != nil {
-					err = g.Error(err, "Error getting reader")
-					setError(err)
-					return nil, err
+					return nil, g.Error(err, "Error getting reader for %s", node.URI)
 				}
 				return reader, nil
 			}
 
 			select {
-			case readerChn <- r:
+			case nodeChn <- r:
 			case <-ds.Context.Ctx.Done():
 				return
 			}
 		}
+	}()
+
+	// Prefetch pool: open bodies ahead of the consumer, bounded by the worker
+	// count plus the channel buffer. A body that a remote store resets while
+	// it waits is reopened at read time (see iop.ReaderReady.Read).
+	go func() {
+		defer close(readerChn)
+
+		wg := sync.WaitGroup{}
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for r := range nodeChn {
+					select {
+					case <-ds.Context.Ctx.Done():
+						// stream ended; pass unopened for the drain to close
+					default:
+						r.Prefetch()
+					}
+					select {
+					case readerChn <- r:
+					case <-ds.Context.Ctx.Done():
+						r.Close()
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
 	}()
 
 	if channelConsume {

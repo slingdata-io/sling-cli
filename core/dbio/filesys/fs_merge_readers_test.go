@@ -27,6 +27,7 @@ type idleTrackingReader struct {
 	dead        bool
 	closed      bool
 	forceClosed bool
+	dieAt       int // >0: die like a reset connection after this many bytes
 	fs          *idleSensitiveFS
 }
 
@@ -79,6 +80,10 @@ func (r *idleTrackingReader) Read(p []byte) (int, error) {
 	if r.dead {
 		return 0, fmt.Errorf("read tcp 10.0.0.1:54567->52.216.0.1:443: read: connection reset by peer")
 	}
+	if r.dieAt > 0 && r.pos >= r.dieAt {
+		r.close()
+		return 0, fmt.Errorf("read tcp 10.0.0.1:54567->52.216.0.1:443: read: connection reset by peer")
+	}
 	if r.pos >= len(r.data) {
 		r.close()
 		return 0, io.EOF
@@ -91,9 +96,12 @@ func (r *idleTrackingReader) Read(p []byte) (int, error) {
 // idleSensitiveFS hands back bodies that go stale if not consumed promptly.
 type idleSensitiveFS struct {
 	LocalFileSysClient
-	contents   map[string][]byte
-	idleWindow time.Duration
-	readPause  time.Duration
+	contents      map[string][]byte
+	idleWindow    time.Duration
+	readPause     time.Duration
+	openPause     time.Duration   // latency per GetReader, like a remote store
+	dieAfterBytes int             // >0: the first body per URI dies mid-stream
+	killed        map[string]bool // URIs whose first body already died
 
 	mu         sync.Mutex
 	openCount  int
@@ -118,11 +126,23 @@ func (fs *idleSensitiveFS) GetReader(uri string) (io.Reader, error) {
 		return nil, fmt.Errorf("no such object: %s", uri)
 	}
 
+	if fs.openPause > 0 {
+		time.Sleep(fs.openPause)
+	}
+
 	fs.mu.Lock()
 	fs.openCount++
 	fs.curOpen++
 	if fs.curOpen > fs.maxOpen {
 		fs.maxOpen = fs.curOpen
+	}
+	dieAt := 0
+	if fs.dieAfterBytes > 0 && !fs.killed[uri] {
+		if fs.killed == nil {
+			fs.killed = map[string]bool{}
+		}
+		fs.killed[uri] = true
+		dieAt = fs.dieAfterBytes
 	}
 	fs.mu.Unlock()
 
@@ -131,6 +151,7 @@ func (fs *idleSensitiveFS) GetReader(uri string) (io.Reader, error) {
 		uri:        uri,
 		openedAt:   time.Now(),
 		idleWindow: fs.idleWindow,
+		dieAt:      dieAt,
 		fs:         fs,
 	}, nil
 }
@@ -206,9 +227,14 @@ func (fs *idleSensitiveFS) snapshot() (maxOpen int, maxIdle time.Duration, maxId
 	return fs.maxOpen, fs.maxIdle, fs.maxIdleURI, fs.curOpen
 }
 
-// TestMergeReadersIdleBoundedIssue789 guards issue #789. MergeReaders used to
-// open every file's body up front while the consumer read one at a time.
-func TestMergeReadersIdleBoundedIssue789(t *testing.T) {
+// mergeConcurrency mirrors the concurrency pick in MergeReaders for the
+// mock FS (S3 type, small node counts).
+const mergeConcurrency = 10
+
+// TestMergeReadersOpenBoundIssue789 guards issue #789's resource side.
+// Look-ahead is allowed, but the open-body count must stay bounded by the
+// prefetch window, not grow with the file count.
+func TestMergeReadersOpenBoundIssue789(t *testing.T) {
 	const numFiles = 40
 	const rowsPerFile = 200
 
@@ -221,37 +247,48 @@ func TestMergeReadersIdleBoundedIssue789(t *testing.T) {
 	maxOpen, maxIdle, maxIdleURI, curOpen := fs.snapshot()
 	t.Logf("max open at once: %d, longest idle: %v (%s)", maxOpen, maxIdle.Round(time.Millisecond), maxIdleURI)
 
-	// current file plus at most one transition. 20 idle bodies is the old bug.
-	assert.LessOrEqual(t, maxOpen, 2, "too many bodies open at once: %d", maxOpen)
-	assert.Less(t, maxIdle, time.Second,
-		"a body idled %v before its first read; open the body at first read",
-		maxIdle.Round(time.Millisecond))
+	// workers + channel buffer + consumer transition; 40 open bodies is the old bug
+	assert.LessOrEqual(t, maxOpen, 2*mergeConcurrency+4, "too many bodies open at once: %d", maxOpen)
 	assert.Equal(t, 0, curOpen, "bodies must be closed after use")
 }
 
-// TestMergeReadersIdleDoesNotGrowWithFileCount is the core of the #789 fix:
-// a larger unload must not mean a longer idle wait.
-func TestMergeReadersIdleDoesNotGrowWithFileCount(t *testing.T) {
-	measure := func(numFiles int) time.Duration {
-		fs, nodes := newIdleSensitiveFS(t, numFiles, 200, time.Hour, idleCSV)
+// TestMergeReadersOpensArePipelined guards the staging timeout regression
+// (exec 3HuEiSRkALXQERuORc7KDWC5XAn): with per-open latency, opens must
+// overlap. A serial open of 30 files at 50ms each takes 1.5s+.
+func TestMergeReadersOpensArePipelined(t *testing.T) {
+	const numFiles = 30
+	const rowsPerFile = 50
+	const openPause = 50 * time.Millisecond
 
-		count, err := readAll(t, fs, nodes, dbio.FileTypeCsv)
-		assert.NoError(t, err)
-		assert.Equal(t, numFiles*200, count)
+	fs, nodes := newIdleSensitiveFS(t, numFiles, rowsPerFile, time.Hour, idleCSV)
+	fs.openPause = openPause
 
-		_, maxIdle, _, _ := fs.snapshot()
-		return maxIdle
-	}
+	started := time.Now()
+	count, err := readAll(t, fs, nodes, dbio.FileTypeCsv)
+	elapsed := time.Since(started)
 
-	small := measure(10)
-	large := measure(40)
+	assert.NoError(t, err)
+	assert.Equal(t, numFiles*rowsPerFile, count)
 
-	t.Logf("longest idle: 10 files=%v, 40 files=%v",
-		small.Round(time.Millisecond), large.Round(time.Millisecond))
+	serial := time.Duration(numFiles) * openPause
+	t.Logf("elapsed: %v (serial would be %v+)", elapsed.Round(time.Millisecond), serial)
+	assert.Less(t, elapsed, serial/2, "opens are not pipelined: %v", elapsed.Round(time.Millisecond))
+}
 
-	// both must stay far below a reset window; do not ratio two near-zero times
-	assert.Less(t, small, 200*time.Millisecond, "10-file idle %v is not bounded", small)
-	assert.Less(t, large, 200*time.Millisecond, "40-file idle %v is not bounded", large)
+// TestMergeReadersResumesAfterMidStreamReset covers the reopen path with a
+// non-zero offset: a body that dies mid-file is reopened and skipped to the
+// bytes already delivered, with no loss and no duplicates.
+func TestMergeReadersResumesAfterMidStreamReset(t *testing.T) {
+	const numFiles = 3
+	const rowsPerFile = 500
+
+	fs, nodes := newIdleSensitiveFS(t, numFiles, rowsPerFile, time.Hour, idleCSV)
+	fs.dieAfterBytes = 1000 // dies mid-file; each file is ~8KB
+
+	count, err := readAll(t, fs, nodes, dbio.FileTypeCsv)
+
+	assert.NoError(t, err, "stream must resume after a mid-stream reset")
+	assert.Equal(t, numFiles*rowsPerFile, count, "rows must not be lost or duplicated")
 }
 
 // TestMergeReadersSurvivesIdleReset is the end-to-end guard: with a window
@@ -269,10 +306,10 @@ func TestMergeReadersSurvivesIdleReset(t *testing.T) {
 	assert.Equal(t, numFiles*rowsPerFile, count, "all rows should be read")
 }
 
-// TestMergeReadersSlowConsumerDoesNotResetLookahead fails if the next body
-// is opened while the current file is still being read. Prefetch of live
-// bodies sits idle for the pause (2s) and trips the 1s window.
-func TestMergeReadersSlowConsumerDoesNotResetLookahead(t *testing.T) {
+// TestMergeReadersSlowConsumerRecoversResetLookahead: a slow consumer (2s
+// per file) lets prefetched bodies idle past the 1s reset window. The
+// stream must recover each reset body by a reopen at first read.
+func TestMergeReadersSlowConsumerRecoversResetLookahead(t *testing.T) {
 	const numFiles = 4
 	const rowsPerFile = 200
 	const pause = 2 * time.Second
@@ -283,18 +320,11 @@ func TestMergeReadersSlowConsumerDoesNotResetLookahead(t *testing.T) {
 
 	count, err := readAll(t, fs, nodes, dbio.FileTypeCsv)
 
-	assert.NoError(t, err, "look-ahead opened a body that sat idle for %v", pause)
+	assert.NoError(t, err, "a look-ahead body that sat idle for %v must be reopened", pause)
 	assert.Equal(t, numFiles*rowsPerFile, count)
-
-	maxOpen, maxIdle, maxIdleURI, _ := fs.snapshot()
-	t.Logf("max open at once: %d, longest idle: %v (%s)", maxOpen, maxIdle.Round(time.Millisecond), maxIdleURI)
-
-	assert.LessOrEqual(t, maxOpen, 2, "look-ahead opened extra bodies: maxOpen=%d", maxOpen)
-	assert.Less(t, maxIdle, idleWindow,
-		"a body idled %v; open the body at first read", maxIdle.Round(time.Millisecond))
 }
 
-func TestMergeReadersJsonLinesIdleBounded(t *testing.T) {
+func TestMergeReadersJsonLinesResetRecovered(t *testing.T) {
 	const numFiles = 10
 	const rowsPerFile = 50
 
@@ -304,15 +334,14 @@ func TestMergeReadersJsonLinesIdleBounded(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, numFiles*rowsPerFile, count)
 
-	maxOpen, maxIdle, _, curOpen := fs.snapshot()
-	assert.LessOrEqual(t, maxOpen, 2, "too many JSONL bodies open at once: %d", maxOpen)
-	assert.Less(t, maxIdle, time.Second, "JSONL body idled %v", maxIdle.Round(time.Millisecond))
+	maxOpen, _, _, curOpen := fs.snapshot()
+	assert.LessOrEqual(t, maxOpen, 2*mergeConcurrency+4, "too many JSONL bodies open at once: %d", maxOpen)
 	assert.Equal(t, 0, curOpen, "JSONL bodies must be closed after use")
 }
 
-// TestMergeReadersXmlOpensNearPointOfUse covers the pipe path. Producers used
-// to call GetReader for every file, then copy one by one.
-func TestMergeReadersXmlOpensNearPointOfUse(t *testing.T) {
+// TestMergeReadersXmlOpenBound covers the pipe path: open bodies stay
+// bounded by the prefetch window.
+func TestMergeReadersXmlOpenBound(t *testing.T) {
 	const numFiles = 20
 	const rowsPerFile = 10
 
@@ -328,5 +357,5 @@ func TestMergeReadersXmlOpensNearPointOfUse(t *testing.T) {
 		return fs.openCount
 	}())
 
-	assert.LessOrEqual(t, maxOpen, 2, "XML pipe path opened %d bodies at once", maxOpen)
+	assert.LessOrEqual(t, maxOpen, 2*mergeConcurrency+4, "XML pipe path opened %d bodies at once", maxOpen)
 }

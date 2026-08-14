@@ -1194,16 +1194,23 @@ type ReaderReady struct {
 	Reader io.Reader
 	URI    string
 
-	// Open obtains the reader at first use. Remote stores reset an unread body.
+	// Open obtains the body. It can run again to replace a body that a
+	// remote store reset while the body sat idle (e.g. in a prefetch queue).
 	Open func() (io.Reader, error)
 
-	mu     sync.Mutex
-	opened bool
-	closed bool
-	err    error
+	mu        sync.Mutex
+	opened    bool
+	closed    bool
+	delivered int64 // raw bytes handed to the consumer, for resume on reopen
+	reopens   int
 }
 
-// GetReader returns the reader. It opens on first use. A failed Open is retried.
+const readerReadyMaxReopens = 2
+
+// GetReader returns the reader. It opens on first use. A failed Open is
+// retried on the next call. When Open is set, the returned reader recovers
+// from a reset body: it reopens, skips the bytes already delivered, and
+// resumes (see Read).
 func (rr *ReaderReady) GetReader() (io.Reader, error) {
 	if rr == nil {
 		return nil, g.Error("nil reader")
@@ -1218,21 +1225,108 @@ func (rr *ReaderReady) GetReader() (io.Reader, error) {
 	if rr.closed {
 		return nil, g.Error("reader is closed")
 	}
-	if rr.opened {
-		return rr.Reader, rr.err
+
+	if !rr.opened {
+		reader, err := rr.Open()
+		if err != nil {
+			// do not cache; the consumer retries at the point of use
+			return nil, err
+		}
+		rr.Reader = reader
+		rr.opened = true
 	}
+
+	return rr, nil
+}
+
+// Prefetch opens the body ahead of consumption. An error is not returned:
+// GetReader retries the open at the point of use.
+func (rr *ReaderReady) Prefetch() {
+	if rr == nil || rr.Open == nil {
+		return
+	}
+
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed || rr.opened {
+		return
+	}
+
+	if reader, err := rr.Open(); err == nil {
+		rr.Reader = reader
+		rr.opened = true
+	}
+}
+
+// Read delegates to the body. On a read error before any byte of this call,
+// it reopens the body, skips the bytes already delivered, and retries. This
+// recovers a body that a remote store reset while it sat idle.
+func (rr *ReaderReady) Read(p []byte) (n int, err error) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed {
+		return 0, g.Error("reader is closed")
+	}
+
+	if !rr.opened {
+		reader, oerr := rr.Open()
+		if oerr != nil {
+			return 0, oerr
+		}
+		rr.Reader = reader
+		rr.opened = true
+	}
+
+	for {
+		n, err = rr.Reader.Read(p)
+		if n > 0 {
+			rr.delivered += int64(n)
+		}
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+		if n > 0 {
+			// deliver the bytes; the error resurfaces on the next call
+			return n, nil
+		}
+		if rerr := rr.reopenLocked(err); rerr != nil {
+			return 0, rerr
+		}
+	}
+}
+
+// reopenLocked replaces a dead body and skips to the resume offset.
+// The caller must hold rr.mu.
+func (rr *ReaderReady) reopenLocked(cause error) error {
+	if rr.Open == nil || rr.reopens >= readerReadyMaxReopens {
+		return cause
+	}
+	rr.reopens++
+
+	if c, ok := rr.Reader.(io.Closer); ok && rr.Reader != nil {
+		c.Close()
+	}
+
+	g.Debug("reopening reader (attempt %d) from %s after read error: %s", rr.reopens+1, rr.URI, cause.Error())
 
 	reader, err := rr.Open()
 	if err != nil {
-		// do not cache; the consumer retries at the point of use
-		rr.err = err
-		return nil, err
+		return g.Error(err, "could not reopen reader for %s (after read error: %s)", rr.URI, cause.Error())
+	}
+
+	if rr.delivered > 0 {
+		if _, err = io.CopyN(io.Discard, reader, rr.delivered); err != nil {
+			if c, ok := reader.(io.Closer); ok {
+				c.Close()
+			}
+			return g.Error(err, "could not skip to offset %d on reopened reader for %s", rr.delivered, rr.URI)
+		}
 	}
 
 	rr.Reader = reader
-	rr.err = nil
-	rr.opened = true
-	return rr.Reader, nil
+	return nil
 }
 
 // Close closes an unused or finished body. Safe to call more than once.
