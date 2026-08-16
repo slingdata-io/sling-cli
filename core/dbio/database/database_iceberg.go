@@ -1282,7 +1282,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 	// Process batches from the datastream
 	for batch := range ds.BatchChan {
 		// Create Arrow schema from batch columns (in case they changed)
-		arrowSchema := iop.ColumnsToArrowSchema(batch.Columns)
+		arrowSchema := conn.icebergArrowSchema(batch.Columns)
 
 		// Create memory allocator
 		alloc := memory.NewGoAllocator()
@@ -1595,6 +1595,30 @@ func (conn *IcebergConn) generateIcebergSchema(columns iop.Columns) (*iceberg.Sc
 	// Create schema with ID 0 (initial schema)
 	schema := iceberg.NewSchema(0, fields...)
 	return schema, nil
+}
+
+// icebergArrowSchema builds the arrow schema used to append into an iceberg
+// table. All timestamp fields get a zone because iopTypeToIcebergPrimitiveType
+// declares every timestamp column as iceberg `timestamptz`. A zone-less arrow
+// timestamp reads back as iceberg `timestamp`, which iceberg refuses to promote.
+func (conn *IcebergConn) icebergArrowSchema(columns iop.Columns) *arrow.Schema {
+	schema := iop.ColumnsToArrowSchema(columns)
+
+	fields := schema.Fields()
+	changed := false
+	for i, field := range fields {
+		tsType, ok := field.Type.(*arrow.TimestampType)
+		if !ok || tsType.TimeZone != "" {
+			continue
+		}
+		fields[i].Type = &arrow.TimestampType{Unit: tsType.Unit, TimeZone: "UTC"}
+		changed = true
+	}
+
+	if !changed {
+		return schema
+	}
+	return arrow.NewSchema(fields, nil)
 }
 
 // iopTypeToIcebergPrimitiveType converts iop column type to Iceberg primitive type
