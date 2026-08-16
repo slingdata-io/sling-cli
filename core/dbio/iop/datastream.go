@@ -1193,17 +1193,192 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 type ReaderReady struct {
 	Reader io.Reader
 	URI    string
+
+	// Open obtains the body. It can run again to replace a body that a
+	// remote store reset while the body sat idle (e.g. in a prefetch queue).
+	Open func() (io.Reader, error)
+
+	mu        sync.Mutex
+	opened    bool
+	closed    bool
+	delivered int64 // raw bytes handed to the consumer, for resume on reopen
+	reopens   int
+}
+
+const readerReadyMaxReopens = 2
+
+// GetReader returns the reader. It opens on first use. A failed Open is
+// retried on the next call. When Open is set, the returned reader recovers
+// from a reset body: it reopens, skips the bytes already delivered, and
+// resumes (see Read).
+func (rr *ReaderReady) GetReader() (io.Reader, error) {
+	if rr == nil {
+		return nil, g.Error("nil reader")
+	}
+	if rr.Open == nil {
+		return rr.Reader, nil
+	}
+
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed {
+		return nil, g.Error("reader is closed")
+	}
+
+	if !rr.opened {
+		reader, err := rr.Open()
+		if err != nil {
+			// do not cache; the consumer retries at the point of use
+			return nil, err
+		}
+		rr.Reader = reader
+		rr.opened = true
+	}
+
+	return rr, nil
+}
+
+// Prefetch opens the body ahead of consumption. An error is not returned:
+// GetReader retries the open at the point of use.
+func (rr *ReaderReady) Prefetch() {
+	if rr == nil || rr.Open == nil {
+		return
+	}
+
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed || rr.opened {
+		return
+	}
+
+	if reader, err := rr.Open(); err == nil {
+		rr.Reader = reader
+		rr.opened = true
+	}
+}
+
+// Read delegates to the body. On a read error before any byte of this call,
+// it reopens the body, skips the bytes already delivered, and retries. This
+// recovers a body that a remote store reset while it sat idle.
+func (rr *ReaderReady) Read(p []byte) (n int, err error) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed {
+		return 0, g.Error("reader is closed")
+	}
+
+	if !rr.opened {
+		reader, oerr := rr.Open()
+		if oerr != nil {
+			return 0, oerr
+		}
+		rr.Reader = reader
+		rr.opened = true
+	}
+
+	for {
+		n, err = rr.Reader.Read(p)
+		if n > 0 {
+			rr.delivered += int64(n)
+		}
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+		if n > 0 {
+			// deliver the bytes; the error resurfaces on the next call
+			return n, nil
+		}
+		if rerr := rr.reopenLocked(err); rerr != nil {
+			return 0, rerr
+		}
+	}
+}
+
+// reopenLocked replaces a dead body and skips to the resume offset.
+// The caller must hold rr.mu.
+func (rr *ReaderReady) reopenLocked(cause error) error {
+	if rr.Open == nil || rr.reopens >= readerReadyMaxReopens {
+		return cause
+	}
+	rr.reopens++
+
+	if c, ok := rr.Reader.(io.Closer); ok && rr.Reader != nil {
+		c.Close()
+	}
+
+	g.Debug("reopening reader (attempt %d) from %s after read error: %s", rr.reopens+1, rr.URI, cause.Error())
+
+	reader, err := rr.Open()
+	if err != nil {
+		return g.Error(err, "could not reopen reader for %s (after read error: %s)", rr.URI, cause.Error())
+	}
+
+	if rr.delivered > 0 {
+		if _, err = io.CopyN(io.Discard, reader, rr.delivered); err != nil {
+			if c, ok := reader.(io.Closer); ok {
+				c.Close()
+			}
+			return g.Error(err, "could not skip to offset %d on reopened reader for %s", rr.delivered, rr.URI)
+		}
+	}
+
+	rr.Reader = reader
+	return nil
+}
+
+// Close closes an unused or finished body. Safe to call more than once.
+func (rr *ReaderReady) Close() error {
+	if rr == nil {
+		return nil
+	}
+
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+
+	if rr.closed {
+		return nil
+	}
+	rr.closed = true
+
+	if c, ok := rr.Reader.(io.Closer); ok && rr.Reader != nil {
+		return c.Close()
+	}
+	return nil
+}
+
+func drainReaderReadyCh(ch <-chan *ReaderReady) {
+	if ch == nil {
+		return
+	}
+	for rr := range ch {
+		rr.Close()
+	}
 }
 
 func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bool) (err error) {
 
+	var current *ReaderReady
+
 	nextJSON := func(reader *ReaderReady) (*jsonStream, error) {
+		if current != nil {
+			current.Close()
+		}
+		current = reader
 
 		// set URI
 		ds.Metadata.StreamURL.Value = reader.URI
 
+		// open now that we are ready to consume
+		reader1, err := reader.GetReader()
+		if err != nil {
+			return nil, g.Error(err, "could not get reader")
+		}
+
 		// decompress if needed
-		reader2, err := AutoDecompress(reader.Reader)
+		reader2, err := AutoDecompress(reader1)
 		if err != nil {
 			return nil, g.Error(err, "could not auto-decompress")
 		}
@@ -1224,12 +1399,34 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 		return jsNew, nil
 	}
 
-	js, err := nextJSON(<-readerChn)
+	first, ok := <-readerChn
+	if !ok || first == nil {
+		ds.SetReady()
+		ds.Close()
+		return nil
+	}
+
+	js, err := nextJSON(first)
 	if err != nil {
+		if current != nil {
+			current.Close()
+		}
+		go drainReaderReadyCh(readerChn)
 		return
 	}
 
+	stopJSON := func() {
+		if current != nil {
+			current.Close()
+			current = nil
+		}
+		js = nil
+	}
+
 	nextFunc := func(it *Iterator) bool {
+		if js == nil {
+			return false
+		}
 
 	processNext:
 		hasNext := js.NextFunc(it)
@@ -1238,12 +1435,15 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 			// next reader
 			for reader := range readerChn {
 				if reader == nil {
+					stopJSON()
 					return false
 				}
 
 				jsNew, err := nextJSON(reader)
 				if err != nil {
 					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
+					stopJSON()
+					go drainReaderReadyCh(readerChn)
 					return false
 				}
 
@@ -1254,6 +1454,9 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 
 				goto processNext
 			}
+			stopJSON()
+		} else if !hasNext {
+			stopJSON()
 		}
 
 		// set stream url
@@ -1294,11 +1497,21 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		c.Delimiter = ds.config.Delimiter
 	}
 
+	var current *ReaderReady
+
 	nextCSV := func(reader *ReaderReady) (r csv.CsvReaderLike, err error) {
-		c.Reader = reader.Reader
+		if current != nil {
+			current.Close()
+		}
+		current = reader
 
 		// set URI
 		ds.Metadata.StreamURL.Value = reader.URI
+
+		// open now that we are ready to consume
+		if c.Reader, err = reader.GetReader(); err != nil {
+			return r, g.Error(err, "could not get reader")
+		}
 
 		// decompress if needed
 		readerDecompr, err := AutoDecompress(c.Reader)
@@ -1325,8 +1538,16 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 	for reader := range readerChn {
 		r, err = nextCSV(reader)
 		if err != nil {
+			if current != nil {
+				current.Close()
+			}
+			go drainReaderReadyCh(readerChn)
 			return
 		} else if r == nil {
+			if current != nil {
+				current.Close()
+			}
+			go drainReaderReadyCh(readerChn)
 			return g.Error("no reader was returned for: %s", ds.Metadata.StreamURL.Value)
 		}
 
@@ -1341,6 +1562,10 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		} else if err != nil {
 			err = g.Error(err, "could not parse header line")
 			ds.Context.CaptureErr(err)
+			if current != nil {
+				current.Close()
+			}
+			go drainReaderReadyCh(readerChn)
 			return err
 		}
 
@@ -1369,12 +1594,23 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 
 			for reader := range readerChn {
 				if reader == nil {
+					if current != nil {
+						current.Close()
+						current = nil
+					}
+					r = nil
 					return false
 				}
 
 				r, err = nextCSV(reader)
 				if err != nil {
 					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
+					if current != nil {
+						current.Close()
+						current = nil
+					}
+					r = nil
+					go drainReaderReadyCh(readerChn)
 					return false
 				} else if r == nil {
 					continue
@@ -1413,9 +1649,20 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 				goto processNext
 			}
 
+			if current != nil {
+				current.Close()
+				current = nil
+			}
+			r = nil
 			return false
 		} else if err != nil {
 			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
+			if current != nil {
+				current.Close()
+				current = nil
+			}
+			r = nil
+			go drainReaderReadyCh(readerChn)
 			return false
 		}
 
@@ -2717,6 +2964,25 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 	return readerChn
 }
 
+// closeArrowWriter closes aw, aborting the flush if the stream context is
+// cancelled. Without this, a consumer that stops reading mid-batch (duckdb's
+// read_arrow) leaves the flush blocked on the pipe with no reader forever.
+func (ds *Datastream) closeArrowWriter(aw *ArrowWriter, pipeW *io.PipeWriter) error {
+	done := make(chan error, 1)
+	go func() { done <- aw.Close() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ds.Context.Ctx.Done():
+		if pipeW != nil {
+			pipeW.CloseWithError(ds.Context.Ctx.Err()) // unblock the flush
+		}
+		<-done // it returns once the pipe is broken
+		return ds.Context.Ctx.Err()
+	}
+}
+
 // NewArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
 func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
@@ -2735,8 +3001,11 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 
 		nextPipe := func(batch *Batch) error {
 			if aw != nil {
-				err := aw.Close()
-				if err != nil {
+				// Closing flushes the tail of the batch into the prior pipe. If the
+				// consumer already stopped reading (duckdb's read_arrow stops once
+				// it has what it needs), that write blocks forever, so unblock it
+				// when the stream context is cancelled.
+				if err := ds.closeArrowWriter(aw, pipeW); err != nil {
 					return g.Error(err, "could not close arrow writer")
 				}
 			}

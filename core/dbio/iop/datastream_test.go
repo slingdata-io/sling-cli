@@ -2,7 +2,9 @@ package iop
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/flarco/g/csv"
@@ -188,5 +190,44 @@ func TestEncodeRowAsJSONObject(t *testing.T) {
 				t.Fatalf("output is not valid JSON: %s", string(got))
 			}
 		})
+	}
+}
+
+func TestReaderReadyRetriesFailedOpenAndClose(t *testing.T) {
+	opens := 0
+	rr := &ReaderReady{
+		URI: "s3://bucket/file.csv",
+		Open: func() (io.Reader, error) {
+			opens++
+			if opens == 1 {
+				return nil, errors.New("temporary")
+			}
+			return io.NopCloser(strings.NewReader("ok")), nil
+		},
+	}
+
+	if _, err := rr.GetReader(); err == nil {
+		t.Fatal("expected first Open to fail")
+	}
+	r, err := rr.GetReader()
+	if err != nil {
+		t.Fatalf("retry should succeed: %v", err)
+	}
+	if opens != 2 {
+		t.Fatalf("opens=%d, want 2", opens)
+	}
+	buf := make([]byte, 2)
+	n, _ := r.Read(buf)
+	if string(buf[:n]) != "ok" {
+		t.Fatalf("got %q", buf[:n])
+	}
+	if err := rr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rr.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if _, err := rr.GetReader(); err == nil {
+		t.Fatal("GetReader after Close should fail")
 	}
 }

@@ -1,0 +1,62 @@
+# issue #787: a row larger than duckdb's 2MB read_csv max_line_size failed the
+# stream. Values land in text/json columns, so both must raise the limit.
+source: postgres
+target: local
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        drop table if exists public.test_max_line_size;
+        create table public.test_max_line_size (
+          id bigint,
+          big_text text,
+          big_json jsonb
+        );
+        insert into public.test_max_line_size (id, big_text, big_json)
+        values (
+          1,
+          repeat('x', 3000000),
+          jsonb_build_object('payload', repeat('y', 3000000))
+        );
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: duckdb
+      query: |
+        select
+          length(big_text) as text_len,
+          length(big_json) as json_len
+        from read_parquet('/tmp/test_max_line_size.parquet')
+      into: result
+
+    - type: log
+      message: 'text_len => {store.result[0].text_len}, json_len => {store.result[0].json_len}'
+
+    # the 3MB values must survive intact, not truncate or fail the stream
+    - type: check
+      check: int_parse(store.result[0].text_len) == 3000000
+
+    - type: check
+      check: int_parse(store.result[0].json_len) > 3000000
+
+    - type: log
+      message: 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'
+
+    - type: query
+      connection: '{source.name}'
+      query: drop table if exists public.test_max_line_size
+
+streams:
+  public.test_max_line_size:
+    object: '/tmp/test_max_line_size.parquet'
+    target_options:
+      format: parquet

@@ -416,3 +416,81 @@ func TestDecimal128ToString(t *testing.T) {
 		})
 	}
 }
+
+// createBuilder had no case for time or uuid columns, so it fell through to a
+// string builder while the schema declared time64/uuid. Building the record
+// then panicked on the type mismatch, making any parquet write with a time or
+// uuid column fail.
+func TestParquetArrowWriterTimeAndUUID(t *testing.T) {
+	columns := NewColumns(
+		Columns{
+			{Name: "col_id", Type: BigIntType},
+			{Name: "col_time", Type: TimeType},
+			{Name: "col_timez", Type: TimezType},
+			{Name: "col_uuid", Type: UUIDType},
+		}...,
+	)
+
+	rows := [][]any{
+		{int64(1), "10:00:00", "10:00:00", "6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
+		{int64(2), "23:59:59", "00:00:01", "6ba7b811-9dad-11d1-80b4-00c04fd430c8"},
+		{int64(3), nil, nil, nil},
+	}
+
+	testFile := "/tmp/test_time_uuid.parquet"
+	f, err := os.Create(testFile)
+	assert.NoError(t, err)
+	defer f.Close()
+	defer os.Remove(testFile)
+
+	pw, err := NewParquetArrowWriter(f, columns, compress.Codecs.Snappy)
+	assert.NoError(t, err)
+
+	for _, row := range rows {
+		assert.NoError(t, pw.WriteRow(row))
+	}
+	assert.NoError(t, pw.Close())
+
+	stat, err := os.Stat(testFile)
+	assert.NoError(t, err)
+	assert.Greater(t, stat.Size(), int64(0))
+
+	f2, err := os.Open(testFile)
+	assert.NoError(t, err)
+	defer f2.Close()
+
+	reader, err := NewParquetArrowReader(f2, nil)
+	assert.NoError(t, err)
+
+	readCols := reader.Columns()
+	assert.Equal(t, len(columns), len(readCols))
+
+	table, err := reader.Reader.ReadTable(context.Background())
+	assert.NoError(t, err)
+	defer table.Release()
+	assert.Equal(t, len(rows), int(table.NumRows()))
+
+	for rowIdx, originalRow := range rows {
+		for colIdx, col := range columns {
+			chunk := table.Column(colIdx).Data().Chunk(0)
+			read := GetValueFromArrowArray(chunk, rowIdx)
+
+			if originalRow[colIdx] == nil {
+				assert.Nil(t, read, "row %d, %s: expected nil", rowIdx, col.Name)
+				continue
+			}
+			assert.NotNil(t, read, "row %d, col %s (%s): expected a value", rowIdx, col.Name, col.Type)
+			t.Logf("row %d %s = %v", rowIdx, col.Name, read)
+
+			// times land as time.Time, uuid as its canonical string
+			switch col.Type {
+			case TimeType, TimezType:
+				assert.Contains(t, cast.ToString(read), cast.ToString(originalRow[colIdx]),
+					"row %d, %s value mismatch", rowIdx, col.Name)
+			case UUIDType:
+				assert.Equal(t, originalRow[colIdx], cast.ToString(read),
+					"row %d, %s value mismatch", rowIdx, col.Name)
+			}
+		}
+	}
+}

@@ -210,8 +210,25 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 			if tsType, ok := field.Type.(*arrow.TimestampType); ok {
 				col.Metadata["timeUnit"] = tsType.Unit.String()
 				if tsType.TimeZone != "" {
+					col.Metadata["timeZone"] = tsType.TimeZone
 					col.Type = TimestampzType
 					col.DbType = "TIMESTAMPTZ"
+				}
+				// The declared type wins when present. A datetime may carry a
+				// zone purely to label its values, and that must not turn it
+				// into a timestampz in the target DDL.
+				if declared, ok := field.Metadata.GetValue(arrowDeclaredTypeKey); ok {
+					switch ColumnType(declared) {
+					case DatetimeType:
+						col.Type = DatetimeType
+						col.DbType = "TIMESTAMP"
+					case TimestampType:
+						col.Type = TimestampType
+						col.DbType = "TIMESTAMP"
+					case TimestampzType:
+						col.Type = TimestampzType
+						col.DbType = "TIMESTAMPTZ"
+					}
 				}
 			}
 		case arrow.STRING, arrow.LARGE_STRING:
@@ -575,19 +592,22 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		case DateType:
 			arrowType = arrow.FixedWidthTypes.Date32
 		case DatetimeType, TimestampType, TimestampzType:
-			arrowType = arrow.FixedWidthTypes.Timestamp_ns
+			unit := arrow.Microsecond // iceberg does not support nano, micro as default
 			switch col.Metadata["timeUnit"] {
 			case "s":
-				arrowType = arrow.FixedWidthTypes.Timestamp_s
+				unit = arrow.Second
 			case "ms":
-				arrowType = arrow.FixedWidthTypes.Timestamp_ms
+				unit = arrow.Millisecond
 			case "us":
-				arrowType = arrow.FixedWidthTypes.Timestamp_us
+				unit = arrow.Microsecond
 			case "ns":
-				arrowType = arrow.FixedWidthTypes.Timestamp_ns
-			default:
-				arrowType = arrow.FixedWidthTypes.Timestamp_us // iceberg does not support nano, micro as default
+				unit = arrow.Nanosecond
 			}
+			// Carry the column's zone in the schema so the read path can
+			// restore the original offset. The FixedWidthTypes.Timestamp_*
+			// globals are all hardcoded to "UTC", so building the type here is
+			// what lets a non-UTC connection `loc` survive the round trip.
+			arrowType = &arrow.TimestampType{Unit: unit, TimeZone: arrowSchemaTimeZone(col)}
 		case TimeType, TimezType:
 			// Iceberg Time (microsecond precision), matching iopTypeToIcebergPrimitiveType
 			arrowType = arrow.FixedWidthTypes.Time64us
@@ -606,6 +626,15 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 			Name:     col.Name,
 			Type:     arrowType,
 			Nullable: true,
+		}
+
+		// Record the declared type for timestamps. Arrow's TimeZone is the only
+		// zone signal it has, so a zone-carrying datetime is otherwise
+		// indistinguishable from a timestampz on the way back. Keeping the
+		// declared type here lets the zone act purely as a label.
+		if col.Type == DatetimeType || col.Type == TimestampType || col.Type == TimestampzType {
+			fields[i].Metadata = arrow.NewMetadata(
+				[]string{arrowDeclaredTypeKey}, []string{string(col.Type)})
 		}
 	}
 
@@ -921,6 +950,13 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 		}
 	case *array.TimestampBuilder:
 		tVal, _ := cast.ToTimeE(val)
+		// A zone-less arrow timestamp stores a wall clock, not an instant. Shift
+		// the label onto UTC so the digits survive; taking the epoch instead would
+		// re-express the value in UTC and move the wall clock by the offset.
+		if tsType, ok := b.Type().(*arrow.TimestampType); ok && tsType.TimeZone == "" {
+			tVal = time.Date(tVal.Year(), tVal.Month(), tVal.Day(), tVal.Hour(),
+				tVal.Minute(), tVal.Second(), tVal.Nanosecond(), time.UTC)
+		}
 		switch col.Metadata["timeUnit"] {
 		case "s":
 			b.Append(arrow.Timestamp(tVal.Unix()))
@@ -958,6 +994,40 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 			b.AppendNull()
 		}
 	}
+}
+
+// arrowDeclaredTypeKey names the arrow field metadata that carries a timestamp
+// column's declared iop type across the cache round trip.
+const arrowDeclaredTypeKey = "sling:declaredType"
+
+// arrowSchemaTimeZone returns the zone to record in a timestamp field's schema.
+// Uses the column's "timeZone" metadata when present (set on read, or by
+// producers that know the connection's `loc`), defaulting to UTC so behaviour
+// is unchanged for columns that carry no zone.
+func arrowSchemaTimeZone(col Column) string {
+	if tz := col.Metadata["timeZone"]; tz != "" {
+		return tz
+	}
+	// A datetime with no zone of its own stays zone-less. Defaulting it to UTC
+	// would relabel its wall clock. When a zone is supplied the declared type
+	// keeps it from being promoted to timestampz.
+	if col.Type == DatetimeType {
+		return ""
+	}
+	return "UTC"
+}
+
+// arrowTimestampLocation resolves the zone recorded in an arrow timestamp
+// schema. Falls back to UTC when the zone is absent or not loadable, which
+// preserves the previous behaviour for schemas that carry no zone.
+func arrowTimestampLocation(tsType *arrow.TimestampType) *time.Location {
+	if tsType == nil || tsType.TimeZone == "" {
+		return time.UTC
+	}
+	if loc, err := time.LoadLocation(tsType.TimeZone); err == nil {
+		return loc
+	}
+	return time.UTC
 }
 
 // GetValueFromArrowArray extracts a value from an arrow array at the given index
@@ -1168,15 +1238,21 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 	case *array.Timestamp:
 		val := a.Value(idx)
 		tsType := a.DataType().(*arrow.TimestampType)
+		// Restore the schema's zone, not UTC. The instant is the same either
+		// way, but the label is written out with RFC3339Nano and becomes the
+		// stored offset in targets like Snowflake TIMESTAMP_TZ. Forcing UTC
+		// here made CDC rows land as +00:00 while snapshot rows of the same
+		// table kept the connection's offset.
+		loc := arrowTimestampLocation(tsType)
 		switch tsType.Unit {
 		case arrow.Second:
-			return time.Unix(int64(val), 0).UTC()
+			return time.Unix(int64(val), 0).In(loc)
 		case arrow.Millisecond:
-			return time.UnixMilli(int64(val)).UTC()
+			return time.UnixMilli(int64(val)).In(loc)
 		case arrow.Microsecond:
-			return time.UnixMicro(int64(val)).UTC()
+			return time.UnixMicro(int64(val)).In(loc)
 		case arrow.Nanosecond:
-			return time.Unix(0, int64(val)).UTC()
+			return time.Unix(0, int64(val)).In(loc)
 		}
 	case *array.Uint16:
 		return int64(a.Value(idx))

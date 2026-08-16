@@ -1,10 +1,14 @@
 package connection
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/flarco/g"
+	"github.com/microsoft/go-mssqldb/msdsn"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConnectionDiscover(t *testing.T) {
@@ -271,4 +275,215 @@ func TestQueryURL(t *testing.T) {
 	// correct := "%3CJuIQ%29%7BcXpV%7B%3C%29nB%2B4DrNX%3BLC%2B0dx%3B%2BVl4hk%5E%21%7BM%28%2BR.66Y%3C%7D"
 	// println(url.QueryEscape(password))
 	_ = password
+}
+
+// GitHub #780: named-instance URL building.
+// The driver calls SQL Browser (UDP 1434) only when instance is set and port is 0.
+// If a port is set, the driver uses that port and ignores the instance name.
+func TestSQLServerNamedInstance(t *testing.T) {
+	type want struct {
+		host         string
+		port         uint64
+		instance     string
+		database     string
+		callBrowser  bool
+		dataHost     string
+		dataInstance string
+		urlHas       []string
+		urlNotHas    []string
+	}
+
+	base := map[string]any{
+		"type":     "sqlserver",
+		"user":     "the_user",
+		"password": "secret",
+		"database": "dbname",
+	}
+
+	with := func(extra map[string]any) map[string]any {
+		data := map[string]any{}
+		for k, v := range base {
+			data[k] = v
+		}
+		for k, v := range extra {
+			data[k] = v
+		}
+		return data
+	}
+
+	cases := []struct {
+		name string
+		data map[string]any
+		want want
+	}{
+		{
+			name: "instance only does not inject default port",
+			data: with(map[string]any{
+				"host":     "THEHOST",
+				"instance": "Instance",
+			}),
+			want: want{
+				host:         "THEHOST",
+				port:         0,
+				instance:     "Instance",
+				database:     "dbname",
+				callBrowser:  true,
+				dataHost:     "THEHOST",
+				dataInstance: "Instance",
+				urlHas:       []string{"@THEHOST/Instance"},
+				urlNotHas:    []string{":1433"},
+			},
+		},
+		{
+			name: "port only connects to that port",
+			data: with(map[string]any{
+				"host": "THEHOST",
+				"port": 1433,
+			}),
+			want: want{
+				host:        "THEHOST",
+				port:        1433,
+				instance:    "",
+				database:    "dbname",
+				callBrowser: false,
+				dataHost:    "THEHOST",
+				urlHas:      []string{"@THEHOST:1433"},
+			},
+		},
+		{
+			name: "port and instance keep both in the url",
+			data: with(map[string]any{
+				"host":     "THEHOST",
+				"port":     1433,
+				"instance": "Instance",
+			}),
+			want: want{
+				host:         "THEHOST",
+				port:         1433,
+				instance:     "Instance",
+				database:     "dbname",
+				callBrowser:  false,
+				dataHost:     "THEHOST",
+				dataInstance: "Instance",
+				urlHas:       []string{"@THEHOST:1433/Instance"},
+			},
+		},
+		{
+			name: "host slash instance without port",
+			data: with(map[string]any{
+				"host": "THEHOST/Instance",
+			}),
+			want: want{
+				host:         "THEHOST",
+				port:         0,
+				instance:     "Instance",
+				database:     "dbname",
+				callBrowser:  true,
+				dataHost:     "THEHOST",
+				dataInstance: "Instance",
+				urlHas:       []string{"@THEHOST/Instance"},
+				urlNotHas:    []string{"Instance:1433", "@THEHOST/Instance:1433"},
+			},
+		},
+		{
+			name: "host backslash instance without port",
+			data: with(map[string]any{
+				"host": `THEHOST\Instance`,
+			}),
+			want: want{
+				host:         "THEHOST",
+				port:         0,
+				instance:     "Instance",
+				database:     "dbname",
+				callBrowser:  true,
+				dataHost:     "THEHOST",
+				dataInstance: "Instance",
+				urlHas:       []string{"@THEHOST/Instance"},
+				urlNotHas:    []string{`THEHOST\Instance`, "Instance:1433"},
+			},
+		},
+		{
+			name: "host slash instance with explicit port",
+			data: with(map[string]any{
+				"host": "THEHOST/Instance",
+				"port": 51433,
+			}),
+			want: want{
+				host:         "THEHOST",
+				port:         51433,
+				instance:     "Instance",
+				database:     "dbname",
+				callBrowser:  false,
+				dataHost:     "THEHOST",
+				dataInstance: "Instance",
+				urlHas:       []string{"@THEHOST:51433/Instance"},
+				urlNotHas:    []string{"Instance:51433"},
+			},
+		},
+		{
+			name: "url with port and instance keeps both",
+			data: map[string]any{
+				"url": "sqlserver://myuser:mypass@host.ip:51433/my_instance?database=dbname",
+			},
+			want: want{
+				host:         "host.ip",
+				port:         51433,
+				instance:     "my_instance",
+				database:     "dbname",
+				callBrowser:  false,
+				dataHost:     "host.ip",
+				dataInstance: "my_instance",
+				urlHas:       []string{"@host.ip:51433/my_instance"},
+			},
+		},
+		{
+			name: "url with instance only does not inject default port",
+			data: map[string]any{
+				"url": "sqlserver://myuser:mypass@host.ip/my_instance?database=dbname",
+			},
+			want: want{
+				host:         "host.ip",
+				port:         0,
+				instance:     "my_instance",
+				database:     "dbname",
+				callBrowser:  true,
+				dataHost:     "host.ip",
+				dataInstance: "my_instance",
+				urlHas:       []string{"@host.ip/my_instance"},
+				urlNotHas:    []string{":1433"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := NewConnection("TEST", dbio.TypeDbSQLServer, tc.data)
+			require.NoError(t, err)
+
+			gotURL := c.URL()
+			for _, s := range tc.want.urlHas {
+				assert.Contains(t, gotURL, s, "url=%s", gotURL)
+			}
+			for _, s := range tc.want.urlNotHas {
+				assert.NotContains(t, gotURL, s, "url=%s", gotURL)
+			}
+
+			if tc.want.dataHost != "" {
+				assert.Equal(t, tc.want.dataHost, c.Data["host"])
+			}
+			if tc.want.dataInstance != "" {
+				assert.Equal(t, tc.want.dataInstance, c.Data["instance"])
+			}
+
+			cfg, err := msdsn.Parse(gotURL)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want.host, cfg.Host)
+			assert.Equal(t, tc.want.port, cfg.Port)
+			assert.Equal(t, tc.want.instance, cfg.Instance)
+			assert.Equal(t, tc.want.database, cfg.Database)
+			assert.Equal(t, tc.want.callBrowser, len(cfg.Instance) > 0 && cfg.Port == 0)
+
+			assert.False(t, strings.Contains(cfg.Instance, ":"), "instance must not include a port: %q", cfg.Instance)
+		})
+	}
 }

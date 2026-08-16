@@ -236,7 +236,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns), conn.duck.MaxLineSize(file.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -287,8 +287,18 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, forma
 		return 0, g.Error(err, "could not setup http stream")
 	}
 
+	// Unblock the producer if we leave the loop early (insert error). Without
+	// this it stays parked on an unbuffered send and the process hangs.
+	var cancelStream context.CancelFunc
+	defer func() {
+		if cancelStream != nil {
+			cancelStream()
+		}
+	}()
+
 	// Process each stream part
 	for streamPart := range streamPartChn {
+		cancelStream = streamPart.Cancel
 		columnNames := lo.Map(streamPart.Columns.Names(), func(col string, i int) string {
 			return `"` + col + `"`
 		})

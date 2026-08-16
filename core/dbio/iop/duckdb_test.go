@@ -525,6 +525,115 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 
 		t.Logf("Test completed - received %d Arrow parts. Implementation uses io.Pipe for streaming.", len(parts))
 	})
+
+	t.Run("CSV streaming - max_line_size raised for binary and text columns", func(t *testing.T) {
+		// columns that can hold unbounded values must raise max_line_size,
+		// else a single large row fails the stream (issue #787)
+		testCases := []struct {
+			name        string
+			columnType  ColumnType
+			maxLineSize string
+		}{
+			{"binary column raises limit", BinaryType, "max_line_size=268435456"},
+			{"text column raises limit", TextType, "max_line_size=268435456"},
+			{"string column raises limit", StringType, "max_line_size=268435456"},
+			{"json column raises limit", JsonType, "max_line_size=268435456"},
+			{"integer column keeps default", IntegerType, "max_line_size=2000000"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				df := NewDataflow()
+				columns := NewColumnsFromFields("id", "payload")
+				columns[0].Type = IntegerType
+				columns[1].Type = tc.columnType
+				df.Columns = columns
+				df.Ready = true
+
+				ds := NewDatastreamContext(ctx, columns)
+				ds.SetConfig(map[string]string{})
+				ds.Buffer = append(ds.Buffer, []any{int64(1), "some payload"})
+				ds.Count = 1
+				ds.Ready = true
+
+				df.Streams = append(df.Streams, ds)
+
+				go func() {
+					defer close(df.StreamCh)
+					df.StreamCh <- ds
+					time.Sleep(50 * time.Millisecond)
+					ds.Close()
+				}()
+
+				duck := NewDuckDb(ctx)
+				defer duck.Close()
+
+				sc := StreamConfig{
+					Format:       dbio.FileTypeCsv,
+					BatchLimit:   10,
+					FileMaxBytes: 1024 * 1024,
+				}
+
+				streamPartChn, err := duck.DataflowToHttpStream(df, sc)
+				assert.NoError(t, err)
+				assert.NotNil(t, streamPartChn)
+
+				select {
+				case part, ok := <-streamPartChn:
+					if assert.True(t, ok, "should have received a stream part") {
+						assert.Contains(t, part.FromExpr, "read_csv")
+						assert.Contains(t, part.FromExpr, tc.maxLineSize)
+						t.Logf("Received part: %s", part.FromExpr)
+					}
+				case <-time.After(3 * time.Second):
+					t.Error("timed out waiting for stream part")
+				}
+
+				cancel()
+			})
+		}
+	})
+}
+
+func TestDuckDbMaxLineSize(t *testing.T) {
+	colOf := func(t ColumnType) Columns {
+		cols := NewColumnsFromFields("id", "payload")
+		cols[0].Type = IntegerType
+		cols[1].Type = t
+		return cols
+	}
+
+	duckOf := func(props ...string) *DuckDb {
+		return NewDuckDb(context.Background(), props...)
+	}
+
+	t.Run("unbounded types raise the limit", func(t *testing.T) {
+		duck := duckOf()
+		for _, ct := range []ColumnType{StringType, TextType, JsonType, BinaryType, UUIDType, GeometryType} {
+			assert.Equal(t, DuckDbLargeMaxLineSize, duck.MaxLineSize(colOf(ct)), "colType=%s", ct)
+		}
+	})
+
+	t.Run("bounded types keep the default", func(t *testing.T) {
+		duck := duckOf()
+		for _, ct := range []ColumnType{IntegerType, BigIntType, DecimalType, BoolType, DateType, DatetimeType} {
+			assert.Equal(t, DuckDbDefaultMaxLineSize, duck.MaxLineSize(colOf(ct)), "colType=%s", ct)
+		}
+	})
+
+	t.Run("max_line_size prop overrides", func(t *testing.T) {
+		duck := duckOf("max_line_size=999")
+		assert.Equal(t, 999, duck.MaxLineSize(colOf(TextType)))
+		assert.Equal(t, 999, duck.MaxLineSize(colOf(IntegerType)))
+	})
+
+	t.Run("invalid prop is ignored", func(t *testing.T) {
+		duck := duckOf("max_line_size=abc")
+		assert.Equal(t, DuckDbLargeMaxLineSize, duck.MaxLineSize(colOf(TextType)))
+	})
 }
 
 // regression guard for issue #770: http_timeout must be raised on every DuckDB

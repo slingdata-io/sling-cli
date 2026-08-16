@@ -375,6 +375,14 @@ func (conn *MsSQLServerConn) connectAccessToken(timeOut ...int) error {
 	return nil
 }
 
+func isSQLServerBrowserError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sql server browser") || strings.Contains(msg, "no instance matching")
+}
+
 func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 
 	// Check if this is a Cloud SQL connection
@@ -387,6 +395,9 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 		err = conn.BaseConn.Connect(timeOut...)
 	}
 	if err != nil {
+		if isSQLServerBrowserError(err) {
+			return g.Error(err, "SQL Server Browser (UDP 1434) did not return the named instance. Set `port` to the instance TCP port and omit `instance`, or allow UDP 1434. See https://docs.slingdata.io/connections/database-connections/sqlserver")
+		}
 		return err
 	}
 

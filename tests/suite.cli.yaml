@@ -2634,3 +2634,45 @@
     - 'snowflake-adbc'
     - 'bigquery-adbc'
     - 'SUCCESS: SLING_USE_ADBC routed postgres, mysql, sqlserver, duckdb, snowflake and bigquery through ADBC'
+
+# issue #787: rows larger than duckdb's 2MB read_csv max_line_size failed the stream
+- id: 317
+  name: 'rows larger than the duckdb 2MB max_line_size replicate intact (text + json)'
+  run: 'sling run -d -r tests/replications/r.101.duckdb_max_line_size.yaml'
+  output_contains:
+    - 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'
+
+# issue #785: ADBC ingestion never sets the catalog, so a 3-part target name
+# writes the temp table to one database and ingests into the default one.
+# Requires the mssql ADBC driver (dbc install mssql)
+- id: 318
+  name: 'ADBC ingests into a 3-part (database.schema.table) target name'
+  run: 'sling run -d -r tests/replications/r.102.adbc_three_part_name.yaml'
+  output_contains:
+    - 'SUCCESS: ADBC loaded into a 3-part (database.schema.table) target name'
+
+# issue #789: row-integrity check across many merged CSV files. The idle-reset
+# guard lives in core/dbio/filesys/fs_merge_readers_test.go (local disk does not reset).
+- id: 319
+  name: 'many merged files read intact (issue #789)'
+  run: 'sling run -d -p tests/pipelines/p.49.merge_readers_many_files.yaml'
+  output_contains:
+    - 'SUCCESS: all 8000 rows read intact from many merged files'
+
+# MergeReaders must pipeline remote reader opens. A serial open of 40 files at 0.4s latency each
+# takes 16s+ and breaks the 12s SLING_TIMEOUT. A concurrent open takes ~4s.
+- id: 320
+  name: 'many high-latency remote files open concurrently'
+  env:
+    SLING_TIMEOUT: '0.2'
+  run: |
+    mkdir -p temp/merge_latency/src
+    rm -f temp/merge_latency/src/*.csv temp/merge_latency/out.csv
+    for i in $(seq -w 1 40); do printf 'id,name\n%s,row_%s\n' "$i" "$i" > temp/merge_latency/src/file_$i.csv; done
+    python3 tests/files/slow_server.py 18937 temp/merge_latency/src 0.4 120 &
+    SRV_PID=$!
+    trap 'kill $SRV_PID 2>/dev/null || true' EXIT
+    sleep 1
+    sling run -d --src-stream 'http://127.0.0.1:18937/' --tgt-object 'file://temp/merge_latency/out.csv'
+  output_contains:
+    - 'execution succeeded'

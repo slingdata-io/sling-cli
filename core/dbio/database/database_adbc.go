@@ -1351,11 +1351,20 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		return 0, g.Error("ADBC connection is not open")
 	}
 
-	// Parse table name to get schema
-	table, _ := ParseTableName(tableFName, conn.Type)
+	// Parse table name to get catalog and schema
+	table, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return count, g.Error(err, "could not parse table name: %s", tableFName)
+	}
 
 	// Get ingest mode from property, default to append
 	ingestMode := conn.getIngestMode()
+
+	// Target the catalog/schema of the table, not the connection defaults
+	opts := adbc.IngestStreamOptions{
+		Catalog:  table.Database,
+		DBSchema: table.Schema,
+	}
 
 	g.Trace("arrow schema => %s", iop.ColumnsToArrowSchema(ds.Columns))
 
@@ -1364,12 +1373,6 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		reader, err := conn.batchToRecordReader(batch)
 		if err != nil {
 			return count, g.Error(err, "error converting batch to Arrow")
-		}
-
-		// Ingest using ADBC
-		opts := adbc.IngestStreamOptions{}
-		if table.Schema != "" {
-			opts.DBSchema = table.Schema
 		}
 
 		ingested, err := adbc.IngestStream(

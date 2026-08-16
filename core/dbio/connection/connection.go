@@ -552,6 +552,20 @@ func (c *Connection) ConnSetDatabase(dbName string) *Connection {
 	return &c2
 }
 
+// splitSQLServerHostInstance splits host\instance or host/instance.
+func splitSQLServerHostInstance(host string) (hostNew, instance string) {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.HasPrefix(host, "[") {
+		return host, ""
+	}
+	normalized := strings.ReplaceAll(host, `\`, "/")
+	i := strings.LastIndex(normalized, "/")
+	if i <= 0 || i == len(normalized)-1 {
+		return host, ""
+	}
+	return normalized[:i], normalized[i+1:]
+}
+
 func (c *Connection) setURL() (err error) {
 	c.setFromEnv()
 	c.setUseADBC()
@@ -951,6 +965,13 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("app_name", "sling")
 
+		if host, inst := splitSQLServerHostInstance(cast.ToString(c.Data["host"])); host != "" {
+			c.Data["host"] = host
+			if inst != "" {
+				setIfMissing("instance", inst)
+			}
+		}
+
 		template = "sqlserver://{username}:{password}@{host}"
 		if c.Type == dbio.TypeDbFabric {
 			template = "fabric://{username}:{password}@{host}"
@@ -958,8 +979,15 @@ func (c *Connection) setURL() (err error) {
 
 		_, port_ok := c.Data["port"]
 		_, instance_ok := c.Data["instance"]
+		buildingURL := cast.ToString(c.Data["url"]) == ""
 
 		switch {
+		case port_ok && instance_ok:
+			template += ":{port}/{instance}"
+			g.Debug("SQL Server: port %s and instance %s are both set. The driver uses the port and ignores the instance name.", c.Data["port"], c.Data["instance"])
+			if buildingURL && cast.ToInt(c.Data["port"]) == 1433 {
+				g.Warn("SQL Server: port 1433 and instance %s are both set. The driver uses port 1433 and ignores the instance name. For a named instance, set `port` to the instance TCP port or omit `port`.", c.Data["instance"])
+			}
 		case port_ok:
 			template += ":{port}"
 		case instance_ok:

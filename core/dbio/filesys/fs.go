@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1411,6 +1412,15 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 		return bw, g.Error(err)
 	}
 
+	// Unblock the producer on any early return below (delete failure, copy
+	// error). Otherwise it stays parked on an unbuffered send and hangs.
+	var cancelStream context.CancelFunc
+	defer func() {
+		if cancelStream != nil {
+			cancelStream()
+		}
+	}()
+
 	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	if fileFormat == dbio.FileTypeNone {
 		fileFormat = InferFileFormat(uri)
@@ -1428,6 +1438,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	}
 
 	for streamPart := range streamPartChn {
+		cancelStream = streamPart.Cancel
 		copyOptions := iop.DuckDbCopyOptions{
 			Format:        fileFormat,
 			Compression:   sc.Compression,
@@ -1708,51 +1719,91 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 		concurrency = 3
 	}
 
+	// CSV/JSON are read one file at a time. XML is copied one file at a time.
+	channelConsume := g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson)
+
 	g.Debug("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
+	nodeChn := make(chan *iop.ReaderReady, concurrency)
 	readerChn := make(chan *iop.ReaderReady, concurrency)
 	go func() {
-		defer close(readerChn)
+		defer close(nodeChn)
 
+		seen := map[string]struct{}{}
 		for _, node := range nodes {
 			if strings.HasSuffix(node.URI, "/") {
 				g.Debug("skipping %s because is not file", node.URI)
 				continue
 			}
 
-			ds.Context.Wg.Read.Add()
-			go func(node FileNode) {
-				defer ds.Context.Wg.Read.Done()
+			// stores like Google Drive can list the same path more than once
+			if _, ok := seen[node.URI]; ok {
+				g.Debug("skipping duplicate listing of %s", node.URI)
+				continue
+			}
+			seen[node.URI] = struct{}{}
 
-				if !includeAll {
-					_, uriExclude := excludeMap[node.URI]
-					_, pathExclude := excludeMap[node.Path()]
-					_, uriInclude := includeMap[node.URI]
-					_, pathInclude := includeMap[node.Path()]
+			if !includeAll {
+				_, uriExclude := excludeMap[node.URI]
+				_, pathExclude := excludeMap[node.Path()]
+				_, uriInclude := includeMap[node.URI]
+				_, pathInclude := includeMap[node.Path()]
 
-					if (uriExclude || pathExclude) || (!uriInclude && !pathInclude) {
-						g.Debug("skipping %s", node.URI)
+				if (uriExclude || pathExclude) || (!uriInclude && !pathInclude) {
+					g.Debug("skipping %s", node.URI)
+					continue
+				}
+			}
+
+			node := node
+			r := &iop.ReaderReady{URI: node.URI}
+			r.Open = func() (io.Reader, error) {
+				g.Debug("processing reader from %s", node.URI)
+				reader, err := fs.Self().GetReader(node.URI)
+				if err != nil {
+					return nil, g.Error(err, "Error getting reader for %s", node.URI)
+				}
+				return reader, nil
+			}
+
+			select {
+			case nodeChn <- r:
+			case <-ds.Context.Ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Prefetch pool: open bodies ahead of the consumer, bounded by the worker
+	// count plus the channel buffer. A body that a remote store resets while
+	// it waits is reopened at read time (see iop.ReaderReady.Read).
+	go func() {
+		defer close(readerChn)
+
+		wg := sync.WaitGroup{}
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for r := range nodeChn {
+					select {
+					case <-ds.Context.Ctx.Done():
+						// stream ended; pass unopened for the drain to close
+					default:
+						r.Prefetch()
+					}
+					select {
+					case readerChn <- r:
+					case <-ds.Context.Ctx.Done():
+						r.Close()
 						return
 					}
 				}
-
-				g.Debug("processing reader from %s", node.URI)
-
-				reader, err := fs.Self().GetReader(node.URI)
-				if err != nil {
-					setError(g.Error(err, "Error getting reader"))
-					return
-				}
-
-				r := &iop.ReaderReady{Reader: reader, URI: node.URI}
-				readerChn <- r
-			}(node)
+			}()
 		}
-
-		ds.Context.Wg.Read.Wait()
-
+		wg.Wait()
 	}()
 
-	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson) {
+	if channelConsume {
 		pipeW.Close()
 
 		switch fileType {
@@ -1768,13 +1819,30 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 			defer pipeW.Close()
 
 			for reader := range readerChn {
-				_, err = io.Copy(pipeW, reader.Reader)
-				if err != nil {
-					setError(g.Error(err, "Error copying reader to pipe writer"))
+				src, rerr := reader.GetReader()
+				if rerr != nil {
+					reader.Close()
+					setError(g.Error(rerr, "Error getting reader"))
+					for leftover := range readerChn {
+						leftover.Close()
+					}
+					return
+				}
+
+				_, rerr = io.Copy(pipeW, src)
+				reader.Close()
+				if rerr != nil {
+					setError(g.Error(rerr, "Error copying reader to pipe writer"))
+					for leftover := range readerChn {
+						leftover.Close()
+					}
 					return
 				}
 
 				if cfg.Limit > 0 && (ds.Limited(cfg.Limit) || len(ds.Buffer) >= cfg.Limit) {
+					for leftover := range readerChn {
+						leftover.Close()
+					}
 					return
 				}
 			}
