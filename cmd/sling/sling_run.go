@@ -311,8 +311,17 @@ runReplication:
 		// run task, add replication config for md5
 		rc := cfg.AsReplication()
 
-		// run as replication is stream is wildcard
-		if cfg.HasWildcard() {
+		// stdin only counts as the source if no source connection is given,
+		// since Options.StdIn is also true for any non-interactive shell
+		isStdInOut := (cfg.Options.StdIn && cfg.Source.Conn == "") || cfg.Options.StdOut
+
+		if isStdInOut && (cfg.WithRetries() || cfg.WithChunking() || cfg.WithThreads()) {
+			g.Warn("chunking, threads and retries are not supported with stdin/stdout")
+		}
+
+		// run as replication if stream is wildcard, or if a pro feature
+		// needs the replication path
+		if cfg.HasWildcard() || (cfg.RequiresPro() && !isStdInOut) {
 			replicationCfgPath = path.Join(env.GetTempFolder(), g.NewTsID("replication.temp")+".json")
 			err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
 			if err != nil {

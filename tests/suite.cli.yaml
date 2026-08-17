@@ -2692,3 +2692,31 @@
     sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
   output_contains:
     - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+# Chunking with ad-hoc CLI flags (no -r) was silently ignored, since only the
+# replication path calls ProcessChunks. The task path now routes to the
+# replication path when a pro feature needs it.
+- id: 322
+  name: 'ad-hoc CLI flags trigger chunking'
+  run: |
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
+    sling conns exec POSTGRES --limit 0 "create table public.cli_chunk_test as select g as id, 'v'||g as val from generate_series(1,1000) g"
+    sling run -d --src-conn POSTGRES --src-stream 'public.cli_chunk_test' --tgt-conn DUCKDB --tgt-object 'main.cli_chunk_test' --mode full-refresh --src-options '{"chunk_size": "250"}' --update-key id --primary-key id
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
+  output_contains:
+    - 'determined 4 chunks'
+    - '(part-004)'
+    - 'execution succeeded'
+
+# Guard: an ad-hoc run with no pro feature must stay on the task path,
+# and stdout must keep streaming when chunking is requested.
+- id: 323
+  name: 'ad-hoc CLI without pro features keeps task path'
+  run: |
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_nochunk_test"
+    sling conns exec POSTGRES --limit 0 "create table public.cli_nochunk_test as select g as id from generate_series(1,10) g"
+    sling run -d --src-conn POSTGRES --src-stream 'public.cli_nochunk_test' --stdout --src-options '{"chunk_size": "5"}'
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_nochunk_test"
+  output_contains:
+    - 'chunking, threads and retries are not supported with stdin/stdout'
+    - 'execution succeeded'

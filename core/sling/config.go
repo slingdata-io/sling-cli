@@ -495,6 +495,20 @@ func (cfg *Config) HasWildcard() bool {
 	return false
 }
 
+// RequiresPro returns true if the config uses a pro feature which
+// the replication path applies. An ad-hoc task ignores these.
+func (cfg *Config) RequiresPro() bool {
+	return cfg.WithChunking() || cfg.WithRetries() || cfg.WithThreads()
+}
+
+func (cfg *Config) WithRetries() bool {
+	return cast.ToInt(cfg.Env["SLING_RETRIES"]) > 0 || cast.ToInt(os.Getenv("SLING_RETRIES")) > 0
+}
+
+func (cfg *Config) WithThreads() bool {
+	return cast.ToInt(cfg.Env["SLING_THREADS"]) > 1 || cast.ToInt(os.Getenv("SLING_THREADS")) > 1
+}
+
 func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 	rc = ReplicationConfig{
 		Source: cfg.Source.Conn,
