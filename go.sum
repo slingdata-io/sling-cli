@@ -359,8 +359,6 @@ github.com/flarco/bigquery v0.0.9 h1:WfxO6XuuHZTJV+55Bq24FhdHYpmAOzgVk9xOcJpEecY
 github.com/flarco/bigquery v0.0.9/go.mod h1:IpRSw4quaXxHjFyDSXUo7B6v+XcNF2pSmnNfeqXa/gM=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad h1:z5mgsXmNXsgskClg/s6zelILFihJTyK6x7+zX1jUgyU=
 github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad/go.mod h1:mnsep6/uctUEgRONJy1pQdb17s/lRtqgcZZZV/WPdkc=
-github.com/flarco/g v0.1.177 h1:lk7N62jt4w88EPQFnVNnh8QaciiZC43QFDLKTwsTVtU=
-github.com/flarco/g v0.1.177/go.mod h1:Ho26Asm6DWBEcBW3Hs8q8ntdWDc/oe9wdF24m8jYSuQ=
 github.com/flarco/iceberg-go v0.0.0-20260105175128-f16b74585ee2 h1:k01grALOonWx3nBt0LfbUqY39kjaIXaiNP+2LHNuJYY=
 github.com/flarco/iceberg-go v0.0.0-20260105175128-f16b74585ee2/go.mod h1:S7rRApCtYThojNe57sOBhV/ZmH7EMfgEyou4TBEdQHU=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
@@ -992,8 +990,8 @@ github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 h1:JIAuq3EEf9cgbU6AtGPK4CTG3Zf6CKMNqf0MHTggAUA=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966/go.mod h1:sUM3LWHvSMaG192sy56D9F7CNvL7jUJVXoqM1QKLnog=
-github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260225105818-efcf366e7dd4 h1:ApIb+5SkT85NqoZH8nmqS5Ydn3dKxwJoCUXrT8BeTa4=
-github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260225105818-efcf366e7dd4/go.mod h1:ikEb6zQgczMp7Alx/RYGaBEn/Mwwz1kfXbirnkbgWUo=
+github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260806214312-6da3e7189c98 h1:HT0E/6EiVUe8wew4uIgYEpUYPHcswmGkxpbbqFges3g=
+github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260806214312-6da3e7189c98/go.mod h1:ikEb6zQgczMp7Alx/RYGaBEn/Mwwz1kfXbirnkbgWUo=
 github.com/slingdata-io/godbc v0.0.9 h1:wh5MSI6l+eyTQ8pSbQcO4j195HwBXrVmNYRnHaGJKK8=
 github.com/slingdata-io/godbc v0.0.9/go.mod h1:oBLg0zDZSK1BhLpcNhZjsvCLdfvB4OiTReAreXCrb3M=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
