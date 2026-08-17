@@ -3,9 +3,11 @@ package iop
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -634,6 +636,49 @@ func TestDuckDbMaxLineSize(t *testing.T) {
 		duck := duckOf("max_line_size=abc")
 		assert.Equal(t, DuckDbLargeMaxLineSize, duck.MaxLineSize(colOf(TextType)))
 	})
+}
+
+// regression guard for the v1.5.25 OOM: DuckDB sizes its read_csv buffer as
+// 16 × max_line_size and allocates it eagerly. The 256MB raise thus demands a
+// 4 GiB block, which fails on hosts with memory_limit below ~4 GiB. The bridge
+// expression must cap the buffer so it works under small memory limits.
+func TestDuckDbReadCsvExprLowMemory(t *testing.T) {
+	cols := NewColumnsFromFields("id", "payload")
+	cols[0].Type = IntegerType
+	cols[1].Type = TextType
+
+	// a ~5MB line exceeds the 2 MB default limit, so this also guards the
+	// #787 raise: the line must still load with the capped buffer_size
+	csvPath := os.TempDir() + "/duckdb_low_mem_test.csv"
+	payload := strings.Repeat("x", 5*1024*1024)
+	err := os.WriteFile(csvPath, []byte("id,payload\n1,"+payload+"\n"), 0644)
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer os.Remove(csvPath)
+
+	duck := NewDuckDb(context.Background(), "memory_limit=1GB")
+	err = duck.Open()
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer duck.Close()
+
+	expr := duck.ReadCsvExpr(csvPath, cols)
+	assert.Contains(t, expr, cast.ToString(DuckDbLargeMaxLineSize))
+
+	// same COPY shape the fabric/parquet bridge submits in production
+	parquetPath := os.TempDir() + "/duckdb_low_mem_test.parquet"
+	defer os.Remove(parquetPath)
+	_, err = duck.Exec(g.F("COPY (select * from %s) TO '%s' (format 'parquet', overwrite true)", expr, parquetPath))
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	data, err := duck.Query(g.F("select count(*) cnt from read_parquet('%s')", parquetPath))
+	if assert.NoError(t, err) && assert.Equal(t, 1, len(data.Rows)) {
+		assert.EqualValues(t, 1, cast.ToInt(data.Rows[0][0]))
+	}
 }
 
 // regression guard for issue #770: http_timeout must be raised on every DuckDB
