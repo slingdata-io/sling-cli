@@ -463,6 +463,10 @@ func (duck *DuckDb) getSessionSettingsSQL() (sql string) {
 	}
 
 	sql += fmt.Sprintf("SET http_timeout = %d;", httpTimeout)
+
+	if limit := duck.GetProp("memory_limit"); limit != "" {
+		sql += fmt.Sprintf("SET memory_limit = '%s';", limit)
+	}
 	return
 }
 
@@ -1934,10 +1938,8 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				// Create a pipe to stream data through
 				pipeR, pipeW := io.Pipe()
 
-				maxLineSize := duck.MaxLineSize(batchR.Columns)
-
 				// can use this as a from table
-				fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns), maxLineSize)
+				fromExpr := duck.ReadCsvExpr(httpURL, batchR.Columns)
 
 				select {
 				case streamPartChn <- HttpStreamPart{
@@ -2027,6 +2029,16 @@ func (duck *DuckDb) MaxLineSize(columns Columns) int {
 	}
 
 	return DuckDbDefaultMaxLineSize
+}
+
+// ReadCsvExpr returns the read_csv from-expression for the CSV bridge.
+// DuckDB sizes its read buffer as 16 × max_line_size and allocates it
+// eagerly, so the 256MB raise would demand a 4 GiB block and OOM hosts
+// with a smaller memory_limit. An explicit buffer_size caps the
+// allocation at max_line_size, the minimum that fits one line.
+func (duck *DuckDb) ReadCsvExpr(uri string, columns Columns) string {
+	maxLineSize := duck.MaxLineSize(columns)
+	return g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, buffer_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, uri, duck.GenerateCsvColumns(columns), maxLineSize, maxLineSize)
 }
 
 func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {

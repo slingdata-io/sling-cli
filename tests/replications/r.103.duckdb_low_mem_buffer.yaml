@@ -1,0 +1,33 @@
+# DuckDB sizes its read_csv buffer as 16 x max_line_size and allocates it
+# eagerly. The 256MB max_line_size raise must not demand a 4 GiB block when
+# memory_limit is small; the bridge caps the buffer with buffer_size.
+# One row holds a 5MB payload, which also guards the #787 large-line raise.
+source: LOCAL
+target: DUCK_LOW_MEM
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) cnt, max(length(payload)) max_len from main.big_rows
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].cnt) == 2
+
+    - type: check
+      check: int_parse(store.result[0].max_len) == 5242880
+
+    - type: log
+      message: 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+streams:
+  "file://temp/duckdb_low_mem/big.csv":
+    object: main.big_rows

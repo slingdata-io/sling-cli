@@ -2676,3 +2676,19 @@
     sling run -d --src-stream 'http://127.0.0.1:18937/' --tgt-object 'file://temp/merge_latency/out.csv'
   output_contains:
     - 'execution succeeded'
+
+# DuckDB allocates its read_csv buffer as 16 x max_line_size, so the 256MB
+# raise (#787) demanded a 4 GiB block and OOMed hosts with memory_limit
+# below ~4 GiB. The bridge must cap the buffer via buffer_size.
+# Unit guard: TestDuckDbReadCsvExprLowMemory in core/dbio/iop/duckdb_test.go
+- id: 321
+  name: 'duckdb csv bridge loads large rows under low memory_limit'
+  env:
+    DUCK_LOW_MEM: '{type: duckdb, instance: "temp/duckdb_low_mem/test.duckdb", memory_limit: 1GB}'
+  run: |
+    mkdir -p temp/duckdb_low_mem
+    rm -f temp/duckdb_low_mem/test.duckdb temp/duckdb_low_mem/big.csv
+    python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
+    sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
+  output_contains:
+    - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
