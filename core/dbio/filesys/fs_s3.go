@@ -512,7 +512,9 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	}
 
 	svc := s3.NewFromConfig(fs.getConfig())
-	uploader := manager.NewUploader(svc)
+	uploader := manager.NewUploader(svc, func(d *manager.Uploader) {
+		d.RequestChecksumCalculation = fs.awsConfig.RequestChecksumCalculation
+	})
 	uploader.Concurrency = fs.Context().Wg.Limit
 
 	// Create pipe to get bytes written.
