@@ -1366,6 +1366,11 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		DBSchema: table.Schema,
 	}
 
+	// For 2-part targets (schema.table), ParseTableName leaves table.Database empty
+	if opts.Catalog == "" {
+		opts.Catalog = conn.GetProp("database")
+	}
+
 	g.Trace("arrow schema => %s", iop.ColumnsToArrowSchema(ds.Columns))
 
 	for batch := range ds.BatchChan {
