@@ -1,0 +1,5 @@
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+  drop_cascade: true # needed so re-runs can drop staging under mart views

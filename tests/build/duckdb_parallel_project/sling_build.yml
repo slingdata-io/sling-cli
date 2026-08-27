@@ -1,0 +1,4 @@
+target: DUCK_PARALLEL
+
+defaults:
+  mode: full-refresh

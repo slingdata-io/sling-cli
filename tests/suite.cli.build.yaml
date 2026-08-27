@@ -1,0 +1,528 @@
+
+
+- id: 400
+  name: 'sling build execute nested_yml_project with config inheritance'
+  run: 'sling build tests/build/nested_yml_project --target POSTGRES --full-refresh'
+  group: build
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+
+- id: 401
+  name: 'sling build execute dbt_compat_project'
+  run: 'sling build tests/build/dbt_compat_project --target POSTGRES --full-refresh'
+  group: build
+  after: [400]
+  output_contains:
+    - 'seed'
+    - 'OK'
+    - 'Build Completed'
+
+
+- id: 402
+  name: 'sling build execute -R multi_target_project'
+  run: 'sling build tests/build/multi_target_project -R --full-refresh'
+  group: build
+  after: [401]
+  output_contains:
+    - 'stg_orders'
+    - 'stg_events'
+    - 'OK'
+    - 'Build Completed'
+
+# Multi-statement SQL models (pre/post statements)
+
+- id: 403
+  name: 'sling build --compile multi_statement_project shows pre/post'
+  run: 'sling build tests/build/multi_statement_project --compile --target POSTGRES'
+  output_contains:
+    - 'stg_multi'
+    - 'mode: full-refresh'
+    - 'pre_statements:'
+    - 'CREATE TEMPORARY TABLE'
+    - 'sql:'
+    - 'post_statements:'
+    - 'DROP TABLE IF EXISTS'
+
+
+- id: 404
+  name: 'sling build execute multi_statement_project'
+  run: 'sling build tests/build/multi_statement_project --target POSTGRES --full-refresh'
+  group: build
+  after: [402]
+  output_contains:
+    - 'stg_multi'
+    - 'OK'
+    - 'Build Completed'
+
+# Macro usage in models
+
+- id: 405
+  name: 'sling build --compile macro_project shows expanded macros'
+  run: 'sling build tests/build/macro_project --compile --target POSTGRES'
+  output_contains:
+    - 'stg_products'
+    - 'product_margins'
+    - 'mode: full-refresh'
+    - 'dependencies: [stg_products]'
+    - 'TRIM(LOWER('
+    - 'CASE WHEN'
+    - 'price_cents / 100.0'
+    - 'sql:'
+
+
+- id: 406
+  name: 'sling build execute macro_project'
+  run: 'sling build tests/build/macro_project --target POSTGRES --full-refresh'
+  output_contains:
+    - 'stg_products'
+    - 'product_margins'
+    - 'OK'
+    - 'Build Completed'
+
+# Model hooks (start/end)
+
+- id: 407
+  name: 'sling build --compile hooks_project shows hooks'
+  run: 'sling build tests/build/hooks_project --compile --target POSTGRES'
+  output_contains:
+    - 'stg_orders'
+    - 'fct_orders'
+    - 'mode: full-refresh'
+    - 'start_hooks:'
+    - 'end_hooks:'
+    - 'building stg_orders model'
+    - 'building fct_orders from stg_orders'
+    - 'fct_orders build complete'
+    - 'dependencies: [stg_orders]'
+
+
+- id: 408
+  name: 'sling build execute hooks_project'
+  run: 'sling build tests/build/hooks_project --target POSTGRES --full-refresh'
+  group: build
+  output_contains:
+    - 'building stg_orders model'
+    - 'finished stg_orders model'
+    - 'building fct_orders from stg_orders'
+    - 'fct_orders build complete'
+    - 'OK'
+    - 'Build Completed'
+
+# sling build incremental+range (tiers A/B/C, lookback, paged, --range)
+
+- id: 409
+  name: 'sling build --compile range_test_project validates all models'
+  run: 'sling build tests/build/range_test_project --compile --target POSTGRES'
+  group: build
+  output_contains:
+    - 'range_test.stg_orders'
+    - 'range_test.fact_orders'
+    - 'range_test.fact_orders_lookback'
+    - 'range_test.fact_orders_paged'
+    - 'range_test.fact_orders_paged_start'
+    - 'mode: incremental'
+    - 'dependencies: [stg_orders]'
+
+
+- id: 410
+  name: 'sling build plain incremental first run loads full data'
+  after: [409]
+  run: |
+    sling conns exec POSTGRES "DROP SCHEMA IF EXISTS range_test CASCADE; CREATE SCHEMA range_test"
+    rm -rf tests/build/range_test_project/.sling_state/261
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh
+  output_contains:
+    - 'range_test.stg_orders'
+    - 'range_test.fact_orders'
+    - 'OK'
+    - 'Build Completed'
+
+
+- id: 411
+  name: 'sling build plain incremental second run reads SLING_STATE (tier A)'
+  after: [410]
+  env:
+    SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/262
+  run: |
+    rm -rf tests/build/range_test_project/.sling_state/262
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders --debug
+  output_contains:
+    - 'incremental'
+    - 'created_at" >'
+    - 'OK'
+    - 'Build Completed'
+
+
+- id: 412
+  name: 'sling build plain incremental without SLING_STATE queries target MAX (tier B)'
+  after: [411]
+  run: |
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders --debug
+  output_contains:
+    - 'incremental'
+    - 'tier B'
+    - 'SELECT MAX('
+    - 'Build Completed'
+
+
+- id: 413
+  name: 'sling build lookback-only uses inclusive bound with 2d offset'
+  after: [412]
+  run: |
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_lookback
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_lookback --debug
+  output_contains:
+    - 'fact_orders_lookback'
+    - 'created_at" >='
+    - 'Build Completed'
+
+
+- id: 414
+  name: 'sling build paged first run with explicit start'
+  after: [413]
+  env:
+    SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/265
+  run: |
+    rm -rf tests/build/range_test_project/.sling_state/265
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
+  output_contains:
+    - 'fact_orders_paged_start'
+    - '2024-01-01'
+    - '2024-01-08'
+    - 'Build Completed'
+
+
+- id: 415
+  name: 'sling build paged first run auto-detects origin from source MIN'
+  after: [414]
+  env:
+    SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/266
+  run: |
+    rm -rf tests/build/range_test_project/.sling_state/266
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged --debug
+  output_contains:
+    - 'fact_orders_paged'
+    - 'SELECT MIN('
+    - 'Build Completed'
+
+
+- id: 416
+  name: 'sling build paged subsequent run advances state by one step'
+  after: [415]
+  env:
+    SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/267
+  run: |
+    rm -rf tests/build/range_test_project/.sling_state/267
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
+  output_contains:
+    - 'fact_orders_paged_start'
+    - 'Build Completed'
+
+
+- id: 417
+  name: 'sling build advance range without SLING_STATE errors'
+  after: [416]
+  run: |
+    unset SLING_STATE
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+  err: true
+  output_contains:
+    - 'range.advance requires SLING_STATE'
+
+
+- id: 418
+  name: 'sling build --range single chunk runs once'
+  after: [417]
+  run: |
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build tests/build/range_test_project --target POSTGRES \
+      --range '2024-01-01,2024-02-01' -s fact_orders --debug
+  output_contains:
+    - 'fact_orders'
+    - '2024-01-01'
+    - '2024-02-01'
+    - 'Build Completed'
+
+
+- id: 419
+  name: 'sling build --range multi-chunk backfill shows per-chunk progress'
+  after: [418]
+  run: |
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build tests/build/range_test_project --target POSTGRES \
+      --range '2024-01-01,2024-04-01,1mo' -s fact_orders --debug
+  output_contains:
+    - 'chunk 1/4'
+    - 'chunk 2/4'
+    - 'chunk 3/4'
+    - 'chunk 4/4'
+    - 'Build Completed'
+
+
+- id: 420
+  name: 'sling build --range does not advance SLING_STATE'
+  after: [419]
+  env:
+    SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/271
+  run: |
+    rm -rf tests/build/range_test_project/.sling_state/271
+    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+    cp tests/build/range_test_project/.sling_state/271/*.json /tmp/sling_state_before_271.json
+    sling build tests/build/range_test_project --target POSTGRES \
+      --range '2024-01-01,2024-01-08,7d' -s fact_orders_paged_start
+    diff /tmp/sling_state_before_271.json tests/build/range_test_project/.sling_state/271/*.json
+  output_contains:
+    - 'Build Completed'
+
+
+- id: 421
+  name: 'sling build range.start requires range.advance validation error'
+  group: build
+  run: 'sling build tests/build/range_bad_start_no_advance --compile --target POSTGRES'
+  err: true
+  output_contains:
+    - 'range.start requires range.advance'
+
+
+- id: 422
+  name: 'sling build dbt-style + range.* validation error'
+  group: build
+  run: 'sling build tests/build/range_bad_dbt_with_range --compile --target POSTGRES'
+  err: true
+  output_contains:
+    - 'range.* requires {incremental_where_cond}'
+
+
+- id: 423
+  name: 'sling build mixed is_incremental + where_cond validation error'
+  group: build
+  run: 'sling build tests/build/range_bad_mixed_style --compile --target POSTGRES'
+  err: true
+  output_contains:
+    - 'cannot mix is_incremental() and {incremental_where_cond}'
+
+# expanded BuildDefaults — layered schema, additive tags/hooks,
+# enabled:false skip, defaults unique_key/update_key/merge_strategy.
+
+- id: 424
+  name: 'sling build --compile defaults_expanded_project layers defaults'
+  group: build
+  run: 'sling build tests/build/defaults_expanded_project --compile --target POSTGRES --recursive'
+  output_contains:
+    # stg_orders inherits root defaults.schema=raw (overrides folder schema)
+    - 'table: raw.stg_orders'
+    # child defaults.mode + unique_key + update_key + merge_strategy apply
+    - 'mode: incremental'
+    - 'unique_key: id'
+    - 'update_key: updated_at'
+    - 'merge_strategy: delete+insert'
+    # root tag + child tag — union+dedupe
+    - 'tags: [core, staging]'
+    # root defaults hook inherited into stg_orders
+    - '"message":"default start hook"'
+    # fct_orders: schema override propagates, frontmatter merges with root defaults
+    - 'table: raw.fct_orders'
+    - 'tags: [core, marts]'
+    - '"message":"fct_orders frontmatter start hook"'
+    # ref() rewrite uses overridden schema
+    - 'FROM raw.stg_orders'
+    - 'dependencies: [stg_orders]'
+  output_does_not_contain:
+    # enabled:false model must be absent from compile output
+    - 'stg_disabled'
+
+# Sling Build - CLI registration, compile mode, seed config
+
+- id: 425
+  name: 'sling build --help shows command description'
+  run: 'sling build --help'
+  output_contains:
+    - 'Build and execute SQL models'
+    - '--compile'
+    - '--target'
+    - '--select'
+    - '--full-refresh'
+    - '--schema'
+  output_does_not_contain:
+    - '--init'
+
+- id: 426
+  name: 'sling build --compile sample_project with target'
+  run: 'sling build tests/build/sample_project --compile --target POSTGRES'
+  group: build
+  output_contains:
+    - 'DAG Execution Order:'
+    - 'country_codes (seed)'
+    - 'stg_orders (full-refresh)'
+    - 'stg_customers (full-refresh)'
+    - 'dim_customers (view)'
+    - 'fct_orders (incremental)'
+    - 'revenue (view)'
+    - 'raw (full-refresh)'
+    - 'sql:'
+    - 'dependencies: [stg_orders]'
+    - 'dependencies: [stg_customers]'
+    - 'dependencies: [fct_orders]'
+
+
+- id: 427
+  name: 'sling build --compile with selector stg_*'
+  run: 'sling build tests/build/sample_project --compile --target POSTGRES -s "stg_*"'
+  group: build
+  output_contains:
+    - 'stg_customers (full-refresh)'
+    - 'stg_orders (full-refresh)'
+  output_does_not_contain:
+    - 'dim_customers'
+    - 'fct_orders'
+    - 'revenue'
+    - 'country_codes'
+
+
+- id: 428
+  name: 'sling build --compile dev mode with --schema override'
+  run: 'sling build tests/build/sample_project --compile --target POSTGRES --schema dev_test'
+  group: build
+  output_contains:
+    - 'dev_test.staging_stg_orders'
+    - 'dev_test.staging_stg_customers'
+    - 'dev_test.marts_core_dim_customers'
+    - 'dev_test.marts_core_fct_orders'
+    - 'dev_test.marts_finance_revenue'
+    - 'dev_test.raw'
+    - 'dev_test.staging_country_codes'
+    - 'dev_test.seeds_status_map'
+
+
+- id: 429
+  name: 'sling build --compile with upstream selector +revenue'
+  run: 'sling build tests/build/sample_project --compile --target POSTGRES -s "+revenue"'
+  group: build
+  output_contains:
+    - 'stg_orders'
+    - 'fct_orders'
+    - 'revenue'
+  output_does_not_contain:
+    - 'stg_customers'
+    - 'dim_customers'
+    - 'country_codes'
+
+
+- id: 430
+  name: 'sling build --compile dbt_compat_project'
+  run: 'sling build tests/build/dbt_compat_project --compile --target POSTGRES'
+  group: build
+  output_contains:
+    - 'stg_orders'
+    - 'country_codes (seed)'
+
+
+- id: 431
+  name: 'sling build --compile nested_yml_project inherits config'
+  run: 'sling build tests/build/nested_yml_project --compile --target POSTGRES --recursive'
+  group: build
+  output_contains:
+    - 'stg_orders (truncate)'
+    - 'dim_customers (full-refresh)'
+
+
+- id: 432
+  name: 'sling build with no config and no target shows help'
+  run: 'sling build /tmp --compile'
+  output_contains:
+    - 'Build and execute SQL models'
+    - '--recursive'
+
+
+- id: 433
+  name: 'sling build execute with selector'
+  run: 'sling build tests/build/sample_project --target POSTGRES --full-refresh -s "stg_*"'
+  group: build
+  output_contains:
+    - 'stg_orders'
+    - 'stg_customers'
+    - 'OK'
+  output_does_not_contain:
+    - 'dim_customers'
+    - 'revenue'
+
+- id: 434
+  name: 'sling build execute sample_project full-refresh'
+  run: 'sling build tests/build/sample_project --target POSTGRES --full-refresh'
+  group: build
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 435
+  name: 'sling build second run (view and incremental modes)'
+  run: 'sling build tests/build/sample_project --target POSTGRES'
+  group: build
+  after: [434]
+  output_contains:
+    - 'view'
+    - 'incremental'
+    - 'OK'
+    - 'Build Completed'
+
+- id: 436
+  name: 'sling build --help shows range without short -r'
+  run: 'sling build --help'
+  output_contains:
+    - 'Build and execute SQL models'
+    - '--range'
+    - '--threads'
+    - '--test'
+    - '--json'
+  output_does_not_contain:
+    - '-r, --range'
+
+# §5.3 — type: build pipeline step / replication end-hook
+- id: 437
+  name: 'pipeline type:build step runs project and exposes state results'
+  run: 'sling run -d -p tests/pipelines/p.45.build_step.yaml'
+  group: build
+  output_contains:
+    - 'Build Completed'
+    - 'SUCCESS: pipeline type:build step completed'
+    - 'rows=2'
+    - 'label=from_pipeline'
+    - 'build total='
+
+- id: 438
+  name: 'replication end-hook type:build after load'
+  run: 'sling run -d -r tests/pipelines/p.46.build_step_replication_hook.yaml'
+  group: build
+  after: [437]
+  output_contains:
+    - 'Build Completed'
+    - 'SUCCESS: replication end-hook type:build ok'
+    - 'rows=2'
+    - 'label=from_repl_hook'
+
+- id: 439
+  name: 'sling build serializes independent DuckDB roots'
+  env:
+    DUCK_PARALLEL: '{type: duckdb, instance: "temp/duckdb_parallel/test.duckdb"}'
+  run: |
+    mkdir -p temp/duckdb_parallel
+    rm -f temp/duckdb_parallel/test.duckdb
+    sling build tests/build/duckdb_parallel_project --target DUCK_PARALLEL --full-refresh --threads 4
+  group: build
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+  output_does_not_contain:
+    - 'Conflicting lock'
+    - 'Could not set lock'
+
+
