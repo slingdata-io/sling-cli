@@ -1169,29 +1169,22 @@ func splitCLIRange(raw string, dbType dbio.Type, colType iop.ColumnType) (*Range
 	return r, nil
 }
 
-// resolveRange decides which range-resolution strategy to use and returns the
-// ordered set of chunks to execute. Returns a Range with 0 chunks as a no-op.
-func (e *Executor) resolveRange(model *Model) (*Range, error) {
-	// --range CLI flag wins over all automatic resolution
-	if e.Build.Options.Range != nil {
-		return e.resolveCLIRange(model)
+var (
+	resolveAdvanceRange = func(e *Executor, model *Model) (*Range, error) {
+		g.Warn("use the official release of sling-cli to use sling state")
+		return nil, nil
 	}
 
-	rc := model.Config.Range
-	if rc != nil && rc.HasAdvance() {
-		return e.resolveAdvanceRange(model)
+	advanceStateAfterRange = func(e *Executor, model *Model, r *Range, updateKey string) error {
+		g.Warn("use the official release of sling-cli to use sling state")
+		return nil
 	}
 
-	return e.resolveIncrementalRange(model)
-}
-
-// resolveCLIRange parses the --range flag and produces one or more chunks.
-// State is never advanced for CLI backfills.
-func (e *Executor) resolveCLIRange(model *Model) (*Range, error) {
-	raw := *e.Build.Options.Range
-	dbType := e.DbConn.GetType()
-	return splitCLIRange(raw, dbType, "")
-}
+	readState = func(string, string) (string, iop.ColumnType, error) {
+		g.Warn("use the official release of sling-cli to use sling state")
+		return "", "", nil
+	}
+)
 
 // resolveIncrementalRange resolves the watermark via tier A/B/C and applies
 // optional lookback. This is used when there is no step (plain incremental).
@@ -1199,7 +1192,7 @@ func (e *Executor) resolveCLIRange(model *Model) (*Range, error) {
 //   - Tier A: SLING_STATE is configured → read from state store
 //   - Tier B: target table has rows → SELECT MAX(update_key)
 //   - Tier C: first run → unbounded lower (full-refresh semantics)
-func (e *Executor) resolveIncrementalRange(model *Model) (*Range, error) {
+func resolveIncrementalRange(e *Executor, model *Model) (*Range, error) {
 	updateKey := model.Config.UpdateKey
 	if updateKey == "" {
 		return nil, g.Error("model '%s': sling-style incremental requires update_key in config()", model.Name)
@@ -1213,14 +1206,10 @@ func (e *Executor) resolveIncrementalRange(model *Model) (*Range, error) {
 
 	// Tier A: state store
 	if sling.IsStateConfigured() {
-		rec, err := sling.ReadState(model.Name, model.FullTableName)
+		var err error
+		lowerRaw, colType, err = readState(model.Name, model.FullTableName)
 		if err != nil {
 			return nil, g.Error(err, "could not read SLING_STATE for model '%s'", model.Name)
-		}
-		if rec != nil && rec.IsValid() {
-			lowerRaw = rec.Value
-			colType = rec.ColumnType
-			g.Debug("build[%s]: tier A — state value %q", model.Name, lowerRaw)
 		}
 	}
 
@@ -1279,128 +1268,25 @@ func (e *Executor) resolveIncrementalRange(model *Model) (*Range, error) {
 	}, nil
 }
 
-// resolveAdvanceRange resolves a range that moves forward one "advance" window
-// per run. Requires SLING_STATE. On first run, probes source for MIN(update_key)
-// (or uses range.start). On subsequent runs, advances by one advance-window from
-// the last state value.
-func (e *Executor) resolveAdvanceRange(model *Model) (*Range, error) {
-	if !sling.IsStateConfigured() {
-		return nil, g.Error("model '%s': range.advance requires SLING_STATE to be configured", model.Name)
+// resolveRange decides which range-resolution strategy to use and returns the
+// ordered set of chunks to execute. Returns a Range with 0 chunks as a no-op.
+func (e *Executor) resolveRange(model *Model) (*Range, error) {
+	// --range CLI flag wins over all automatic resolution
+	if e.Build.Options.Range != nil {
+		raw := *e.Build.Options.Range
+		dbType := e.DbConn.GetType()
+		return splitCLIRange(raw, dbType, "")
 	}
 
 	rc := model.Config.Range
-	advance, err := parseBuildDuration(rc.Advance)
-	if err != nil {
-		return nil, g.Error(err, "model '%s': invalid range.advance", model.Name)
+	if rc != nil && rc.HasAdvance() {
+		if !sling.IsStateConfigured() {
+			return nil, g.Error("model '%s': range.advance requires SLING_STATE to be configured", model.Name)
+		}
+		return resolveAdvanceRange(e, model)
 	}
 
-	updateKey := model.Config.UpdateKey
-	if updateKey == "" {
-		return nil, g.Error("model '%s': range.advance requires update_key in config()", model.Name)
-	}
-
-	dbType := e.DbConn.GetType()
-	var colType iop.ColumnType
-
-	// Read existing state
-	rec, err := sling.ReadState(model.Name, model.FullTableName)
-	if err != nil {
-		return nil, g.Error(err, "could not read SLING_STATE for model '%s'", model.Name)
-	}
-
-	now := time.Now().UTC()
-
-	if rec != nil && rec.IsValid() {
-		// Subsequent run: advance from last state
-		stateT, err := parseValueAsTime(rec.Value, rec.ColumnType)
-		if err != nil {
-			return nil, g.Error(err, "model '%s': could not parse state value for advance range", model.Name)
-		}
-
-		lower := stateT
-		if rc.HasLookback() {
-			lb, err := parseBuildDuration(rc.Lookback)
-			if err != nil {
-				return nil, g.Error(err, "model '%s': invalid range.lookback", model.Name)
-			}
-			lower = stateT.Add(-lb)
-		}
-		upper := stateT.Add(advance)
-		if upper.After(now) {
-			upper = now
-		}
-
-		if !lower.Before(upper) {
-			g.Debug("build[%s]: advance range caught up (lower >= upper), no-op", model.Name)
-			return &Range{UpdateState: false, Chunks: nil}, nil
-		}
-
-		lowerInclusive := rc.HasLookback()
-		colType = rec.ColumnType
-		return &Range{
-			UpdateState: true,
-			Step:        rc.Advance,
-			Chunks: []RangeChunk{{
-				Lower:          quoteValue(lower, colType, dbType),
-				Upper:          quoteValue(upper, colType, dbType),
-				LowerInclusive: lowerInclusive,
-				ColType:        colType,
-				LowerRaw:       lower.Format(time.RFC3339),
-				UpperRaw:       upper.Format(time.RFC3339),
-			}},
-		}, nil
-	}
-
-	// First run: resolve origin
-	var originT time.Time
-	if rc.Start != "" {
-		originT, err = parseValueAsTime(rc.Start, "")
-		if err != nil {
-			return nil, g.Error(err, "model '%s': could not parse range.start", model.Name)
-		}
-		colType = iop.TimestampType
-	} else {
-		// Probe source for MIN(update_key)
-		minVal, minType, err := e.probeSourceMin(model, updateKey)
-		if err != nil {
-			return nil, g.Error(err, "model '%s': could not probe source for range origin", model.Name)
-		}
-		if minVal == "" {
-			g.Debug("build[%s]: advance first-run probe returned empty source; no-op", model.Name)
-			return &Range{UpdateState: false, Chunks: nil}, nil
-		}
-		colType = minType
-		originT, err = parseValueAsTime(minVal, colType)
-		if err != nil {
-			return nil, g.Error(err, "model '%s': could not parse probed origin", model.Name)
-		}
-	}
-
-	// Cache origin in state immediately (idempotent on crash/retry)
-	if err := sling.WriteState(model.Name, model.FullTableName, originT.Format(time.RFC3339), colType); err != nil {
-		g.Warn("build[%s]: could not cache advance origin in SLING_STATE: %s", model.Name, err)
-	}
-
-	upper := originT.Add(advance)
-	if upper.After(now) {
-		upper = now
-	}
-	if !originT.Before(upper) {
-		return &Range{UpdateState: false, Chunks: nil}, nil
-	}
-
-	return &Range{
-		UpdateState: true,
-		Step:        rc.Advance,
-		Chunks: []RangeChunk{{
-			Lower:          quoteValue(originT, colType, dbType),
-			Upper:          quoteValue(upper, colType, dbType),
-			LowerInclusive: true, // first-run: inclusive of origin
-			ColType:        colType,
-			LowerRaw:       originT.Format(time.RFC3339),
-			UpperRaw:       upper.Format(time.RFC3339),
-		}},
-	}, nil
+	return resolveIncrementalRange(e, model)
 }
 
 // probeSourceMin compiles the model with default context, rewrites refs, builds
@@ -1519,7 +1405,7 @@ func (e *Executor) executeRange(model *Model, r *Range) error {
 
 	// Advance state after successful run
 	if r.UpdateState && sling.IsStateConfigured() {
-		if err := e.advanceStateAfterRange(model, r, updateKey); err != nil {
+		if err := advanceStateAfterRange(e, model, r, updateKey); err != nil {
 			g.Warn("build[%s]: could not advance SLING_STATE: %s", model.Name, err)
 		}
 	}
@@ -1591,34 +1477,6 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) er
 	}
 
 	return nil
-}
-
-// advanceStateAfterRange writes the final watermark to SLING_STATE.
-// For bounded upper (paged): writes last chunk's UpperRaw.
-// For unbounded upper (plain incremental): queries target MAX post-merge.
-func (e *Executor) advanceStateAfterRange(model *Model, r *Range, updateKey string) error {
-	last := r.Chunks[len(r.Chunks)-1]
-
-	if last.Upper != "" && last.Upper != "null" {
-		// Paged / bounded — advance to upper bound
-		return sling.WriteState(model.Name, model.FullTableName, last.UpperRaw, last.ColType)
-	}
-
-	// Unbounded upper — query actual max from target
-	maxVal, maxType, err := e.queryTargetMax(model, updateKey)
-	if err != nil {
-		return g.Error(err, "advanceStateAfterRange: queryTargetMax failed")
-	}
-	if maxVal == "" {
-		g.Warn("build[%s]: target table appears empty after merge; leaving state unchanged", model.Name)
-		return nil
-	}
-
-	colType := last.ColType
-	if colType == "" {
-		colType = maxType
-	}
-	return sling.WriteState(model.Name, model.FullTableName, maxVal, colType)
 }
 
 // handleChunkError formats an error from a failed chunk and optionally prints
