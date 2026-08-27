@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - staticcheck
+    - revive
+    - errcheck
+    - unused
+    - ineffassign
+    - govet
+    - funlen
+    - gocyclo
+    - unconvert
+    - misspell
+
+  settings:
+    funlen:
+      lines: 80
+      statements: 60
+    gocyclo:
+      min-complexity: 25
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: var-naming
+        - name: error-return
+        - name: context-as-argument
+        - name: unexported-return
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocyclo
+    paths:
+      - temp
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/slingdata-io/sling-cli
+  exclusions:
+    paths:
+      - temp
+
+issues:
+  new-from-merge-base: main
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
