@@ -2758,6 +2758,21 @@
     - sling init scaffolds
     - launch interactive mode
 
+- id: 588
+  name: 'incremental file source with no new files since checkpoint (issue #793)'
+  run: |
+    sling conns exec POSTGRES "drop table if exists public.issue793_no_new_files"
+    uv run tests/scripts/generate_issue793_parquet.py
+    sling run --src-stream 'file:///tmp/sling-test/issue793.parquet' --tgt-conn AZURE_STORAGE --tgt-object 'sling-issue793/data.parquet'
+    sling run -r tests/replications/r.124.incremental_no_new_files_duckdb.yaml
+    sling run -r tests/replications/r.124.incremental_no_new_files_duckdb.yaml
+  output_contains:
+    - 'no new files found since latest timestamp'
+    - '✓ issue793 target has 3 rows'
+  output_does_not_contain:
+    - 'No files provided in nodes'
+    - 'could not copy files locally to use duckdb compute'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

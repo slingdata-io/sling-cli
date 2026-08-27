@@ -712,6 +712,11 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 			// duckdb read natively
 			df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
 		} else {
+			// match the error of the other paths, so callers can no-op (incremental with no new files)
+			if len(nodes.Files()) == 0 {
+				return df, g.Error("Provided 0 files for: %#v", nodes)
+			}
+
 			localRoot := path.Join(env.GetTempFolder(), g.NewTsID("duck.temp"))
 
 			// copy to local first
