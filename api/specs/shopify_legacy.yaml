@@ -100,8 +100,6 @@ endpoints:
         url: "{state.base_url}/product_variants.json"  # Initial URL or next URL from pagination
         updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
       
-      sync: [ last_id ]
-      
       request:
         url: '{state.url}'
         parameters:
