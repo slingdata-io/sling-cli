@@ -487,6 +487,19 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return nil
 	}
 
+	// another process may still hold the file lock; retry briefly
+	for attempt := 0; ; attempt++ {
+		err = duck.openOnce(timeOut...)
+		if err == nil || attempt >= 4 || !strings.Contains(err.Error(), "Conflicting lock") {
+			return err
+		}
+		g.Debug("duckdb file lock busy, retrying (attempt %d)", attempt+1)
+		duck.kill()
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+	}
+}
+
+func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
 		return g.Error(err, "could not get duckdb binary")
@@ -1425,26 +1438,27 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 			return "", g.Error("missing partition key")
 		}
 
+		keyExpr := duck.partitionKeyTimestampExpr(options.PartitionKey, options.Columns)
 		pe := partExpression{
 			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), pl),
-			expression: g.F("date_part('%s', %s)", pl, options.PartitionKey),
+			expression: g.F("date_part('%s', %s)", pl, keyExpr),
 		}
 
 		switch pl {
 		case PartitionLevelYear:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%Y")
 		case PartitionLevelYearMonth:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y-%m")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%Y-%m")
 		case PartitionLevelMonth:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%m")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%m")
 		case PartitionLevelWeek:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%V")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%V")
 		case PartitionLevelDay:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%d")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%d")
 		case PartitionLevelHour:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%H")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%H")
 		case PartitionLevelMinute:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%M")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%M")
 		default:
 			return sql, g.Error("invalid partition field: %s", pl)
 		}
@@ -1512,6 +1526,30 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	}
 
 	return
+}
+
+// partitionKeyTimestampExpr wraps epoch-integer partition keys so DuckDB
+// strftime/date_part receive a TIMESTAMP. _sling_loaded_at is Unix seconds
+// by default (SLING_LOADED_AT_COLUMN=timestamp stores a real timestamptz).
+func (duck *DuckDb) partitionKeyTimestampExpr(key string, cols Columns) string {
+
+	partitionKeyIsEpoch := func(name string, cols Columns) bool {
+		if strings.EqualFold(name, "_sling_loaded_at") {
+			return true
+		}
+		for i := range cols {
+			if strings.EqualFold(cols[i].Name, name) {
+				return cols[i].IsInteger()
+			}
+		}
+		return false
+	}
+
+	name := strings.Trim(key, `"`)
+	if partitionKeyIsEpoch(name, cols) {
+		return g.F("to_timestamp(%s)", key)
+	}
+	return key
 }
 
 // Quote quotes a column name

@@ -756,27 +756,37 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 	}
 
 	// First, we need to identify string literals to exclude them
-	// Track positions of string literals
+	// Track positions of string literals (double- and single-quoted)
 	inString := false
+	stringQuote := rune(0)
 	stringRanges := make([][]int, 0)
 	var start int
 
-	for i, char := range expr {
-		if char == '"' {
-			// Check if the quote is escaped
-			if i > 0 && expr[i-1] == '\\' {
-				continue
-			}
+	runes := []rune(expr)
+	for i, char := range runes {
+		if char != '"' && char != '\'' {
+			continue
+		}
+		if inString && char != stringQuote {
+			continue
+		}
+		// Check if the quote is escaped
+		if i > 0 && runes[i-1] == '\\' {
+			continue
+		}
+		// SQL-style doubled quote inside a matching literal ('' or "")
+		if inString && i+1 < len(runes) && runes[i+1] == char {
+			continue
+		}
 
-			if !inString {
-				// Start of a string
-				inString = true
-				start = i
-			} else {
-				// End of a string
-				inString = false
-				stringRanges = append(stringRanges, []int{start, i})
-			}
+		if !inString {
+			inString = true
+			stringQuote = char
+			start = i
+		} else {
+			inString = false
+			stringQuote = 0
+			stringRanges = append(stringRanges, []int{start, i})
 		}
 	}
 
@@ -914,6 +924,22 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 	}
 
 	return stateMap
+}
+
+// methodCallRegex matches JS/Python method-call syntax, for example
+// `name.split('.')`. Sling expressions only support function calls.
+var methodCallRegex = regexp.MustCompile(`\.\w+\(`)
+
+// methodCallHint appends guidance when a render error comes from
+// method-call syntax on a string value.
+func (e *Evaluator) methodCallHint(expr string, err error) string {
+	if err == nil || !strings.Contains(err.Error(), "cannot access fields on type string") {
+		return ""
+	}
+	if methodCallRegex.MatchString(expr) {
+		return " (method calls are not supported; use function syntax, e.g. split_part(value, \".\", 0))"
+	}
+	return ""
 }
 
 func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal string, err error) {
@@ -1122,7 +1148,9 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		key := "{" + expr + "}"
 		// If jmespath failed or if we detected evaluation operators/functions, use goval
 		if callsFuncOrEvals || err != nil || e.KeepMissingExpr {
-			value, err = e.Eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			// Rewrite SQL-style '…' literals to goval double-quoted strings
+			evalExpr := e.rewriteSingleQuotedStrings(expr)
+			value, err = e.Eval.Evaluate(evalExpr, stateMap, GlobalFunctionMap)
 			if err != nil {
 				// check if jmespath rendered
 				if jpValue != nil && validJmesPath {
@@ -1142,7 +1170,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 					if errChk := e.Check(expr); errChk != nil {
 						return "", g.Error(errChk, "invalid expression: %s", expr)
 					}
-					return "", g.Error(err, "could not render expression: %s", expr)
+					return "", g.Error(err, "could not render expression: %s%s", expr, e.methodCallHint(expr, err))
 				}
 			}
 		} else {
@@ -1227,39 +1255,52 @@ func (e *Evaluator) RenderPayload(val any, extras ...map[string]any) (newVal any
 }
 
 func (e *Evaluator) Check(expr string) (err error) {
-	inDouble := false
+	inQuote := rune(0)
 	parenCount := 0
 
 	runes := []rune(expr)
+	escaped := false
 	for i, c := range runes {
-		if c == '\'' && !inDouble {
-			return g.Error("cannot use single quotes (') for strings in expression, use double quotes (\"): %s", expr)
-		} else if c == '"' {
-			// Check if this quote is escaped by counting preceding backslashes
-			backslashCount := 0
-			for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
-				backslashCount++
-			}
-			// If even number of backslashes (including 0), the quote is not escaped
-			if backslashCount%2 == 0 {
-				inDouble = !inDouble
-			}
-		} else if !inDouble {
-			// Only track parentheses when not inside double quotes
-			switch c {
-			case '(':
-				parenCount++
-			case ')':
-				parenCount--
-				if parenCount < 0 {
-					return g.Error("unmatched closing parenthesis ')' in expression: %s", expr)
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			// Markdown / source-escaped quote (\"…\") is not a string opener.
+			escaped = true
+			continue
+		}
+		if inQuote != 0 {
+			if c == inQuote {
+				// SQL-style doubled quote stays inside the literal
+				if i+1 < len(runes) && runes[i+1] == inQuote {
+					escaped = true
+					continue
 				}
+				inQuote = 0
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inQuote = c
+			continue
+		}
+		switch c {
+		case '(':
+			parenCount++
+		case ')':
+			parenCount--
+			if parenCount < 0 {
+				return g.Error("unmatched closing parenthesis ')' in expression: %s", expr)
 			}
 		}
 	}
 
-	if inDouble {
+	if inQuote == '"' {
 		return g.Error("unclosed double quote in expression: %s", expr)
+	}
+	if inQuote == '\'' {
+		return g.Error("unclosed single quote in expression: %s", expr)
 	}
 
 	if parenCount > 0 {
@@ -1267,6 +1308,73 @@ func (e *Evaluator) Check(expr string) (err error) {
 	}
 
 	return nil
+}
+
+// rewriteSingleQuotedStrings converts SQL-style '…' literals to goval
+// double-quoted strings so expressions like date_format(now(), '%Y-%m-%d')
+// evaluate. Doubled single quotes (” ) become a literal apostrophe.
+// Content already inside "…" is left alone.
+func (e *Evaluator) rewriteSingleQuotedStrings(expr string) string {
+	runes := []rune(expr)
+	var b strings.Builder
+	b.Grow(len(expr) + 8)
+	inDouble := false
+	i := 0
+	for i < len(runes) {
+		c := runes[i]
+		if inDouble {
+			b.WriteRune(c)
+			if c == '\\' && i+1 < len(runes) {
+				b.WriteRune(runes[i+1])
+				i += 2
+				continue
+			}
+			if c == '"' {
+				inDouble = false
+			}
+			i++
+			continue
+		}
+		if c == '"' {
+			inDouble = true
+			b.WriteRune(c)
+			i++
+			continue
+		}
+		if c == '\'' {
+			b.WriteByte('"')
+			i++
+			for i < len(runes) {
+				if runes[i] == '\'' {
+					if i+1 < len(runes) && runes[i+1] == '\'' {
+						b.WriteByte('\'')
+						i += 2
+						continue
+					}
+					b.WriteByte('"')
+					i++
+					break
+				}
+				if runes[i] == '\\' && i+1 < len(runes) {
+					b.WriteRune(runes[i])
+					b.WriteRune(runes[i+1])
+					i += 2
+					continue
+				}
+				if runes[i] == '"' {
+					b.WriteString(`\"`)
+					i++
+					continue
+				}
+				b.WriteRune(runes[i])
+				i++
+			}
+			continue
+		}
+		b.WriteRune(c)
+		i++
+	}
+	return b.String()
 }
 
 // FindMatches parses the input string and extracts expressions within curly braces,
@@ -1318,7 +1426,7 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 			start := i
 			depth := 1
 			i++
-			inDoubleQuote := false
+			inQuote := rune(0)
 			hasNestedOpen := false  // Track if expression contains nested { outside quotes
 			hasNestedClose := false // Track if expression contains nested } outside quotes
 
@@ -1331,13 +1439,17 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 					continue
 				}
 
-				// Track quote state
-				if c == '"' {
-					inDoubleQuote = !inDoubleQuote
+				// Track quote state (double or single)
+				if inQuote != 0 {
+					if c == inQuote {
+						inQuote = 0
+					}
+				} else if c == '"' || c == '\'' {
+					inQuote = c
 				}
 
 				// Only count brackets outside of quotes
-				if !inDoubleQuote {
+				if inQuote == 0 {
 					if c == '{' {
 						depth++
 						hasNestedOpen = true

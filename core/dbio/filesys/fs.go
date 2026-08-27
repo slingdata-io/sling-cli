@@ -1461,6 +1461,16 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 				localPath = strings.TrimRight(localPath, "/")
 			}
 
+			// Trailing slash (dated folders like .../2026/08/23/) is a
+			// directory target. DuckDB COPY TO a directory fails with
+			// "Is a directory" unless we write a file inside it.
+			asDir := strings.HasSuffix(localPath, "/") || strings.HasSuffix(localPath, string(os.PathSeparator))
+			if asDir {
+				localPath = strings.TrimRight(localPath, `/\`)
+				os.MkdirAll(localPath, 0755)
+				localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
+			}
+
 			// create the parent folder if needed
 			parent := path.Dir(localPath)
 			if err = os.MkdirAll(parent, 0755); err != nil {

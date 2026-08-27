@@ -30,6 +30,28 @@ const (
 
 var HookRunReplication func(string, *Config, ...string) error
 
+// HookRunBuild runs a sling build project from a pipeline step or replication hook.
+// Registered by the build package (avoids import cycle: build imports sling).
+// Returns a state map (results, counts, path, target) for state.<step_id>.
+var HookRunBuild func(path string, opts HookBuildRunOptions) (map[string]any, error)
+
+// HookBuildRunOptions are options passed from a type: build step into HookRunBuild.
+type HookBuildRunOptions struct {
+	Target      string
+	Select      []string
+	Exclude     []string
+	Vars        map[string]any
+	FailFast    bool
+	FullRefresh bool
+	Threads     int
+	Schema      string
+	Prod        bool
+	NoSeeds     bool
+	Range       string
+	Recursive   bool
+	Test        bool
+}
+
 type Hook interface {
 	Type() HookType
 	ID() string

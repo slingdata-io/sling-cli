@@ -281,6 +281,11 @@ func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)
 }
 
+// IsSingleWriterDB is true for engines that allow only one writer per file.
+func (t Type) IsSingleWriterDB() bool {
+	return g.In(t, TypeDbDuckDb, TypeDbMotherDuck, TypeDbDuckLake)
+}
+
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
@@ -386,6 +391,17 @@ func (t Type) Name() string {
 
 //go:embed templates/*
 var templatesFolder embed.FS
+
+// TemplatesFS returns the embedded templates filesystem.
+func TemplatesFS() embed.FS {
+	return templatesFolder
+}
+
+// ReadTemplateFile reads a file from the embedded templates folder.
+// name is relative to the templates directory, for example "_properties.yaml".
+func ReadTemplateFile(name string) ([]byte, error) {
+	return templatesFolder.ReadFile(path.Join("templates", name))
+}
 
 // Template is a database YAML template
 type Template struct {

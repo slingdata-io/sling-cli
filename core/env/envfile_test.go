@@ -195,6 +195,105 @@ func TestWriteEnvFileAssistRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWriteEnvFileKeepsOnDiskEnvRefs fails if write materializes a ${VAR}
+// that loadEnvFile interpolated from the process environment.
+func TestWriteEnvFileKeepsOnDiskEnvRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	const leak = "hunter2-LEAK-TEST"
+	t.Setenv("MY_PG_PASSWORD", leak)
+
+	original := `connections:
+  MY_PG:
+    type: postgres
+    host: localhost
+    password: ${MY_PG_PASSWORD}
+    port: 5432
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := LoadEnvFile(path)
+	gotPass, _ := ef.Connections["MY_PG"]["password"].(string)
+	if gotPass != leak {
+		t.Fatalf("load should interpolate password, got %q", gotPass)
+	}
+
+	ef.Connections["MY_PG"]["port"] = "5433"
+	if err := ef.WriteEnvFile(); err != nil {
+		t.Fatalf("WriteEnvFile: %v", err)
+	}
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	if !strings.Contains(out, "${MY_PG_PASSWORD}") {
+		t.Errorf("expected on-disk ${MY_PG_PASSWORD} ref\n--- got ---\n%s", out)
+	}
+	if strings.Contains(out, leak) {
+		t.Errorf("merge wrote interpolated secret %q\n--- got ---\n%s", leak, out)
+	}
+	if !strings.Contains(out, "5433") {
+		t.Errorf("expected updated port\n--- got ---\n%s", out)
+	}
+}
+
+func TestLookupConnectionLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  MY_PG:
+    type: postgres
+    host: localhost
+    password: ${MY_PG_PASSWORD}
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := LoadEnvFile(path)
+	loc, err := ef.LookupConnection("MY_PG")
+	if err != nil {
+		t.Fatalf("LookupConnection: %v", err)
+	}
+	if loc.Path != path {
+		t.Errorf("path: got %q want %q", loc.Path, path)
+	}
+	if loc.Connection != "MY_PG" {
+		t.Errorf("connection: got %q", loc.Connection)
+	}
+	if loc.Line != 2 {
+		t.Errorf("connection line: got %d want 2\n%s", loc.Line, original)
+	}
+	if len(loc.Missing) != 1 {
+		t.Fatalf("missing: got %#v", loc.Missing)
+	}
+	if loc.Missing[0].Key != "password" {
+		t.Errorf("missing key: got %q", loc.Missing[0].Key)
+	}
+	if loc.Missing[0].Var != "MY_PG_PASSWORD" {
+		t.Errorf("missing var: got %q", loc.Missing[0].Var)
+	}
+	if loc.Missing[0].Line != 5 {
+		t.Errorf("missing line: got %d want 5", loc.Missing[0].Line)
+	}
+}
+
+func TestIsEnvVarRef(t *testing.T) {
+	if !IsEnvVarRef("${MY_PG_PASSWORD}") {
+		t.Error("expected ${MY_PG_PASSWORD} to be a ref")
+	}
+	if IsEnvVarRef("${my_pg_password}") {
+		t.Error("lowercase var names are not refs")
+	}
+	if IsEnvVarRef("mypass") {
+		t.Error("plaintext is not a ref")
+	}
+	if EnvVarRefName("${MY_PG_PASSWORD}") != "MY_PG_PASSWORD" {
+		t.Error("EnvVarRefName")
+	}
+}
+
 func TestParseDotEnv(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -232,7 +331,7 @@ func TestParseDotEnv(t *testing.T) {
 			},
 		},
 		{
-			name: "multi-line double-quoted value",
+			name:    "multi-line double-quoted value",
 			content: "KEY=\"hello\nworld\"",
 			expected: map[string]string{
 				"KEY": "hello\nworld",
@@ -298,22 +397,22 @@ BAZ=qux`,
 			},
 		},
 		{
-			name: "double-quoted value with single quotes inside",
+			name:    "double-quoted value with single quotes inside",
 			content: `KEY="{'a': 'b'}"`,
 			expected: map[string]string{
 				"KEY": "{'a': 'b'}",
 			},
 		},
 		{
-			name: "multi-line double-quoted with single quotes inside",
+			name:    "multi-line double-quoted with single quotes inside",
 			content: "KEY=\"{\n  'a': 'b'\n}\"",
 			expected: map[string]string{
 				"KEY": "{\n  'a': 'b'\n}",
 			},
 		},
 		{
-			name:    "line without equals is skipped",
-			content: "NOPE",
+			name:     "line without equals is skipped",
+			content:  "NOPE",
 			expected: map[string]string{},
 		},
 	}
@@ -324,4 +423,22 @@ BAZ=qux`,
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestMergeDeclaredEnv(t *testing.T) {
+	t.Setenv("MERGE_DECLARED_PROBE", "from-process")
+	t.Setenv("MERGE_DECLARED_OVERRIDE", "from-process")
+
+	got := MergeDeclaredEnv(map[string]any{
+		"MERGE_DECLARED_OVERRIDE": "from-yaml",
+		"MERGE_DECLARED_ONLY":     7,
+	})
+
+	assert.Equal(t, "from-process", got["MERGE_DECLARED_PROBE"])
+	assert.Equal(t, "from-yaml", got["MERGE_DECLARED_OVERRIDE"])
+	assert.Equal(t, 7, got["MERGE_DECLARED_ONLY"])
+
+	empty := MergeDeclaredEnv(nil)
+	assert.Equal(t, "from-process", empty["MERGE_DECLARED_PROBE"])
+	assert.NotContains(t, empty, "MERGE_DECLARED_ONLY")
 }

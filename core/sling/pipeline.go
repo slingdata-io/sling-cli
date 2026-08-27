@@ -442,7 +442,7 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 		pl.state = &PipelineState{
 			State: map[string]map[string]any{},
 			Store: map[string]any{},
-			Env:   pl.Env,
+			Env:   env.MergeDeclaredEnv(pl.Env),
 			Runs:  map[string]*RunState{},
 			mu:    &sync.RWMutex{},
 		}

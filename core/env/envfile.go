@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"gopkg.in/yaml.v3"
 )
+
+// envVarRefRe matches a whole-string ${VAR} ref. Unset refs stay literal after g.Rmd.
+var envVarRefRe = regexp.MustCompile(`^\$\{([A-Z_][A-Z0-9_]*)\}$`)
 
 type EnvFile struct {
 	Connections map[string]map[string]any `json:"connections,omitempty" yaml:"connections,omitempty"`
@@ -72,7 +76,8 @@ func (ef *EnvFile) marshalEnvFileBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	merged := mergeNode(original, newRoot)
+	merged := mergeNode(original, newRoot, interpEnvMap(ef.Path))
+	annotateEnvVarRefComments(merged)
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -247,15 +252,7 @@ func loadEnvFile(body, path string) (ef EnvFile, err error) {
 	}
 
 	// expand variables
-	envMap := map[string]any{}
-	if path != "" {
-		envMap["SLING_HOME_DIR"] = HomeDir
-	}
-	for _, tuple := range os.Environ() {
-		key := strings.Split(tuple, "=")[0]
-		val := strings.TrimPrefix(tuple, key+"=")
-		envMap[key] = val
-	}
+	envMap := interpEnvMap(path)
 	ef.Body = g.Rmd(ef.Body, envMap)
 
 	if err = yaml.Unmarshal([]byte(ef.Body), &ef); err != nil {
@@ -292,9 +289,56 @@ func GetEnvFilePath(dir string) string {
 	return CleanWindowsPath(path.Join(dir, "env.yaml"))
 }
 
+// processEnv is the current process environment as a map.
+func processEnv() map[string]any {
+	out := map[string]any{}
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// MergeDeclaredEnv starts from the process environment and overlays
+// declared pipeline/replication env keys. Bare {env.X} then renders
+// even when the YAML has no env: block.
+func MergeDeclaredEnv(declared map[string]any) map[string]any {
+	out := processEnv()
+	for k, v := range declared {
+		out[k] = v
+	}
+	return out
+}
+
+// interpEnvMap is the same substitution map loadEnvFile uses for g.Rmd.
+func interpEnvMap(path string) map[string]any {
+	envMap := processEnv()
+	if path != "" {
+		if _, ok := envMap["SLING_HOME_DIR"]; !ok {
+			envMap["SLING_HOME_DIR"] = HomeDir
+		}
+	}
+	return envMap
+}
+
+// keepOnDiskScalar is true when newVal is origVal or origVal after env expansion.
+// Load interpolates ${VAR}; write must keep the on-disk ref, not the secret.
+func keepOnDiskScalar(origVal, newVal string, envMap map[string]any) bool {
+	if origVal == newVal {
+		return true
+	}
+	if envMap == nil || !strings.Contains(origVal, "${") {
+		return false
+	}
+	return g.Rmd(origVal, envMap) == newVal
+}
+
 // mergeNode deep-merges newNode into original, keeping original's comments and
 // key order. Adapted from pulumi/pulumi's yamlutil.editNodes (Apache 2.0).
-func mergeNode(original, newNode *yaml.Node) *yaml.Node {
+func mergeNode(original, newNode *yaml.Node, envMap map[string]any) *yaml.Node {
 	if original == nil {
 		out := *newNode
 		return &out
@@ -309,6 +353,9 @@ func mergeNode(original, newNode *yaml.Node) *yaml.Node {
 	}
 
 	ret := *original
+	if original.Kind == yaml.ScalarNode && keepOnDiskScalar(original.Value, newNode.Value, envMap) {
+		return &ret
+	}
 	ret.Tag = newNode.Tag
 	ret.Value = newNode.Value
 
@@ -320,12 +367,12 @@ func mergeNode(original, newNode *yaml.Node) *yaml.Node {
 		}
 		content := make([]*yaml.Node, 0, len(newNode.Content))
 		for i := 0; i < minLen; i++ {
-			content = append(content, mergeNode(original.Content[i], newNode.Content[i]))
+			content = append(content, mergeNode(original.Content[i], newNode.Content[i], envMap))
 		}
 		content = append(content, newNode.Content[minLen:]...)
 		ret.Content = content
 	case yaml.MappingNode:
-		ret.Content = mergeMappingContent(original, newNode)
+		ret.Content = mergeMappingContent(original, newNode, envMap)
 	case yaml.ScalarNode, yaml.AliasNode:
 		ret.Content = newNode.Content
 	}
@@ -335,7 +382,7 @@ func mergeNode(original, newNode *yaml.Node) *yaml.Node {
 // mergeMappingContent merges two mapping nodes: original keys keep their
 // position and comments; new-only keys append at the end; dropped keys are
 // removed.
-func mergeMappingContent(original, newNode *yaml.Node) []*yaml.Node {
+func mergeMappingContent(original, newNode *yaml.Node, envMap map[string]any) []*yaml.Node {
 	origIdx := map[string]int{}
 	newIdx := map[string]int{}
 	var origOrder, newOnly []string
@@ -360,8 +407,8 @@ func mergeMappingContent(original, newNode *yaml.Node) []*yaml.Node {
 			continue
 		}
 		oi := origIdx[k]
-		key := mergeNode(original.Content[oi], newNode.Content[ni])
-		val := mergeNode(original.Content[oi+1], newNode.Content[ni+1])
+		key := mergeNode(original.Content[oi], newNode.Content[ni], envMap)
+		val := mergeNode(original.Content[oi+1], newNode.Content[ni+1], envMap)
 		content = append(content, key, val)
 	}
 	for _, k := range newOnly {
@@ -394,4 +441,161 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
 	return root, nil
+}
+
+// IsEnvVarRef is true when s is a whole-string ${VAR} reference.
+func IsEnvVarRef(s string) bool {
+	return envVarRefRe.MatchString(strings.TrimSpace(s))
+}
+
+// EnvVarRefName returns VAR from ${VAR}. It returns "" when s is not a ref.
+func EnvVarRefName(s string) string {
+	m := envVarRefRe.FindStringSubmatch(strings.TrimSpace(s))
+	if len(m) != 2 {
+		return ""
+	}
+	return m[1]
+}
+
+// ConnLocation is a deep-link into env.yaml for one connection.
+type ConnLocation struct {
+	Path       string       `json:"path"`
+	Line       int          `json:"line"`
+	Connection string       `json:"connection"`
+	Missing    []MissingRef `json:"missing"`
+}
+
+// MissingRef is one ${VAR} field that still needs a value (or an env var).
+type MissingRef struct {
+	Key  string `json:"key"`
+	Var  string `json:"var"`
+	Line int    `json:"line"`
+}
+
+// LookupConnection re-parses ef.Path and returns line numbers for
+// connections.<NAME> and each ${VAR} field under it.
+func (ef *EnvFile) LookupConnection(name string) (ConnLocation, error) {
+	loc := ConnLocation{
+		Path:       ef.Path,
+		Connection: strings.ToUpper(name),
+		Missing:    []MissingRef{},
+	}
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return loc, err
+	}
+
+	conns := mappingChild(root, "connections")
+	if conns == nil {
+		return loc, g.Error("connections block not found in %s", ef.Path)
+	}
+
+	keyNode, valNode := mappingChildFold(conns, name)
+	if keyNode == nil {
+		return loc, g.Error("connection %s not found in %s", name, ef.Path)
+	}
+	loc.Line = keyNode.Line
+	collectMissingRefs(valNode, "", &loc.Missing)
+	return loc, nil
+}
+
+func mappingChild(n *yaml.Node, key string) *yaml.Node {
+	n = mappingRoot(n)
+	if n == nil {
+		return nil
+	}
+	for i := 0; i < len(n.Content)-1; i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func mappingChildFold(n *yaml.Node, key string) (keyNode, valNode *yaml.Node) {
+	n = mappingRoot(n)
+	if n == nil {
+		return nil, nil
+	}
+	for i := 0; i < len(n.Content)-1; i += 2 {
+		if strings.EqualFold(n.Content[i].Value, key) {
+			return n.Content[i], n.Content[i+1]
+		}
+	}
+	return nil, nil
+}
+
+func mappingRoot(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	return n
+}
+
+func collectMissingRefs(n *yaml.Node, prefix string, out *[]MissingRef) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if !IsEnvVarRef(n.Value) {
+			return
+		}
+		*out = append(*out, MissingRef{
+			Key:  prefix,
+			Var:  EnvVarRefName(n.Value),
+			Line: n.Line,
+		})
+	case yaml.MappingNode:
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			k := n.Content[i].Value
+			path := k
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+			collectMissingRefs(n.Content[i+1], path, out)
+		}
+	case yaml.SequenceNode:
+		for _, child := range n.Content {
+			collectMissingRefs(child, prefix, out)
+		}
+	}
+}
+
+// annotateEnvVarRefComments writes EnvVarRefComment on connection ${VAR}
+// scalars that have no trailing comment. Original comments stay.
+func annotateEnvVarRefComments(root *yaml.Node) {
+	conns := mappingChild(root, "connections")
+	if conns == nil {
+		return
+	}
+	annotateMappingRefs(conns)
+}
+
+func annotateMappingRefs(n *yaml.Node) {
+
+	// EnvVarRefComment is the trailing comment written next to scaffolded ${VAR} refs.
+	const EnvVarRefComment = "replace with the value, or set the env var (CI)"
+
+	n = mappingRoot(n)
+	if n == nil {
+		return
+	}
+	for i := 0; i < len(n.Content)-1; i += 2 {
+		val := n.Content[i+1]
+		switch val.Kind {
+		case yaml.ScalarNode:
+			if IsEnvVarRef(val.Value) && strings.TrimSpace(val.LineComment) == "" {
+				val.LineComment = EnvVarRefComment
+			}
+		case yaml.MappingNode:
+			annotateMappingRefs(val)
+		}
+	}
 }

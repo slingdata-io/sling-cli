@@ -1088,6 +1088,7 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		PartitionKey:       t.Config.Source.UpdateKey,
 		WritePartitionCols: true,
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
+		Columns:            df.Columns,
 	}
 
 	// if one wishes to not write the partition columns

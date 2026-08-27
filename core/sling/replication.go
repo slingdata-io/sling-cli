@@ -134,7 +134,7 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 	if rd.state.Runs == nil {
 		rd.state.Runs = map[string]*RunState{}
 	}
-	rd.state.Env = rd.Env
+	rd.state.Env = env.MergeDeclaredEnv(rd.Env)
 	if rd.state.Execution.StartTime == nil {
 		rd.state.Execution.StartTime = g.Ptr(time.Now())
 	}
@@ -160,8 +160,8 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 				return rd.state, err
 			}
 
-			// populate env
-			rd.state.Env = g.CastToMapAny(task.Env)
+			// populate env (process env first, declared/task env wins)
+			rd.state.Env = env.MergeDeclaredEnv(g.CastToMapAny(task.Env))
 
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type
