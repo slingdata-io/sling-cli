@@ -1,0 +1,44 @@
+# partition tokens derived from epoch INTEGER _sling_loaded_at
+# must emit to_timestamp(...) so DuckDB strftime accepts the key.
+source: LOCAL
+target: LOCAL
+
+defaults:
+  mode: full-refresh
+
+env:
+  SLING_LOADED_AT_COLUMN: "true"
+
+hooks:
+  start:
+    - type: delete
+      location: local//tmp/sling/part_epoch
+      recursive: true
+      on_failure: quiet
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: abort
+    - type: list
+      id: parts
+      location: local//tmp/sling/part_epoch
+      recursive: true
+      only: files
+    - type: log
+      message: "partition files: {state.parts.result}"
+    - type: check
+      check: length(state.parts.result) > 0
+      failure_message: "expected partitioned parquet under /tmp/sling/part_epoch"
+      on_failure: abort
+    - type: delete
+      location: local//tmp/sling/part_epoch
+      recursive: true
+      on_failure: quiet
+
+streams:
+  file://tests/files/test1.csv:
+    object: file:///tmp/sling/part_epoch/{part_year_month}/{part_day}
+    update_key: _sling_loaded_at
+    target_options:
+      format: parquet

@@ -2720,3 +2720,47 @@
   output_contains:
     - 'chunking, threads and retries are not supported with stdin/stdout'
     - 'execution succeeded'
+
+- id: 324
+  name: 'pipeline query state.result + process env fallback'
+  env:
+    EVAL_ENV_PROBE: eval-ok
+  run: sling run -p tests/pipelines/p.50.query_state_and_env.yaml
+  output_contains:
+    - eval-env-probe:eval-ok
+
+- id: 327
+  name: 'partition tokens with epoch _sling_loaded_at'
+  env:
+    SLING_LOADED_AT_COLUMN: 'true'
+  run: sling run -d -r tests/replications/r.123.part_epoch_loaded_at.yaml
+  output_contains:
+    - partition_by (
+    - to_timestamp(_sling_loaded_at)
+    - execution succeeded
+
+- id: 328
+  name: 'copy accepts bare list path'
+  run: sling run -d -p tests/pipelines/p.51.copy_bare_list_path.yaml
+  output_contains:
+    - copied via bare path
+    - copying single file from /tmp/sling/p51/data/a.csv
+
+- id: 550
+  name: 'bare sling non-TTY prints classic help'
+  run: sling
+  output_contains:
+    - Slings data from a data source to a data target.
+    - An Extract-Load tool
+    - 'Usage:'
+  output_does_not_contain:
+    - Welcome to sling
+    - sling init scaffolds
+    - launch interactive mode
+
+# Nested CLI suites. Loader in sling_cli_test.go merges these in.
+- suite: suite.cli.assist.yaml
+- suite: suite.cli.build.yaml
+- suite: suite.cli.validate.yaml
+- suite: suite.cli.conns.yaml
+- suite: suite.cli.project.yaml

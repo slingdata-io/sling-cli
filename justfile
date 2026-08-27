@@ -136,8 +136,30 @@ test-cdc-soft-sustained:
 # Run all CDC test
 test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay
 
+# Eval assist smoke (claude, smoke tags, 1 trial)
+test-eval-smoke: build
+    #!/usr/bin/env bash
+    echo "EVAL assist smoke (claude, 1 trial)"
+    export SLING_BIN="$PWD/cmd/sling/sling"
+    go test -v -count=1 ./tests/evals -run TestEvalAssist -- \
+      --arms claude --tags smoke --trials 1 --max-suite-usd 15
+
+# Eval assist full (claude+grok, 3 trials). Optional baseline: just eval-assist-full path.jsonl
+test-eval-full baseline="": build
+    #!/usr/bin/env bash
+    echo "EVAL assist full (claude+grok, 3 trials)"
+    export SLING_BIN="$PWD/cmd/sling/sling"
+    EXTRA=""
+    if [ -n "{{baseline}}" ]; then
+      EXTRA="--baseline {{baseline}}"
+    fi
+    go test -v -count=1 ./tests/evals -run TestEvalAssist -- \
+      --arms claude,grok --trials 3 --max-suite-usd 15 $EXTRA
+
+test-eval: test-eval-full
+
 # Run all tests
-test-all: test-cli test-connections test-dbio test-core test-python test-cdc
+test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
     #!/usr/bin/env bash
     echo "✓ All tests passed!"
 

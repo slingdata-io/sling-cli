@@ -1,0 +1,16 @@
+# Query rows stay at state.<id>.result even with into:,
+# and {env.X} renders from the process env without an env: block.
+steps:
+  - type: query
+    connection: DUCKDB
+    query: select 7 as n
+    into: result
+    id: count_query
+
+  - type: check
+    check: state.count_query.result[0].n == 7
+    failure_message: "expected state.count_query.result[0].n == 7"
+    on_failure: abort
+
+  - type: log
+    message: "eval-env-probe:{env.EVAL_ENV_PROBE}"

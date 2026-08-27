@@ -35,8 +35,10 @@ def generate_large_string(size=70000):
     return (base_text * repetitions)[:size]
 
 def main():
-    # Create output directory
+    # Remove a stale file at this path so makedirs can succeed.
     output_dir = "/tmp/sling-test"
+    if os.path.exists(output_dir) and not os.path.isdir(output_dir):
+        os.remove(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, "test_large_strings.parquet")
 
