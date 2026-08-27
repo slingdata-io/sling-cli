@@ -1,0 +1,7 @@
+source: LOCAL
+target: SQLITE
+streams:
+  file://./tests/files/test1.csv:
+    object: main.test
+defaults:
+  mode: full-refresh

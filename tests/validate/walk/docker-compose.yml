@@ -1,0 +1,5 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ComposePassDoNotParse

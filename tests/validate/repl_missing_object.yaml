@@ -1,0 +1,5 @@
+source: LOCAL
+target: SQLITE
+streams:
+  public.orders:
+    mode: full-refresh

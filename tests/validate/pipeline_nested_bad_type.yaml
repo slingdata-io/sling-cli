@@ -1,0 +1,12 @@
+steps:
+  - type: group
+    loop: [1]
+    steps:
+      - type: set
+        key: table_name
+        value: t
+      - type: run
+        source: LOCAL
+        target: DUCKDB
+      - type: log
+        message: done

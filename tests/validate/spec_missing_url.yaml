@@ -1,0 +1,5 @@
+name: missing-url
+endpoints:
+  ping:
+    request:
+      method: GET

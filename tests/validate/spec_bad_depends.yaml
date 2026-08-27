@@ -1,0 +1,6 @@
+name: bad-depends
+endpoints:
+  child:
+    request:
+      url: https://example.com/child
+    depends_on: [does_not_exist]
