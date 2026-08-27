@@ -1,7 +1,7 @@
 ---
 name: sling
 description: >
-  Sling data integration platform — overview, MCP tools, CLI quick reference, and troubleshooting. Use when asked about Sling in general, what it does, how to use the MCP tools, or when debugging errors, connection failures, authentication issues, type conversion problems, memory/performance issues, or API rate limits.
+  Sling data platform — overview, MCP tools such as querying databases, CLI quick reference, and troubleshooting. Use when asked to query databases via mcp, about Sling in general, what it does, how to use the MCP tools, or when debugging errors, connection failures, authentication issues, type conversion problems, memory/performance issues, or API rate limits.
 ---
 
 # Sling - Data Integration Platform
@@ -58,12 +58,36 @@ sling assist report --id <id> --github --submit \
 {"action": "validate", "input": {"file_path": "/path/to/replication.yaml"}}
 ```
 
+## CLI vs MCP — which to use
+
+Use the MCP tools to inspect and validate. Use the CLI to execute.
+
+| Task | Use |
+|------|-----|
+| Ad-hoc SQL query, schema lookup | MCP `database` (`query`, `get_schemata`, `get_columns`) |
+| List, test, or discover connections | MCP `connection` |
+| Browse, inspect, or copy files | MCP `file_system` |
+| Validate a replication, pipeline, or API spec | MCP `replication` / `pipeline` / `api_spec` |
+| Execute a replication or pipeline | CLI `sling run` |
+| Build SQL models | CLI `sling build` |
+| Send an issue report | CLI `sling assist report` |
+
+Do not query a database with `sling run --stdout`. That flag is for piping data to a target, not for inspecting a database. Use the MCP `database` tool.
+
+When the MCP tools are not available, query with `sling conns exec`:
+
+```bash
+sling conns exec MY_PG "select * from public.users limit 10"
+sling conns exec MY_PG "select 1" -o json      # Output: text (default), csv, json, arrow
+```
+
 ## CLI Quick Reference
 
 ```bash
 sling conns list                    # List connections
 sling conns test MY_CONN --debug    # Test connection
 sling conns discover MY_PG          # Discover tables
+sling conns exec MY_PG "select 1"   # Run a SQL query (add -o json|csv|arrow)
 sling run -r replication.yaml       # Run replication
 sling run -p pipeline.yaml          # Run pipeline
 sling run -r replication.yaml --debug   # Run with debug logging

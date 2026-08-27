@@ -79,7 +79,7 @@ Resolve each row before you write YAML, in this order: the user's request, exist
 sling conns list                              # List all
 sling conns test MY_POSTGRES --debug          # Test
 sling conns discover MY_POSTGRES --pattern "public.*"  # Discover
-sling conns exec MY_POSTGRES -q "SELECT 1"    # Execute SQL
+sling conns exec MY_POSTGRES "SELECT 1"       # Execute SQL (query is positional)
 ```
 
 ## Configuration Methods
