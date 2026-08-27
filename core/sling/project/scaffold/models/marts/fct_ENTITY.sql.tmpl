@@ -1,0 +1,9 @@
+/**
+mode: full-refresh
+tests:
+  - not_null: [id]
+**/
+SELECT
+  id,
+  name
+FROM {{ ref('stg_{{SOURCE_SLUG}}__{{ENTITY}}') }}

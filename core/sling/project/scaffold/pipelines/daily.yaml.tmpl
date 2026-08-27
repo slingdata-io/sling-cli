@@ -1,0 +1,20 @@
+steps:
+  - type: log
+    message: "Start daily run"
+
+  - type: replication
+    path: replications/{{SOURCE_SLUG}}.yaml
+    id: load_raw
+
+  - type: build
+    build: models
+    prod: true
+    id: transform
+
+  - type: check
+    check: state.transform.failed == 0
+    failure_message: "Build reported failures"
+    on_failure: abort
+
+  - type: log
+    message: "Done. build ok={state.transform.ok}"

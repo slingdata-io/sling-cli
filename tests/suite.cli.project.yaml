@@ -1,0 +1,202 @@
+- id: 530
+  name: 'sling init succeeds with no token'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    unset SLING_CLI_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - sling_project.yml
+    - models/sling_build.yml
+  output_does_not_contain:
+    - invalid project token
+    - did not provide the SLING_PROJECT_TOKEN
+
+- id: 531
+  name: 'sling init succeeds with leftover token and no network'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    sling init --target POSTGRES --source SQLITE --yes
+  env:
+    SLING_PROJECT_TOKEN: dummy-token-must-not-call-network
+    SLING_CLI_TOKEN: ''
+    HTTPS_PROXY: 'http://127.0.0.1:1'
+    HTTP_PROXY: 'http://127.0.0.1:1'
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - sling_project.yml
+    - sling project deploy --check
+  output_does_not_contain:
+    - invalid project token
+    - error validating project token
+
+- id: 532
+  name: 'sling init non-interactive writes canonical layout'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    test -f sling_project.yml
+    test -f models/sling_build.yml
+    test -f pipelines/daily.yaml
+    test -f replications/sqlite.yaml
+    test -f models/staging/stg_sqlite__example.sql
+    test -f models/marts/fct_example.sql
+    echo "SUCCESS: canonical layout"
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'SUCCESS: canonical layout'
+    - sling_project.yml
+
+- id: 534
+  name: 'sling validate succeeds on scaffolded pipeline'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    sling validate pipelines/daily.yaml --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - '"kind": "pipeline"'
+    - '"ok": true'
+    - daily.yaml
+
+- id: 535
+  name: 'sling project status without a token fails fast'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    sling project status
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - SLING_PROJECT_TOKEN
+  output_does_not_contain:
+    - Last Run
+    - Project Root
+
+- id: 560
+  name: 'sling project deploy --check prints local job plan'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    unset SLING_CLI_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    echo 'jobs:' >> sling_project.yml
+    echo '  orders_hourly:' >> sling_project.yml
+    echo '    file: replications/sqlite.yaml' >> sling_project.yml
+    echo '    schedules: ["0 * * * *"]' >> sling_project.yml
+    echo '    streams: [public.orders]' >> sling_project.yml
+    sling project deploy --check
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_CLI_TOKEN: ''
+  output_contains:
+    - create
+    - orders_hourly
+    - replications/sqlite.yaml
+  output_does_not_contain:
+    - not implemented yet
+
+- id: 561
+  name: 'sling run -j applies the job streams and mode'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'id,name\n1,alpha\n' > alpha.csv
+    printf 'id,name\n2,beta\n' > beta.csv
+    printf 'source: LOCAL\ntarget: SQLITE\ndefaults:\n  mode: full-refresh\nstreams:\n  file://alpha.csv:\n    object: main.job_alpha\n  file://beta.csv:\n    object: main.job_beta\n' > replications/local.yaml
+    printf 'name: jobdemo\njobs:\n  onlyalpha:\n    file: replications/local.yaml\n    streams: ["file://alpha.csv"]\n    mode: truncate\n' > sling_project.yml
+    sling run -j onlyalpha -d
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'job_alpha'
+    - 'full-refresh => truncate'
+    - 'file://alpha.csv'
+  output_does_not_contain:
+    - 'job_beta'
+    - 'file://beta.csv'
+
+- id: 562
+  name: 'sling run <key> resolves a bare manifest key'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'id,name\n1,alpha\n' > alpha.csv
+    printf 'source: LOCAL\ntarget: SQLITE\ndefaults:\n  mode: full-refresh\nstreams:\n  file://alpha.csv:\n    object: main.bare_key\n' > replications/local.yaml
+    printf 'name: jobdemo\njobs:\n  loadit:\n    file: replications/local.yaml\n    mode: truncate\n' > sling_project.yml
+    sling run loadit -d
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'bare_key'
+    - 'full-refresh => truncate'
+
+- id: 563
+  name: 'a file path shadowing a job key wins over the key'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'id,name\n1,alpha\n' > alpha.csv
+    printf 'source: LOCAL\ntarget: SQLITE\nstreams:\n  file://alpha.csv:\n    object: main.from_key\n' > replications/local.yaml
+    printf 'source: LOCAL\ntarget: SQLITE\nstreams:\n  file://alpha.csv:\n    object: main.from_path\n' > loadit
+    printf 'name: jobdemo\njobs:\n  loadit:\n    file: replications/local.yaml\n    mode: truncate\n' > sling_project.yml
+    sling run loadit -d
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'from_path'
+  output_does_not_contain:
+    - 'from_key'
+    - 'full-refresh => truncate'
+
+- id: 564
+  name: 'sling run -j with a missing key lists the available keys'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'jobs:\n  daily:\n    file: pipelines/daily.yaml\n  hourly:\n    file: pipelines/daily.yaml\n' >> sling_project.yml
+    sling run -j nope
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'is not in the manifest'
+    - 'daily'
+    - 'hourly'
+
+- id: 565
+  name: 'sling run -j applies job variables to a pipeline'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'steps:\n  - type: log\n    message: "who={env.WHO} where={env.WHERE}"\n' > pipelines/daily.yaml
+    printf 'name: jobdemo\njobs:\n  greet:\n    file: pipelines/daily.yaml\n    variables:\n      WHO: sling\n      WHERE: here\n' > sling_project.yml
+    sling run -j greet -d
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - 'who=sling where=here'

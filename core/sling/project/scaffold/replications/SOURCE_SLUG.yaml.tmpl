@@ -1,0 +1,10 @@
+source: {{SOURCE}}
+target: {{TARGET}}
+
+defaults:
+  mode: full-refresh
+  object: raw_{{SOURCE_SLUG}}.{stream_table}
+
+streams:
+  main.{{ENTITY}}:
+    object: raw_{{SOURCE_SLUG}}.{{ENTITY}}
