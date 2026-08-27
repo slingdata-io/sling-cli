@@ -4,7 +4,7 @@
 
 1. [Introduction and Overview](#1-introduction-and-overview)
 2. [Authentication](#2-authentication)
-3. [`sling project init`](#3-sling-project-init)
+3. [`sling init`](#3-sling-init)
 4. [`sling project status`](#4-sling-project-status)
 5. [`sling project sync`](#5-sling-project-sync)
 6. [`sling project jobs list`](#6-sling-project-jobs-list)
@@ -72,12 +72,12 @@ By default the CLI talks to `https://api.slingdata.io`. Override with:
 
 ---
 
-## 3. `sling project init`
+## 3. `sling init`
 
 Create a `.sling.json` marker in the current directory so the CLI knows it is inside a project. Subsequent commands will be scoped to this directory tree.
 
 ```bash
-sling project init
+sling init
 ```
 
 Effects:
@@ -550,7 +550,7 @@ The full `Job` JSON shape accepted by `save` and returned by `get`:
 ```bash
 export SLING_PROJECT_TOKEN=...
 cd ~/my-project
-sling project init
+sling init
 # ... write replications/nightly.yaml ...
 sling project sync -f
 sling project jobs save --payload '{"name":"nightly","type":"replication","file_name":"replications/nightly.yaml","active":true,"schedules":["0 2 * * *"],"timezone":"UTC","config":{"mode":"incremental","threads":4}}'

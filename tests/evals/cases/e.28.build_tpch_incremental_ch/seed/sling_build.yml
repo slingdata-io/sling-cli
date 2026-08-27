@@ -1,0 +1,3 @@
+target: CLICKHOUSE
+defaults:
+  mode: incremental

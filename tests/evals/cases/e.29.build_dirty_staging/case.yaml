@@ -1,0 +1,32 @@
+id: e.29.build_dirty_staging
+task: build_create
+tier: core
+gating: false # relation-type swap still mixed with agent test config
+tags: [build, ecom]
+intention: >
+  Our raw ecommerce tables are dirty (eval_ecom schema). Build staging models
+  that dedupe raw_orders (keep latest by loaded_at), normalize status to
+  lowercase, parse the two date formats, and standardize country codes in
+  raw_customers. Add not_null and unique data tests on the keys.
+  Write the project to ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [ecom_dirty]
+conns: [POSTGRES]
+reset_schemas: [staging, marts, seeds]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - target
+    - sling: build compile .
+    - sling: build run . --target POSTGRES
+    - tests_pass: { target: POSTGRES }
+    - query:
+        connection: POSTGRES
+        sql: select count(distinct order_id) = count(*) from staging.stg_orders
+        equals: true

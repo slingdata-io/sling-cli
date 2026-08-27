@@ -1,0 +1,30 @@
+id: e.18.build_staging_view
+task: build_create
+tier: smoke
+gating: true
+tags: [build]
+intention: >
+  Create a staging build model on DUCKDB from the planted seed CSV at
+  seeds/orders.csv (one data row). Materialize as a view. Write the project
+  to ./sling_build.yml and staging/stg_orders.sql. The model must compile
+  and run. Do not invent extra seed rows.
+arms: [claude, grok, noskills, opencode2, codex]
+timeout: 300s
+conns: [DUCKDB]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - file_exists: staging/stg_orders.sql
+    - sling: build compile .
+    - sling: build run . --target DUCKDB
+    - query:
+        connection: DUCKDB
+        sql: select count(*) from staging.stg_orders
+        equals: 1
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - target

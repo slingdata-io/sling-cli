@@ -1,0 +1,6 @@
+source: POSTGRES
+target: DUCKDB
+streams:
+  eval_tpch.orders:
+    object: main.orders
+    mode: full-refresh

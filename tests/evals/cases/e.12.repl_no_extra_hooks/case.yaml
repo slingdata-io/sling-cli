@@ -1,0 +1,29 @@
+id: e.12.repl_no_extra_hooks
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication, negative]
+intention: >
+  Create a replication from POSTGRES to DUCKDB for public.orders in full-refresh
+  mode. Write ./plain.yaml. Do not add hooks, transforms, or extra streams.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [POSTGRES, DUCKDB]
+artifact: plain.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+        must_not_exist:
+          - hooks
+          - streams.*.transforms
+    - yq: '.streams | length == 1'
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

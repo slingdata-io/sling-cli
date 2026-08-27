@@ -1,0 +1,14 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]

@@ -1,0 +1,3 @@
+steps:
+  - type: log
+    message: no query

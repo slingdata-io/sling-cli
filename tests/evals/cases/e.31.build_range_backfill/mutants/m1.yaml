@@ -1,0 +1,3 @@
+target: DUCKDB
+defaults:
+  mode: full-refresh

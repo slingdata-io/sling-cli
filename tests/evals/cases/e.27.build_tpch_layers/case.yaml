@@ -1,0 +1,39 @@
+id: e.27.build_tpch_layers
+task: build_create
+tier: core
+gating: true
+tags: [build, tpch]
+intention: >
+  We loaded our warehouse raw tables (TPC-H schema) into DUCKDB. Model them:
+  staging views stg_customers, stg_orders, stg_lineitem (rename to snake_case
+  business names, cast dates); an intermediate model int_order_items joining
+  orders+lineitem with net revenue per line; marts fct_orders (table, built
+  from int_order_items, one row per order with the order total — carry the
+  source o_totalprice through, do not recompute it from line items) and
+  dim_customers (table, with lifetime value, the sum of the customer's order
+  totals o_totalprice, and nation name).
+  On dim_customers name the LTV columns cust_key and ltv.
+  Write the project to ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [tpch_duckdb]
+conns: [DUCKDB]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: build compile .
+    - sling: build run . --target DUCKDB
+    - dag: { model: fct_orders, depends_on: [int_order_items] }
+    - dag: { model: dim_customers, depends_on: [stg_customers] }
+    - query:
+        connection: DUCKDB
+        sql: select count(*) from marts.fct_orders
+        equals_query: select count(*) from orders
+    - rows_equal:
+        connection: DUCKDB
+        actual_sql: select cust_key, ltv from marts.dim_customers order by ltv desc, cust_key limit 10
+        expected_sql: reference/ltv.sql
+        order_by: ltv desc, cust_key
+  judge:
+    - "Are staging models views and marts tables, per the ask?"

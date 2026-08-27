@@ -1,0 +1,43 @@
+id: e.34.repl_transforms_parquet
+task: replication_create
+tier: core
+gating: true
+tags: [replication, transforms]
+intention: >
+  Export eval_ecom.raw_customers to partitioned parquet on LOCAL under
+  ./exports/, trim whitespace on email, uppercase country_code, exclude
+  the raw address column. Write ./customers_parquet.yaml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [ecom_dirty]
+conns: [POSTGRES, LOCAL, DUCKDB]
+artifact: customers_parquet.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.select
+    - outcome:
+        run: sling run -r {artifact}
+        checks:
+          - file_exists: "**/*.parquet"
+    - query:
+        connection: DUCKDB
+        sql: >
+          select count(*) from read_parquet([{parquet}], union_by_name=true)
+          where email != trim(email)
+        equals: 0
+    - query:
+        connection: DUCKDB
+        sql: >
+          select count(*) from read_parquet([{parquet}], union_by_name=true)
+          where country_code != upper(country_code)
+        equals: 0

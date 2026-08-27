@@ -1,0 +1,21 @@
+id: e.17.pipeline_no_delete
+task: pipeline_create
+tier: core
+gating: true
+tags: [pipeline, negative]
+intention: >
+  Create a pipeline that summarizes a POSTGRES table. Do not include delete
+  or drop steps. Write ./summary.yaml.
+arms: [claude, grok, opencode2, codex]
+conns: [POSTGRES]
+artifact: summary.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: query}
+        must_not_contain_steps:
+          - {type: delete}

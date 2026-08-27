@@ -1,0 +1,15 @@
+source: POSTGRES
+target: DUCKDB
+hooks:
+  start:
+    - type: query
+      query: select 1
+streams:
+  public.orders:
+    object: public.orders
+    mode: full-refresh
+    transforms:
+      - upper
+  public.extra:
+    object: public.extra
+    mode: full-refresh

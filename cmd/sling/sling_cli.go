@@ -17,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling/assist"
 	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
@@ -59,6 +60,12 @@ var cliRunFlags = []g.Flag{
 		Name:        "directory",
 		Type:        "string",
 		Description: "The directory path file to use to run nested replications/pipelines.\n",
+	},
+	{
+		Name:        "job",
+		ShortName:   "j",
+		Type:        "string",
+		Description: "The job key from the project manifest (sling_project.yml) to run locally.\n",
 	},
 	{
 		Name:        "src-conn",
@@ -216,12 +223,6 @@ var cliRun = &g.CliSC{
 	ExecProcess: processRun,
 }
 
-var cliInteractive = &g.CliSC{
-	Name:        "it",
-	Description: "launch interactive mode",
-	ExecProcess: slingPrompt,
-}
-
 var cliUpdate = &g.CliSC{
 	Name:        "update",
 	Description: "Update Sling to the latest version",
@@ -367,10 +368,26 @@ var cliConns = &g.CliSC{
 					Name:        "key=value properties...",
 					ShortName:   "",
 					Type:        "string",
-					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#set-connections",
+					Description: "The key=value properties to set. Secret fields omitted with --type are written as ${NAME_KEY} refs. See https://docs.slingdata.io/sling-cli/environment#set-connections",
 				},
 			},
 			Flags: []g.Flag{
+				{
+					Name:        "type",
+					Type:        "string",
+					Description: "Connection type (postgres, s3, api, ...). Use ${NAME_KEY} refs for secrets.",
+				},
+				{
+					Name:        "output",
+					ShortName:   "o",
+					Type:        "string",
+					Description: "Output format: text (default), json. Overrides SLING_OUTPUT.",
+				},
+				{
+					Name:        "stdin",
+					Type:        "bool",
+					Description: "Read a YAML or JSON property map from stdin.",
+				},
 				{
 					Name:        "home-dir",
 					Type:        "string",
@@ -559,6 +576,27 @@ func main() {
 	os.Exit(exitCode)
 }
 
+// startAssistLogCapture buffers the run log tail for the assist failure
+// snapshot. Only for commands that write one (see writeFailure below).
+// Reads os.Args: g.CliObj is not populated until g.CliProcess runs.
+func startAssistLogCapture() {
+	cmd, sub := "", ""
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if cmd == "" {
+			cmd = a
+			continue
+		}
+		sub = a
+		break
+	}
+	if cmd == "run" || (cmd == "conns" && g.In(sub, "test", "discover")) {
+		env.StartLogCapture()
+	}
+}
+
 func cliInit(done chan struct{}) int {
 	defer close(done)
 
@@ -592,12 +630,20 @@ func cliInit(done chan struct{}) int {
 		os.Args = []string{os.Args[0], "runner"}
 	case len(os.Args) > 2 && os.Args[1] == "agent":
 		os.Args = append([]string{os.Args[0], "runner"}, os.Args[2:]...)
+		// 'sling project' into 'sling platform'
+		// case len(os.Args) == 2 && os.Args[1] == "project":
+		// 	os.Args = []string{os.Args[0], "platform"}
+		// case len(os.Args) > 2 && os.Args[1] == "project":
+		// 	os.Args = append([]string{os.Args[0], "platform"}, os.Args[2:]...)
 	}
+
+	os.Args = padAssistResumeFlag(os.Args)
 
 	flaggy.ShowHelpOnUnexpectedDisable()
 	flaggy.Parse()
 
 	setSentry()
+	startAssistLogCapture()
 	ok, err := g.CliProcess()
 
 	if err != nil || env.TelMap["error"] != nil {
@@ -615,9 +661,39 @@ func cliInit(done chan struct{}) int {
 			Track(eventName)
 		}
 
-		g.PrintFatal(err)
+		// print main error
+		env.PrintFatal(err)
+
+		// append failure hint
+		if g.CliObj != nil && (g.In(g.CliObj.Name, "run", "build") || g.In(g.CliObj.UsedSC(), "test", "discover")) {
+			errMsg := getErrString(err)
+			snap := assist.FailureSnapshot{
+				ExecID:   env.ExecID,
+				ErrMsg:   errMsg,
+				RunLog:   env.RecentLogs(),
+				SignMeta: assist.MakeSignMeta(),
+			}
+			if g.CliObj != nil && g.CliObj.Name == "conns" {
+				snap.ConnName = cast.ToString(g.CliObj.Vals["name"])
+			} else if g.CliObj != nil {
+				for _, key := range []string{"replication", "pipeline", "path"} {
+					if v, ok := g.CliObj.Vals[key]; ok {
+						snap.ConfigPath = cast.ToString(v)
+						break
+					}
+				}
+			}
+
+			assist.WriteFailureSnapshot(snap)
+			assist.PrintFailureFooter(assist.FailureFooterOpts{
+				ExecID:   env.ExecID,
+				ErrMsg:   errMsg,
+				SignMeta: snap.SignMeta,
+			})
+		}
 		return 1
 	} else if !ok {
+		// Always print classic help.
 		flaggy.ShowHelp("")
 	}
 
@@ -631,15 +707,28 @@ func cliInit(done chan struct{}) int {
 	return 0
 }
 
-func getErrString(err error) (errString string) {
-	if err != nil {
-		errString = err.Error()
-		E, ok := err.(*g.ErrType)
-		if ok && E.Debug() != "" {
-			errString = E.Debug()
-		}
+func getErrString(err error) string {
+	if err == nil {
+		return ""
 	}
-	return
+	if eg, ok := err.(*g.ErrorGroup); ok {
+		parts := make([]string, 0, len(eg.Errors))
+		for i, child := range eg.Errors {
+			s := getErrString(child)
+			if s == "" {
+				continue
+			}
+			if i < len(eg.Names) && eg.Names[i] != "" {
+				s = g.F("--------------------------- %s ---------------------------\n%s", eg.Names[i], s)
+			}
+			parts = append(parts, s)
+		}
+		return strings.Join(parts, "\n")
+	}
+	if d := g.ErrMsgDebug(err); d != "" {
+		return d
+	}
+	return err.Error()
 }
 
 func setSentry() {

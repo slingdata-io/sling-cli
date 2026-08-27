@@ -1,0 +1,28 @@
+id: e.37.pipeline_replication_step
+task: pipeline_create
+tier: core
+gating: true
+tags: [pipeline, replication]
+intention: >
+  Create a pipeline: run the replication at ./orders.yaml (already in the
+  workdir; it copies POSTGRES eval_tpch.orders into DUCKDB main.orders), then
+  verify the DUCKDB main.orders count is greater than 0; fail the pipeline
+  if not. Write ./pipe.yaml. Do not open eval.duckdb yourself.
+arms: [claude, grok, opencode2, codex]
+fixtures: [tpch_postgres]
+conns: [POSTGRES, DUCKDB]
+artifact: pipe.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: replication}
+          - {type: query}
+          - {type: check}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

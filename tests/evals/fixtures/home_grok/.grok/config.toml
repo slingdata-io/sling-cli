@@ -1,0 +1,3 @@
+[mcp_servers.sling]
+command = "sling"
+args = ["serve", "mcp"]

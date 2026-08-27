@@ -1,0 +1,32 @@
+id: e.35.repl_api_source
+task: replication_create
+tier: core
+gating: true
+tags: [replication, spec]
+intention: >
+  Load the users endpoint of MOCK_API into DUCKDB, full-refresh.
+  Write ./api_users.yaml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API, DUCKDB]
+artifact: api_users.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+    - outcome:
+        run: sling run -r {artifact}
+        checks:
+          - file_exists: "{artifact}"
+    - query:
+        connection: DUCKDB
+        sql: select count(*) from main.users
+        equals: 250

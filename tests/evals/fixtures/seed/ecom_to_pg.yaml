@@ -1,0 +1,13 @@
+source: LOCAL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+streams:
+  "file://./fixtures/data/ecom/raw_orders.parquet":
+    object: eval_ecom.raw_orders
+  "file://./fixtures/data/ecom/raw_customers.parquet":
+    object: eval_ecom.raw_customers
+  "file://./fixtures/data/ecom/raw_events.parquet":
+    object: eval_ecom.raw_events

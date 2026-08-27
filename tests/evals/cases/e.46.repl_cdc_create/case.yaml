@@ -1,0 +1,23 @@
+id: e.46.repl_cdc_create
+task: replication_create
+tier: core
+gating: true
+tags: [replication, cdc]
+intention: >
+  Create a change-capture replication from POSTGRES to CLICKHOUSE for
+  eval_tpch.orders and eval_tpch.customer. Write ./cdc.yaml. Do not run it.
+arms: [claude, grok]
+conns: [POSTGRES, CLICKHOUSE]
+artifact: cdc.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - streams.*.mode
+          - streams.*.primary_key

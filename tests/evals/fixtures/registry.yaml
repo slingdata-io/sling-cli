@@ -1,0 +1,37 @@
+tpch_duckdb:
+  connection: DUCKDB
+  provision:
+    - sling: conns exec DUCKDB "INSTALL tpch; LOAD tpch; CALL dbgen(sf = 0.01)"
+  ready_check:
+    connection: DUCKDB
+    sql: select count(*) from orders
+    equals: 15000
+
+tpch_postgres:
+  connection: POSTGRES
+  requires: [tpch_duckdb]
+  provision:
+    - sling: run -r fixtures/seed/tpch_to_pg.yaml
+  ready_check:
+    connection: POSTGRES
+    sql: select count(*) from eval_tpch.orders
+    equals: 15000
+
+tpch_clickhouse:
+  connection: CLICKHOUSE
+  requires: [tpch_duckdb]
+  provision:
+    - sling: run -r fixtures/seed/tpch_to_ch.yaml
+  ready_check:
+    connection: CLICKHOUSE
+    sql: select count(*) from eval_tpch.orders
+    equals: 15000
+
+ecom_dirty:
+  connection: POSTGRES
+  provision:
+    - sling: run -r fixtures/seed/ecom_to_pg.yaml
+  ready_check:
+    connection: POSTGRES
+    sql: select count(*) from eval_ecom.raw_orders
+    equals: 5000

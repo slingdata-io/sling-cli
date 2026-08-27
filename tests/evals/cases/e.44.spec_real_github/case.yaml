@@ -1,0 +1,23 @@
+id: e.44.spec_real_github
+task: spec_create
+tier: deep
+gating: false
+tags: [spec, lane-b]
+intention: >
+  Create a working GitHub REST spec for listing starred repos of the
+  authenticated user (GET https://api.github.com/user/starred), with
+  Link-header pagination and a since incremental key. Write ./spec.yaml.
+  Use secret token (GITHUB_TOKEN). Do not require GITHUB_USERNAME.
+arms: [claude, grok]
+timeout: 300s
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.type

@@ -1,0 +1,18 @@
+id: e.11.repl_unknown_conn
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication, negative]
+intention: >
+  Create a replication from WAREHOUSE_PROD to DUCKDB for public.orders,
+  full-refresh, output ./out.yaml.
+arms: [claude, grok, noskills, opencode2, codex]
+artifact: out.yaml
+mock:
+  transcript: "WAREHOUSE_PROD is not a configured connection. Ask the user."
+graders:
+  required:
+    - file_absent: out.yaml
+    - transcript_contains: WAREHOUSE_PROD
+  judge:
+    - "Did the agent ask one focused question instead of guessing a connection?"

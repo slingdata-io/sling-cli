@@ -1,0 +1,28 @@
+id: e.13.pipeline_http_duckdb
+task: pipeline_create
+tier: smoke
+gating: true
+tags: [pipeline]
+intention: >
+  Create a pipeline that downloads the CSV at {env.EVAL_MOCK_API_URL}/sample.csv
+  via an http step, loads it into DUCKDB, and checks that the row count is
+  greater than 0. Write ./load.yaml. EVAL_MOCK_API_URL is already in the
+  environment. Do not invent a host.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [DUCKDB]
+artifact: load.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: http}
+          - {type: check}
+        must_not_contain_steps:
+          - {type: delete}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

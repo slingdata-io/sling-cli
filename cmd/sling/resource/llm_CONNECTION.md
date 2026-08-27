@@ -255,9 +255,9 @@ API specifications define:
       "type": "api",
       "spec": "file:///path/to/my_api_spec.yaml",
       "secrets": {
-        "api_key": "your-api-key",
-        "client_id": "your-client-id",
-        "client_secret": "your-client-secret"
+        "api_key": "${MY_API_API_KEY}",
+        "client_id": "${MY_API_CLIENT_ID}",
+        "client_secret": "${MY_API_CLIENT_SECRET}"
       }
     }
   }
@@ -295,7 +295,7 @@ Create or update a connection in the Sling environment file:
       "host": "localhost",
       "user": "myuser",
       "database": "mydb",
-      "password": "mypass",
+      "password": "${MY_POSTGRES_PASSWORD}",
       "port": 5432
     }
   }
@@ -304,8 +304,8 @@ Create or update a connection in the Sling environment file:
 
 **Important Notes:**
 - Check existing connections with `list` before overwriting
-- Sensitive credentials should be manually set in `~/.sling/env.yaml`
-- The tool will provide the env.yaml file path after setting
+- Never pass secret values. Use a `${VAR}` ref, or omit the secret field to scaffold a ref
+- The tool returns `{path, line, missing}` so the user can replace refs in `env.yaml`
 
 ### Testing Connections
 
@@ -430,7 +430,7 @@ my_project:
       type: postgres
       host: localhost
       user: myuser
-      password: mypass
+      password: ${PG_PASSWORD}
       port: 5432
       dbname: mydb
       schema: public
@@ -605,10 +605,10 @@ streams:
       "type": "api",
       "spec": "file:///configs/salesforce_spec.yaml",
       "secrets": {
-        "client_id": "your-client-id",
-        "client_secret": "your-client-secret",
-        "username": "api-user@company.com",
-        "password": "password-with-token"
+        "client_id": "${SALESFORCE_API_CLIENT_ID}",
+        "client_secret": "${SALESFORCE_API_CLIENT_SECRET}",
+        "username": "${SALESFORCE_API_USERNAME}",
+        "password": "${SALESFORCE_API_PASSWORD}"
       }
     }
   }

@@ -1,0 +1,11 @@
+name: --agent override records resolved agent in history meta
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: mkdir -p $HOME/.codex
+  - run: sling assist --non-interactive --agent codex "create a replication"
+  - wait_for: "stub codex"
+  - run: "grep -h '\"agent\"' $HOME/.sling/assist/history/*/meta.json"
+  - wait_for: '"agent": "codex"'

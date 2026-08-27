@@ -1,0 +1,30 @@
+id: e.03.repl_pg_clickhouse_keys
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication, incremental]
+intention: >
+  Create a replication from POSTGRES to CLICKHOUSE for public.orders.
+  Incremental mode. Primary key id, update key updated_at.
+  Set target_options.table_keys.order_by to [id].
+  Write ./orders_ch.yaml. Do not run it.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [POSTGRES, CLICKHOUSE]
+artifact: orders_ch.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.primary_key
+          - streams.*.update_key
+          - streams.*.target_options.table_keys
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

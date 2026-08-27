@@ -1,0 +1,10 @@
+name: dummyjson
+endpoints:
+  products:
+    request:
+      url: https://dummyjson.com/products
+      method: GET
+    response:
+      records:
+        jmespath: "products"
+        primary_key: [id]

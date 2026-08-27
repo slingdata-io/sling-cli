@@ -1,0 +1,14 @@
+name: github
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+endpoints:
+  stars:
+    request:
+      url: https://api.github.com/user/starred
+      method: GET
+    response:
+      records:
+        jmespath: "@"
+        primary_key: [id]

@@ -1,0 +1,27 @@
+id: e.38.spec_cursor_stop
+task: spec_create
+tier: core
+gating: true
+tags: [spec]
+intention: >
+  Create a MOCK_API spec for cursor-paginated GET {secrets.base_url}/orders.
+  Use next_cursor in the body and stop when it is null. Authenticate with
+  Bearer {secrets.token}. Available secrets: base_url, token. Write ./spec.yaml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - api_spec:
+        action: test
+        path: "{artifact}"
+        endpoint: orders
+        equals: 1000
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - endpoints.*.pagination.stop_condition

@@ -1,0 +1,11 @@
+name: github
+authentication:
+  type: none
+endpoints:
+  stars:
+    request:
+      url: https://example.com/stars
+      method: GET
+    response:
+      records:
+        jmespath: "data"

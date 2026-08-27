@@ -1,0 +1,23 @@
+id: e.36.pipeline_group_loop
+task: pipeline_create
+tier: core
+gating: true
+tags: [pipeline]
+intention: >
+  For each CSV in fixtures/data/ecom/, load it into DUCKDB and log the row
+  count. Use a group/loop, not one step per file. Write ./loop.yaml.
+arms: [claude, grok, opencode2, codex]
+conns: [DUCKDB, LOCAL]
+artifact: loop.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: group}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

@@ -1,0 +1,6 @@
+source: POSTGRES
+target: LOCAL
+streams:
+  public.orders:
+    object: file://./output/orders.csv
+    mode: full-refresh

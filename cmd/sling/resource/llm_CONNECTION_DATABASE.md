@@ -72,7 +72,7 @@ The `database` tool provides database-specific operations through various action
 }
 ```
 
-**Important**: Database operations require a Pro token and are rate-limited.
+**Important**: Database operations are read-oriented and run locally through your configured connections.
 
 ---
 
@@ -85,7 +85,6 @@ Before using database operations:
 1. **Connection Setup**: Database connection must be configured using the `connection` tool
 2. **Connection Testing**: Verify connection works with `connection` tool `test` action
 3. **Permissions**: Database user must have SELECT permissions on target objects
-4. **Token**: Operations require a valid Sling CLI Pro token
 
 ### Operation Categories
 

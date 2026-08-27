@@ -1,0 +1,3 @@
+# missing target — compile must fail
+defaults:
+  mode: view

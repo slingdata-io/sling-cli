@@ -1,0 +1,8 @@
+target: DUCKDB
+defaults:
+  mode: view
+models:
+  fct_orders:
+    mode: table
+  dim_customers:
+    mode: table

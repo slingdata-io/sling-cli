@@ -1,0 +1,13 @@
+name: install runs twice without duplicating entries
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  # The full claude.json must contain exactly ONE block of `"sling":` followed
+  # by an opening brace. We hex-escape the colon-space so YAML doesn't try to
+  # parse it as a mapping.
+  - run: awk '/sling/ && /\{/ {n++} END{print "SLING_COUNT="n}' $HOME/.claude.json
+  - wait_for: "SLING_COUNT=1"

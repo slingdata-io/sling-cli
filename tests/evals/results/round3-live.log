@@ -1,0 +1,27 @@
+=== RUN   TestEvalAssist
+    eval_test.go:40: sling binary: /Users/fritz/Projects/sling-workspace/sling-cli/cmd/sling/sling mtime=2026-08-23T16:38:12Z size=267954450 version=Version: dev git=v1.5.26-1-g63ea5feec637-dirty
+    runner.go:307: fixture tpch_duckdb: already ready
+    runner.go:307: fixture tpch_postgres: already ready
+    runner.go:307: fixture tpch_clickhouse: already ready
+    runner.go:307: fixture ecom_dirty: already ready
+    runner.go:307: judge smoke: warning: judge parse: no judge array in output
+opencode2 cost is not tracked (no structured cost in transcript)
+    runner.go:307: e.18.build_staging_view claude t1 infra_error, retrying once
+    runner.go:307: e.18.build_staging_view opencode2 t1 infra_error, retrying once
+    runner.go:307: e.30.build_fix_broken_dag claude t1 infra_error, retrying once
+    runner.go:307: e.30.build_fix_broken_dag opencode2 t1 infra_error, retrying once
+[90m2026-08-23 14:16:49[0m [31mWRN[0m no values obtained from "queue.imdb_ids"
+    eval_test.go:73: 
+        ARM     CASES  pass@1  pass^k  Δ vs baseline           COST
+        claude     42    0.71    0.71  -                       $0.00
+        opencode2    36    0.69    0.69  -                       $0.00
+        verdict=fail threshold=0.90 total=$0.00
+        binary=/Users/fritz/Projects/sling-workspace/sling-cli/cmd/sling/sling mtime=2026-08-23T16:38:12Z size=267954450 version=Version: dev git=v1.5.26-1-g63ea5feec637-dirty
+        judge=skipped (13 asked)
+        
+    eval_test.go:74: jsonl=/Users/fritz/Projects/sling-workspace/sling-cli/tests/evals/results/2026-08-23T16-41Z.qqh2.jsonl
+    eval_test.go:84: suite verdict=fail (threshold=0.90)
+--- FAIL: TestEvalAssist (2251.85s)
+FAIL
+FAIL	github.com/slingdata-io/sling-cli/tests/evals	2253.327s
+FAIL

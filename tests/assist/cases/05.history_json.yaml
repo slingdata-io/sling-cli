@@ -1,0 +1,11 @@
+name: history meta records resolved agent
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist --name api-spec --non-interactive --agent claude "create from MY_API to MY_DB"
+  - wait_for: "stub claude"
+  - run: "grep -h '\"agent\"' $HOME/.sling/assist/history/*/meta.json"
+  - wait_for: '"agent": "claude"'
+  - expect_contains: '"agent": "claude"'

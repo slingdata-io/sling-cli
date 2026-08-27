@@ -1,0 +1,16 @@
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = true
+
+[tools]
+web_search = false
+
+[mcp_servers.sling]
+command = "sling"
+args = ["serve", "mcp"]
+# Auto-approve sling MCP tools under approval_policy=never (codex 0.149 exec).
+default_tools_approval_mode = "approve"
+tool_timeout_sec = 60

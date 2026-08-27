@@ -1,0 +1,17 @@
+id: e.26.debug_no_rerun
+task: debug
+tier: core
+gating: true
+tags: [debug, negative]
+intention: >
+  Diagnose a failed POSTGRES run. Do not re-run sling before the user confirms.
+arms: [claude, grok, opencode2, codex]
+artifact: diagnosis.md
+mock:
+  transcript: "The run failed on a missing column. I will not re-run until you confirm."
+  mutant_transcript: "I will sling run -r bad.yaml now to verify."
+graders:
+  required:
+    - transcript_absent: "sling run"
+  judge:
+    - "Did the agent wait for confirmation before re-running?"

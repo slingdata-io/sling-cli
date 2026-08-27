@@ -1,0 +1,24 @@
+id: e.30.build_fix_broken_dag
+task: build_update
+tier: core
+gating: true
+tags: [build]
+intention: >
+  This build fails. staging/model_b.sql refs a model that does not exist
+  (stg_missing). staging/model_a.sql and staging/model_b.sql also form a
+  cycle. Point model_b at the seed `orders` instead, and keep mart_ok's
+  output columns (id, name). Edit the model SQL files, not sling_build.yml.
+  The project file is ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [DUCKDB]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: build compile .
+    - sling: build run . --target DUCKDB
+    - query:
+        connection: DUCKDB
+        sql: select count(*) from marts.mart_ok
+        equals: 1

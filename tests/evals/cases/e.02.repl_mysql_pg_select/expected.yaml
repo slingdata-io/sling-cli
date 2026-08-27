@@ -1,0 +1,7 @@
+source: MYSQL
+target: POSTGRES
+streams:
+  mysql.users:
+    object: public.users
+    mode: full-refresh
+    select: [id, email, name]

@@ -1,0 +1,308 @@
+
+
+- id: 290
+  name: 'sling assist setup --non-interactive (headless)'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude
+    test -f "$H/.agents/skills/sling/SKILL.md"
+    test -f "$H/.agents/skills/agent-browser/SKILL.md"
+    test -f "$H/.agents/skills/agent-browser/CORE.md"
+    test -f "$H/.claude/skills/sling/SKILL.md"
+    test -f "$H/.claude.json"
+    grep -q 'agent-browser' "$H/.claude.json"
+    grep -q 'agent: claude' "$H/.sling/env.yaml"
+    rm -rf "$H"
+  output_contains:
+    - 'Wired clients:'
+    - 'claude'
+    - 'sling assist setup --doctor'
+
+- id: 291
+  name: 'sling assist setup --doctor exits non-zero when nothing installed'
+  group: assist
+  err: true
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
+    rm -rf "$H"
+  output_contains:
+    - 'profile'
+
+- id: 292
+  name: 'sling assist --out - renders prompt without launching'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out - \
+      "Create a replication from PG to SF for public.users in full-refresh mode."
+    rm -rf "$H"
+  output_contains:
+    - '# Rules'
+    - '# State'
+    - '# Context'
+    - 'from PG to SF'
+    - 'Gather first'
+
+- id: 322
+  name: 'sling assist --out - works without setup'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out - "hello"
+    rm -rf "$H"
+  output_contains:
+    - '# Rules'
+    - '# State'
+    - 'hello'
+
+- id: 293
+  name: 'sling assist --out - with investigation ask'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out - "ERROR column missing"
+    rm -rf "$H"
+  output_contains:
+    - '# Rules'
+    - '# Ask'
+    - 'column missing'
+
+- id: 294
+  name: 'sling assist --resume unknown id errors'
+  group: assist
+  err: true
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --resume no-such-id --out -
+    rm -rf "$H"
+  output_contains:
+    - 'unknown session'
+
+- id: 295
+  name: 'sling assist setup --uninstall is idempotent'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --uninstall
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --uninstall
+    rm -rf "$H"
+  output_contains:
+    - 'Removed Sling skills'
+
+- id: 296
+  name: 'sling assist --out - with piped stdin still renders'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out - < /dev/null
+    rm -rf "$H"
+  output_contains:
+    - '# Rules'
+    - '# State'
+    - '# Context'
+
+- id: 297
+  name: 'sling run failure writes log snapshot + AI hint'
+  group: assist
+  err: true
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    # Intentionally broken replication so `sling run` fails quickly.
+    cat > "$H/bad.yaml" <<'EOF'
+    source: __no_such_conn__
+    target: __no_such_conn__
+    streams:
+      public.x:
+        object: public.x
+    EOF
+    # Leave stderr unredirected so the suite can assert on the AI hint; the
+    # script still fails (set -e) if the snapshot files are missing.
+    set +e
+    HOME="$H" SLING_HOME_DIR="$H/.sling" SLING_EXEC_ID=exec_assist_test297 \
+      sling run -r "$H/bad.yaml"
+    run_rc=$?
+    set -e
+    test -f "$H/.sling/assist/errors/executions/exec_assist_test297/error.txt"
+    test -f "$H/.sling/assist/errors/executions/exec_assist_test297/meta.json"
+    grep -q error_signature "$H/.sling/assist/errors/executions/exec_assist_test297/meta.json"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out -
+    rm -rf "$H"
+    # Propagate the failed-run exit so suite.err:true is satisfied.
+    exit $run_rc
+  output_contains:
+    - 'error signature:'
+    - 'failed run'
+    - 'exec_assist_test297'
+
+- id: 300
+  name: 'sling conns test failure writes log snapshot + signature footer'
+  group: assist
+  err: true
+  run: |
+    H=$(mktemp -d)
+    set +e
+    HOME="$H" SLING_HOME_DIR="$H/.sling" SLING_EXEC_ID=exec_conns_test300 \
+      sling conns test __no_such_conn__
+    run_rc=$?
+    set -e
+    test -f "$H/.sling/assist/errors/executions/exec_conns_test300/error.txt"
+    test -f "$H/.sling/assist/errors/executions/exec_conns_test300/meta.json"
+    grep -q error_signature "$H/.sling/assist/errors/executions/exec_conns_test300/meta.json"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --out -
+    rm -rf "$H"
+    exit $run_rc
+  output_contains:
+    - 'error signature:'
+    - 'exec_conns_test300'
+
+- id: 298
+  name: 'uninstall stamp prevents AutoRefresh resurrection'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    test -f "$H/.agents/skills/sling/SKILL.md"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --uninstall >/dev/null 2>&1
+    test ! -d "$H/.agents/skills/sling"
+    # Stamp must be "uninstalled" so a fake older binary version does not reinstall.
+    grep -qx uninstalled "$H/.sling/assist/version"
+    # Touch a bogus old stamp scenario: rewrite stamp to old, but uninstall
+    # already set uninstalled; after re-uninstall stamp stays uninstalled.
+    # Simulate upgrade path: write old version then ensure doctor/history still no-ops refresh.
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor >/dev/null || true
+    test ! -d "$H/.agents/skills/sling"
+    rm -rf "$H"
+  output_contains: []
+
+- id: 323
+  name: 'sling assist auto-heals drifted skills on every command'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    echo drifted-content > "$H/.agents/skills/sling/SKILL.md"
+    echo drifted-content > "$H/.agents/skills/sling-build/SKILL.md"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
+    grep -qv drifted-content "$H/.agents/skills/sling/SKILL.md"
+    grep -qv drifted-content "$H/.agents/skills/sling-build/SKILL.md"
+    rm -rf "$H"
+  output_contains:
+    - '✓ skills: sling matches embedded'
+  output_does_not_contain:
+    - 'drifted from embedded'
+
+- id: 299
+  name: 'sling assist --resume --out - restores saved prompt'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude" "$H/.sling/assist/history/2026-01-01_00-00-00_assist"
+    cat > "$H/.sling/assist/history/2026-01-01_00-00-00_assist/answers.yaml" <<'EOF'
+    schema_version: 1
+    name: assist
+    task: ask
+    created: 2026-01-01T00:00:00Z
+    agent: claude
+    cwd: /tmp
+    answers:
+      ask: backfill orders
+    EOF
+    echo 'saved prompt: backfill orders' > "$H/.sling/assist/history/2026-01-01_00-00-00_assist/prompt.md"
+    echo '{"id":"2026-01-01_00-00-00_assist","agent":"claude","harness_session_id":"abc"}' > "$H/.sling/assist/history/2026-01-01_00-00-00_assist/meta.json"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --resume 2026-01-01_00-00-00_assist --out -
+    rm -rf "$H"
+  output_contains:
+    - 'saved prompt: backfill orders'
+
+- id: 324
+  name: 'sling assist setup wires agent-browser MCP and skill'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude
+    grep -q 'agent-browser' "$H/.claude.json"
+    grep -q '"mcp"' "$H/.claude.json" || grep -q 'mcpServers' "$H/.claude.json"
+    test -f "$H/.agents/skills/agent-browser/SKILL.md"
+    test -f "$H/.agents/skills/agent-browser/CORE.md"
+    grep -q 'agent-browser' "$H/.agents/skills/agent-browser/SKILL.md"
+    rm -rf "$H"
+  output_contains:
+    - 'Wired clients:'
+    - 'claude'
+- id: 325
+  name: 'sling assist --exec investigates a failed run with its log'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    cat > "$H/bad.yaml" <<'YAML'
+    source: local
+    target: local
+    defaults:
+      mode: full-refresh
+    streams:
+      "file:///nonexistent/path/*.csv":
+        object: "file:///tmp/out.csv"
+    YAML
+    set +e
+    HOME="$H" SLING_HOME_DIR="$H/.sling" SLING_EXEC_ID=exec_suite325 \
+      sling run --debug -r "$H/bad.yaml"
+    set -e
+    # The run log is captured, not just the error text.
+    test -f "$H/.sling/assist/errors/executions/exec_suite325/stderr.log"
+    grep -q 'execution failed' "$H/.sling/assist/errors/executions/exec_suite325/stderr.log"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist --exec exec_suite325 --out -
+    rm -rf "$H"
+  output_contains:
+    - 'error signature:'
+    - 'run log (tail):'
+    - 'Investigate the failed run exec_suite325'
+
+- id: 326
+  name: 'sling assist --id rejects unknown execution id'
+  group: assist
+  err: true
+  run: |
+    H=$(mktemp -d)
+    unset SLING_PROJECT_TOKEN
+    HOME="$H" SLING_HOME_DIR="$H/.sling" SLING_PROJECT_TOKEN='' sling assist --id no_such_exec --out -
+    rm -rf "$H"
+  output_contains:
+    - 'unknown exec id'
+
+- id: 329
+  name: 'sling assist report --id prints redacted draft'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    D="$H/.sling/assist/errors/executions/exec_report329"
+    mkdir -p "$D"
+    cat > "$D/meta.json" <<'EOF'
+    {"exec_id":"exec_report329","exit_code":1,"error_short_label":"no_stream_columns","source_type":"postgres","target_type":"snowflake","object":"/Users/alice/secret.yaml"}
+    EOF
+    printf '%s\n' 'failed to read /Users/alice/secret.yaml' > "$D/error.txt"
+    printf '%s\n' 'opened https://db.internal.example.com/x' 'path=/Users/alice/secret.yaml' > "$D/stderr.log"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist report --id exec_report329
+    rm -rf "$H"
+  output_contains:
+    - 'no_stream_columns'
+    - '<path>'
+    - '## Description'
+    - '## Replication Configuration'
+    - '## Log Output'
+  output_does_not_contain:
+    - '/Users/'
+

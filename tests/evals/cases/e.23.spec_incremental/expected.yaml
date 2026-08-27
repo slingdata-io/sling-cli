@@ -1,0 +1,23 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+      parameters:
+        updated_since: '{coalesce(sync.updated_since, "2024-01-01T00:00:00Z")}'
+        limit: "1000"
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]
+      processors:
+        - expression: "record.updated_at"
+          output: "state.updated_since"
+          aggregation: maximum
+    sync:
+      - updated_since

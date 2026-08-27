@@ -1,0 +1,6 @@
+source: MOCK_API
+target: DUCKDB
+streams:
+  users:
+    object: main.users
+    mode: full-refresh

@@ -1,0 +1,3 @@
+target: DUCKDB
+# mutant keeps the cycle — compile must fail. Plant is expected.yaml (valid target)
+# but seed still has the cycle. For passable we need the plant to include fixed SQL.

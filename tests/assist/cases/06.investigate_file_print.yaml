@@ -1,0 +1,11 @@
+name: sling assist --out - with error ask renders five-section prompt
+seed: home_with_claude
+timeout_s: 15
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist --out - "ERROR column email_verified does not exist"
+  - wait_for: "email_verified"
+  - expect_contains: "# Rules"
+  - expect_contains: "# Ask"
+  - expect_contains: "email_verified"

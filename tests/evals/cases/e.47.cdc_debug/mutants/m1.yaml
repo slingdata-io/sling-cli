@@ -1,0 +1,6 @@
+# unused plant; sensitivity uses mutant_transcript
+source: POSTGRES
+target: CLICKHOUSE
+streams:
+  eval_tpch.orders:
+    mode: change-capture

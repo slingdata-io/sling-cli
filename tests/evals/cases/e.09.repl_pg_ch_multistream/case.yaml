@@ -1,0 +1,27 @@
+id: e.09.repl_pg_ch_multistream
+task: replication_create
+tier: core
+gating: true
+tags: [replication]
+intention: >
+  Create a replication from POSTGRES to CLICKHOUSE for finance.* streams
+  with a shared defaults block (full-refresh, object public.{stream_table}).
+  Also include public.products in snapshot mode.
+  Write ./finance.yaml. Do not run it.
+arms: [claude, grok, opencode2, codex]
+conns: [POSTGRES, CLICKHOUSE]
+artifact: finance.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

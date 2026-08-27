@@ -1,0 +1,24 @@
+id: e.40.spec_parent_child
+task: spec_create
+tier: core
+gating: false # agent-quality tail (records selector / depends_on); Phase-8
+tags: [spec]
+intention: >
+  Create a MOCK_API spec that lists users then iterates into
+  GET {secrets.base_url}/users/{id}/posts. Authenticate with Bearer
+  {secrets.token}. Available secrets: base_url, token. Write ./spec.yaml.
+  Name the child endpoint `posts`. Set `depends_on: [users]` on it.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - endpoints.posts.depends_on

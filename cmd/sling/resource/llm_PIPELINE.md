@@ -48,14 +48,16 @@ Sling pipelines are powerful YAML-based workflow definitions that allow you to o
 
 The Sling MCP tool provides these pipeline commands:
 - `pipeline/docs` - Get documentation.
-- `pipeline/parse` - Parse and validate the pipeline configuration.
-- `pipeline/run` - Execute the pipeline.
+- `pipeline/validate` - Parse and validate the pipeline configuration.
+
+There is no MCP `run` action. Execute pipelines with the CLI: `sling run -p /path/to/pipeline.yaml`.
+There is no MCP `build` action. Execute SQL models with the CLI: `sling build`.
 
 ---
 
 ## 2. Quick Start Guide
 
-### Essential MCP Commands
+### Essential Commands
 
 ```json
 // Get pipeline documentation
@@ -66,21 +68,18 @@ The Sling MCP tool provides these pipeline commands:
 
 // Parse a pipeline file
 {
-  "action": "parse",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/pipeline.yaml",
     "working_dir": "/optional/work/dir"
   }
 }
+```
 
-// Run a pipeline
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/pipeline.yaml",
-    "working_dir": "/optional/work/dir"
-  }
-}
+```bash
+# Run a pipeline (CLI only — no MCP run action)
+sling run -p /path/to/pipeline.yaml
+sling run -p /path/to/pipeline.yaml --debug
 ```
 
 ### Basic Pipeline Structure
@@ -603,7 +602,7 @@ steps:
 #### Parse Configuration
 ```json
 {
-  "action": "parse",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/pipeline.yaml",
     "working_dir": "/optional/work/dir"
@@ -612,25 +611,20 @@ steps:
 ```
 
 #### Execute Pipeline
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/pipeline.yaml",
-    "working_dir": "/optional/work/dir",
-    "env": {
-      "CUSTOM_VAR": "value"
-    }
-  }
-}
+
+There is no MCP `run` action. Use the CLI:
+
+```bash
+sling run -p /path/to/pipeline.yaml
+sling run -p /path/to/pipeline.yaml --debug
 ```
 
 ### Development Workflow
 
 1.  **Write** your pipeline YAML file.
-2.  **Parse** the configuration to validate syntax: `{"action": "parse", "input": {"file_path": "my_pipeline.yaml"}}`.
+2.  **Validate** the configuration with MCP: `{"action": "validate", "input": {"file_path": "my_pipeline.yaml"}}`.
 3.  **Test** individual steps if possible (e.g., run `query` or `command` steps manually).
-4.  **Run** the full pipeline: `{"action": "run", "input": {"file_path": "my_pipeline.yaml"}}`.
+4.  **Run** the full pipeline with the CLI: `sling run -p my_pipeline.yaml`.
 5.  **Debug** by checking the logs and the output of each step.
 
 ---

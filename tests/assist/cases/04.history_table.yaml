@@ -1,0 +1,12 @@
+name: --resume --out - restores saved session prompt
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist --name pg-to-sf --non-interactive --agent claude "create from MY_PG to MY_SF"
+  - wait_for: "stub claude"
+  - run: "ID=$(ls $HOME/.sling/assist/history | grep -v '^\\.' | head -1); sling assist --resume $ID --out -"
+  - wait_for: "MY_PG"
+  - expect_contains: "# Rules"
+  - expect_contains: "MY_SF"

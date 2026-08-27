@@ -1,0 +1,16 @@
+name: doctor reports green after install
+seed: home_with_claude
+timeout_s: 20
+env:
+  PATH: "$HOME/bin:/usr/bin:/bin"
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist setup --doctor
+  - wait_for: "✓ profile"
+  - expect_contains: "✓ skills: sling matches embedded"
+  - expect_contains: "Agent × Capability:"
+  - expect_contains: "auth"
+  - expect_contains: "MCP"
+  - expect_contains: "✓ env:"
+  - expect_contains: "✓ version:"

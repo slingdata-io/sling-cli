@@ -1,0 +1,9 @@
+steps:
+  - type: replication
+    path: orders.yaml
+  - type: query
+    connection: DUCKDB
+    query: select count(*) as n from orders
+    into: n
+  - type: check
+    check: store.n[0].n > 0

@@ -1,0 +1,16 @@
+name: sling assist --out - default prompt has five sections
+seed: home_with_claude
+timeout_s: 30
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+
+  - run: sling assist --out -
+  - wait_for: "Gather first"
+  - expect_contains: "# Rules"
+  - expect_contains: "# State"
+  - expect_contains: "# Context"
+  - expect_contains: "# Ask"
+  - expect_contains: "# Objective"
+  - expect_not_contains: "What do you want to work on"
+  - expect_not_contains: "Submit — launch agent"

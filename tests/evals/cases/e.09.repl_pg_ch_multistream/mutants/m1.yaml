@@ -1,0 +1,6 @@
+source: POSTGRES
+target: CLICKHOUSE
+streams:
+  finance.invoices:
+    object: public.invoices
+    mode: incremental

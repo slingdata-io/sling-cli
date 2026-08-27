@@ -1,0 +1,38 @@
+id: e.01.repl_pg_duckdb_incremental
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication, incremental]
+intention: >
+  Create a replication from POSTGRES to DUCKDB for table public.orders.
+  Incremental mode. Primary key id, update key updated_at.
+  Write the YAML to ./orders_repl.yaml. Do not run it.
+arms: [claude, grok, noskills, opencode2, codex]
+trials: 3
+budget_usd: 0.50
+timeout: 180s
+conns: [POSTGRES, DUCKDB]
+artifact: orders_repl.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.primary_key
+          - streams.*.update_key
+        must_not_exist:
+          - hooks
+          - streams.*.transforms
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}
+  optional:
+    - yq: '.streams | length == 1'
+  judge:
+    - "Does the config do everything the intention asked, and nothing more?"

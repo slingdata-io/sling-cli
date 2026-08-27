@@ -1,0 +1,7 @@
+source: POSTGRES
+target: CLICKHOUSE
+streams:
+  eval_tpch.orders:
+    mode: incremental
+    primary_key: [o_orderkey]
+    object: eval_tpch.orders

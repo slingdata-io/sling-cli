@@ -1,0 +1,24 @@
+id: e.39.spec_oauth2
+task: spec_create
+tier: core
+gating: true
+tags: [spec]
+intention: >
+  Create a MOCK_API spec that uses OAuth2 client-credentials against
+  {secrets.base_url}/oauth/token with client_id {secrets.oauth_client_id}
+  and client_secret {secrets.oauth_client_secret}. Then GET /users.
+  Write ./spec.yaml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.type

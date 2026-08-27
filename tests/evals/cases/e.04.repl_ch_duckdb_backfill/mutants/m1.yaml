@@ -1,0 +1,6 @@
+source: CLICKHOUSE
+target: DUCKDB
+streams:
+  events:
+    object: main.events
+    mode: full-refresh

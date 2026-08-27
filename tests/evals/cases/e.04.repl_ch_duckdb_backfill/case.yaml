@@ -1,0 +1,26 @@
+id: e.04.repl_ch_duckdb_backfill
+task: replication_create
+tier: core
+gating: true
+tags: [replication, backfill]
+intention: >
+  Create a replication from CLICKHOUSE to DUCKDB for events.
+  Backfill mode with range 2024-01-01,2024-12-31. Write ./events_repl.yaml. Do not run it.
+arms: [claude, grok, opencode2, codex]
+conns: [CLICKHOUSE, DUCKDB]
+artifact: events_repl.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.source_options.range
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

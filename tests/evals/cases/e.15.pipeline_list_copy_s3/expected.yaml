@@ -1,0 +1,8 @@
+steps:
+  - type: list
+    id: files
+    location: LOCAL/data/*.csv
+    only: files
+  - type: copy
+    from: LOCAL/data
+    to: AWS_S3_TEST/eval/

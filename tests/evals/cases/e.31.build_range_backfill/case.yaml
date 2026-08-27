@@ -1,0 +1,28 @@
+id: e.31.build_range_backfill
+task: build_create
+tier: deep
+gating: true
+tags: [build, tpch]
+intention: >
+  Make fct_orders incremental with a range config on o_orderdate: start
+  1992-01-01, advance 1 month, lookback 3 days. Backfill 1992 only.
+  Write the project to ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [tpch_duckdb]
+conns: [DUCKDB]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - defaults.mode
+    - sling: build compile .
+    - sling: build run . --target DUCKDB
+    - query:
+        connection: DUCKDB
+        sql: select min(order_date)::text from marts.fct_orders
+        equals: "1992-01-01"

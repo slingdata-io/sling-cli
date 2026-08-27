@@ -1,0 +1,7 @@
+source: LOCAL
+target: MYSQL
+streams:
+  'file://./fixtures/data/*.csv':
+    object: mysql.sample
+    mode: incremental
+    single: true

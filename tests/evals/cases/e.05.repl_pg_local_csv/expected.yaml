@@ -1,0 +1,8 @@
+source: POSTGRES
+target: LOCAL
+streams:
+  public.orders:
+    object: file://./output/orders/{part_num}.csv
+    mode: full-refresh
+    target_options:
+      file_max_rows: 100000
