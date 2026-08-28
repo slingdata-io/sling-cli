@@ -344,6 +344,7 @@ native_type_map:
   double: float
   enum: string
   float: float
+  geometry: geometry
   hugeint: bigint
   integer: integer
   interval: string
@@ -373,6 +374,7 @@ general_type_map:
   datetime: datetime
   decimal: "decimal(,)"
   float: double
+  geometry: geometry
   integer: integer
   json: json
   smallint: smallint

@@ -1389,33 +1389,44 @@ type DuckDbCopyOptions struct {
 	PartitionKey       string
 	WritePartitionCols bool
 	FileSizeBytes      int64
-	Columns            Columns // optional, used to decode hex-encoded binary back to BLOB
+	GeometryCRS        string  // optional, stamps exported geometry columns with this CRS
+	Columns            Columns // optional, used to decode hex-encoded binary and geometry
 }
 
-// buildSelectProjection returns the SELECT list for export. For binary columns
+// buildSelectProjection returns the SELECT list for export. Binary columns
 // (which are streamed through CSV as hex-encoded varchar), it emits
 // `unhex(col)::BLOB AS col` so parquet output preserves true binary type.
-// If no binary columns are present, returns `*`.
+// Geometry columns (hex WKB varchar) are parsed into native geometry so
+// parquet output carries GeoParquet metadata. If neither is present,
+// returns `*`.
 func (opts DuckDbCopyOptions) buildSelectProjection() string {
 	if len(opts.Columns) == 0 {
 		return "*"
 	}
-	hasBinary := false
+	hasConversion := false
 	for _, c := range opts.Columns {
-		if c.IsBinary() {
-			hasBinary = true
+		if c.IsBinary() || c.Type.IsGeometry() {
+			hasConversion = true
 			break
 		}
 	}
-	if !hasBinary {
+	if !hasConversion {
 		return "*"
 	}
 	parts := make([]string, len(opts.Columns))
 	for i, c := range opts.Columns {
 		qName := dbio.TypeDbDuckDb.Quote(c.Name)
-		if c.IsBinary() {
+		switch {
+		case c.Type.IsGeometry():
+			// try() makes malformed hex a null instead of failing the copy
+			expr := g.F("try(st_geomfromwkb(unhex(%s)))", qName)
+			if opts.GeometryCRS != "" {
+				expr = g.F("st_setcrs(%s, '%s')", expr, strings.ReplaceAll(opts.GeometryCRS, "'", "''"))
+			}
+			parts[i] = g.F("%s AS %s", expr, qName)
+		case c.IsBinary():
 			parts[i] = g.F("unhex(%s)::BLOB AS %s", qName, qName)
-		} else {
+		default:
 			parts[i] = qName
 		}
 	}
@@ -1488,6 +1499,16 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	selectExpr := "*"
 	if options.Format == dbio.FileTypeParquet {
 		selectExpr = options.buildSelectProjection()
+		if options.GeometryCRS != "" {
+			for _, c := range options.Columns {
+				if c.Type.IsGeometry() {
+					// st_setcrs resolves a crs string to projjson only when
+					// spatial is loaded explicitly, not through autoload
+					duck.AddExtension("spatial")
+					break
+				}
+			}
+		}
 	}
 
 	if len(partExpressions) > 0 {
@@ -2092,6 +2113,12 @@ func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
 		// CSVs cannot handle binary data, so let's set to varchar.
 		// https://duckdb.org/docs/sql/functions/blob.html
 		if nativeType == "binary" {
+			nativeType = "varchar"
+		}
+
+		// geometry rides the csv as hex WKB varchar; st_geomfromwkb parses it
+		// in the select that reads this csv
+		if nativeType == "geometry" {
 			nativeType = "varchar"
 		}
 

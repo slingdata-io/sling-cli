@@ -66,9 +66,23 @@ for i in $(seq 1 60); do
 done
 
 # Expose container as the POSTGIS Sling connection for this run only.
+# LOCAL_CRS is the local conn with the geometry_crs prop (p.42).
+# GEO_DUCK / GEO_DUCKLAKE are the duck targets for native geometry (p.43).
 export POSTGIS='postgres://postgres:postgres@127.0.0.1:55432/postgis_test?sslmode=disable'
+export LOCAL_CRS='{"type":"file","geometry_crs":"EPSG:4326"}'
 
 echo "=== Running PostGIS pipeline test ==="
 "$SLING_BIN" run -d -p "$SCRIPT_DIR/p.41.postgis_geometry.yaml"
+
+echo "=== Running PostGIS geometry parquet test ==="
+"$SLING_BIN" run -d -p "$SCRIPT_DIR/p.42.postgis_geometry_parquet.yaml"
+
+echo "=== Running PostGIS geometry duckdb/ducklake test ==="
+mkdir -p /tmp/sling_p43
+export GEO_DUCK='duckdb:///tmp/sling_p43/geo.duckdb'
+export GEO_DUCKLAKE='{"type":"ducklake","catalog_conn_string":"/tmp/sling_p43/ducklake/catalog.metadata.sqlite","data_path":"/tmp/sling_p43/ducklake/data/"}'
+rm -f /tmp/sling_p43/geo.duckdb
+rm -rf /tmp/sling_p43/ducklake /tmp/sling_p43/roundtrip.parquet /tmp/sling_p43/parted
+"$SLING_BIN" run -d -p "$SCRIPT_DIR/p.43.postgis_geometry_duck.yaml"
 
 echo "=== PostGIS reproduction test completed ==="

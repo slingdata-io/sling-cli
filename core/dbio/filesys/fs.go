@@ -1448,6 +1448,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			Format:        fileFormat,
 			Compression:   sc.Compression,
 			FileSizeBytes: sc.FileMaxBytes,
+			GeometryCRS:   fs.GetProp("geometry_crs"),
 			Columns:       streamPart.Columns,
 		}
 

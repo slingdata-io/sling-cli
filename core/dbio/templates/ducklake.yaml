@@ -313,6 +313,7 @@ native_type_map:
   blob: binary
   boolean: bool
   char: string
+  geometry: geometry
   date: date
   datetime: datetime
   decimal: decimal
@@ -360,6 +361,7 @@ general_type_map:
   bool: bool
   date: date
   datetime: datetime
+  geometry: geometry
   decimal: "decimal(,)"
   float: double
   integer: integer

@@ -138,6 +138,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
+	// geometry columns of some sources are unusable through their drivers;
+	// make them return hex WKB so duckdb can parse them at export
+	selectFields = sTable.GeometryWKBFields(selectFields)
+
 	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"

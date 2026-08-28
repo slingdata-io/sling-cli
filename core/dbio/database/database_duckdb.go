@@ -79,8 +79,20 @@ func (conn *DuckDbConn) DuckDb() *iop.DuckDb {
 }
 
 // GenerateDDL builds the CREATE TABLE plus post-CREATE indexes and column
-// comments (covers DuckDB and MotherDuck).
+// comments (covers DuckDB, DuckLake and MotherDuck).
 func (conn *DuckDbConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+	// a file-export staging conn (geometry_as_varchar) stores geometry as hex
+	// WKB varchar; the copy projection parses it at export
+	if cast.ToBool(conn.GetProp("geometry_as_varchar")) {
+		data.Columns = append(iop.Columns{}, data.Columns...)
+		for i := range data.Columns {
+			if data.Columns[i].Type.IsGeometry() {
+				data.Columns[i].Type = iop.TextType
+				data.Columns[i].DbType = "varchar"
+			}
+		}
+	}
+
 	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return ddl, g.Error(err)
@@ -205,6 +217,59 @@ func (conn *DuckDbConn) InsertStream(tableFName string, ds *iop.Datastream) (cou
 	return conn.BulkImportFlow(tableFName, df)
 }
 
+// generateImportSelectExprs returns the select list for an import insert.
+// A geometry column that the table stores as native geometry is parsed from
+// its hex WKB csv encoding. It returns "*" when no column needs parsing.
+func (conn *DuckDbConn) generateImportSelectExprs(table *Table, columns iop.Columns) (string, error) {
+	hasGeometry := false
+	for _, col := range columns {
+		if col.Type.IsGeometry() {
+			hasGeometry = true
+			break
+		}
+	}
+	if !hasGeometry {
+		return "*", nil
+	}
+
+	// information_schema needs the schema name. an unqualified table
+	// lives in the current schema.
+	if table.Schema == "" {
+		data, err := conn.Self().Query("select current_schema() as schema_name")
+		if err != nil || len(data.Rows) == 0 {
+			return "", g.Error(err, "could not get the current schema for %s", table.FullName())
+		}
+		table.Schema = cast.ToString(data.Rows[0][0])
+	}
+
+	tgtColumns, err := conn.Self().GetColumns(table.FullName())
+	if err != nil {
+		return "", g.Error(err, "could not get columns of %s", table.FullName())
+	}
+
+	nativeGeometry := map[string]bool{} // lower name -> table column is geometry
+	for _, col := range tgtColumns {
+		if col.Type.IsGeometry() {
+			nativeGeometry[strings.ToLower(col.Name)] = true
+		}
+	}
+	if len(nativeGeometry) == 0 {
+		return "*", nil
+	}
+
+	exprs := make([]string, len(columns))
+	for i, col := range columns {
+		qName := dbio.TypeDbDuckDb.Quote(col.Name)
+		if col.Type.IsGeometry() && nativeGeometry[strings.ToLower(col.Name)] {
+			// try() makes malformed hex a null instead of failing the insert
+			exprs[i] = g.F("try(st_geomfromwkb(unhex(%s))) as %s", qName, qName)
+		} else {
+			exprs[i] = qName
+		}
+	}
+	return strings.Join(exprs, ", "), nil
+}
+
 func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 
 	table, err := ParseTableName(tableFName, conn.GetType())
@@ -235,8 +300,13 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 			return `"` + col + `"`
 		})
 
+		selectExpr, err := conn.generateImportSelectExprs(&table, file.Columns)
+		if err != nil {
+			return err
+		}
+
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns), conn.duck.MaxLineSize(file.Columns)),
+			g.F(`insert into %s (%s) select %s from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), selectExpr, file.Node.Path(), conn.generateCsvColumns(file.Columns), conn.duck.MaxLineSize(file.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -303,9 +373,14 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, forma
 			return `"` + col + `"`
 		})
 
+		selectExpr, err := conn.generateImportSelectExprs(&table, streamPart.Columns)
+		if err != nil {
+			return df.Count(), g.Error(err, "could not insert into %s", tableFName)
+		}
+
 		// Generate insert SQL using the fromExpr from streamPart
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from %s;`, table.FDQN(), strings.Join(columnNames, ", "), streamPart.FromExpr),
+			g.F(`insert into %s (%s) select %s from %s;`, table.FDQN(), strings.Join(columnNames, ", "), selectExpr, streamPart.FromExpr),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -356,6 +431,9 @@ func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column
 		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
 		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
+	case srcCol.Type.IsGeometry() && !tgtCol.Type.IsGeometry():
+		// keep the hex WKB transport form for a non-geometry target column
+		selectStr = g.F("hex(st_aswkb(%s))", qName)
 	default:
 		selectStr = qName
 	}

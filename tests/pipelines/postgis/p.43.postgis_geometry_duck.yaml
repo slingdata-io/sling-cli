@@ -1,0 +1,269 @@
+# PostGIS geometry into DuckDB and DuckLake tables as native GEOMETRY
+# (issue #794). The source emits hex WKB; duckdb parses it when the target
+# column is a geometry column. A legacy VARCHAR column keeps the hex text.
+# A DuckDB source also exports to parquet as native geometry. Requires the
+# POSTGIS, GEO_DUCK and GEO_DUCKLAKE connections; see run_docker_test.sh.
+
+steps:
+  # Cleanup any prior state
+  - connection: POSTGIS
+    query: |
+      DROP TABLE IF EXISTS public.postgis_geom_duck_src;
+
+  - connection: GEO_DUCK
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_duck;
+
+  - connection: GEO_DUCK
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_varchar;
+
+  - connection: GEO_DUCKLAKE
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_dl;
+
+  # Source table: point, NULL row and polygon, all SRID 4326. ts drives the
+  # partitioned export (one row per year).
+  - connection: POSTGIS
+    query: |
+      CREATE TABLE public.postgis_geom_duck_src (
+        id BIGINT PRIMARY KEY,
+        ts TIMESTAMP,
+        geom geometry(Geometry, 4326)
+      );
+      INSERT INTO public.postgis_geom_duck_src VALUES
+        (1, '2023-05-01 12:00:00', ST_GeomFromText('POINT(9.09 53.49)', 4326)),
+        (2, '2024-05-01 12:00:00', NULL),
+        (3, '2025-05-01 12:00:00', ST_GeomFromText('POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))', 4326));
+
+  # Load into a DuckDB table
+  - replication:
+      source: POSTGIS
+      target: GEO_DUCK
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_duck_src:
+          object: main.postgis_geom_duck
+          mode: full-refresh
+
+  # Load into a DuckLake table
+  - replication:
+      source: POSTGIS
+      target: GEO_DUCKLAKE
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_duck_src:
+          object: main.postgis_geom_dl
+          mode: full-refresh
+
+  # Legacy table: the geometry column stays VARCHAR and must keep hex WKB
+  - connection: GEO_DUCK
+    query: |
+      CREATE TABLE main.postgis_geom_varchar (
+        id BIGINT,
+        geom VARCHAR
+      );
+
+  - replication:
+      source: POSTGIS
+      target: GEO_DUCK
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_duck_src:
+          object: main.postgis_geom_varchar
+          mode: truncate
+
+  # Export from the DuckDB table back to parquet
+  - replication:
+      source: GEO_DUCK
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        main.postgis_geom_duck:
+          object: file:///tmp/sling_p43/roundtrip.parquet
+          mode: full-refresh
+
+  # Partitioned export. This path stages the data in a temp duckdb table
+  # before the copy, so the hex WKB must survive the staging round.
+  - replication:
+      source: POSTGIS
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_duck_src:
+          object: file:///tmp/sling_p43/parted/{part_year}/parted.parquet
+          mode: full-refresh
+          update_key: ts
+
+  # DuckDB table: column type and values
+  - type: query
+    connection: GEO_DUCK
+    query: |
+      SELECT
+        (SELECT typeof(geom) FROM main.postgis_geom_duck LIMIT 1) AS geom_type,
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(geom)) = '0101000000AE47E17A142E22401F85EB51B8BE4A40') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(geom)) = '01030000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(*) AS total
+      FROM main.postgis_geom_duck
+    into: duck_vals
+
+  - type: log
+    message: "duckdb table: geom_type={store.duck_vals[0].geom_type} point={store.duck_vals[0].point_ok} polygon={store.duck_vals[0].polygon_ok} null={store.duck_vals[0].null_ok} total={store.duck_vals[0].total}"
+
+  - type: check
+    check: store.duck_vals[0].geom_type == "GEOMETRY"
+    message: "expected GEOMETRY column in duckdb, got {store.duck_vals[0].geom_type}"
+
+  - type: check
+    check: int_parse(store.duck_vals[0].point_ok) == 1 && int_parse(store.duck_vals[0].polygon_ok) == 1
+    message: "duckdb geometry values do not match expected WKB"
+
+  - type: check
+    check: int_parse(store.duck_vals[0].null_ok) == 1 && int_parse(store.duck_vals[0].total) == 3
+    message: "duckdb NULL geometry row missing or wrong row count"
+
+  # DuckLake table: column type and values
+  - type: query
+    connection: GEO_DUCKLAKE
+    query: |
+      SELECT
+        (SELECT typeof(geom) FROM main.postgis_geom_dl LIMIT 1) AS geom_type,
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(geom)) = '0101000000AE47E17A142E22401F85EB51B8BE4A40') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(geom)) = '01030000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(*) AS total
+      FROM main.postgis_geom_dl
+    into: dl_vals
+
+  - type: log
+    message: "ducklake table: geom_type={store.dl_vals[0].geom_type} point={store.dl_vals[0].point_ok} polygon={store.dl_vals[0].polygon_ok} null={store.dl_vals[0].null_ok} total={store.dl_vals[0].total}"
+
+  - type: check
+    check: store.dl_vals[0].geom_type == "GEOMETRY"
+    message: "expected GEOMETRY column in ducklake, got {store.dl_vals[0].geom_type}"
+
+  - type: check
+    check: int_parse(store.dl_vals[0].point_ok) == 1 && int_parse(store.dl_vals[0].polygon_ok) == 1
+    message: "ducklake geometry values do not match expected WKB"
+
+  - type: check
+    check: int_parse(store.dl_vals[0].null_ok) == 1 && int_parse(store.dl_vals[0].total) == 3
+    message: "ducklake NULL geometry row missing or wrong row count"
+
+  # Legacy VARCHAR column keeps the hex WKB transport form
+  - type: query
+    connection: GEO_DUCK
+    query: |
+      SELECT
+        count(*) FILTER (WHERE id = 1 AND typeof(geom) = 'VARCHAR'
+          AND geom LIKE '0101000000%') AS hex_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(*) AS total
+      FROM main.postgis_geom_varchar
+    into: legacy_vals
+
+  - type: log
+    message: "legacy varchar: hex={store.legacy_vals[0].hex_ok} null={store.legacy_vals[0].null_ok} total={store.legacy_vals[0].total}"
+
+  - type: check
+    check: int_parse(store.legacy_vals[0].hex_ok) == 1
+    message: "legacy VARCHAR column must keep hex WKB text"
+
+  - type: check
+    check: int_parse(store.legacy_vals[0].null_ok) == 1 && int_parse(store.legacy_vals[0].total) == 3
+    message: "legacy table NULL row missing or wrong row count"
+
+  # Parquet roundtrip from the DuckDB source. split_part strips the CRS
+  # annotation, so 'GEOMETRY('OGC:CRS84')' reports as 'GEOMETRY'.
+  - type: query
+    connection: GEO_DUCK
+    query: |
+      SELECT
+        (SELECT split_part(typeof(geom), '(', 1) FROM read_parquet('/tmp/sling_p43/roundtrip.parquet') LIMIT 1) AS geom_type,
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(geom)) = '0101000000AE47E17A142E22401F85EB51B8BE4A40') AS point_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p43/roundtrip.parquet')
+    into: parquet_vals
+
+  - type: log
+    message: "parquet roundtrip: geom_type={store.parquet_vals[0].geom_type} point={store.parquet_vals[0].point_ok} null={store.parquet_vals[0].null_ok} total={store.parquet_vals[0].total}"
+
+  - type: check
+    check: store.parquet_vals[0].geom_type == "GEOMETRY"
+    message: "expected GEOMETRY column in parquet, got {store.parquet_vals[0].geom_type}"
+
+  - type: check
+    check: int_parse(store.parquet_vals[0].point_ok) == 1 && int_parse(store.parquet_vals[0].null_ok) == 1 && int_parse(store.parquet_vals[0].total) == 3
+    message: "parquet geometry values or row count wrong"
+
+  # Partitioned parquet: native geometry survived the staging table
+  - type: query
+    connection: GEO_DUCK
+    query: |
+      SELECT
+        (SELECT split_part(typeof(geom), '(', 1) FROM read_parquet('/tmp/sling_p43/parted/**/*.parquet') LIMIT 1) AS geom_type,
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(geom)) = '0101000000AE47E17A142E22401F85EB51B8BE4A40') AS point_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(DISTINCT strftime(ts, '%Y')) AS years,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p43/parted/**/*.parquet')
+    into: parted_vals
+
+  - type: log
+    message: "partitioned parquet: geom_type={store.parted_vals[0].geom_type} point={store.parted_vals[0].point_ok} null={store.parted_vals[0].null_ok} years={store.parted_vals[0].years} total={store.parted_vals[0].total}"
+
+  - type: check
+    check: store.parted_vals[0].geom_type == "GEOMETRY"
+    message: "expected GEOMETRY column in partitioned parquet, got {store.parted_vals[0].geom_type}"
+
+  - type: check
+    check: int_parse(store.parted_vals[0].point_ok) == 1 && int_parse(store.parted_vals[0].null_ok) == 1 && int_parse(store.parted_vals[0].years) == 3 && int_parse(store.parted_vals[0].total) == 3
+    message: "partitioned parquet geometry values, partitions or row count wrong"
+
+  - type: log
+    message: "PostGIS geometry duckdb/ducklake test PASSED"
+
+  # Cleanup
+  - connection: POSTGIS
+    query: |
+      DROP TABLE IF EXISTS public.postgis_geom_duck_src;
+
+  - connection: GEO_DUCK
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_duck;
+
+  - connection: GEO_DUCK
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_varchar;
+
+  - connection: GEO_DUCKLAKE
+    query: |
+      DROP TABLE IF EXISTS main.postgis_geom_dl;

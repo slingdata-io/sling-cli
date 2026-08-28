@@ -1,0 +1,143 @@
+# PostGIS geometry to Parquet as native geometry with geo metadata (issue #794).
+# The source emits hex WKB; duckdb parses it at parquet export, so the file
+# carries a GEOMETRY column plus GeoParquet metadata. The target conn prop
+# geometry_crs stamps the CRS that WKB does not carry. Requires the POSTGIS
+# and LOCAL_CRS connections; see run_docker_test.sh.
+
+steps:
+  # Cleanup any prior state
+  - connection: POSTGIS
+    query: |
+      DROP TABLE IF EXISTS public.postgis_geom_src;
+
+  - connection: POSTGIS
+    query: |
+      CREATE EXTENSION IF NOT EXISTS postgis;
+
+  # Source table: point, NULL row and polygon, all SRID 4326
+  - connection: POSTGIS
+    query: |
+      CREATE TABLE public.postgis_geom_src (
+        id BIGINT PRIMARY KEY,
+        geom geometry(Geometry, 4326)
+      );
+      INSERT INTO public.postgis_geom_src VALUES
+        (1, ST_GeomFromText('POINT(9.09 53.49)', 4326)),
+        (2, NULL),
+        (3, ST_GeomFromText('POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))', 4326));
+
+  - replication:
+      source: POSTGIS
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_src:
+          object: file:///tmp/sling_p42/geom.parquet
+          mode: full-refresh
+
+  # LOCAL_CRS is the local conn with the geometry_crs prop
+  - replication:
+      source: POSTGIS
+      target: LOCAL_CRS
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        public.postgis_geom_src:
+          object: file:///tmp/sling_p42/geom_crs.parquet
+          mode: full-refresh
+
+  # column must read as GEOMETRY in both files
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT typeof(geom) FROM read_parquet('/tmp/sling_p42/geom.parquet') LIMIT 1) AS geom_type,
+        (SELECT typeof(geom) FROM read_parquet('/tmp/sling_p42/geom_crs.parquet') LIMIT 1) AS geom_crs_type
+    into: col_types
+
+  - type: log
+    message: "Parquet geom column type={substring(store.col_types[0].geom_type, 0, 8)}, with geometry_crs type={substring(store.col_types[0].geom_crs_type, 0, 8)}"
+
+  - type: check
+    check: substring(store.col_types[0].geom_type, 0, 8) == "GEOMETRY" && substring(store.col_types[0].geom_crs_type, 0, 8) == "GEOMETRY"
+    message: "expected GEOMETRY, got {store.col_types[0].geom_type} / {store.col_types[0].geom_crs_type}"
+
+  # values must be plain WKB (duckdb drops the EWKB srid)
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(geom)) = '0101000000AE47E17A142E22401F85EB51B8BE4A40') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(geom)) = '01030000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND geom IS NULL) AS null_ok,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p42/geom.parquet')
+    into: wkb_vals
+
+  - type: log
+    message: "wkb check: point={store.wkb_vals[0].point_ok} polygon={store.wkb_vals[0].polygon_ok} null={store.wkb_vals[0].null_ok} total={store.wkb_vals[0].total}"
+
+  - type: check
+    check: int_parse(store.wkb_vals[0].point_ok) == 1 && int_parse(store.wkb_vals[0].polygon_ok) == 1
+    message: "WKB values do not match expected plain WKB"
+
+  - type: check
+    check: int_parse(store.wkb_vals[0].null_ok) == 1 && int_parse(store.wkb_vals[0].total) == 3
+    message: "NULL geometry row missing or wrong row count"
+
+  - type: log
+    message: "WKB matches expected plain WKB (no SRID flag)"
+
+  # each file carries one geo metadata key
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p42/geom.parquet')
+          WHERE key = 'geo') AS geom_keys,
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p42/geom_crs.parquet')
+          WHERE key = 'geo') AS geom_crs_keys
+    into: geo_keys
+
+  - type: check
+    check: int_parse(store.geo_keys[0].geom_keys) == 1 && int_parse(store.geo_keys[0].geom_crs_keys) == 1
+    message: "expected one geo metadata key per file, got {store.geo_keys[0].geom_keys} / {store.geo_keys[0].geom_crs_keys}"
+
+  # without geometry_crs, duckdb omits crs (GeoParquet default OGC:CRS84)
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p42/geom.parquet')
+          WHERE key = 'geo' AND strpos(CAST(value AS VARCHAR), 'crs') > 0) AS geom_crs_cnt,
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p42/geom_crs.parquet')
+          WHERE key = 'geo' AND strpos(CAST(value AS VARCHAR), '4326') > 0) AS geom_crs_stamped
+    into: crs_vals
+
+  - type: log
+    message: "crs check: omitted_cnt={store.crs_vals[0].geom_crs_cnt} stamped_cnt={store.crs_vals[0].geom_crs_stamped}"
+
+  - type: check
+    check: int_parse(store.crs_vals[0].geom_crs_cnt) == 0
+    message: "crs must be omitted without geometry_crs"
+
+  - type: check
+    check: int_parse(store.crs_vals[0].geom_crs_stamped) == 1
+    message: "geometry_crs must stamp 4326 in geo metadata"
+
+  - type: log
+    message: "PostGIS geometry parquet test PASSED"
+
+  # Cleanup
+  - connection: POSTGIS
+    query: |
+      DROP TABLE IF EXISTS public.postgis_geom_src;

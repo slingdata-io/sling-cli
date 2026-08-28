@@ -2773,6 +2773,71 @@
     - 'No files provided in nodes'
     - 'could not copy files locally to use duckdb compute'
 
+# Self-contained: run_docker_test.sh provides the POSTGIS connection.
+- id: 589
+  name: 'PostGIS geometry exports to Parquet as native geometry with geo metadata (issue 794)'
+  run: |
+    cd tests/pipelines/postgis
+    bash run_docker_test.sh
+  group: postgis
+  output_contains:
+    - 'Parquet geom column type=GEOMETRY, with geometry_crs type=GEOMETRY'
+    - 'WKB matches expected plain WKB (no SRID flag)'
+    - 'wkb check: point=1 polygon=1 null=1 total=3'
+    - 'crs check: omitted_cnt=0 stamped_cnt=1'
+    - 'PostGIS geometry parquet test PASSED'
+    - 'execution succeeded'
+
+# Self-contained: run_docker_test.sh provides the MYSQL/MARIADB connections.
+- id: 590
+  name: 'MySQL & MariaDB geometry exports to Parquet as native geometry with geo metadata (issue 794)'
+  run: |
+    cd tests/pipelines/geom_wkb
+    bash run_docker_test.sh
+  group: geometry
+  output_contains:
+    - 'MySQL geom column type=GEOMETRY, MariaDB geom column type=GEOMETRY'
+    - 'MySQL & MariaDB WKB match expected plain WKB (lon-lat, no SRID flag)'
+    - 'geo keys: mysql=1 mariadb=1'
+    - 'crs check: omitted_cnt=0 stamped_cnt=1'
+    - 'MySQL WKB parquet test PASSED'
+    - 'MariaDB WKB parquet test PASSED'
+    - 'execution succeeded'
+
+# Requires a BIGQUERY connection. Locally export BIGQUERY explicitly.
+- id: 591
+  name: 'BigQuery geography exports to Parquet as native geometry with CRS84 geo metadata (issue 794)'
+  run: |
+    if [ -z "${BIGQUERY:-}" ]; then
+      echo 'ERROR: set BIGQUERY (BIGQUERY connection JSON or URL)'
+      exit 1
+    fi
+    sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
+  group: geometry
+  output_contains:
+    - 'BQ geography column type=GEOMETRY'
+    - 'BQ WKB matches expected plain WKB (lon-lat)'
+    - 'BQ geo metadata defaults to OGC:CRS84'
+    - 'BQ WKB parquet test PASSED'
+    - 'execution succeeded'
+
+# Self-contained: run_docker_test.sh provides the POSTGIS, GEO_DUCK and
+# GEO_DUCKLAKE connections.
+- id: 592
+  name: 'PostGIS geometry loads into DuckDB/DuckLake as native GEOMETRY columns (issue 794)'
+  run: |
+    cd tests/pipelines/postgis
+    bash run_docker_test.sh
+  group: postgis
+  output_contains:
+    - 'duckdb table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
+    - 'ducklake table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
+    - 'legacy varchar: hex=1 null=1 total=3'
+    - 'parquet roundtrip: geom_type=GEOMETRY point=1 null=1 total=3'
+    - 'partitioned parquet: geom_type=GEOMETRY point=1 null=1 years=3 total=3'
+    - 'PostGIS geometry duckdb/ducklake test PASSED'
+    - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
