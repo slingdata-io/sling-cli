@@ -16,7 +16,7 @@ import (
 var cliValidate = &g.CliSC{
 	Name:                  "validate",
 	Description:           "Validate Sling files",
-	AdditionalHelpPrepend: "\nDetect the file kind and check the structure. Compile is the default. Compile needs connections and replaces ${VAR}. Use --parse-only for a syntax check.",
+	AdditionalHelpPrepend: "\nDetect the file kind and check the structure. Compile is the default, which confirms the file is ready to run. Compile needs connections and replaces ${VAR}. Use --parse-only for a syntax check. With no paths, validate the project from the current directory.",
 	Flags: []g.Flag{
 		{Name: "quiet", ShortName: "q", Type: "bool", Description: "Exit code only. No output."},
 		{Name: "parse-only", Type: "bool", Description: "Skip compilation step, parse structure only. Do not replace ${VAR}."},
