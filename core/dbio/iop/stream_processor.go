@@ -49,38 +49,38 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	EmptyAsNull     bool           `json:"empty_as_null"`
-	Header          bool           `json:"header"`
-	Compression     CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf          string         `json:"null_if"`
-	NullAs          string         `json:"null_as"`
-	DatetimeFormat  string         `json:"datetime_format"`
-	SkipBlankLines  bool           `json:"skip_blank_lines"`
-	SkipLines       int            `json:"skip_lines"`
-	Format          dbio.FileType  `json:"format"`
-	Delimiter       string         `json:"delimiter"`
-	Escape          string         `json:"escape"`
-	Quote           string         `json:"quote"`
-	FileMaxRows     int64          `json:"file_max_rows"`
-	FileMaxBytes    int64          `json:"file_max_bytes"`
-	BatchLimit      int64          `json:"batch_limit"`
-	BatchMaxDuration time.Duration `json:"batch_max_duration"`
-	MaxDecimals     int            `json:"max_decimals"`
-	Flatten         int            `json:"flatten"`
-	FieldsPerRec    int            `json:"fields_per_rec"`
-	Jmespath        string         `json:"jmespath"`
-	Jq              string         `json:"jq"`
-	Select          []string       `json:"select"` // applied to JSON-family streams
-	Sheet           string         `json:"sheet"`
-	ColumnCasing    ColumnCasing   `json:"column_casing"`
-	ColumnTyping    ColumnTyping   `json:"column_typing"`
-	TargetType      dbio.Type      `json:"target_type"`
-	DeleteFile      bool           `json:"delete"` // whether to delete before writing
-	BoolAsInt       bool           `json:"-"`
-	EscapeBackslash bool           `json:"-"`       // escape backslashes for MySQL LOAD DATA
-	BinaryAsHex     bool           `json:"-"`       // hex-encode binary in CSV
-	Columns         Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	Transforms      Transform
+	EmptyAsNull      bool           `json:"empty_as_null"`
+	Header           bool           `json:"header"`
+	Compression      CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf           string         `json:"null_if"`
+	NullAs           string         `json:"null_as"`
+	DatetimeFormat   string         `json:"datetime_format"`
+	SkipBlankLines   bool           `json:"skip_blank_lines"`
+	SkipLines        int            `json:"skip_lines"`
+	Format           dbio.FileType  `json:"format"`
+	Delimiter        string         `json:"delimiter"`
+	Escape           string         `json:"escape"`
+	Quote            string         `json:"quote"`
+	FileMaxRows      int64          `json:"file_max_rows"`
+	FileMaxBytes     int64          `json:"file_max_bytes"`
+	BatchLimit       int64          `json:"batch_limit"`
+	BatchMaxDuration time.Duration  `json:"batch_max_duration"`
+	MaxDecimals      int            `json:"max_decimals"`
+	Flatten          int            `json:"flatten"`
+	FieldsPerRec     int            `json:"fields_per_rec"`
+	Jmespath         string         `json:"jmespath"`
+	Jq               string         `json:"jq"`
+	Select           []string       `json:"select"` // applied to JSON-family streams
+	Sheet            string         `json:"sheet"`
+	ColumnCasing     ColumnCasing   `json:"column_casing"`
+	ColumnTyping     ColumnTyping   `json:"column_typing"`
+	TargetType       dbio.Type      `json:"target_type"`
+	DeleteFile       bool           `json:"delete"` // whether to delete before writing
+	BoolAsInt        bool           `json:"-"`
+	EscapeBackslash  bool           `json:"-"`       // escape backslashes for MySQL LOAD DATA
+	BinaryAsHex      bool           `json:"-"`       // hex-encode binary in CSV
+	Columns          Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
+	Transforms       Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -1619,6 +1619,9 @@ func (sp *StreamProcessor) CastRow(row []any, columns Columns) []any {
 	sp.rowBlankValCnt = 0
 	sp.rowChecksum = make([]uint64, len(row))
 	for i, val := range row {
+		if i >= len(columns) {
+			break // row is wider than the schema, caller must widen it
+		}
 		col := &columns[i]
 		row[i] = sp.CastVal(i, val, col)
 		// g.Warn("%d | col %s | nVal => %#v", sp.N, col.Name, row[i])
@@ -1637,6 +1640,10 @@ func (sp *StreamProcessor) CastRow(row []any, columns Columns) []any {
 				}
 			}
 		}
+	}
+
+	if len(row) > len(columns) {
+		row = row[:len(columns)]
 	}
 
 	for len(row) < len(columns) {

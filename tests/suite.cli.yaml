@@ -2859,6 +2859,32 @@
   run: 'sling run -r tests/replications/r.100.duckdb_sql_stream_url_rename.yaml'
   rows: 5
 
+# A data row is wider than the header row. Excel must widen the schema (col_N)
+# like CSV does, not index columns out of range in CastRow (issue 797).
+- id: 595
+  name: 'Excel data row wider than the header row (issue 797)'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.wide-row.xlsx' --stdout
+  rows: 4
+  output_contains:
+    - 'id,name,value,a,b,c,col_7,col_8,col_9,col_10,col_11'
+    - '2,Bob,20,1,2,3,7,8,9,10,11'
+    - 'wrote 4 rows to stdout'
+
+# The second file reorders the header and adds a column. The remap must place
+# each value in its own column and must not index the schema out of range.
+- id: 596
+  name: 'Multi-file CSV with a reordered header and a new column'
+  run: |
+    sling run --src-stream 'file://tests/files/csv_reorder/' --stdout
+  rows: 4
+  output_contains:
+    - 'id,name,value,extra'
+    - '2,Bob,20,'
+    - '3,Carl,30,x'
+    - '4,Dana,40,y'
+    - 'wrote 4 rows to stdout'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

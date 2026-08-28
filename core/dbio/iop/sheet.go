@@ -3,6 +3,7 @@ package iop
 import (
 	"strings"
 
+	"github.com/flarco/g"
 	"github.com/spf13/cast"
 )
 
@@ -60,6 +61,8 @@ func (s *spreadsheet) makeDatasetAuto(rows [][]string) (data Dataset) {
 			}
 		}
 
+		s.widenColumns(&data, len(row0))
+
 		row := make([]interface{}, len(row0))
 		for i, val := range row0 {
 			row[i] = val
@@ -91,6 +94,8 @@ func (s *spreadsheet) makeDatasetStr(rangeRows [][]string) (data Dataset) {
 			data.SetFields(CleanHeaderRow(row0))
 			continue
 		}
+
+		s.widenColumns(&data, len(row0))
 
 		row := make([]interface{}, len(row0))
 		for i, val := range row0 {
@@ -129,6 +134,7 @@ func (s *spreadsheet) makeDatasetInterf(rangeRows [][]interface{}) (data Dataset
 			continue
 		}
 
+		s.widenColumns(&data, len(row))
 		data.Append(row)
 
 		if i == SampleSize {
@@ -146,4 +152,16 @@ func (s *spreadsheet) makeDatasetInterf(rangeRows [][]interface{}) (data Dataset
 		}
 	}
 	return
+}
+
+// widenColumns adds placeholder columns when a data row is wider than the
+// header row, so casting the row does not index the schema out of range.
+func (s *spreadsheet) widenColumns(data *Dataset, rowLen int) {
+	for len(data.Columns) < rowLen {
+		data.Columns = append(data.Columns, Column{
+			Name:     g.F("col_%d", len(data.Columns)+1),
+			Type:     StringType,
+			Position: len(data.Columns) + 1,
+		})
+	}
 }
