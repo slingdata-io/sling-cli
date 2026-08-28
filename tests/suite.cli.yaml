@@ -2804,15 +2804,10 @@
     - 'MariaDB WKB parquet test PASSED'
     - 'execution succeeded'
 
-# Requires a BIGQUERY connection. Locally export BIGQUERY explicitly.
+# Requires a BIGQUERY connection, resolved by name from env.yaml.
 - id: 591
   name: 'BigQuery geography exports to Parquet as native geometry with CRS84 geo metadata (issue 794)'
-  run: |
-    if [ -z "${BIGQUERY:-}" ]; then
-      echo 'ERROR: set BIGQUERY (BIGQUERY connection JSON or URL)'
-      exit 1
-    fi
-    sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
+  run: sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
   group: geometry
   output_contains:
     - 'BQ geography column type=GEOMETRY'
