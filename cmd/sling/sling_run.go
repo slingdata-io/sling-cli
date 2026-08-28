@@ -779,19 +779,10 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 func runPipeline(pipelineCfgPath string, overlay map[string]string) (err error) {
 	g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 
-	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath)
+	// Job / --env values overlay the file env.
+	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath, overlay)
 	if err != nil {
 		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)
-	}
-
-	// Job / --env values overlay the file env. CLI already won over the job spec in resolveJob.
-	if len(overlay) > 0 {
-		if pipeline.Env == nil {
-			pipeline.Env = map[string]any{}
-		}
-		for k, v := range overlay {
-			pipeline.Env[k] = v
-		}
 	}
 
 	// load SLING_TIMEOUT if specified in pipeline env
