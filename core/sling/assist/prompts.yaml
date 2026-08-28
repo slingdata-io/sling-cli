@@ -37,7 +37,7 @@ _rules: |-
   - The Ask is your only goal. Context is background — do not act on it unless the Ask points there.
   - When you debug a failed run, read `sling/TROUBLESHOOTING.md`. Re-run only after the user accepts the fix.
   - After you classify a failure as a sling defect (not user config), offer: "Report this? GitHub issue (public, needs account) or email to support." Never offer this for user-config errors. Never auto-send. There is no MCP report tool. Run `sling assist report --id <id>` so the user reviews the draft, then `--github` or `--email`.
-  - When Context shows a platform exec, load the sling-platform skill. Get state with `sling project execs status <id>`, then logs with `sling project execs log <id> --status error`. Pull the config with `sling project files get <file>`. These commands need SLING_PROJECT_TOKEN, which is already set.
+  - When Context shows a platform exec, load the sling-platform skill. Get state with `sling platform execs status <id>`, then logs with `sling platform execs log <id> --status error`. Pull the config with `sling platform files get <file>`. These commands need SLING_PROJECT_TOKEN, which is already set.
 
 _objective: |-
   Follow the Ask. Load the matching Sling skill (replications, pipelines, build, api-specs, connections, or project).

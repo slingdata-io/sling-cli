@@ -159,7 +159,7 @@ func contains(items []string, want string) bool {
 func TestSetProjectIDKeepsJobsComment(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, project.ManifestFileName)
-	body := "name: demo\n# project_id: set by `sling project link`\n\n# jobs:\n#   daily:\n#     file: pipelines/daily.yaml\n#     schedules: [\"0 6 * * *\"]\n"
+	body := "name: demo\n# project_id: set when linked\n\n# jobs:\n#   daily:\n#     file: pipelines/daily.yaml\n#     schedules: [\"0 6 * * *\"]\n"
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -95,7 +95,7 @@ Load `sling-replications`, `sling-build`, and `sling-pipelines` for YAML details
 
 * Run a job locally on demand: `sling run -j <key>` (or `sling run <key>`). No token is necessary.
 * A local run is a rehearsal of the deployment. It applies the same overrides the platform will apply.
-* `schedules:` fire on the platform after `sling project deploy`. A local run is always manual.
+* `schedules:` fire on the platform once the folder is linked. A local run is always manual.
 * Pipelines are the local driver for multi-step work. A job points at one replication or one pipeline.
 
 ```yaml

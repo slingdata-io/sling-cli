@@ -69,11 +69,11 @@ func runInit(opts project.Options, testConns bool) error {
 	}
 	fmt.Println()
 	fmt.Println("  Next: Add .sql models to schema folders and run 'sling build'")
-	fmt.Println("  Run a job locally with 'sling run -j <key>'. Schedules fire on the platform after 'sling project deploy'.")
+	fmt.Println("  Run a job locally with 'sling run -j <key>'. Schedules fire on the platform once this folder is linked.")
 	fmt.Println()
 
 	if os.Getenv("SLING_PROJECT_TOKEN") != "" {
-		fmt.Println("To preview the platform jobs for this folder, run `sling project deploy --check`.")
+		fmt.Println("To see the platform jobs for this folder, run `sling platform jobs list`.")
 	}
 	return nil
 }

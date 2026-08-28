@@ -5,17 +5,17 @@
 1. [Introduction and Overview](#1-introduction-and-overview)
 2. [Authentication](#2-authentication)
 3. [`sling init`](#3-sling-init)
-4. [`sling project status`](#4-sling-project-status)
-5. [`sling project sync`](#5-sling-project-sync)
-6. [`sling project jobs list`](#6-sling-project-jobs-list)
-7. [`sling project jobs status`](#7-sling-project-jobs-status)
-8. [`sling project jobs trigger`](#8-sling-project-jobs-trigger)
-9. [`sling project jobs get`](#9-sling-project-jobs-get)
-10. [`sling project jobs save`](#10-sling-project-jobs-save)
-11. [`sling project jobs delete`](#11-sling-project-jobs-delete)
-12. [`sling project execs`](#12-sling-project-execs)
-13. [`sling project files`](#13-sling-project-files)
-14. [`sling project connections`](#14-sling-project-connections)
+4. [`sling platform status`](#4-sling-platform-status)
+5. [`sling platform sync`](#5-sling-platform-sync)
+6. [`sling platform jobs list`](#6-sling-platform-jobs-list)
+7. [`sling platform jobs status`](#7-sling-platform-jobs-status)
+8. [`sling platform jobs trigger`](#8-sling-platform-jobs-trigger)
+9. [`sling platform jobs get`](#9-sling-platform-jobs-get)
+10. [`sling platform jobs save`](#10-sling-platform-jobs-save)
+11. [`sling platform jobs delete`](#11-sling-platform-jobs-delete)
+12. [`sling platform execs`](#12-sling-platform-execs)
+13. [`sling platform files`](#13-sling-platform-files)
+14. [`sling platform connections`](#14-sling-platform-connections)
 15. [Job Payload Reference](#15-job-payload-reference)
 16. [Common Workflows](#16-common-workflows)
 17. [Troubleshooting](#17-troubleshooting)
@@ -26,9 +26,9 @@
 
 ### What is the Sling Platform?
 
-The Sling Platform (hosted at `api.slingdata.io`, UI at `platform.slingdata.io`) is the commercial control plane for Sling. It stores projects, project files, scheduled jobs, execution history, monitors, and agents. The `sling project ...` subcommands in the CLI let you interact with a platform project from the terminal and from scripts — without touching the UI.
+The Sling Platform (hosted at `api.slingdata.io`, UI at `platform.slingdata.io`) is the commercial control plane for Sling. It stores projects, project files, scheduled jobs, execution history, monitors, and agents. The `sling platform ...` subcommands in the CLI let you interact with a platform project from the terminal and from scripts — without touching the UI.
 
-### When to use the `sling project` commands
+### When to use the `sling platform` commands
 
 - You have a Sling Platform project and want to push local YAML file changes up (`sync`).
 - You want to script job lifecycle management (create, read, update, trigger) from CI or local automation.
@@ -39,19 +39,19 @@ The Sling Platform (hosted at `api.slingdata.io`, UI at `platform.slingdata.io`)
 
 - **Project**: A workspace on the platform containing project files (YAML replications/pipelines/monitors/queries) and jobs.
 - **Project token**: A scoped API token (36-character UUID) that authenticates requests for one project. Created in `Settings > API Tokens` on the platform UI.
-- **Project file**: A YAML/SQL file stored in the project (e.g. `replications/hackernews.yaml`). Synced from local disk via `sling project sync`.
+- **Project file**: A YAML/SQL file stored in the project (e.g. `replications/hackernews.yaml`). Synced from local disk via `sling platform sync`.
 - **Job**: A scheduled or triggerable definition pointing at a project file, with its own `schedules`, `streams`, `config`, `notification_settings`, etc. Job IDs have the prefix `job_`.
 - **Execution**: One run of a job. Execution IDs have the prefix `exec_`.
 
 ### Relationship to the rest of the CLI
 
-`sling project` commands are **only** for interacting with the hosted platform. They have nothing to do with running data movement locally — for that use `sling run ...`. The platform commands are thin REST clients over `https://api.slingdata.io` (or a self-hosted URL if `SLING_PLATFORM_HOST` is set).
+`sling platform` commands are **only** for interacting with the hosted platform. They have nothing to do with running data movement locally — for that use `sling run ...`. The platform commands are thin REST clients over `https://api.slingdata.io` (or a self-hosted URL if `SLING_PLATFORM_HOST` is set).
 
 ---
 
 ## 2. Authentication
 
-All `sling project ...` commands require a project token via environment variable:
+All `sling platform ...` commands require a project token via environment variable:
 
 ```bash
 export SLING_PROJECT_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -89,26 +89,26 @@ The `id` field is populated when `SLING_PROJECT_TOKEN` is validated — you do n
 
 ---
 
-## 4. `sling project status`
+## 4. `sling platform status`
 
 Print a summary of the linked platform project: project ID, name, organization, owner, plus a key/value table of status details (counts of files, jobs, executions, etc.).
 
 ```bash
-sling project status
+sling platform status
 ```
 
 Uses `GET /project/get?type=status_details`. Token required.
 
 ---
 
-## 5. `sling project sync`
+## 5. `sling platform sync`
 
 Diff local project files against the platform's stored copies and push any that are new or locally newer.
 
 ```bash
-sling project sync           # prompts before pushing
-sling project sync --force   # skip the confirmation prompt
-sling project sync -f        # short form of --force
+sling platform sync           # prompts before pushing
+sling platform sync --force   # skip the confirmation prompt
+sling platform sync -f        # short form of --force
 ```
 
 Flags:
@@ -122,16 +122,16 @@ Behavior:
 
 ---
 
-## 6. `sling project jobs list`
+## 6. `sling platform jobs list`
 
 Print all jobs in the project as a table (default) or JSON.
 
 ```bash
-sling project jobs list                                   # all jobs, table
-sling project jobs list --type replication               # only replication jobs
-sling project jobs list --file-name replications/x.yaml  # filter by file name
-sling project jobs list --name "Nightly"                 # filter by job name
-sling project jobs list -o json | jq '.[].id'            # JSON for scripting
+sling platform jobs list                                   # all jobs, table
+sling platform jobs list --type replication               # only replication jobs
+sling platform jobs list --file-name replications/x.yaml  # filter by file name
+sling platform jobs list --name "Nightly"                 # filter by job name
+sling platform jobs list -o json | jq '.[].id'            # JSON for scripting
 ```
 
 Flags:
@@ -144,15 +144,15 @@ Columns (table mode): `ID`, `Name`, `File Name`, `Type`, `Status`, `Active`, `Ex
 
 ---
 
-## 7. `sling project jobs status`
+## 7. `sling platform jobs status`
 
 Per-job overview matching the platform home page: one row per job with the latest execution's status. Jobs with no runs in the last 60 days still appear with `-` placeholders.
 
 ```bash
-sling project jobs status
-sling project jobs status --name hacker           # substring match on job name
-sling project jobs status --id job_0vnx           # substring match on job id
-sling project jobs status -o json
+sling platform jobs status
+sling platform jobs status --name hacker           # substring match on job name
+sling platform jobs status --id job_0vnx           # substring match on job id
+sling platform jobs status -o json
 ```
 
 Flags:
@@ -168,17 +168,17 @@ Backed by `GET /project/dashboard?name=home_dashboard_job_history`; merged with 
 
 ---
 
-## 8. `sling project jobs trigger`
+## 8. `sling platform jobs trigger`
 
 Kick off a job run. Optionally override which streams run and the mode.
 
 ```bash
-sling project jobs trigger job_0vnx9sjkjzmd95nh
-sling project jobs trigger job_0vnx9sjkjzmd95nh --wait
-sling project jobs trigger job_0vnx9sjkjzmd95nh -w
-sling project jobs trigger job_0vnx9sjkjzmd95nh --streams users,orders
-sling project jobs trigger job_0vnx9sjkjzmd95nh --full-refresh
-sling project jobs trigger job_0vnx9sjkjzmd95nh --streams u --full-refresh --wait
+sling platform jobs trigger job_0vnx9sjkjzmd95nh
+sling platform jobs trigger job_0vnx9sjkjzmd95nh --wait
+sling platform jobs trigger job_0vnx9sjkjzmd95nh -w
+sling platform jobs trigger job_0vnx9sjkjzmd95nh --streams users,orders
+sling platform jobs trigger job_0vnx9sjkjzmd95nh --full-refresh
+sling platform jobs trigger job_0vnx9sjkjzmd95nh --streams u --full-refresh --wait
 ```
 
 Flags:
@@ -190,41 +190,41 @@ The positional argument must begin with `job_` or the CLI rejects it as invalid.
 
 ---
 
-## 9. `sling project jobs get`
+## 9. `sling platform jobs get`
 
 Fetch a single job's full definition as JSON to stdout.
 
 ```bash
-sling project jobs get job_0vnx9sjkjzmd95nh
-sling project jobs get job_0vnx9sjkjzmd95nh > /tmp/job.json
-sling project jobs get job_0vnx9sjkjzmd95nh | jq '.config'
+sling platform jobs get job_0vnx9sjkjzmd95nh
+sling platform jobs get job_0vnx9sjkjzmd95nh > /tmp/job.json
+sling platform jobs get job_0vnx9sjkjzmd95nh | jq '.config'
 ```
 
-Output is pretty-printed JSON of the `Job` model. The shape is a round-trip — you can edit the JSON and pass it directly to `sling project jobs save --file`.
+Output is pretty-printed JSON of the `Job` model. The shape is a round-trip — you can edit the JSON and pass it directly to `sling platform jobs save --file`.
 
 Uses `GET /project/job/get?job_id=<id>`. The positional argument must begin with `job_`.
 
 ---
 
-## 10. `sling project jobs save`
+## 10. `sling platform jobs save`
 
 Create a job (if `id` is empty/missing) or update an existing one (if `id` is present). A single command handles both.
 
 ```bash
 # Create: omit id
-sling project jobs save --payload '{"name":"nightly","type":"replication","file_name":"replications/nightly.yaml","active":true,"schedules":["0 2 * * *"],"timezone":"UTC","config":{}}'
+sling platform jobs save --payload '{"name":"nightly","type":"replication","file_name":"replications/nightly.yaml","active":true,"schedules":["0 2 * * *"],"timezone":"UTC","config":{}}'
 
 # Update from edited file
-sling project jobs get job_abc123 > /tmp/job.json
+sling platform jobs get job_abc123 > /tmp/job.json
 # ... edit /tmp/job.json ...
-sling project jobs save --file /tmp/job.json
+sling platform jobs save --file /tmp/job.json
 
 # Short flags
-sling project jobs save -p '{"name":"test","type":"replication","file_name":"r.yaml","config":{}}'
-sling project jobs save -f /tmp/job.json
+sling platform jobs save -p '{"name":"test","type":"replication","file_name":"r.yaml","config":{}}'
+sling platform jobs save -f /tmp/job.json
 
 # Pipe from get (stdin via `-`)
-sling project jobs get job_abc123 | sling project jobs save --file -
+sling platform jobs get job_abc123 | sling platform jobs save --file -
 ```
 
 Flags (exactly one required):
@@ -253,14 +253,14 @@ The platform enforces plan limits and will reject the save with an error:
 
 ---
 
-## 11. `sling project jobs delete`
+## 11. `sling platform jobs delete`
 
 Delete a job by ID.
 
 ```bash
-sling project jobs delete job_abc123              # prompts Y/N
-sling project jobs delete job_abc123 -f            # no prompt
-sling project jobs delete job_abc123 --force       # no prompt
+sling platform jobs delete job_abc123              # prompts Y/N
+sling platform jobs delete job_abc123 -f            # no prompt
+sling platform jobs delete job_abc123 --force       # no prompt
 ```
 
 Flags:
@@ -272,7 +272,7 @@ Uses `POST /project/job/delete` with body `{"job_id": "<id>"}`.
 
 ---
 
-## 12. `sling project execs`
+## 12. `sling platform execs`
 
 Manage and inspect executions.
 
@@ -281,12 +281,12 @@ Manage and inspect executions.
 List recent executions with a job-name column, derived status, and optional time range. Newest first.
 
 ```bash
-sling project execs list                                    # default: 10 rows, table
-sling project execs list --status error --limit 5          # filter by status
-sling project execs list --job-id job_abc123 -o json       # scope to one job, JSON
-sling project execs list --since 24h                        # last 24 hours
-sling project execs list --since 7d --status success
-sling project execs list --since 2026-04-10 --until 2026-04-17
+sling platform execs list                                    # default: 10 rows, table
+sling platform execs list --status error --limit 5          # filter by status
+sling platform execs list --job-id job_abc123 -o json       # scope to one job, JSON
+sling platform execs list --since 24h                        # last 24 hours
+sling platform execs list --since 7d --status success
+sling platform execs list --since 2026-04-10 --until 2026-04-17
 ```
 
 Flags:
@@ -304,8 +304,8 @@ Columns (table): `Name`, `Exec ID`, `Job ID`, `Start Time`, `Rows`, `Bytes`, `St
 Fetch the full server-side status record for one execution as pretty-printed JSON.
 
 ```bash
-sling project execs status exec_abc123
-sling project execs status exec_abc123 | jq '.status_map'
+sling platform execs status exec_abc123
+sling platform execs status exec_abc123 | jq '.status_map'
 ```
 
 Uses `GET /execution/list?filters=%7B%22exec_id%22%3A%22...%22%7D`.
@@ -315,7 +315,7 @@ Uses `GET /execution/list?filters=%7B%22exec_id%22%3A%22...%22%7D`.
 Cancel a running execution.
 
 ```bash
-sling project execs cancel exec_abc123
+sling platform execs cancel exec_abc123
 ```
 
 Uses `POST /execution/cancel` with body `{"exec_id": "<id>"}`.
@@ -325,11 +325,11 @@ Uses `POST /execution/cancel` with body `{"exec_id": "<id>"}`.
 Print the full log output captured during an execution. Each task/step's log is prefixed with a `=== <name> (status=...) ===` banner. The log contains ANSI color codes by default; use `--no-color` to strip them for grep/diff/save-to-file.
 
 ```bash
-sling project execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X                       # all streams, colored
-sling project execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --no-color             # plain text
-sling project execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --task users           # only the "users" stream
-sling project execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --status error         # only errored tasks/steps
-sling project execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X -o json > tasks.json   # raw task records
+sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X                       # all streams, colored
+sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --no-color             # plain text
+sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --task users           # only the "users" stream
+sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --status error         # only errored tasks/steps
+sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X -o json > tasks.json   # raw task records
 ```
 
 Flags:
@@ -343,15 +343,15 @@ Backed by `POST /execution/replication-tasks` for replication/query/monitor exec
 
 ---
 
-## 13. `sling project files`
+## 13. `sling platform files`
 
-Manage project files stored on the platform. For bulk push from local disk, prefer `sling project sync`.
+Manage project files stored on the platform. For bulk push from local disk, prefer `sling platform sync`.
 
 ### `files list`
 
 ```bash
-sling project files list
-sling project files list -o json | jq '.[].name'
+sling platform files list
+sling platform files list -o json | jq '.[].name'
 ```
 
 Columns (table): `Name`, `Size`, `Updated`. `-o json` emits the full file records.
@@ -361,8 +361,8 @@ Columns (table): `Name`, `Size`, `Updated`. `-o json` emits the full file record
 Print a project file's body to stdout. Output is the raw file body, **not** JSON-wrapped, so shell redirection works:
 
 ```bash
-sling project files get replications/hackernews.yaml
-sling project files get replications/hackernews.yaml > /tmp/hackernews.yaml
+sling platform files get replications/hackernews.yaml
+sling platform files get replications/hackernews.yaml > /tmp/hackernews.yaml
 ```
 
 ### `files save <name>`
@@ -371,23 +371,23 @@ Create or update a project file. For Sling job files (replication/pipeline/monit
 
 ```bash
 # inline body
-sling project files save replications/foo.yaml --body 'source: PG
+sling platform files save replications/foo.yaml --body 'source: PG
 target: SF
 streams:
   public.users: {}
 '
 
 # from a local file
-sling project files save replications/foo.yaml -f ./local_repl.yaml
+sling platform files save replications/foo.yaml -f ./local_repl.yaml
 
 # from stdin
-cat ./local.yaml | sling project files save replications/foo.yaml -f -
+cat ./local.yaml | sling platform files save replications/foo.yaml -f -
 
 # create an empty directory marker
-sling project files save replications/archive/ --dir
+sling platform files save replications/archive/ --dir
 
 # JSON response (useful for default_job_id)
-sling project files save replications/foo.yaml -f ./local.yaml -o json | jq .default_job_id
+sling platform files save replications/foo.yaml -f ./local.yaml -o json | jq .default_job_id
 ```
 
 Flags:
@@ -403,8 +403,8 @@ Backed by `POST /project/file/save` with `{"file": {"name", "body", "is_dir"}}`.
 Hard-delete a file on the platform.
 
 ```bash
-sling project files delete replications/old.yaml        # prompts Y/N
-sling project files delete replications/old.yaml -f      # no prompt
+sling platform files delete replications/old.yaml        # prompts Y/N
+sling platform files delete replications/old.yaml -f      # no prompt
 ```
 
 Flags:
@@ -417,20 +417,20 @@ Note: the server performs a hard delete immediately; the CLI prompt is the only 
 Rename a file on the platform. The server also cascades the rename to any jobs referencing the old path.
 
 ```bash
-sling project files rename replications/old.yaml replications/new.yaml
+sling platform files rename replications/old.yaml replications/new.yaml
 ```
 
 ---
 
-## 14. `sling project connections`
+## 14. `sling platform connections`
 
 Inspect connections configured for the project on the platform (from `env.yaml` and/or `.env.sling`).
 
 ### `connections list`
 
 ```bash
-sling project connections list
-sling project connections list -o json
+sling platform connections list
+sling platform connections list -o json
 ```
 
 Columns (table): `Name`, `Type`, `Kind`, `Source`.
@@ -440,7 +440,7 @@ Columns (table): `Name`, `Type`, `Kind`, `Source`.
 Test that a project connection is valid. Requires a running agent for most connection types (the request is forwarded to the connection's agent).
 
 ```bash
-sling project connections test MY_POSTGRES
+sling platform connections test MY_POSTGRES
 ```
 
 On success: prints `Connection MY_POSTGRES: valid`. On failure: exits non-zero with the server/agent's error message.
@@ -552,39 +552,39 @@ export SLING_PROJECT_TOKEN=...
 cd ~/my-project
 sling init
 # ... write replications/nightly.yaml ...
-sling project sync -f
-sling project jobs save --payload '{"name":"nightly","type":"replication","file_name":"replications/nightly.yaml","active":true,"schedules":["0 2 * * *"],"timezone":"UTC","config":{"mode":"incremental","threads":4}}'
+sling platform sync -f
+sling platform jobs save --payload '{"name":"nightly","type":"replication","file_name":"replications/nightly.yaml","active":true,"schedules":["0 2 * * *"],"timezone":"UTC","config":{"mode":"incremental","threads":4}}'
 ```
 
 ### Edit a job's schedule
 
 ```bash
-sling project jobs get job_abc123 > /tmp/j.json
+sling platform jobs get job_abc123 > /tmp/j.json
 # edit schedules[] in /tmp/j.json
-sling project jobs save --file /tmp/j.json
+sling platform jobs save --file /tmp/j.json
 ```
 
 ### Toggle `active` via jq
 
 ```bash
-sling project jobs get job_abc123 \
+sling platform jobs get job_abc123 \
   | jq '.active = false' \
-  | sling project jobs save --file -
+  | sling platform jobs save --file -
 ```
 
 ### Promote config from one job to another
 
 ```bash
-sling project jobs get job_src > /tmp/src.json
-sling project jobs get job_dst \
+sling platform jobs get job_src > /tmp/src.json
+sling platform jobs get job_dst \
   | jq --slurpfile src /tmp/src.json '.config = $src[0].config | .notification_settings = $src[0].notification_settings' \
-  | sling project jobs save --file -
+  | sling platform jobs save --file -
 ```
 
 ### Trigger + wait in CI
 
 ```bash
-sling project jobs trigger job_abc123 --wait
+sling platform jobs trigger job_abc123 --wait
 # exits non-zero on non-Success, so CI fails the step
 ```
 

@@ -630,11 +630,11 @@ func cliInit(done chan struct{}) int {
 		os.Args = []string{os.Args[0], "runner"}
 	case len(os.Args) > 2 && os.Args[1] == "agent":
 		os.Args = append([]string{os.Args[0], "runner"}, os.Args[2:]...)
-		// 'sling project' into 'sling platform'
-		// case len(os.Args) == 2 && os.Args[1] == "project":
-		// 	os.Args = []string{os.Args[0], "platform"}
-		// case len(os.Args) > 2 && os.Args[1] == "project":
-		// 	os.Args = append([]string{os.Args[0], "platform"}, os.Args[2:]...)
+	// 'sling project' into 'sling platform'
+	case len(os.Args) == 2 && os.Args[1] == "project":
+		os.Args = []string{os.Args[0], "platform"}
+	case len(os.Args) > 2 && os.Args[1] == "project":
+		os.Args = append([]string{os.Args[0], "platform"}, os.Args[2:]...)
 	}
 
 	os.Args = padAssistResumeFlag(os.Args)

@@ -410,26 +410,26 @@
     - partition_by (
 
 - id: 63
-  name: Run sling project init
-  run: sling project init
+  name: Run sling platform init
+  run: sling platform init
   output_contains:
     - .sling.json
 
 - id: 64
-  name: Run sling project status
-  run: sling project status
+  name: Run sling platform status
+  run: sling platform status
   output_contains:
     - PROJECT NAME
 
 - id: 65
-  name: Run sling project jobs
-  run: sling project jobs
+  name: Run sling platform jobs
+  run: sling platform jobs
   output_contains:
     - manage project jobs
 
 - id: 66
-  name: Run sling project jobs list
-  run: sling project jobs list
+  name: Run sling platform jobs list
+  run: sling platform jobs list
   output_contains:
     - FILE NAME
 
@@ -2231,11 +2231,11 @@
   output_contains:
     - 'SUCCESS: adjust_column_type correctly expanded varchar and decimal columns'
 
-# Platform CLI: exercises `sling project jobs/exec/files/connections` via a
+# Platform CLI: exercises `sling platform jobs/exec/files/connections` via a
 # self-contained pipeline that runs each command and asserts against stdout.
 # Relies on SLING_PROJECT_TOKEN being set (typically via ~/.sling/env.yaml).
 - id: 230
-  name: 'sling project CLI (jobs/exec/files/connections)'
+  name: 'sling platform CLI (jobs/exec/files/connections)'
   run: 'sling run -p tests/pipelines/p.28.platform_cli.yaml'
   output_contains:
     - 'Platform CLI: all checks passed'
