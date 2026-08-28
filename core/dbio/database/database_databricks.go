@@ -26,11 +26,12 @@ import (
 // DatabricksConn is a Databricks connection
 type DatabricksConn struct {
 	BaseConn
-	URL        string
-	Catalog    string
-	Schema     string
-	Warehouse  string
-	CopyMethod string
+	URL         string
+	Catalog     string
+	Schema      string
+	Warehouse   string
+	CopyMethod  string
+	TableFormat string
 }
 
 // Init initiates the object
@@ -38,6 +39,7 @@ func (conn *DatabricksConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbDatabricks
 	conn.CopyMethod = "stage"
+	conn.TableFormat = "delta"
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
@@ -45,7 +47,11 @@ func (conn *DatabricksConn) Init() error {
 	conn.Schema = conn.GetProp("schema")
 
 	if m := conn.GetProp("copy_method"); m != "" {
-		conn.CopyMethod = strings.ToLower(conn.GetProp("copy_method"))
+		conn.CopyMethod = strings.ToLower(m)
+	}
+
+	if tf := conn.GetProp("table_format"); tf != "" {
+		conn.TableFormat = strings.ToLower(tf)
 	}
 
 	if w := conn.GetProp("warehouse"); w != "" {
@@ -618,10 +624,10 @@ func (conn *DatabricksConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	}
 
 	// Add Databricks-specific DDL modifications
-	// Databricks uses Delta tables by default
-	if !temporary && !strings.Contains(strings.ToLower(sql), "using") {
+	// table format defaults to delta, set table_format=iceberg to use Iceberg
+	if !strings.Contains(strings.ToLower(sql), "using") {
 		sql = strings.TrimSuffix(strings.TrimSpace(sql), ";")
-		sql += " USING DELTA"
+		sql += " USING " + strings.ToUpper(conn.TableFormat)
 	}
 
 	// Add partitioning if specified

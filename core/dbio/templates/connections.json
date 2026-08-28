@@ -928,6 +928,12 @@
         "schema": {
           "type": "string",
           "description": "Schema name"
+        },
+        "table_format": {
+          "type": "string",
+          "description": "Table format to use when creating tables",
+          "enum": ["delta", "iceberg"],
+          "default": "delta"
         }
       }
     },
