@@ -92,6 +92,19 @@ type FileStreamConfig struct {
 	Props            map[string]string `json:"props"`
 }
 
+// AddsFilenameColumn tells whether the scan query appends a filename column,
+// which becomes _sling_stream_url. A custom sql must ask for it with the
+// {filename_expr} placeholder, otherwise its own last column is the last one.
+func (sc *FileStreamConfig) AddsFilenameColumn() bool {
+	if !sc.DuckDBFilename {
+		return false
+	}
+	if sc.SQL != "" {
+		return strings.Contains(sc.SQL, "{filename_expr}")
+	}
+	return true
+}
+
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
 	if !env.UseDuckDbCompute() {
 		return false
@@ -1981,7 +1994,7 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig
 
 	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.AddsFilenameColumn()))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
@@ -2043,7 +2056,7 @@ func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (e
 
 	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.AddsFilenameColumn()))
 	if err != nil {
 		return g.Error(err, "could not read csv rows")
 	}

@@ -2854,6 +2854,11 @@
     - '5,Eve,50'
     - 'wrote 5 rows to stdout'
 
+- id: 594
+  name: 'DuckDB sql on file keeps its own last column when _sling_stream_url is on (issue 796)'
+  run: 'sling run -r tests/replications/r.100.duckdb_sql_stream_url_rename.yaml'
+  rows: 5
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

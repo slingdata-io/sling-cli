@@ -2159,7 +2159,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	}
 
 	duckdbFilenameStr := ""
-	if fsc.DuckDBFilename {
+	if fsc.AddsFilenameColumn() {
 		duckdbFilenameStr = g.F(", filename = true")
 	}
 
