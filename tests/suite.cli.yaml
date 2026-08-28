@@ -2838,6 +2838,22 @@
     - 'PostGIS geometry duckdb/ducklake test PASSED'
     - 'execution succeeded'
 
+# Sheet row 1 holds a one-cell comment, so it is narrower than the header and
+# data rows below it. The range must still read columns A:C (issue 796).
+- id: 593
+  name: 'Excel partial range below a narrow comment row (issue 796)'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C" }' --stdout
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C7" }' --stdout
+    # a range past the last row clamps to the data, it adds no empty rows
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C50" }' --stdout
+  rows: 5
+  output_contains:
+    - 'id,name,value'
+    - '1,Alice,10'
+    - '5,Eve,50'
+    - 'wrote 5 rows to stdout'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
