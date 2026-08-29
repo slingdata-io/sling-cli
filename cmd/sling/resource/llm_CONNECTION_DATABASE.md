@@ -49,6 +49,7 @@ The `database` tool provides database-specific operations through various action
 - `get_schemas` - Get list of schema names
 - `get_columns` - Get column metadata for a table
 - `query` - Execute read-only SQL queries
+- `query_cancel` - Cancel a running query by `query_id`
 
 ### Basic Tool Usage
 
@@ -95,6 +96,7 @@ Before using database operations:
 
 #### Data Access Operations
 - `query` - Read-only SQL execution
+- `query_cancel` - Cancel a running query
 
 ---
 
@@ -234,6 +236,7 @@ Run read-only SQL queries on database connections:
 - `description` (optional but strongly recommended) - A brief description of the intent and expected result of this query. Explain *why* you are running this query and what the result should tell you. This is logged for observability so that query activity can be understood in context. **Always provide this when executing a query.**
 - `limit` (optional) - Maximum rows to return (default: 100)
 - `transient` (optional) - Use transient connection (default: false)
+- `query_id` (optional) - Client-supplied id (`[A-Za-z0-9_-]`, max 64) so a concurrent `query_cancel` can target this query. Generated if omitted. Long queries are supported; interrupting the client (Ctrl+C / Escape) cancels the running query.
 
 #### Referencing a Query File with `file://`
 
@@ -251,6 +254,24 @@ If the SQL query already exists as a file on disk, pass its path as a `file://` 
 ```
 
 The path must be absolute. Sling reads the file and executes its contents as the SQL query. The same read-only restrictions below apply to file-loaded queries.
+
+### Cancelling a Running Query
+
+Pass a `query_id` on `query`, then call `query_cancel` from a concurrent tool call (clients that pipeline JSON-RPC). Sequential clients should interrupt the first call (Ctrl+C / Escape); that cancels the query automatically.
+
+```json
+{
+  "action": "query_cancel",
+  "input": {
+    "query_id": "my-q1"
+  }
+}
+```
+
+**Parameters:**
+- `query_id` (required) - The id of the running query to cancel
+
+Idempotent. Returns `{cancelled: true, query_id}` if that query was running, or `{cancelled: false, query_id}` if it was not.
 
 ### Query Safety and Restrictions
 

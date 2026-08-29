@@ -85,6 +85,7 @@ tools:
       - `"get_schemata"` - Get database schemata (schemas, tables, columns)
       - `"get_schemas"` - Get list of schema names
       - `"query"` - Execute SQL queries (read-only)
+      - `"query_cancel"` - Cancel a running query by query_id
       - `"get_columns"` - Get column metadata for a table
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
         
@@ -103,13 +104,19 @@ tools:
     - `description` (string, required): A brief description of the intent and expected result of this query. Explain *why* you are running this query and what the result should tell you. Always provide this when executing a query.
     - `limit` (number, optional): The limit of rows to return (defaults to 100)
     - `transient` (boolean, optional): Whether to use a transient connection (default: false)
+    - `query_id` (string, optional): Client-supplied id (`[A-Za-z0-9_-]`, max 64) so a concurrent `query_cancel` can target this query. Generated if omitted.
 
-      This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+      This action executes a SQL query on a database connection and return the results. Long queries are supported. Interrupting the client (Ctrl+C / Escape) cancels the running query. Pass an optional `query_id` to cancel from another concurrent call via `query_cancel`. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
 
       *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
       *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
       *   Always use the LIMIT clause to minimize the number of rows returned.
       *   If the SQL is already saved as a file, pass `file:///abs/path/to/query.sql` as `query` instead of inlining the SQL text.
+
+    **For `action: "query_cancel"`**:
+    - `query_id` (string, required): The id of the running query to cancel.
+
+      Cancels a running `query`. Idempotent; returns `{cancelled: bool, query_id: string}`. `{cancelled: false}` means that id was not running. Requires a client that can issue a second tool call while `query` is in flight; sequential clients rely on interrupting the first call.
     
     **For `action: "get_columns"`**:
     - `connection` (string, required): The name of the database connection
@@ -130,6 +137,14 @@ tools:
         "connection": "MY_PG",
         "query": "SELECT * FROM users LIMIT 10",
         "description": "Preview first 10 user records to understand table structure and data format"
+      }
+    }
+
+    # Cancel a running query
+    {
+      "action": "query_cancel",
+      "input": {
+        "query_id": "my-q1"
       }
     }
     

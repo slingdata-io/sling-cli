@@ -627,3 +627,20 @@ The file is empty or malformed. A common cause: you tried to redirect `get` outp
 ### Self-hosted platform
 
 Set `SLING_PLATFORM_HOST=https://your-host.example.com` before any command. The token is validated against that host's `project/token/get` endpoint instead of `licensing.slingdata.io`.
+
+---
+
+## 18. Platform MCP HTTP server
+
+The master also speaks MCP Streamable HTTP at `POST|GET|DELETE /mcp`. Authenticate with the same project token:
+
+```
+Authorization: Sling-Project-Token <uuid>
+```
+
+```bash
+claude mcp add --transport http sling-platform https://<master>/mcp \
+  --header "Authorization: Sling-Project-Token <token>"
+```
+
+Tools: `project`, `file`, `job`, `execution`, `connection`, `compile`, `monitor`, `infra`. Call `docs` first. `job.run` returns `{exec_id}` — poll `execution.list`.

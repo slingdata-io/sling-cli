@@ -27,7 +27,7 @@ Move data between 40+ databases, file systems, and APIs with a single CLI.
 | Tool | Actions | Use Case |
 |------|---------|----------|
 | `connection` | list, test, discover, set | Manage connections |
-| `database` | query, get_schemata | Inspect/query databases |
+| `database` | query, query_cancel, get_schemata | Inspect/query databases |
 | `file_system` | list, copy, inspect | Browse/copy files |
 | `replication` | docs, validate | Validate replication configs |
 | `pipeline` | docs, validate | Validate pipeline configs |
