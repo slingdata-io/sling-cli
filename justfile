@@ -3,9 +3,10 @@
 
 set shell := ["bash", "-lc"]
 
-hello:
-    infisical-load dev /dbio
-    echo $D1
+# Run all tests
+test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
+    #!/usr/bin/env bash
+    echo "✓ All tests passed!"
 
 # Build the sling binary
 build:
@@ -49,6 +50,10 @@ test-core:
     cd core/sling && go test -v -run 'TestReplication' && cd -
     cd core/sling && go test -v -run 'TestColumnCasing' && cd -
     cd core/sling && go test -run 'TestCheck' && cd -
+    cd core/sling/assist && go test -v && cd -
+    cd core/sling/project && go test -v && cd -
+    cd core/sling/validate && go test -v && cd -
+    cd core/sling/build && go test -v && cd -
 
 # Test all connections (file + database)
 test-connections: test-replication-defaults test-connections-file test-connections-database
@@ -157,11 +162,6 @@ test-eval-full baseline="": build
       --arms claude,grok --trials 3 --max-suite-usd 15 $EXTRA
 
 test-eval: test-eval-full
-
-# Run all tests
-test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
-    #!/usr/bin/env bash
-    echo "✓ All tests passed!"
 
 test-dbio-core-python: test-dbio test-core test-python
     #!/usr/bin/env bash
