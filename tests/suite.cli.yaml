@@ -2880,6 +2880,17 @@
     - '4,Dana,40,y'
     - 'wrote 4 rows to stdout'
 
+# Slow source keeps a silent duckdb HTTP import in flight past the stall timeout.
+- id: 597
+  name: 'DuckDB stall watchdog spares an active silent HTTP import'
+  run: 'sling run -d -r tests/replications/r.100.duckdb_stall_watchdog.yaml'
+  group: duckdb
+  env:
+    SLING_DUCKDB_STALL_TIMEOUT: 3s
+  rows: 1300
+  output_contains:
+    - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

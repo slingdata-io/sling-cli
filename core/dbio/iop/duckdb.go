@@ -60,6 +60,14 @@ func (duck *DuckDb) setQuery(dq *duckDbQuery) {
 	duck.query = dq
 }
 
+// TouchQueryActivity resets the stall clock for the in-flight query.
+// Call it only on real evidence of progress.
+func (duck *DuckDb) TouchQueryActivity() {
+	if dq := duck.getQuery(); dq != nil {
+		dq.touch()
+	}
+}
+
 // duckDbQuery holds the state of one query. err/started/done are written by the
 // scanner and watcher goroutines, so use the accessors below.
 type duckDbQuery struct {
@@ -1793,6 +1801,22 @@ type HttpStreamPart struct {
 	Cancel context.CancelFunc
 }
 
+// activityReader resets the stall clock as duckdb consumes the HTTP stream.
+type activityReader struct {
+	io.Reader
+	duck *DuckDb
+	last time.Time
+}
+
+func (ar *activityReader) Read(p []byte) (n int, err error) {
+	n, err = ar.Reader.Read(p)
+	if n > 0 && time.Since(ar.last) > time.Second { // throttle lock churn
+		ar.duck.TouchQueryActivity()
+		ar.last = time.Now()
+	}
+	return n, err
+}
+
 // closeBatchReader stops reading a batch's pipe. The arrow/csv writer flushes
 // the tail of a batch into this pipe; if the consumer abandoned it (duckdb
 // dropped the response), that flush blocks forever. Closing makes it fail fast.
@@ -1874,7 +1898,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					case <-importContext.Ctx.Done():
 					}
 				}()
-				return c.Stream(200, contentType, reader)
+				return c.Stream(200, contentType, &activityReader{Reader: reader, duck: duck})
 			}
 			return c.NoContent(http.StatusOK)
 		})
