@@ -97,7 +97,7 @@ See [STEPS.md](STEPS.md) for full syntax and options of each type.
 
 ## Pipeline spine
 
-In a Sling project, the daily pipeline is **replicate → build → check → log**. Use real step types only. Do not use `notify` — that type is not active. See the `sling-project` skill.
+In a Sling project, the daily pipeline is **replicate → build → check → log**. Use real step types only. Do not use `notify` — that type is not active. See [PROJECT.md](../sling/PROJECT.md) in the `sling` skill.
 
 ```yaml
 steps:

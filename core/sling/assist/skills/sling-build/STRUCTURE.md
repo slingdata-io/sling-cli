@@ -1,6 +1,6 @@
 # Build structure and naming
 
-Companion to [SKILL.md](SKILL.md). Folder layout for a full ELT repo is in the `sling-project` skill.
+Companion to [SKILL.md](SKILL.md). Folder layout for a full ELT repo is in [PROJECT.md](../sling/PROJECT.md).
 
 A build project is a directory with `sling_build.yml` plus `.sql` models (and optional seeds). In the canonical project that directory is `models/`.
 

@@ -1,7 +1,7 @@
 ---
 name: sling
 description: >
-  Sling data platform — overview, MCP tools such as querying databases, CLI quick reference, and troubleshooting. Use when asked to query databases via mcp, about Sling in general, what it does, how to use the MCP tools, or when debugging errors, connection failures, authentication issues, type conversion problems, memory/performance issues, or API rate limits.
+  Sling data platform — overview, MCP tools such as querying databases, CLI quick reference, connection setup, project layout, and troubleshooting. Use when asked to query databases via mcp, about Sling in general, what it does, how to use the MCP tools, when setting up or testing connections and credentials, when starting a project or choosing folders, or when debugging errors, connection failures, authentication issues, type conversion problems, memory/performance issues, or API rate limits.
 ---
 
 # Sling - Data Integration Platform
@@ -104,6 +104,8 @@ sling assist                        # Open assist (offers to investigate failure
 | Topic | Description |
 |-------|-------------|
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common errors: connections, auth, type conversion, memory, API rate limits, performance |
+| [CONNECTIONS.md](CONNECTIONS.md) | Set up, test, and discover connections; secrets boundary; per-connector docs |
+| [PROJECT.md](PROJECT.md) | Canonical project layout, the four warehouse layers, and where each file goes |
 
 ## Documentation Map
 
@@ -123,7 +125,7 @@ Append `.md` paths to https://docs.slingdata.io to fetch raw markdown. Full inde
 | CLI usage (`sling run`, flags) | https://docs.slingdata.io/sling-cli/run.md |
 | CLI Pro | https://docs.slingdata.io/sling-cli/cli-pro.md |
 | Platform | https://docs.slingdata.io/sling-platform/platform.md |
-| Connections (per-connector guides) | https://docs.slingdata.io/connections/ — see `sling-connections` skill |
+| Connections (per-connector guides) | https://docs.slingdata.io/connections/ — see [CONNECTIONS.md](CONNECTIONS.md) |
 
 ## Documentation
 

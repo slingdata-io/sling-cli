@@ -27,7 +27,7 @@ When you update a model, read the files first. Preserve incremental-state semant
 
 A build project is any directory containing `sling_build.yml`. Models are `.sql` files — usually grouped under schema folders or, with `dbt_project: true`, under `models/` and `seeds/`.
 
-In a full Sling project, put this tree under `models/` (see the `sling-project` skill). First folder = schema. Naming rules: [STRUCTURE.md](STRUCTURE.md).
+In a full Sling project, put this tree under `models/` (see [PROJECT.md](../sling/PROJECT.md) in the `sling` skill). First folder = schema. Naming rules: [STRUCTURE.md](STRUCTURE.md).
 
 ```
 models/

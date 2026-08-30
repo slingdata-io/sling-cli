@@ -387,7 +387,10 @@ func tryRefreshLock(lockPath string) (func(), bool) {
 // retiredSkillNames are Sling-owned skill names from earlier bundle versions
 // that no longer exist in the embed. Pruned on install/refresh so agents stop
 // picking up their stale content.
-var retiredSkillNames = []string{"sling-hooks", "sling-transforms", "sling-troubleshooting"}
+var retiredSkillNames = []string{
+	"sling-hooks", "sling-transforms", "sling-troubleshooting",
+	"sling-connections", "sling-project", "sling-monitors",
+}
 
 // pruneRetiredSkills removes retired skills from the canonical bundle and from
 // per-skill client redirects. Best-effort: failures only debug-log.

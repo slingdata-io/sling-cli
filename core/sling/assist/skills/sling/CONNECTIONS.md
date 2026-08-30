@@ -1,9 +1,3 @@
----
-name: sling-connections
-description: >
-  Manage database, file system, and API connections for Sling. Use when setting up connections, testing connectivity, discovering tables/files, or configuring credentials.
----
-
 # Connection Management
 
 Connections are named endpoints for databases, file systems, and APIs. Sling stores them in `~/.sling/env.yaml`.

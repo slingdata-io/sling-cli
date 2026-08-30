@@ -409,7 +409,7 @@ func TestGatherFirstIntroDoNotAskWhenResolved(t *testing.T) {
 		"sling-pipelines/SKILL.md",
 		"sling-build/SKILL.md",
 		"sling-api-specs/SKILL.md",
-		"sling-connections/SKILL.md",
+		"sling/CONNECTIONS.md",
 	}
 	needle := []byte("If every row resolves, do not ask")
 	for _, name := range names {

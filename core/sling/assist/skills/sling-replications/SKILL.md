@@ -30,7 +30,7 @@ When the ask names a table but not its connection, check each DB connection with
 
 ## Project layout
 
-In a Sling project, replications live in `replications/` and target `raw_*` schemas only. Staging, intermediate, and marts are build models — not replication targets. See the `sling-project` skill.
+In a Sling project, replications live in `replications/` and target `raw_*` schemas only. Staging, intermediate, and marts are build models — not replication targets. See [PROJECT.md](../sling/PROJECT.md) in the `sling` skill.
 
 ```yaml
 source: MY_STRIPE

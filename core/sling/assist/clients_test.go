@@ -4,8 +4,11 @@ package assist
 
 import (
 	"context"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -1048,5 +1051,47 @@ func TestCursorStatusAuthParsesCLI(t *testing.T) {
 	}
 	if st := (&cursorClient{}).AuthState(); st != AuthNone {
 		t.Fatalf("AuthState = %s, want none", st)
+	}
+}
+
+// TestSkillLinksResolve keeps relative links between skill files honest. Folding
+// a skill into an umbrella (sling-connections -> sling/CONNECTIONS.md) is easy to
+// do without fixing the files that pointed at it.
+func TestSkillLinksResolve(t *testing.T) {
+	linkRe := regexp.MustCompile(`\]\((\.\./)?([A-Za-z0-9_./-]+\.md)\)`)
+
+	err := fs.WalkDir(SkillsFS, "skills", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return err
+		}
+		// agent-browser is vendored upstream and ships links we do not own.
+		if strings.HasPrefix(p, "skills/agent-browser/") {
+			return nil
+		}
+		b, err := SkillsFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		dir := path.Dir(p)
+		for _, m := range linkRe.FindAllStringSubmatch(string(b), -1) {
+			target := path.Join(dir, m[1]+m[2])
+			if _, err := SkillsFS.ReadFile(target); err != nil {
+				t.Errorf("%s links to %s, which does not exist", p, m[1]+m[2])
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRetiredSkillsAreGone guards the prune path: every retired name must be
+// absent from the embed, or agents keep serving stale content forever.
+func TestRetiredSkillsAreGone(t *testing.T) {
+	for _, name := range retiredSkillNames {
+		if _, err := SkillsFS.ReadDir("skills/" + name); err == nil {
+			t.Errorf("retired skill %s is still embedded", name)
+		}
 	}
 }

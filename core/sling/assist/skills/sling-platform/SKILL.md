@@ -147,6 +147,8 @@ For bulk work, `sling init` + `sling platform sync` keeps a local directory mirr
 
 Monitors observe data without moving it: schema drift, freshness, row counts, column statistics, and anomaly detection. They are YAML files (`connection:` + `objects:`) saved under the project's `monitors/` directory and scheduled as jobs with `type: monitor`. They require the Advanced plan.
 
+To author a monitor, read [MONITORS.md](MONITORS.md) — object and column keys, patterns, anomalies, and a worked example.
+
 | Monitor topic | Doc |
 |---------------|-----|
 | Overview + quick start | https://docs.slingdata.io/sling-platform/monitors.md |

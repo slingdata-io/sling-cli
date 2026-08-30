@@ -15,7 +15,7 @@ The `sling` pip package wraps the Sling CLI binary (auto-downloaded on first use
 | Replication YAML semantics | `sling-replications` |
 | Pipeline steps / hooks | `sling-pipelines` |
 | API spec structure | `sling-api-specs` |
-| Connection setup | `sling-connections` |
+| Connection setup | [CONNECTIONS.md](../sling/CONNECTIONS.md) |
 
 ## Installation
 
