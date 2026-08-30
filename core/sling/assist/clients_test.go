@@ -1054,9 +1054,7 @@ func TestCursorStatusAuthParsesCLI(t *testing.T) {
 	}
 }
 
-// TestSkillLinksResolve keeps relative links between skill files honest. Folding
-// a skill into an umbrella (sling-connections -> sling/CONNECTIONS.md) is easy to
-// do without fixing the files that pointed at it.
+// TestSkillLinksResolve keeps relative links between skill files honest.
 func TestSkillLinksResolve(t *testing.T) {
 	linkRe := regexp.MustCompile(`\]\((\.\./)?([A-Za-z0-9_./-]+\.md)\)`)
 
