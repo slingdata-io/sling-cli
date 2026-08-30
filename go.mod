@@ -85,7 +85,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/slingdata-io/godbc v0.0.9
-	github.com/slingdata-io/golyglot v1.0.18
+	github.com/slingdata-io/golyglot v1.0.20
 	github.com/slingdata-io/sling v0.0.0-20260715135102-01cd9a07a3c8
 	github.com/snowflakedb/gosnowflake v1.17.1
 	github.com/spf13/cast v1.7.1
