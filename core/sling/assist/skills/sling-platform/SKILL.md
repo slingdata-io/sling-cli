@@ -46,6 +46,23 @@ sling platform status             # smoke test: project info + counts
 
 Most list/get commands accept `-o json` — prefer it when parsing output.
 
+## Two MCP servers
+
+If both the CLI stdio MCP (`sling serve mcp`) and the Platform HTTP MCP are attached, pick by location:
+
+- **Local** `env.yaml`, local files, local validate → stdio tools `connection`, `database`, `file_system`, `replication`, `pipeline`, `api_spec`.
+- **Hosted project** (this skill) → platform tools `jobs`, `execs`, `files`, `connections`, `agents`, `compile`, `project`, `monitor`.
+
+Same vocabulary as the CLI. `jobs trigger` in the shell is `jobs.trigger` over MCP.
+
+| CLI | MCP |
+|-----|-----|
+| `sling platform jobs list/get/save/trigger/activate/deactivate/status` | `jobs.list` / `get` / `save` / `trigger` / `activate` / `deactivate` / `status` |
+| `sling platform execs list/status/log/cancel` | `execs.list` / `status` / `log` / `cancel` |
+| `sling platform files list/get/save/delete/rename` | `files.list` / `get` / `save` / `delete` / `rename` |
+| `sling platform connections list/test` | `connections.list` / `test` |
+| `sling platform status` | `project.status` |
+
 ## Job payload shape
 
 `jobs save` sends the JSON straight to the platform's Job model. Key fields:

@@ -33,7 +33,7 @@ Move data between 40+ databases, file systems, and APIs with a single CLI.
 | `pipeline` | docs, validate | Validate pipeline configs |
 | `api_spec` | docs, validate, test | Build API integrations |
 
-There is no MCP `run`, `build`, or `report` action. Execute with the CLI: `sling run` (replications/pipelines), `sling build` (SQL models), and `sling assist report` (issue reports).
+The Sling CLI stdio MCP has no `run`, `build`, or `report` action. Execute with the CLI: `sling run` (replications/pipelines), `sling build` (SQL models), and `sling assist report` (issue reports). The Platform HTTP MCP is separate; its `jobs.trigger` runs hosted jobs, not local files.
 
 After you classify a failure as a sling defect (not user config), offer: "Report this? GitHub issue (public, needs account) or email to support." Never offer this for user-config errors. Send only after the user agrees. Show the user the draft first (`sling assist report --id <id>`), then send with `--github` or `--email`. Add `--submit` to skip the interactive confirm (for agents and non-TTY use). `--email` opens the contact page with the report prefilled; the user fills in their name and email there — do not ask for an email address yourself.
 
