@@ -632,15 +632,17 @@ Set `SLING_PLATFORM_HOST=https://your-host.example.com` before any command. The 
 
 ## 18. Platform MCP HTTP server
 
-The master also speaks MCP Streamable HTTP at `POST|GET|DELETE /mcp`. Authenticate with the same project token:
+The server also speaks MCP Streamable HTTP at `POST|GET|DELETE /mcp`. Authenticate with the same project token:
 
 ```
 Authorization: Sling-Project-Token <uuid>
 ```
 
+Claude Code:
+
 ```bash
-claude mcp add --transport http sling-platform https://<master>/mcp \
+claude mcp add --transport http sling-platform https://<server>/mcp \
   --header "Authorization: Sling-Project-Token <token>"
 ```
 
-Tools: `project`, `file`, `job`, `execution`, `connection`, `compile`, `monitor`, `infra`. Call `docs` first. `job.run` returns `{exec_id}` — poll `execution.list`.
+Tools (one coarse tool per domain, `action` + `input`): `project`, `file`, `job`, `execution`, `connection`, `compile`, `monitor`, `infra`. Call `docs` on a tool before other actions. `job.run` returns `{exec_id}` — poll `execution.list` (stateless; no server push). The project must enable MCP in Settings → Project. Discover/preview/exec (`connection.discover`, `connection.preview`, `connection.exec`, `compile.replication_preview`) require an online agent and follow Enable Data Preview. `connection.exec` runs **read-only** SQL only — queries are parsed and must be a single read-only statement; mutating statements, DDL, and locking clauses are rejected. Never issue destructive or altering commands (INSERT/UPDATE/DELETE/DDL). Long queries are supported; client disconnect cancels the query. Optional `query_id` on `exec` plus `connection.exec_cancel` cancels from another session. Token, user, org, billing, and git-write routes are not exposed.
