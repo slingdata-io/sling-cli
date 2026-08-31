@@ -118,7 +118,7 @@ streams:
   to: "aws_s3/archive/{timestamp.YYYY}/{timestamp.MM}/source.csv"
 ```
 
-Location form is `CONN/path`. `local/rel/file.csv` is cwd-relative; `local//abs/path` (two slashes) is absolute. Bare relative paths (`data/a.csv`, `{loop.value.path}`) are treated as local cwd-relative. After a `list` step prefer `{loop.value.location}` — it is already `CONN/path`.
+Location form is `CONN/path`. `local/rel/file.csv` is relative to the working directory of whichever host runs the step; `local//abs/path` (two slashes) is absolute. Bare relative paths (`data/a.csv`, `{loop.value.path}`) are treated as local relative paths. Prefer a named file connection over `local` when the step may run on a remote agent. After a `list` step prefer `{loop.value.location}` — it is already `CONN/path`.
 
 ### delete
 ```yaml
@@ -224,7 +224,7 @@ Shortcut form: `build: models` (type is inferred). Results land in `state.<id>.o
 ```
 
 ### routine
-Runs a named, reusable group of steps defined in a YAML file under the routines directory (`~/.sling/routines/` or `SLING_ROUTINES_DIR`), where files declare a top-level `routines:` map.
+Runs a named, reusable group of steps defined in a YAML file that declares a top-level `routines:` map. The CLI reads these from `~/.sling/routines/` (or `SLING_ROUTINES_DIR`); on the platform they are project files.
 ```yaml
 - type: routine
   routine: notify_slack

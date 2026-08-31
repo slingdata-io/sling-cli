@@ -191,11 +191,7 @@ state:
     }
 ```
 
-Run with override:
-
-```bash
-OVERRIDE_START_DATE="2023-06-01" sling run -r replication.yaml
-```
+Set `OVERRIDE_START_DATE` as a run variable (CLI: an env var on `sling run`; platform: a job `config.variables` entry).
 
 ## Multiple Sync Variables
 
@@ -226,7 +222,7 @@ endpoints:
 - Use `maximum` aggregation for timestamps
 - Use `last` aggregation for cursors
 - Context variables are read-only
-- Test with `--debug` to see sync state
+- Inspect the run log to see sync state (CLI: `--debug`; platform: `execs.log`)
 
 ## Related Topics
 

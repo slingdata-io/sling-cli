@@ -1,6 +1,6 @@
 # Build structure and naming
 
-Companion to [SKILL.md](SKILL.md). Folder layout for a full ELT repo is in [PROJECT.md](../sling/PROJECT.md).
+Companion to the main build guide. Folder layout for a full ELT repo: https://docs.slingdata.io/concepts/project-structure.md
 
 A build project is a directory with `sling_build.yml` plus `.sql` models (and optional seeds). In the canonical project that directory is `models/`.
 
@@ -52,10 +52,10 @@ Staging selects from raw via `src()`. Marts use `ref()` to staging or intermedia
 | `staging/stg_orders.sql` | `staging.stg_orders` | `dev_fritz.staging_stg_orders` |
 | `marts/core/dim_customers.sql` | `marts.core_dim_customers` | `dev_fritz.marts_core_dim_customers` |
 
-Dev mode is on when `dev:` is present in `sling_build.yml`. `--prod` writes folder-based schemas. `--schema` forces a dev schema.
+Dev mode is on when `dev:` is present in `sling_build.yml`. Prod mode writes folder-based schemas (CLI `--prod`, pipeline step `prod: true`). Forcing a schema (CLI `--schema`, step `schema:`) selects a dev schema.
 
 ## Nested configs
 
-`-R` / `--recursive` is opt-in. Without `-R`, only `<path>/sling_build.yml` loads.
+Recursive discovery is opt-in (CLI `-R`/`--recursive`, pipeline step `recursive: true`). Without it, only `<path>/sling_build.yml` loads.
 
-A subdirectory with its own `sling_build.yml` is a nested project. Parent discovery skips it unless you pass `-R` (immediate children only). Do not leave scratch projects (`probe/`) inside a parent.
+A subdirectory with its own `sling_build.yml` is a nested project. Parent discovery skips it unless recursion is enabled (immediate children only). Do not leave scratch projects (`probe/`) inside a parent.
