@@ -495,6 +495,7 @@
     - 'Build Completed'
     - 'SUCCESS: pipeline type:build step completed'
     - 'rows=2'
+    - 'build_rows=4'
     - 'label=from_pipeline'
     - 'build total='
 
@@ -507,6 +508,7 @@
     - 'Build Completed'
     - 'SUCCESS: replication end-hook type:build ok'
     - 'rows=2'
+    - 'build_rows=2'
     - 'label=from_repl_hook'
 
 - id: 439
@@ -518,11 +520,92 @@
     rm -f temp/duckdb_parallel/test.duckdb
     sling build tests/build/duckdb_parallel_project --target DUCK_PARALLEL --full-refresh --threads 4
   group: build
+  rows: 5
   output_contains:
     - 'OK'
     - 'Build Completed'
   output_does_not_contain:
     - 'Conflicting lock'
     - 'Could not set lock'
+
+- id: 440
+  name: 'sling build execute clickhouse_project full-refresh row count'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS marts"
+    sling build tests/build/clickhouse_project --target CLICKHOUSE --full-refresh
+  rows: 4
+  output_contains:
+    - 'stg_orders'
+    - 'fct_orders'
+    - 'OK'
+    - 'Build Completed'
+
+# Column-store incremental/append: COUNT(*) the staging temp table.
+# Incremental with extra=true: stg full-refresh 3 + temp 1 new row = 4
+# (target-after-merge would be 3+3=6; no count would be 3+0=3).
+# Append second run: stg full-refresh 2 + temp 2 = 4
+# (target-after-insert would be 2+4=6; no count would be 2+0=2).
+
+- id: 441
+  name: 'sling build duckdb incremental counts temp table rows'
+  group: build
+  env:
+    DUCK_MODES: '{type: duckdb, instance: "temp/duckdb_modes/inc.duckdb"}'
+  run: |
+    mkdir -p temp/duckdb_modes
+    rm -f temp/duckdb_modes/inc.duckdb
+    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_inc"
+    sling build tests/build/column_store_modes_project --target DUCK_MODES --vars 'extra: true' -s "+events_inc"
+  rows: 4
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 442
+  name: 'sling build duckdb append counts temp table rows'
+  group: build
+  env:
+    DUCK_MODES: '{type: duckdb, instance: "temp/duckdb_modes/append.duckdb"}'
+  run: |
+    mkdir -p temp/duckdb_modes
+    rm -f temp/duckdb_modes/append.duckdb
+    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_append"
+    sling build tests/build/column_store_modes_project --target DUCK_MODES -s "+events_append"
+  rows: 4
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 443
+  name: 'sling build clickhouse incremental counts temp table rows'
+  group: build
+  after: [440]
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.stg_events"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_inc"
+    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_inc"
+    sling build tests/build/column_store_modes_project --target CLICKHOUSE --vars 'extra: true' -s "+events_inc"
+  rows: 4
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 444
+  name: 'sling build clickhouse append counts temp table rows'
+  group: build
+  after: [440]
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.stg_events"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_append"
+    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_append"
+    sling build tests/build/column_store_modes_project --target CLICKHOUSE -s "+events_append"
+  rows: 4
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
 
 

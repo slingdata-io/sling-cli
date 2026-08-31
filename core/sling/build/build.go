@@ -25,6 +25,8 @@ type Build struct {
 	Selected    []string               // selected node names after selector filtering
 	SubBuilds   []*Build               // compiled sub-projects (for multi-target compile mode)
 	connEntries connection.ConnEntries // pre-resolved connection entries for parallel execution
+	ExecRows    uint64                 // sum of model/seed rows after Execute
+	ExecBytes   uint64
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -280,7 +282,12 @@ func (b *Build) Execute() error {
 		return err
 	}
 
-	return executor.Execute()
+	err = executor.Execute()
+	for _, r := range executor.Results {
+		b.ExecRows += r.Rows
+		b.ExecBytes += r.Bytes
+	}
+	return err
 }
 
 // PrintListOutput prints the selected models/seeds and exits.

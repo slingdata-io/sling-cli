@@ -50,6 +50,39 @@ models/
 
 Staging selects from raw via `src()`. Marts use `ref()` to staging or intermediate only. Marts never touch raw.
 
+## `src()` and `ref()`
+
+`src()` is a passthrough. It does **not** add a `raw_` prefix.
+
+```sql
+-- two args: schema, table
+select * from {{ src('raw_stripe', 'invoice') }}
+-- result: select * from raw_stripe.invoice
+
+-- one arg: schema.table
+select * from {{ src('raw_stripe.invoice') }}
+-- result: select * from raw_stripe.invoice
+```
+
+`source()` is an alias of `src()`.
+
+`ref('name')` resolves a model or seed in this project to its full table name. An unknown name is a compile error.
+
+```sql
+select * from {{ ref('stg_orders') }}
+-- result: select * from staging.stg_orders
+```
+
+Duplicate model names in the project are a hard error at load time.
+
+## Front-matter
+
+Put YAML in a `/** **/` block. It must be the first content in the file. Leading whitespace is allowed. Comments before the block are not. The engine treats the rest of the file as SQL.
+
+You can also use `/* { ... } */` or `-- { ... }` with a brace object.
+
+Front-matter does not rename the model. The model name is the file stem.
+
 ## sling_build.yml essentials
 
 ```yaml
@@ -85,7 +118,7 @@ range:
   lookback: 2d
 **/
 
-select * from {{ ref("stg_orders") }} where updated_at > '{{ this.last_value }}'
+select * from {{ ref("stg_orders") }} where {{ incremental_where_cond() }}
 ```
 
 Front-matter `range:` (`start`, `advance`, `lookback`) is the durable backfill window. Pair it with `update_key` and `unique_key`. Do not reverse-engineer the binary for this.

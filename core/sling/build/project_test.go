@@ -305,6 +305,36 @@ func TestLoadProjectWithProdOverride(t *testing.T) {
 	assert.Equal(t, "prod", project.Mode)
 }
 
+func TestFindConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	_, ok := FindConfigFile(dir)
+	assert.False(t, ok)
+
+	ymlPath := filepath.Join(dir, "sling_build.yml")
+	require.NoError(t, os.WriteFile(ymlPath, []byte("target: POSTGRES\n"), 0644))
+	found, ok := FindConfigFile(dir)
+	require.True(t, ok)
+	assert.Equal(t, ymlPath, found)
+
+	yamlPath := filepath.Join(dir, "sling_build.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, []byte("target: DUCKDB\n"), 0644))
+	found, ok = FindConfigFile(dir)
+	require.True(t, ok)
+	assert.Equal(t, ymlPath, found, "prefer .yml when both exist")
+}
+
+func TestLoadProjectYAMLConfig(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yaml"), []byte("target: DUCKDB\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stg_ok.sql"), []byte("select 1 as id\n"), 0644))
+
+	project, err := LoadProject(dir)
+	require.NoError(t, err)
+	require.NotNil(t, project.Config)
+	assert.Equal(t, "DUCKDB", project.Config.Target)
+	require.NotNil(t, project.Models["stg_ok"])
+}
+
 func TestNestedProjectIsolation(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yml"), []byte("target: POSTGRES\n"), 0644))
@@ -1030,6 +1060,49 @@ func TestFrontmatterSnapshotRenamedToAppend(t *testing.T) {
 	assert.Equal(t, "append", m.Config.Mode)
 }
 
+func TestFrontmatterUnknownModeRejected(t *testing.T) {
+	_, err := addModelFromFrontmatter(t,
+		"mode: incremenal",
+		"SELECT 1 as id")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown mode 'incremenal'")
+	assert.Contains(t, err.Error(), "full-refresh")
+}
+
+func TestFrontmatterValidModesAccepted(t *testing.T) {
+	for mode := range ValidModes {
+		frontmatter := "mode: " + mode
+		if mode == "incremental" {
+			frontmatter += "\nunique_key: id\nupdate_key: updated_at"
+		}
+		m, err := addModelFromFrontmatter(t, frontmatter, "SELECT 1 as id, 2 as updated_at")
+		require.NoError(t, err, "mode %s should be accepted", mode)
+		assert.Equal(t, mode, m.Config.Mode)
+	}
+}
+
+func TestLoadConfigUnknownDefaultsModeRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+	require.NoError(t, os.WriteFile(path,
+		[]byte("target: MY_PG\ndefaults:\n  mode: bogus\n"), 0644))
+
+	_, err := loadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown defaults.mode 'bogus'")
+}
+
+func TestLoadConfigDefaultsModeAliasNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+	require.NoError(t, os.WriteFile(path,
+		[]byte("target: MY_PG\ndefaults:\n  mode: table\n"), 0644))
+
+	cfg, err := loadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "full-refresh", cfg.Defaults.Mode)
+}
+
 func TestFrontmatterDataTests(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: full-refresh\ntests:\n  - not_null: [id]\n  - unique: id\n  - expr: sum(id) > 0",
@@ -1059,7 +1132,7 @@ func TestFrontmatterDropCascade(t *testing.T) {
 func TestRangeConfig_Valid_AbsentMeansPlainIncremental(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.NoError(t, err)
 	require.NotNil(t, m)
 	assert.Nil(t, m.Config.Range)
@@ -1069,7 +1142,7 @@ func TestRangeConfig_Valid_AbsentMeansPlainIncremental(t *testing.T) {
 func TestRangeConfig_Valid_AdvanceOnly(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  advance: 7d",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.NoError(t, err)
 	require.NotNil(t, m.Config.Range)
 	assert.Equal(t, "7d", m.Config.Range.Advance)
@@ -1080,7 +1153,7 @@ func TestRangeConfig_Valid_AdvanceOnly(t *testing.T) {
 func TestRangeConfig_Valid_StartAndAdvance(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  start: '2020-01-01'\n  advance: 1mo",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.NoError(t, err)
 	require.NotNil(t, m.Config.Range)
 	assert.Equal(t, "2020-01-01", m.Config.Range.Start)
@@ -1090,7 +1163,7 @@ func TestRangeConfig_Valid_StartAndAdvance(t *testing.T) {
 func TestRangeConfig_Valid_AdvanceAndLookback(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  advance: 7d\n  lookback: 2d",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.NoError(t, err)
 	require.NotNil(t, m.Config.Range)
 	assert.Equal(t, "7d", m.Config.Range.Advance)
@@ -1101,7 +1174,7 @@ func TestRangeConfig_Valid_AdvanceAndLookback(t *testing.T) {
 func TestRangeConfig_Valid_LookbackOnly(t *testing.T) {
 	m, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  lookback: 3h",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.NoError(t, err)
 	require.NotNil(t, m.Config.Range)
 	assert.Equal(t, "", m.Config.Range.Advance)
@@ -1111,7 +1184,7 @@ func TestRangeConfig_Valid_LookbackOnly(t *testing.T) {
 func TestRangeConfig_Invalid_StartWithoutAdvance(t *testing.T) {
 	_, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  start: '2020-01-01'",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "range.start requires range.advance")
 }
@@ -1119,7 +1192,7 @@ func TestRangeConfig_Invalid_StartWithoutAdvance(t *testing.T) {
 func TestRangeConfig_Invalid_AdvanceWithoutUpdateKey(t *testing.T) {
 	_, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nrange:\n  advance: 7d",
-		"SELECT id FROM raw WHERE {incremental_where_cond}")
+		"SELECT id FROM raw WHERE {{ incremental_where_cond() }}")
 	require.Error(t, err)
 	// incremental mode without update_key fires first
 	assert.Contains(t, err.Error(), "update_key")
@@ -1136,7 +1209,7 @@ func TestRangeConfig_Invalid_RangeWithoutIncrementalMode(t *testing.T) {
 func TestRangeConfig_Invalid_BadAdvanceDuration(t *testing.T) {
 	_, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  advance: seven_days",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid range.advance")
 }
@@ -1144,7 +1217,7 @@ func TestRangeConfig_Invalid_BadAdvanceDuration(t *testing.T) {
 func TestRangeConfig_Invalid_BadLookbackDuration(t *testing.T) {
 	_, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at\nrange:\n  lookback: later",
-		"SELECT id, updated_at FROM raw WHERE {incremental_where_cond}")
+		"SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid range.lookback")
 }
@@ -1189,17 +1262,17 @@ func TestValidateModel_RangeWithDbtStyleErrors(t *testing.T) {
 		`SELECT id, updated_at FROM raw
 {% if is_incremental() %}WHERE updated_at > (SELECT MAX(updated_at) FROM {{ this }}){% endif %}`)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "range.* requires {incremental_where_cond}")
+	assert.Contains(t, err.Error(), "range.* requires incremental_where_cond()")
 }
 
 func TestValidateModel_MixedStyleErrors(t *testing.T) {
-	// A model containing both is_incremental() AND {incremental_where_cond} errors.
+	// A model containing both is_incremental() AND {{ incremental_where_cond() }} errors.
 	_, err := addModelFromFrontmatter(t,
 		"mode: incremental\nunique_key: id\nupdate_key: updated_at",
-		`SELECT id, updated_at FROM raw WHERE {incremental_where_cond}
+		`SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}
 {% if is_incremental() %}AND updated_at > (SELECT MAX(updated_at) FROM {{ this }}){% endif %}`)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot mix is_incremental() and {incremental_where_cond}")
+	assert.Contains(t, err.Error(), "cannot mix is_incremental() and incremental_where_cond()")
 }
 
 // =============================================================================
@@ -1502,7 +1575,7 @@ defaults:
 `,
 		nil,
 		map[string]string{
-			"staging/orders.sql": "SELECT id, updated_at FROM raw WHERE {incremental_where_cond}",
+			"staging/orders.sql": "SELECT id, updated_at FROM raw WHERE {{ incremental_where_cond() }}",
 		},
 		nil,
 	)

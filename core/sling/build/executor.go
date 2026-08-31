@@ -2,18 +2,23 @@ package build
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/store"
 	"github.com/spf13/cast"
 )
 
@@ -28,16 +33,26 @@ type Executor struct {
 	ctx         *g.Context
 	failedSet   map[string]bool // tracks failed nodes for skipping downstream
 	stopped     bool            // set when fail-fast triggers; prevents new dispatches
+
+	OutputLines chan *g.LogLine
+	prevLogSink func(*g.LogLine)
+	startTime   *time.Time
 }
 
 // ExecutionResult holds the outcome of executing one node.
 type ExecutionResult struct {
-	Name     string
-	NodeType string // "seed" or "model"
-	Mode     string // "full-refresh", "view", "truncate", "incremental", "append"
-	Duration time.Duration
-	Err      error
-	Skipped  bool
+	Name      string
+	NodeType  string // "seed", "model", or "test"
+	Mode      string // "full-refresh", "view", "truncate", "incremental", "append"
+	Duration  time.Duration
+	Err       error
+	Skipped   bool
+	StartTime *time.Time
+	// Rows is sql.Result.RowsAffected, or COUNT(*) on column-store
+	// full-refresh / truncate / first-run append. Incremental and subsequent
+	// append count the staging temp table. CREATE VIEW reports 0.
+	Rows  uint64
+	Bytes uint64
 }
 
 // BuildState implements sling.RuntimeState for build model hooks.
@@ -95,7 +110,48 @@ func NewExecutor(b *Build) (*Executor, error) {
 		connEntries: b.connEntries,
 		failedSet:   make(map[string]bool),
 		ctx:         g.NewContext(context.Background()),
+		OutputLines: make(chan *g.LogLine, 5000),
 	}, nil
+}
+
+// rowsFromResult returns RowsAffected clamped to 0.
+// CREATE VIEW reports 0. Some drivers return -1.
+func rowsFromResult(result sql.Result) uint64 {
+	if result == nil {
+		return 0
+	}
+	n, err := result.RowsAffected()
+	if err != nil || n < 0 {
+		return 0
+	}
+	return uint64(n)
+}
+
+func rowsFromExec(result sql.Result, err error) (uint64, error) {
+	if err != nil {
+		return 0, err
+	}
+	return rowsFromResult(result), nil
+}
+
+// countIfColumnStore runs COUNT(*) on columnar engines. CTAS/INSERT/MERGE often
+// report RowsAffected 0. Call on the target after full-refresh/truncate, or on
+// the staging temp table after incremental/append.
+func (e *Executor) countIfColumnStore(fullName string, rows uint64) uint64 {
+	if e.DbConn == nil || !e.DbConn.GetType().IsColumnStore() {
+		return rows
+	}
+	quoted, err := e.quoteFullTableName(fullName)
+	if err != nil {
+		g.Debug("skip count of %s: %s", fullName, err)
+		return rows
+	}
+	n, err := e.DbConn.GetCount(quoted)
+	if err != nil || n < 0 {
+		g.Debug("count of %s failed: %s", quoted, err)
+		return rows
+	}
+	return uint64(n)
 }
 
 // Connect establishes a database connection to the target.
@@ -161,19 +217,40 @@ func (e *Executor) CreateSchemas() error {
 // Execute runs all selected nodes with a ready-queue scheduler.
 // A node is dispatched as soon as its selected dependencies complete (no level barriers).
 func (e *Executor) Execute() error {
+	start := time.Now()
+	e.startTime = &start
+	e.attachLogSink()
+	defer e.detachLogSink()
+
 	if err := e.Connect(); err != nil {
+		if !sling.IsPipelineRunMode() {
+			e.syncBuildStatus(sling.ExecStatusError, err)
+		}
 		return err
 	}
 	defer e.Close()
 
 	if err := e.CreateSchemas(); err != nil {
+		if !sling.IsPipelineRunMode() {
+			e.syncBuildStatus(sling.ExecStatusError, err)
+		}
 		return err
 	}
 
 	total := len(e.Build.Selected)
 	if total == 0 {
 		fmt.Println("No models selected.")
+		if !sling.IsPipelineRunMode() {
+			e.syncBuildStatus(sling.ExecStatusSuccess, nil)
+		}
 		return nil
+	}
+
+	stopHB := func() {}
+	if !sling.IsPipelineRunMode() {
+		e.syncBuildStatus(sling.ExecStatusRunning, nil)
+		stopHB = e.startBuildHeartbeat()
+		defer stopHB()
 	}
 
 	threads := e.Build.Options.Threads
@@ -260,11 +337,11 @@ func (e *Executor) Execute() error {
 			result := e.runNode(name, nodeIdx, total)
 
 			mu.Lock()
-			e.Results = append(e.Results, result)
 			seedSkipped := result.Skipped && e.Build.Options.NoSeeds &&
 				e.Build.DAG.Nodes[name] != nil && e.Build.DAG.Nodes[name].Seed != nil
 			// failedSet is also read under e.ctx.Mux in runNode — hold both
 			e.ctx.Mux.Lock()
+			e.Results = append(e.Results, result)
 			if result.Err != nil || (result.Skipped && !seedSkipped) {
 				e.failedSet[name] = true
 			}
@@ -305,7 +382,7 @@ func (e *Executor) Execute() error {
 		if wasStarted {
 			continue
 		}
-		result := ExecutionResult{Name: name, Skipped: true}
+		result := ExecutionResult{Name: name, Skipped: true, StartTime: g.Ptr(time.Now())}
 		if node := e.Build.DAG.Nodes[name]; node != nil {
 			if node.Seed != nil {
 				result.NodeType = "seed"
@@ -317,10 +394,11 @@ func (e *Executor) Execute() error {
 				result.Name = node.Model.FullTableName
 			}
 		}
-		e.Results = append(e.Results, result)
 		e.ctx.Mux.Lock()
+		e.Results = append(e.Results, result)
 		e.failedSet[name] = true
 		e.ctx.Mux.Unlock()
+		e.syncModelStatus(name, result, sling.ExecStatusSkipped)
 	}
 
 	fmt.Println()
@@ -337,7 +415,16 @@ func (e *Executor) Execute() error {
 		for i, err := range errs {
 			msgs[i] = err.Error()
 		}
-		return g.Error("build completed with %d error(s): %s", len(errs), strings.Join(msgs, "; "))
+		err := g.Error("build completed with %d error(s): %s", len(errs), strings.Join(msgs, "; "))
+		stopHB()
+		if !sling.IsPipelineRunMode() {
+			e.syncBuildStatus(sling.ExecStatusError, err)
+		}
+		return err
+	}
+	stopHB()
+	if !sling.IsPipelineRunMode() {
+		e.syncBuildStatus(sling.ExecStatusSuccess, nil)
 	}
 	return nil
 }
@@ -349,9 +436,11 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 
 	var result ExecutionResult
 	result.Name = nodeName
+	result.StartTime = g.Ptr(start)
 	if node == nil {
 		result.Err = g.Error("node '%s' not found in DAG", nodeName)
 		result.Duration = time.Since(start)
+		e.syncModelStatus(nodeName, result, sling.ExecStatusError)
 		return result
 	}
 
@@ -377,17 +466,27 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 			result.Mode = e.Build.GetModelMode(node.Model)
 			result.Name = node.Model.FullTableName
 		}
+		e.syncModelStatus(nodeName, result, sling.ExecStatusSkipped)
 		return result
 	}
 
+	stopHB := func() {}
 	if node.Seed != nil {
 		result.NodeType = "seed"
 		result.Mode = "full-refresh"
 		result.Name = node.Seed.FullTableName
 		e.printProgress(nodeIndex, total, result, true)
-		result.Err = e.executeSeed(node.Seed)
+		e.syncModelStatus(nodeName, result, sling.ExecStatusRunning)
+		stopHB = e.startModelHeartbeat(nodeName, &result)
+		rows, bytes, err := e.executeSeed(node.Seed)
+		e.ctx.Lock()
+		result.Rows, result.Bytes, result.Err = rows, bytes, err
 		result.Duration = time.Since(start)
-		return result
+		snap := result
+		e.ctx.Unlock()
+		stopHB()
+		e.syncModelStatus(nodeName, snap, resultStatus(snap))
+		return snap
 	}
 
 	if node.Model != nil {
@@ -395,18 +494,40 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 		result.NodeType = "model"
 		result.Mode = mode
 		if testOnly {
+			result.NodeType = "test"
 			result.Mode = "test"
 		}
 		result.Name = node.Model.FullTableName
 		e.printProgress(nodeIndex, total, result, true)
+		e.syncModelStatus(nodeName, result, sling.ExecStatusRunning)
+		stopHB = e.startModelHeartbeat(nodeName, &result)
+		var rows uint64
+		var err error
 		if testOnly {
-			result.Err = e.executeModelTests(node.Model)
+			err = e.executeModelTests(node.Model)
 		} else {
-			result.Err = e.executeModel(node.Model, mode)
+			rows, err = e.executeModel(node.Model, mode)
 		}
+		e.ctx.Lock()
+		result.Rows, result.Err = rows, err
 		result.Duration = time.Since(start)
+		snap := result
+		e.ctx.Unlock()
+		stopHB()
+		e.syncModelStatus(nodeName, snap, resultStatus(snap))
+		return snap
 	}
 	return result
+}
+
+func resultStatus(result ExecutionResult) sling.ExecStatus {
+	if result.Skipped {
+		return sling.ExecStatusSkipped
+	}
+	if result.Err != nil {
+		return sling.ExecStatusError
+	}
+	return sling.ExecStatusSuccess
 }
 
 // isDownstreamOfFailed checks if any upstream dependency of the node has failed.
@@ -425,7 +546,7 @@ func (e *Executor) isDownstreamOfFailed(name string) bool {
 }
 
 // executeSeed loads a seed file using the sling task infrastructure.
-func (e *Executor) executeSeed(seed *Seed) error {
+func (e *Executor) executeSeed(seed *Seed) (rows, bytes uint64, err error) {
 	// LoadSeed opens its own target connection. DuckDB-family files allow
 	// one writer, so release the executor handle first.
 	if e.DbConn != nil && e.DbConn.GetType().IsSingleWriterDB() {
@@ -494,16 +615,16 @@ func (e *Executor) parseModelHooks(model *Model, mode string) error {
 }
 
 // executeModel executes a single model based on its mode.
-func (e *Executor) executeModel(model *Model, mode string) error {
+func (e *Executor) executeModel(model *Model, mode string) (rows uint64, err error) {
 	// Parse and execute start hooks
 	if err := e.parseModelHooks(model, mode); err != nil {
-		return g.Error(err, "could not parse hooks for model '%s'", model.Name)
+		return 0, g.Error(err, "could not parse hooks for model '%s'", model.Name)
 	}
 
 	if len(model.startHooks) > 0 {
 		g.Debug("running start hooks for %s", model.Name)
 		if err := model.startHooks.Execute(); err != nil {
-			return g.Error(err, "start hook failed for model '%s'", model.Name)
+			return 0, g.Error(err, "start hook failed for model '%s'", model.Name)
 		}
 	}
 
@@ -511,42 +632,41 @@ func (e *Executor) executeModel(model *Model, mode string) error {
 	for i, stmt := range model.PreStatements {
 		g.Debug("running pre-statement %d/%d for %s", i+1, len(model.PreStatements), model.Name)
 		if _, err := e.DbConn.Exec(stmt); err != nil {
-			return g.Error(err, "pre-statement %d failed for model '%s'", i+1, model.Name)
+			return 0, g.Error(err, "pre-statement %d failed for model '%s'", i+1, model.Name)
 		}
 	}
 
-	var err error
 	switch mode {
 	case "full-refresh":
-		err = e.executeFullRefresh(model)
+		rows, err = e.executeFullRefresh(model)
 	case "view":
-		err = e.executeView(model)
+		rows, err = e.executeView(model)
 	case "truncate":
-		err = e.executeTruncate(model)
+		rows, err = e.executeTruncate(model)
 	case "incremental":
-		err = e.executeIncremental(model)
+		rows, err = e.executeIncremental(model)
 	case "append", "snapshot": // snapshot is deprecated alias
-		err = e.executeAppend(model)
+		rows, err = e.executeAppend(model)
 	default:
 		err = g.Error("unknown mode '%s' for model '%s'", mode, model.Name)
 	}
 
 	if err != nil {
-		return err
+		return rows, err
 	}
 
 	// Post-statements (from multi-statement SQL file)
 	for i, stmt := range model.PostStatements {
 		g.Debug("running post-statement %d/%d for %s", i+1, len(model.PostStatements), model.Name)
 		if _, err := e.DbConn.Exec(stmt); err != nil {
-			return g.Error(err, "post-statement %d failed for model '%s'", i+1, model.Name)
+			return rows, g.Error(err, "post-statement %d failed for model '%s'", i+1, model.Name)
 		}
 	}
 
 	// Declarative data tests
 	if len(model.Config.Tests) > 0 {
 		if err := e.executeModelTests(model); err != nil {
-			return err
+			return rows, err
 		}
 	}
 
@@ -554,66 +674,72 @@ func (e *Executor) executeModel(model *Model, mode string) error {
 	if len(model.endHooks) > 0 {
 		g.Debug("running end hooks for %s", model.Name)
 		if err := model.endHooks.Execute(); err != nil {
-			return g.Error(err, "end hook failed for model '%s'", model.Name)
+			return rows, g.Error(err, "end hook failed for model '%s'", model.Name)
 		}
 	}
 
-	return nil
+	return rows, nil
 }
 
 // executeFullRefresh rebuilds the table. Prefer atomic swap (tmp + rename) or
 // CREATE OR REPLACE TABLE where supported so the target is never missing mid-build.
-func (e *Executor) executeFullRefresh(model *Model) error {
+func (e *Executor) executeFullRefresh(model *Model) (uint64, error) {
 	sql := model.CompiledSQL
 	cascade := e.wantCascade(model)
 
 	// Drop any existing view first (model may previously have been a view)
 	_ = e.dropView(model.FullTableName, cascade)
 
+	var rows uint64
+	var err error
+
 	// Path A: CREATE OR REPLACE TABLE (Snowflake, BigQuery, DuckDB, Databricks)
 	if supportsCreateOrReplaceTable(e.DbConn.GetType()) && !e.isClickHouse() {
-		return e.createOrReplaceTableAs(model.FullTableName, sql, model)
+		rows, err = e.createOrReplaceTableAs(model.FullTableName, sql, model)
+	} else if e.supportsRenameTable() {
+		// Path B: atomic temp + rename swap when rename is available
+		rows, err = e.executeFullRefreshAtomic(model, sql, cascade)
+	} else {
+		// Path C: fallback — drop then CTAS (brief downtime window)
+		if err = e.dropTable(model.FullTableName, cascade); err != nil {
+			return 0, err
+		}
+		rows, err = e.createTableAs(model.FullTableName, sql, model)
 	}
-
-	// Path B: atomic temp + rename swap when rename is available
-	if e.supportsRenameTable() {
-		return e.executeFullRefreshAtomic(model, sql, cascade)
+	if err != nil {
+		return rows, err
 	}
-
-	// Path C: fallback — drop then CTAS (brief downtime window)
-	if err := e.dropTable(model.FullTableName, cascade); err != nil {
-		return err
-	}
-	return e.createTableAs(model.FullTableName, sql, model)
+	return e.countIfColumnStore(model.FullTableName, rows), nil
 }
 
 // executeFullRefreshAtomic creates into a temp table, then renames into place.
-func (e *Executor) executeFullRefreshAtomic(model *Model, sql string, cascade bool) error {
+func (e *Executor) executeFullRefreshAtomic(model *Model, sql string, cascade bool) (uint64, error) {
 	tmpFull := e.getTempTableName(model)
 	// Ensure temp is clean
 	_ = e.dropTable(tmpFull, false)
 
-	if err := e.createTableAs(tmpFull, sql, model); err != nil {
+	rows, err := e.createTableAs(tmpFull, sql, model)
+	if err != nil {
 		_ = e.dropTable(tmpFull, false)
-		return g.Error(err, "could not create temp table for full-refresh of '%s'", model.Name)
+		return 0, g.Error(err, "could not create temp table for full-refresh of '%s'", model.Name)
 	}
 
 	// Drop target (or rename aside if we want even less downtime — drop is fine
 	// once data is ready in tmp; window is only drop+rename, not CTAS duration)
 	if err := e.dropTable(model.FullTableName, cascade); err != nil {
 		_ = e.dropTable(tmpFull, false)
-		return err
+		return rows, err
 	}
 
 	if err := e.renameTable(tmpFull, model.FullTableName); err != nil {
 		// Best-effort: leave tmp so data isn't lost
-		return g.Error(err, "could not rename temp table to '%s' (temp left at %s)", model.FullTableName, tmpFull)
+		return rows, g.Error(err, "could not rename temp table to '%s' (temp left at %s)", model.FullTableName, tmpFull)
 	}
-	return nil
+	return rows, nil
 }
 
 // executeView creates or replaces a view.
-func (e *Executor) executeView(model *Model) error {
+func (e *Executor) executeView(model *Model) (uint64, error) {
 	cascade := e.wantCascade(model)
 
 	// Drop any existing table first (dirty fixtures plant tables that
@@ -630,36 +756,44 @@ func (e *Executor) executeView(model *Model) error {
 }
 
 // executeTruncate creates the table on first run, truncates + inserts on subsequent runs.
-func (e *Executor) executeTruncate(model *Model) error {
+func (e *Executor) executeTruncate(model *Model) (uint64, error) {
 	sql := model.CompiledSQL
 
 	exists, err := e.tableExists(model)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if !exists {
-		return e.createTableAs(model.FullTableName, sql, model)
+		rows, err := e.createTableAs(model.FullTableName, sql, model)
+		if err != nil {
+			return 0, err
+		}
+		return e.countIfColumnStore(model.FullTableName, rows), nil
 	}
 
 	if err := e.truncateTable(model.FullTableName); err != nil {
-		return err
+		return 0, err
 	}
-	return e.insertSelect(model.FullTableName, sql)
+	rows, err := e.insertSelect(model.FullTableName, sql)
+	if err != nil {
+		return 0, err
+	}
+	return e.countIfColumnStore(model.FullTableName, rows), nil
 }
 
 // executeIncremental dispatches to the correct incremental strategy based on the
 // model's detected style. dbt-style models use executeLegacyIncremental (the
 // original is_incremental() path); sling-style models use resolveRange + executeRange.
-func (e *Executor) executeIncremental(model *Model) error {
+func (e *Executor) executeIncremental(model *Model) (uint64, error) {
 	uniqueKeys := getUniqueKeys(model)
 	if len(uniqueKeys) == 0 {
-		return g.Error("model '%s' uses incremental mode but has no unique_key defined in config()", model.Name)
+		return 0, g.Error("model '%s' uses incremental mode but has no unique_key defined in config()", model.Name)
 	}
 
 	exists, err := e.tableExists(model)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !exists || e.Build.Options.FullRefresh {
 		return e.executeFullRefresh(model)
@@ -668,30 +802,30 @@ func (e *Executor) executeIncremental(model *Model) error {
 	switch model.Style {
 	case StyleDbt:
 		if e.Build.Options.Range != nil {
-			return g.Error("model '%s' uses is_incremental() (dbt style); --range requires {incremental_where_cond} (sling style)", model.Name)
+			return 0, g.Error("model '%s' uses is_incremental() (dbt style); --range requires incremental_where_cond() (sling style)", model.Name)
 		}
 		return e.executeLegacyIncremental(model)
 	case StyleSling:
 		r, err := e.resolveRange(model)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		return e.executeRange(model, r)
 	default:
-		return g.Error("model '%s': unknown incremental style %d", model.Name, model.Style)
+		return 0, g.Error("model '%s': unknown incremental style %d", model.Name, model.Style)
 	}
 }
 
 // executeLegacyIncremental is the original dbt-style incremental path, preserved
 // byte-for-byte. Recompiles with is_incremental()=true, stages into a temp table,
 // and merges using the configured strategy.
-func (e *Executor) executeLegacyIncremental(model *Model) error {
+func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 	t := model.FullTableName
 
 	// Subsequent run: recompile with is_incremental()=true
 	_, err := e.Build.Engine.CompileModel(model, &IncrementalContext{IsIncremental: true})
 	if err != nil {
-		return g.Error(err, "could not compile incremental SQL for '%s'", model.Name)
+		return 0, g.Error(err, "could not compile incremental SQL for '%s'", model.Name)
 	}
 
 	// Re-apply table reference rewriting after incremental recompilation
@@ -703,7 +837,7 @@ func (e *Executor) executeLegacyIncremental(model *Model) error {
 	// Re-split after recompilation since CompiledSQL changed
 	result, splitErr := MakeModelSQL(model.CompiledSQL, e.DbConn.GetType())
 	if splitErr != nil {
-		return g.Error(splitErr, "could not parse incremental SQL for '%s'", model.Name)
+		return 0, g.Error(splitErr, "could not parse incremental SQL for '%s'", model.Name)
 	}
 	model.CompiledSQL = result.ModelQuery
 	incrementalSQL := model.CompiledSQL
@@ -719,18 +853,8 @@ func (e *Executor) executeLegacyIncremental(model *Model) error {
 		}
 	}()
 
-	// ClickHouse temp staging uses Memory engine (model=nil → Memory default in createTableAs)
-	if e.isClickHouse() {
-		quoted, qErr := e.quoteFullTableName(tempTable)
-		if qErr != nil {
-			return qErr
-		}
-		_, err = e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = Memory AS (%s)", quoted, incrementalSQL))
-	} else {
-		err = e.createTableAs(tempTable, incrementalSQL, nil)
-	}
-	if err != nil {
-		return g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
+	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
+		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
 
 	// Generate and execute merge SQL using sling's merge infrastructure
@@ -738,37 +862,70 @@ func (e *Executor) executeLegacyIncremental(model *Model) error {
 	// Quote target/temp for merge; GenerateMergeSQL expects usable identifiers
 	tgtQuoted, err := e.quoteFullTableName(t)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	tmpQuoted, err := e.quoteFullTableName(tempTable)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	mergeSQL, err := e.DbConn.GenerateMergeSQLWithStrategy(tmpQuoted, tgtQuoted, uniqueKeys, &strategy)
 	if err != nil {
-		return g.Error(err, "could not generate merge SQL for '%s'", model.Name)
+		return 0, g.Error(err, "could not generate merge SQL for '%s'", model.Name)
 	}
 
-	_, err = e.DbConn.ExecMulti(mergeSQL)
+	rows, err := rowsFromExec(e.DbConn.ExecMulti(mergeSQL))
 	if err != nil {
-		return g.Error(err, "could not execute incremental merge for '%s'", model.Name)
+		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}
-
-	return nil
+	return e.countIfColumnStore(tempTable, rows), nil
 }
 
 // executeAppend handles append-only mode (formerly "snapshot").
-// First run: CTAS. Subsequent: INSERT.
-func (e *Executor) executeAppend(model *Model) error {
+// First run: CTAS. Subsequent: INSERT. Column stores stage into a temp table
+// and COUNT(*) that table, because INSERT RowsAffected is often 0.
+func (e *Executor) executeAppend(model *Model) (uint64, error) {
 	sql := model.CompiledSQL
 
 	exists, err := e.tableExists(model)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if !exists {
-		return e.createTableAs(model.FullTableName, sql, model)
+		rows, err := e.createTableAs(model.FullTableName, sql, model)
+		if err != nil {
+			return 0, err
+		}
+		return e.countIfColumnStore(model.FullTableName, rows), nil
+	}
+
+	if e.DbConn != nil && e.DbConn.GetType().IsColumnStore() {
+		tempTable := e.getTempTableName(model)
+		defer func() {
+			if dropErr := e.dropTable(tempTable, false); dropErr != nil {
+				g.Debug("could not drop temp table %s: %s", tempTable, dropErr)
+			}
+		}()
+
+		rows, err := e.createTempTable(tempTable, sql)
+		if err != nil {
+			return 0, g.Error(err, "could not create temp table for append of '%s'", model.Name)
+		}
+		rows = e.countIfColumnStore(tempTable, rows)
+
+		tgtQuoted, err := e.quoteFullTableName(model.FullTableName)
+		if err != nil {
+			return rows, err
+		}
+		tmpQuoted, err := e.quoteFullTableName(tempTable)
+		if err != nil {
+			return rows, err
+		}
+		// No wrapping parens: ClickHouse rejects INSERT INTO t (SELECT * FROM tmp)
+		if _, err = e.DbConn.Exec(g.F("INSERT INTO %s SELECT * FROM %s", tgtQuoted, tmpQuoted)); err != nil {
+			return rows, g.Error(err, "could not append from temp table into '%s'", model.Name)
+		}
+		return rows, nil
 	}
 
 	return e.insertSelect(model.FullTableName, sql)
@@ -880,6 +1037,19 @@ func (e *Executor) getTempTableName(model *Model) string {
 	return getTempTableName(model, e.RunID)
 }
 
+// createTempTable stages SQL into a temp table. ClickHouse uses Memory engine
+// (no ORDER BY). Other dialects use CREATE TABLE AS.
+func (e *Executor) createTempTable(tempTable, sql string) (uint64, error) {
+	if e.isClickHouse() {
+		quoted, err := e.quoteFullTableName(tempTable)
+		if err != nil {
+			return 0, err
+		}
+		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = Memory AS (%s)", quoted, sql)))
+	}
+	return e.createTableAs(tempTable, sql, nil)
+}
+
 // getTempTableName is the package-level implementation.
 // Uses a schema-qualified name so that GetColumns() can find the table for merge SQL generation.
 func getTempTableName(model *Model, runID string) string {
@@ -895,6 +1065,225 @@ func getTempTableName(model *Model, runID string) string {
 	}, model.Name)
 	tempName := g.F("_sling_build_tmp_%s_%s", safeName, runID)
 	return g.F("%s.%s", model.Schema, tempName)
+}
+
+func (e *Executor) attachLogSink() {
+	prev := env.LogSink
+	e.prevLogSink = prev
+	env.LogSink = func(ll *g.LogLine) {
+		if prev != nil {
+			prev(ll)
+		}
+		if e.OutputLines == nil {
+			return
+		}
+		select {
+		case e.OutputLines <- ll:
+		default:
+		}
+	}
+}
+
+func (e *Executor) detachLogSink() {
+	env.LogSink = e.prevLogSink
+}
+
+func (e *Executor) drainLogs() g.LogLines {
+	lines := g.LogLines{}
+	if e.OutputLines == nil {
+		return lines
+	}
+	for {
+		select {
+		case ol := <-e.OutputLines:
+			lines = append(lines, *ol)
+		default:
+			return lines
+		}
+	}
+}
+
+func (e *Executor) fileName() *string {
+	if v := os.Getenv("SLING_FILE_NAME"); v != "" && IsConfigFileName(filepath.Base(v)) {
+		return g.Ptr(v)
+	}
+	if e.Build != nil && e.Build.Project != nil {
+		if p, ok := FindConfigFile(e.Build.Project.Dir); ok {
+			if rel, err := filepath.Rel(e.Build.Project.Dir, p); err == nil {
+				return g.Ptr(rel)
+			}
+			return g.Ptr(p)
+		}
+	}
+	return nil
+}
+
+func (e *Executor) selectedOrder(name string) int {
+	if e.Build == nil {
+		return 0
+	}
+	for i, n := range e.Build.Selected {
+		if n == name {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func (e *Executor) tryNumber() int {
+	n := cast.ToInt(os.Getenv("SLING_TRY_NUMBER"))
+	return lo.Ternary(n == 0, 1, n)
+}
+
+func (e *Executor) syncModelStatus(modelName string, result ExecutionResult, status sling.ExecStatus) {
+	ms := e.makeModelStatus(modelName, result, status)
+	_ = sling.StoreSet(ms)
+}
+
+func (e *Executor) makeModelStatus(modelName string, result ExecutionResult, status sling.ExecStatus) *store.BuildModelStatus {
+	ms := &store.BuildModelStatus{
+		ProjectID:  g.String(os.Getenv("SLING_PROJECT_ID")),
+		JobID:      os.Getenv("SLING_JOB_ID"),
+		ExecID:     os.Getenv("SLING_EXEC_ID"),
+		FileName:   e.fileName(),
+		Target:     e.ConnName,
+		ModelName:  modelName,
+		NodeType:   result.NodeType,
+		ObjectName: result.Name,
+		Mode:       result.Mode,
+		Status:     status,
+		Rows:       result.Rows,
+		Bytes:      result.Bytes,
+		Order:      e.selectedOrder(modelName),
+		Tries:      e.tryNumber(),
+		TryNumber:  e.tryNumber(),
+		NewLines:   e.drainLogs(),
+		TimeNs:     time.Now().UnixNano(),
+		AgentID:    g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID")),
+	}
+	ms.Hostname, _ = os.Hostname()
+	if result.Err != nil {
+		ms.Error = g.Ptr(cast.ToString(result.Err))
+	}
+	if result.StartTime != nil {
+		ms.StartTimeNs = g.Int64(result.StartTime.UnixNano())
+	}
+	if status != sling.ExecStatusRunning {
+		ms.EndTimeNs = g.Int64(time.Now().UnixNano())
+	}
+	return ms
+}
+
+func (e *Executor) startModelHeartbeat(modelName string, result *ExecutionResult) func() {
+	ticker := time.NewTicker(5 * time.Second)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	var once sync.Once
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				e.ctx.Lock()
+				snap := *result
+				e.ctx.Unlock()
+				e.syncModelStatus(modelName, snap, sling.ExecStatusRunning)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		once.Do(func() {
+			close(done)
+			wg.Wait()
+		})
+	}
+}
+
+func (e *Executor) startBuildHeartbeat() func() {
+	ticker := time.NewTicker(5 * time.Second)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	var once sync.Once
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				e.syncBuildStatus(sling.ExecStatusRunning, nil)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		once.Do(func() {
+			close(done)
+			wg.Wait()
+		})
+	}
+}
+
+func (e *Executor) syncBuildStatus(status sling.ExecStatus, runErr error) {
+	_ = sling.StoreSet(e.makeBuildStatus(status, runErr))
+}
+
+func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store.BuildStatus {
+	e.ctx.Lock()
+	results := append([]ExecutionResult(nil), e.Results...)
+	e.ctx.Unlock()
+
+	bs := &store.BuildStatus{
+		ProjectID:  g.String(os.Getenv("SLING_PROJECT_ID")),
+		JobID:      os.Getenv("SLING_JOB_ID"),
+		ExecID:     os.Getenv("SLING_EXEC_ID"),
+		FileName:   e.fileName(),
+		Target:     e.ConnName,
+		Status:     status,
+		ModelCount: 0,
+		Tries:      e.tryNumber(),
+		TryNumber:  e.tryNumber(),
+		NewLines:   e.drainLogs(),
+		TimeNs:     time.Now().UnixNano(),
+		AgentID:    g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID")),
+	}
+	if e.Build != nil {
+		bs.Select = e.Build.Options.Select
+		bs.Exclude = e.Build.Options.Exclude
+		bs.FullRefresh = e.Build.Options.FullRefresh
+		bs.ModelCount = len(e.Build.Selected)
+	}
+	bs.Hostname, _ = os.Hostname()
+	if e.startTime != nil {
+		bs.StartTimeNs = g.Int64(e.startTime.UnixNano())
+	}
+	if status != sling.ExecStatusRunning {
+		bs.EndTimeNs = g.Int64(time.Now().UnixNano())
+		if status == sling.ExecStatusError {
+			bs.ExitCode = 1
+		}
+	}
+	if runErr != nil {
+		bs.Error = g.Ptr(cast.ToString(runErr))
+	}
+	for _, r := range results {
+		bs.Rows += r.Rows
+		bs.Bytes += r.Bytes
+		switch {
+		case r.Skipped:
+			bs.SkippedCount++
+		case r.Err != nil:
+			bs.FailedCount++
+		default:
+			bs.OkCount++
+		}
+	}
+	return bs
 }
 
 // printProgress prints a single line of execution progress.
@@ -1362,17 +1751,18 @@ func (e *Executor) queryTargetMax(model *Model, updateKey string) (string, iop.C
 // executeRange iterates over the chunks in r and runs a merge for each one.
 // On any chunk failure it calls handleChunkError and returns.
 // On all-success it conditionally advances SLING_STATE.
-func (e *Executor) executeRange(model *Model, r *Range) error {
+func (e *Executor) executeRange(model *Model, r *Range) (uint64, error) {
 	if len(r.Chunks) == 0 {
 		g.Debug("build[%s]: range resolved to 0 chunks; skipping", model.Name)
-		return nil
+		return 0, nil
 	}
 
 	updateKey := model.Config.UpdateKey
 	if updateKey == "" {
-		return g.Error("model '%s': sling-style incremental requires update_key in config()", model.Name)
+		return 0, g.Error("model '%s': sling-style incremental requires update_key in config()", model.Name)
 	}
 
+	var rows uint64
 	multi := len(r.Chunks) > 1
 	for i, chunk := range r.Chunks {
 		whereCond := chunk.WhereCond(updateKey, e.DbConn.Quote)
@@ -1388,8 +1778,9 @@ func (e *Executor) executeRange(model *Model, r *Range) error {
 		}
 
 		chunkStart := time.Now()
-		chunkErr := e.runMergeForChunk(model, incCtx)
+		chunkRows, chunkErr := e.runMergeForChunk(model, incCtx)
 		chunkDur := time.Since(chunkStart)
+		rows += chunkRows
 
 		if multi {
 			g.Debug("%s", formatChunkProgressLine(i+1, len(r.Chunks), chunk, updateKey, chunkDur, chunkErr != nil))
@@ -1399,7 +1790,7 @@ func (e *Executor) executeRange(model *Model, r *Range) error {
 		}
 
 		if chunkErr != nil {
-			return e.handleChunkError(model, r, i, chunkErr)
+			return rows, e.handleChunkError(model, r, i, chunkErr)
 		}
 	}
 
@@ -1410,18 +1801,18 @@ func (e *Executor) executeRange(model *Model, r *Range) error {
 		}
 	}
 
-	return nil
+	return rows, nil
 }
 
 // runMergeForChunk compiles the model with incCtx, rewrites refs, and executes
 // the temp-table + merge strategy. This is factored from executeLegacyIncremental.
-func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) error {
+func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (uint64, error) {
 	t := model.FullTableName
 	uniqueKeys := getUniqueKeys(model)
 
 	_, err := e.Build.Engine.CompileModel(model, incCtx)
 	if err != nil {
-		return g.Error(err, "could not compile incremental SQL for '%s'", model.Name)
+		return 0, g.Error(err, "could not compile incremental SQL for '%s'", model.Name)
 	}
 
 	// Honor rewrite: false
@@ -1432,7 +1823,7 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) er
 
 	result, splitErr := MakeModelSQL(model.CompiledSQL, e.DbConn.GetType())
 	if splitErr != nil {
-		return g.Error(splitErr, "could not parse incremental SQL for '%s'", model.Name)
+		return 0, g.Error(splitErr, "could not parse incremental SQL for '%s'", model.Name)
 	}
 	model.CompiledSQL = result.ModelQuery
 	incrementalSQL := model.CompiledSQL
@@ -1445,38 +1836,28 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) er
 		}
 	}()
 
-	if e.isClickHouse() {
-		quoted, qErr := e.quoteFullTableName(tempTable)
-		if qErr != nil {
-			return qErr
-		}
-		_, err = e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = Memory AS (%s)", quoted, incrementalSQL))
-	} else {
-		err = e.createTableAs(tempTable, incrementalSQL, nil)
-	}
-	if err != nil {
-		return g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
+	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
+		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
 
 	tgtQuoted, err := e.quoteFullTableName(t)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	tmpQuoted, err := e.quoteFullTableName(tempTable)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	mergeSQL, err := e.DbConn.GenerateMergeSQLWithStrategy(tmpQuoted, tgtQuoted, uniqueKeys, &strategy)
 	if err != nil {
-		return g.Error(err, "could not generate merge SQL for '%s'", model.Name)
+		return 0, g.Error(err, "could not generate merge SQL for '%s'", model.Name)
 	}
 
-	_, err = e.DbConn.ExecMulti(mergeSQL)
+	rows, err := rowsFromExec(e.DbConn.ExecMulti(mergeSQL))
 	if err != nil {
-		return g.Error(err, "could not execute incremental merge for '%s'", model.Name)
+		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}
-
-	return nil
+	return e.countIfColumnStore(tempTable, rows), nil
 }
 
 // handleChunkError formats an error from a failed chunk and optionally prints

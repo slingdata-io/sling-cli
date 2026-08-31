@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/flarco/g"
@@ -214,6 +213,11 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 
 	opts.Compile = compileMode
 
+	os.Setenv("SLING_CLI", "TRUE")
+	if os.Getenv("SLING_RUN_MODE") == "" {
+		os.Setenv("SLING_RUN_MODE", "build")
+	}
+
 	// Validate flag combinations
 	if opts.Prod && opts.Schema != "" {
 		return ok, g.Error("cannot combine --prod and --schema")
@@ -223,7 +227,7 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	// work with (no --target, no -r), show help instead of walking the tree.
 	// This avoids slurping every .sql file under cwd as "models".
 	if opts.Target == "" && !opts.Recursive {
-		if _, err := os.Stat(filepath.Join(projectPath, build.ConfigFileName)); os.IsNotExist(err) {
+		if _, found := build.FindConfigFile(projectPath); !found {
 			flaggy.ShowHelp("")
 			return ok, nil
 		}
@@ -260,6 +264,9 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	// Execute the build
 	if err := b.Execute(); err != nil {
 		return ok, g.Error(err, "build execution failed")
+	}
+	if err := testOutput(int64(b.ExecRows), b.ExecBytes, 0); err != nil {
+		return ok, err
 	}
 	return ok, nil
 }

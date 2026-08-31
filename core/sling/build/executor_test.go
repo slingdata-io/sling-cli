@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -12,6 +13,35 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockSQLResult struct {
+	n   int64
+	err error
+}
+
+func (m mockSQLResult) LastInsertId() (int64, error) { return 0, nil }
+func (m mockSQLResult) RowsAffected() (int64, error) { return m.n, m.err }
+
+func TestExecutionResultRowsClamp(t *testing.T) {
+	assert.Equal(t, uint64(0), rowsFromResult(nil))
+	assert.Equal(t, uint64(0), rowsFromResult(mockSQLResult{n: -1}))
+	assert.Equal(t, uint64(0), rowsFromResult(mockSQLResult{n: 5, err: errors.New("unsupported")}))
+	assert.Equal(t, uint64(0), rowsFromResult(mockSQLResult{n: 0}))
+	assert.Equal(t, uint64(42), rowsFromResult(mockSQLResult{n: 42}))
+
+	rows, err := rowsFromExec(nil, errors.New("boom"))
+	assert.Equal(t, uint64(0), rows)
+	assert.Error(t, err)
+
+	rows, err = rowsFromExec(mockSQLResult{n: -1}, nil)
+	assert.Equal(t, uint64(0), rows)
+	assert.NoError(t, err)
+}
+
+func TestCountIfColumnStoreSkipped(t *testing.T) {
+	e := &Executor{}
+	assert.Equal(t, uint64(7), e.countIfColumnStore("analytics.t", 7))
+}
 
 func TestNewExecutor(t *testing.T) {
 	dir := getTestFixturePath("sample_project")
@@ -302,7 +332,7 @@ func TestIncrementalRequiresUniqueKey(t *testing.T) {
 	exec, err := NewExecutor(b)
 	require.NoError(t, err)
 
-	err = exec.executeIncremental(model)
+	_, err = exec.executeIncremental(model)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no unique_key defined")
 }

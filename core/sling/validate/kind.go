@@ -78,7 +78,7 @@ func detectKindFromPath(path string) Kind {
 		return KindBuild
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		if _, err := os.Stat(filepath.Join(path, build.ConfigFileName)); err == nil {
+		if _, ok := build.FindConfigFile(path); ok {
 			return KindBuild
 		}
 	}
@@ -101,7 +101,7 @@ func isManifestName(name string) bool {
 
 // isBuildConfigName reports whether the file name is a sling_build config.
 func isBuildConfigName(name string) bool {
-	return name == build.ConfigFileName || strings.EqualFold(name, "sling_build.yaml")
+	return build.IsConfigFileName(name)
 }
 
 // isEnvFileName reports whether the file name is an env.yaml connections file.

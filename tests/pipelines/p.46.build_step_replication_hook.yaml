@@ -40,8 +40,12 @@ hooks:
       check: state.transform.ok >= 1
       failure_message: 'transform step state missing ok count'
 
+    - type: check
+      check: state.transform.rows == 2
+      failure_message: 'expected 2 rows from stg_orders, got {state.transform.rows}'
+
     - type: log
-      message: 'SUCCESS: replication end-hook type:build ok (rows={store.stg[0].cnt}, label={store.stg[0].run_label})'
+      message: 'SUCCESS: replication end-hook type:build ok (rows={store.stg[0].cnt}, build_rows={state.transform.rows}, label={store.stg[0].run_label})'
 
     - type: query
       connection: '{target.name}'

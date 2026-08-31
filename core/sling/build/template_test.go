@@ -990,6 +990,24 @@ SELECT * FROM {{ ref('stg_customers') }}`,
 	assert.Equal(t, "view", model.Config.Mode)
 }
 
+func TestCompileWithConfigUnknownModeRejected(t *testing.T) {
+	project := newTestProject()
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{
+		Name:          "bad_mode",
+		Schema:        "marts",
+		FullTableName: "marts.bad_mode",
+		RawSQL: `{%- config(mode='vew') -%}
+SELECT 1`,
+	}
+	project.Models["bad_mode"] = model
+
+	_, err := te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown mode 'vew'")
+}
+
 func TestCompileWithConfigEnabled(t *testing.T) {
 	project := newTestProject()
 	te := NewTemplateEngine(project, nil)
@@ -1474,14 +1492,14 @@ func TestCompileModel_SlingStyle_Placeholder_Default(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
 	result, err := te.CompileModel(model, nil)
 	require.NoError(t, err)
 	assert.Contains(t, result, "WHERE 1=1")
-	assert.NotContains(t, result, "{incremental_where_cond}")
+	assert.NotContains(t, result, "incremental_where_cond")
 }
 
 func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
@@ -1492,7 +1510,7 @@ func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1500,7 +1518,7 @@ func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
 	result, err := te.CompileModel(model, ctx)
 	require.NoError(t, err)
 	assert.Contains(t, result, `"created_at" > '2024-01-01'`)
-	assert.NotContains(t, result, "{incremental_where_cond}")
+	assert.NotContains(t, result, "incremental_where_cond")
 }
 
 func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
@@ -1511,7 +1529,7 @@ func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT {incremental_value} AS watermark FROM raw",
+		RawSQL:        "SELECT {{ incremental_value() }} AS watermark FROM raw",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1519,7 +1537,7 @@ func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
 	result, err := te.CompileModel(model, ctx)
 	require.NoError(t, err)
 	assert.Contains(t, result, "'2024-01-01' AS watermark")
-	assert.NotContains(t, result, "{incremental_value}")
+	assert.NotContains(t, result, "incremental_value")
 }
 
 func TestCompileModel_DbtStyle_IsIncrementalTrue(t *testing.T) {
@@ -1570,7 +1588,7 @@ func TestCompileModel_NilContext_UsesDefault(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1578,6 +1596,22 @@ func TestCompileModel_NilContext_UsesDefault(t *testing.T) {
 	require.NoError(t, err)
 	// nil context → DefaultIncrementalContext → WhereCond="1=1"
 	assert.Contains(t, result, "WHERE 1=1")
+}
+
+func TestDetectModelStyle_LegacyPlaceholderErrors(t *testing.T) {
+	_, err := detectModelStyle("SELECT * FROM raw WHERE {incremental_where_cond}")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "{{ incremental_where_cond() }}")
+
+	_, err = detectModelStyle("SELECT {incremental_value} AS watermark FROM raw")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "{{ incremental_value() }}")
+}
+
+func TestDetectModelStyle_SlingJinja(t *testing.T) {
+	style, err := detectModelStyle("SELECT * FROM raw WHERE {{ incremental_where_cond() }}")
+	require.NoError(t, err)
+	assert.Equal(t, StyleSling, style)
 }
 
 func TestCompileModel_ViewModel_NoPlaceholders_NoOp(t *testing.T) {

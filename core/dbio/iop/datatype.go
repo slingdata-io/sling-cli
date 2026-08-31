@@ -223,9 +223,9 @@ type ColumnStats struct {
 	MinLen       int    `json:"min_len,omitempty"`
 	MaxLen       int    `json:"max_len,omitempty"`
 	MaxDecLen    int    `json:"max_dec_len,omitempty"`
-	Min          int64  `json:"min"`
-	Max          int64  `json:"max"`
-	NullCnt      int64  `json:"null_cnt"`
+	Min          int64  `json:"min,omitempty"`
+	Max          int64  `json:"max,omitempty"`
+	NullCnt      int64  `json:"null_cnt,omitempty"`
 	IntCnt       int64  `json:"int_cnt,omitempty"`
 	DecCnt       int64  `json:"dec_cnt,omitempty"`
 	BoolCnt      int64  `json:"bool_cnt,omitempty"`
@@ -235,9 +235,9 @@ type ColumnStats struct {
 	DateTimeCnt  int64  `json:"datetime_cnt,omitempty"`
 	DateTimeZCnt int64  `json:"datetimez_cnt,omitempty"`
 	GeometryCnt  int64  `json:"geometry_cnt,omitempty"`
-	TotalCnt     int64  `json:"total_cnt"`
-	UniqCnt      int64  `json:"uniq_cnt"`
-	Checksum     uint64 `json:"checksum"`
+	TotalCnt     int64  `json:"total_cnt,omitempty"`
+	UniqCnt      int64  `json:"uniq_cnt,omitempty"`
+	Checksum     uint64 `json:"checksum,omitempty"`
 	LastVal      any    `json:"-"` // last non-empty value. useful for state incremental
 }
 

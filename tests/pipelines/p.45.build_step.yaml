@@ -32,6 +32,10 @@ steps:
     check: state.build.ok >= 2
     failure_message: 'expected ok >= 2, got {state.build.ok}'
 
+  - type: check
+    check: state.build.rows == 4
+    failure_message: 'expected 4 rows from stg_orders+fct_orders, got {state.build.rows}'
+
   - type: query
     connection: POSTGRES
     query: |
@@ -61,6 +65,10 @@ steps:
     check: state.build_shortcut.ok >= 1
     failure_message: 'shortcut build: form did not run'
 
+  - type: check
+    check: state.build_shortcut.rows == 2
+    failure_message: 'expected 2 rows from stg_orders shortcut, got {state.build_shortcut.rows}'
+
   - type: query
     connection: POSTGRES
     query: SELECT max(run_label) AS run_label FROM staging.stg_orders
@@ -71,7 +79,7 @@ steps:
     failure_message: 'shortcut build vars not applied'
 
   - type: log
-    message: 'SUCCESS: pipeline type:build step completed (rows={store.fct[0].cnt}, label={store.fct[0].run_label})'
+    message: 'SUCCESS: pipeline type:build step completed (rows={store.fct[0].cnt}, build_rows={state.build.rows}, label={store.fct[0].run_label})'
 
   # Cleanup
   - type: query

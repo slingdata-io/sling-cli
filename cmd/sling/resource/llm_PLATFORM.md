@@ -208,7 +208,7 @@ Uses `GET /project/job/get?job_id=<id>`. The positional argument must begin with
 
 ## 10. `sling platform jobs save`
 
-Create a job (if `id` is empty/missing) or update an existing one (if `id` is present). A single command handles both.
+Create a job (if `id` is empty/missing) or update an existing one (if `id` is present). A single command handles both. The auto-created default job (`default: true`) is not editable — omit `id` and create a new job to set a schedule.
 
 ```bash
 # Create: omit id

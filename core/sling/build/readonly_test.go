@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/slingdata-io/golyglot"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,5 +149,41 @@ func TestValidateReadOnlyQueryParallel(t *testing.T) {
 	close(errCh)
 	for err := range errCh {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateReadOnlyQueryParserLoaded(t *testing.T) {
+	if err := golyglot.Init(); err != nil {
+		t.Skipf("golyglot parser not available: %v", err)
+	}
+	if _, err := golyglot.Parse("show tables", mapDialect(dbio.TypeDbPostgres)); err != nil {
+		t.Skipf("golyglot parse failed: %v", err)
+	}
+
+	allowed := []string{
+		"select 1",
+		"explain select 1",
+		"EXPLAIN ANALYZE SELECT 1",
+		"show tables",
+		"describe foo",
+		"desc foo",
+	}
+	for _, q := range allowed {
+		t.Run("allow/"+q, func(t *testing.T) {
+			assert.NoError(t, ValidateReadOnlyQuery(q, dbio.TypeDbPostgres))
+		})
+	}
+
+	denied := []string{
+		"set search_path to public",
+		"use db",
+		"insert into t values (1)",
+	}
+	for _, q := range denied {
+		t.Run("deny/"+q, func(t *testing.T) {
+			err := ValidateReadOnlyQuery(q, dbio.TypeDbPostgres)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), readOnlyErrPrefix)
+		})
 	}
 }

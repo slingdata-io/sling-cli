@@ -83,6 +83,7 @@ func RunForHook(path string, opts sling.HookBuildRunOptions) (map[string]any, er
 func resultsToState(path, target string, results []ExecutionResult) map[string]any {
 	rows := make([]map[string]any, 0, len(results))
 	ok, failed, skipped := 0, 0, 0
+	var totalRows, totalBytes uint64
 	for _, r := range results {
 		status := "success"
 		errMsg := ""
@@ -97,6 +98,8 @@ func resultsToState(path, target string, results []ExecutionResult) map[string]a
 		default:
 			ok++
 		}
+		totalRows += r.Rows
+		totalBytes += r.Bytes
 		rows = append(rows, g.M(
 			"name", r.Name,
 			"type", r.NodeType,
@@ -104,6 +107,8 @@ func resultsToState(path, target string, results []ExecutionResult) map[string]a
 			"duration", r.Duration.Seconds(),
 			"status", status,
 			"error", errMsg,
+			"rows", r.Rows,
+			"bytes", r.Bytes,
 		))
 	}
 
@@ -118,6 +123,8 @@ func resultsToState(path, target string, results []ExecutionResult) map[string]a
 		"ok", ok,
 		"failed", failed,
 		"skipped", skipped,
+		"rows", totalRows,
+		"bytes", totalBytes,
 		// Convenience: comma-joined names of successful models/seeds
 		"ok_names", joinResultNames(results, "success"),
 	)

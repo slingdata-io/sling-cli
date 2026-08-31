@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -165,7 +166,7 @@ func validateModel(m *Model) error {
 
 	// range.* features require owning the WHERE clause (sling style)
 	if (r.Advance != "" || r.Lookback != "") && m.Style == StyleDbt {
-		return g.Error("model '%s': range.* requires {incremental_where_cond} (sling style); is_incremental() is not compatible with range.*", m.Name)
+		return g.Error("model '%s': range.* requires incremental_where_cond() (sling style); is_incremental() is not compatible with range.*", m.Name)
 	}
 
 	return nil
@@ -241,14 +242,31 @@ type BuildOptions struct {
 // DefaultThreads is the default parallelism for model execution.
 const DefaultThreads = 4
 
-// ValidModes are the recognized materialization modes.
+// ValidModes are the recognized materialization modes, post-normalization.
+// Aliases (table, snapshot) are resolved by normalizeMode before this is checked.
 var ValidModes = map[string]bool{
 	"full-refresh": true,
 	"view":         true,
 	"truncate":     true,
 	"incremental":  true,
 	"append":       true,
-	"snapshot":     true, // deprecated alias for append
+}
+
+// validModeNames returns the valid modes sorted, for error messages.
+func validModeNames() string {
+	names := lo.Keys(ValidModes)
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// validateMode rejects an unrecognized canonical mode. It expects a mode that
+// has already been through normalizeMode, and ignores the empty string since
+// that falls back to the project default.
+func validateMode(mode, modelName string) error {
+	if mode == "" || ValidModes[mode] {
+		return nil
+	}
+	return g.Error("model '%s': unknown mode '%s'; expected one of: %s", modelName, mode, validModeNames())
 }
 
 // normalizeMode maps aliases and deprecated names to canonical modes.
@@ -310,13 +328,57 @@ func applyModeAliases(cfg *ModelConfig, modelName string) error {
 		if canonical == "ephemeral" {
 			return g.Error("model '%s': ephemeral models are not supported; use view or table", modelName)
 		}
+		if err := validateMode(canonical, modelName); err != nil {
+			return err
+		}
 		cfg.Mode = canonical
 	}
 	return nil
 }
 
-// ConfigFileName is the standard config file name.
+// ConfigFileName is the canonical config file name.
 const ConfigFileName = "sling_build.yml"
+
+// ConfigFileNameYAML is the alternate config file name.
+const ConfigFileNameYAML = "sling_build.yaml"
+
+// IsConfigFileName reports whether name is sling_build.yml or sling_build.yaml.
+func IsConfigFileName(name string) bool {
+	n := strings.ToLower(name)
+	return n == ConfigFileName || n == ConfigFileNameYAML
+}
+
+// FindConfigFile returns the path of sling_build.yml or sling_build.yaml in dir.
+// Prefer .yml when both exist. Match is case-insensitive on the file name.
+func FindConfigFile(dir string) (string, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		for _, name := range []string{ConfigFileName, ConfigFileNameYAML} {
+			p := filepath.Join(dir, name)
+			if _, statErr := os.Stat(p); statErr == nil {
+				return p, true
+			}
+		}
+		return "", false
+	}
+	var yamlPath string
+	for _, e := range entries {
+		if e.IsDir() || !IsConfigFileName(e.Name()) {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if strings.EqualFold(e.Name(), ConfigFileName) {
+			return p, true
+		}
+		if yamlPath == "" {
+			yamlPath = p
+		}
+	}
+	if yamlPath != "" {
+		return yamlPath, true
+	}
+	return "", false
+}
 
 // seedExtensions are recognized seed file extensions.
 var seedExtensions = map[string]string{
@@ -355,8 +417,7 @@ func LoadProject(dir string, opts ...BuildOptions) (*BuildProject, error) {
 	}
 
 	// Load root config if present
-	rootConfigPath := filepath.Join(absDir, ConfigFileName)
-	if _, err := os.Stat(rootConfigPath); err == nil {
+	if rootConfigPath, ok := FindConfigFile(absDir); ok {
 		cfg, err := loadConfig(rootConfigPath)
 		if err != nil {
 			return nil, g.Error(err, "could not load %s", rootConfigPath)
@@ -405,6 +466,20 @@ func loadConfig(path string) (*BuildConfig, error) {
 	cfg := &BuildConfig{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, g.Error(err, "could not parse config file")
+	}
+
+	if cfg.Defaults.Mode != "" {
+		canonical, warn := normalizeMode(cfg.Defaults.Mode)
+		if warn != "" {
+			g.Warn("%s: defaults.mode: %s", path, warn)
+		}
+		if canonical == "ephemeral" {
+			return nil, g.Error("%s: defaults.mode: ephemeral models are not supported; use view or table", path)
+		}
+		if !ValidModes[canonical] {
+			return nil, g.Error("%s: unknown defaults.mode '%s'; expected one of: %s", path, cfg.Defaults.Mode, validModeNames())
+		}
+		cfg.Defaults.Mode = canonical
 	}
 
 	return cfg, nil
@@ -517,9 +592,7 @@ func discoverNestedConfigs(project *BuildProject) error {
 		}
 
 		childDir := filepath.Join(project.Dir, entry.Name())
-		childConfigPath := filepath.Join(childDir, ConfigFileName)
-
-		if _, err := os.Stat(childConfigPath); err == nil {
+		if childConfigPath, ok := FindConfigFile(childDir); ok {
 			cfg, err := loadConfig(childConfigPath)
 			if err != nil {
 				return g.Error(err, "could not load %s", childConfigPath)
@@ -669,7 +742,7 @@ func skipNestedBuildDir(project *BuildProject, dir string) bool {
 	if project == nil || dir == "" || dir == project.Dir {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(dir, ConfigFileName)); err != nil {
+	if _, ok := FindConfigFile(dir); !ok {
 		return false
 	}
 	if !project.Recursive {
@@ -709,7 +782,7 @@ func walkFlat(project *BuildProject) error {
 		}
 
 		// Skip config files
-		if info.Name() == ConfigFileName {
+		if IsConfigFileName(info.Name()) {
 			return nil
 		}
 
@@ -757,7 +830,7 @@ func walkForModels(project *BuildProject, walkRoot, baseDir string) error {
 			}
 			return nil
 		}
-		if strings.HasPrefix(info.Name(), ".") || info.Name() == ConfigFileName {
+		if strings.HasPrefix(info.Name(), ".") || IsConfigFileName(info.Name()) {
 			return nil
 		}
 
@@ -802,7 +875,7 @@ func walkForSeeds(project *BuildProject, walkRoot, baseDir string) error {
 			}
 			return nil
 		}
-		if strings.HasPrefix(info.Name(), ".") || info.Name() == ConfigFileName {
+		if strings.HasPrefix(info.Name(), ".") || IsConfigFileName(info.Name()) {
 			return nil
 		}
 
@@ -1276,7 +1349,7 @@ func (p *BuildProject) BuildProdNameIndex() map[string]prodNameEntry {
 // LoadSeed loads a seed file into the target database using the existing
 // sling task infrastructure. This gets CSV/JSON/Parquet parsing, type inference,
 // bulk loading, and all 30+ connectors for free. Seeds always use full-refresh.
-func LoadSeed(seed *Seed, connName string, fullRefresh bool) error {
+func LoadSeed(seed *Seed, connName string, fullRefresh bool) (rows, bytes uint64, err error) {
 	_ = fullRefresh // seeds always full-refresh; kept for call-site clarity
 
 	// Build source connection using file:// prefix for the directory
@@ -1298,14 +1371,15 @@ func LoadSeed(seed *Seed, connName string, fullRefresh bool) error {
 
 	task := sling.NewTask("", cfg)
 	if task.Err != nil {
-		return g.Error(task.Err, "could not create task for seed '%s'", seed.Name)
+		return 0, 0, g.Error(task.Err, "could not create task for seed '%s'", seed.Name)
 	}
 
 	if err := task.Execute(); err != nil {
-		return g.Error(err, "could not load seed '%s' into %s", seed.Name, seed.FullTableName)
+		return 0, 0, g.Error(err, "could not load seed '%s' into %s", seed.Name, seed.FullTableName)
 	}
 
-	return nil
+	inBytes, _ := task.GetBytes()
+	return task.GetCount(), inBytes, nil
 }
 
 // MakeSeedConfig creates a sling.Config for loading a seed file

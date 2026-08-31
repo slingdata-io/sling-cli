@@ -281,6 +281,19 @@ func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)
 }
 
+// IsColumnStore is true for columnar engines where COUNT(*) is cheap
+// (metadata / projection). Row stores such as Postgres are false.
+func (t Type) IsColumnStore() bool {
+	return g.In(t,
+		TypeDbClickhouse, TypeDbProton,
+		TypeDbSnowflake, TypeDbBigQuery,
+		TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck,
+		TypeDbRedshift, TypeDbDatabricks, TypeDbStarRocks,
+		TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbExasol,
+		TypeDbAzureDWH, TypeDbFabric,
+	)
+}
+
 // IsSingleWriterDB is true for engines that allow only one writer per file.
 func (t Type) IsSingleWriterDB() bool {
 	return g.In(t, TypeDbDuckDb, TypeDbMotherDuck, TypeDbDuckLake)

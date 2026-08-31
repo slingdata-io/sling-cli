@@ -26,6 +26,10 @@ func init() {
 			StoreSetPipelineExec(v)
 		case *sling.PipelineStepExecution:
 			StoreSetPipelineExec(v.Pipeline)
+		case *BuildStatus:
+			StoreSetBuildExec(v)
+		case *BuildModelStatus:
+			StoreSetBuildModelExec(v)
 		}
 		return nil
 	}
@@ -266,4 +270,12 @@ func StoreSetReplicationExec(t *sling.TaskExecution) {
 
 func StoreSetPipelineExec(pl *sling.Pipeline) {
 	syncStatus(pl)
+}
+
+func StoreSetBuildExec(bs *BuildStatus) {
+	syncStatus(bs)
+}
+
+func StoreSetBuildModelExec(ms *BuildModelStatus) {
+	syncStatus(ms)
 }

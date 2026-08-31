@@ -568,8 +568,8 @@ const (
 	// to write their own WHERE clauses. This is the zero value and the harmless default
 	// for non-incremental models.
 	StyleDbt Style = iota
-	// StyleSling is the sling-native pattern: models use {incremental_where_cond} and/or
-	// {incremental_value} placeholders, and sling owns the WHERE clause / watermark.
+	// StyleSling is the sling-native pattern: models use incremental_where_cond() and/or
+	// incremental_value() Jinja functions, and sling owns the WHERE clause / watermark.
 	StyleSling
 )
 
@@ -577,12 +577,17 @@ const (
 // incremental pattern the model uses. Returns an error if both patterns appear in
 // the same file — the user must pick one.
 func detectModelStyle(rawSQL string) (Style, error) {
-	hasSling := strings.Contains(rawSQL, "{incremental_where_cond}") ||
-		strings.Contains(rawSQL, "{incremental_value}")
+	hasSling := strings.Contains(rawSQL, "incremental_where_cond(") ||
+		strings.Contains(rawSQL, "incremental_value(")
 	hasDbt := strings.Contains(rawSQL, "is_incremental(")
+	hasLegacy := strings.Contains(rawSQL, "{incremental_where_cond}") ||
+		strings.Contains(rawSQL, "{incremental_value}")
 
+	if hasLegacy && !hasSling {
+		return StyleDbt, g.Error("use {{ incremental_where_cond() }} or {{ incremental_value() }} instead of {incremental_where_cond} / {incremental_value}")
+	}
 	if hasSling && hasDbt {
-		return StyleDbt, g.Error("cannot mix is_incremental() and {incremental_where_cond} in the same model. Choose one pattern: either dbt-compatible (is_incremental() + {{ this }}) or sling-native ({incremental_where_cond})")
+		return StyleDbt, g.Error("cannot mix is_incremental() and incremental_where_cond() in the same model. Choose one pattern: either dbt-compatible (is_incremental() + {{ this }}) or sling-native ({{ incremental_where_cond() }})")
 	}
 	if hasSling {
 		return StyleSling, nil
@@ -597,17 +602,17 @@ func detectModelStyle(rawSQL string) (Style, error) {
 // =============================================================================
 
 // IncrementalContext carries values used by CompileModel to resolve incremental
-// placeholders and flags. One type serves both styles:
+// functions and flags. One type serves both styles:
 //
 //   - Style A (dbt):    CompileModel reads IsIncremental only and passes it to
 //     the is_incremental() Jinja function. WhereCond/Value
-//     are ignored because the SQL does not contain the
-//     {incremental_where_cond}/{incremental_value} placeholders.
+//     are ignored because the SQL does not call
+//     incremental_where_cond() / incremental_value().
 //
-//   - Style B (sling):  CompileModel reads WhereCond/Value and substitutes
-//     them into the rendered SQL via g.R(). is_incremental()
-//     is still registered but returns IsIncremental (which
-//     callers typically leave false for sling-style models).
+//   - Style B (sling):  CompileModel reads WhereCond/Value and exposes them as
+//     the incremental_where_cond() / incremental_value() Jinja
+//     functions. is_incremental() is still registered but
+//     returns IsIncremental (typically false for sling-style).
 //
 // A nil *IncrementalContext is equivalent to DefaultIncrementalContext():
 // first-run semantics (WhereCond=1=1, Value=null, IsIncremental=false).
@@ -617,7 +622,7 @@ type IncrementalContext struct {
 	IsIncremental bool   // drives is_incremental() for dbt-style models
 }
 
-// DefaultIncrementalContext returns a first-run context: placeholders resolve
+// DefaultIncrementalContext returns a first-run context: Jinja functions resolve
 // to "1=1"/"null" and is_incremental() returns false.
 func DefaultIncrementalContext() *IncrementalContext {
 	return &IncrementalContext{
@@ -655,8 +660,8 @@ func NewTemplateEngine(project *BuildProject, vars map[string]any) *TemplateEngi
 // CompileModel compiles a model's SQL template, extracting config and resolving references.
 // The incCtx parameter carries incremental-pattern values:
 //   - Style A (dbt) models read incCtx.IsIncremental via the is_incremental() Jinja function.
-//   - Style B (sling) models read incCtx.WhereCond / incCtx.Value via {incremental_where_cond}
-//     and {incremental_value} placeholders, substituted after Jinja rendering.
+//   - Style B (sling) models read incCtx.WhereCond / incCtx.Value via
+//     incremental_where_cond() and incremental_value() Jinja functions.
 //
 // A nil incCtx is equivalent to DefaultIncrementalContext() — first-run semantics.
 func (te *TemplateEngine) CompileModel(model *Model, incCtx *IncrementalContext) (string, error) {
@@ -731,6 +736,13 @@ func (te *TemplateEngine) CompileModel(model *Model, incCtx *IncrementalContext)
 		return incCtx.IsIncremental
 	})
 
+	envCtx.Set("incremental_where_cond", func(_ *exec.Evaluator, params *exec.VarArgs) (string, error) {
+		return incCtx.WhereCond, nil
+	})
+	envCtx.Set("incremental_value", func(_ *exec.Evaluator, params *exec.VarArgs) (string, error) {
+		return incCtx.Value, nil
+	})
+
 	// Register user vars
 	for k, v := range te.vars {
 		envCtx.Set(k, v)
@@ -773,18 +785,7 @@ func (te *TemplateEngine) CompileModel(model *Model, incCtx *IncrementalContext)
 		return "", g.Error(err, "could not compile template for model '%s'", model.Name)
 	}
 
-	// Trim whitespace
 	compiled := strings.TrimSpace(result)
-
-	// Substitute sling-style placeholders. g.R uses {key} literal-bracket syntax;
-	// gonja preserves single-brace text verbatim, so this runs after Jinja rendering.
-	// g.R is a no-op for placeholders not present in the string, so dbt-style and
-	// view/full-refresh models are unaffected.
-	compiled = g.R(compiled,
-		"incremental_where_cond", incCtx.WhereCond,
-		"incremental_value", incCtx.Value,
-	)
-
 	model.CompiledSQL = compiled
 
 	return compiled, nil
@@ -813,6 +814,9 @@ func (te *TemplateEngine) applyConfig(model *Model, params *exec.VarArgs) error 
 			}
 			if canonical == "ephemeral" {
 				return g.Error("model '%s': ephemeral models are not supported; use view or table", model.Name)
+			}
+			if err := validateMode(canonical, model.Name); err != nil {
+				return err
 			}
 			model.Config.Mode = canonical
 		case "materialized":
