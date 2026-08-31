@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -34,9 +35,13 @@ type Executor struct {
 	failedSet   map[string]bool // tracks failed nodes for skipping downstream
 	stopped     bool            // set when fail-fast triggers; prevents new dispatches
 
-	OutputLines chan *g.LogLine
 	prevLogSink func(*g.LogLine)
 	startTime   *time.Time
+
+	// Per-model log buffers. env.LogSink is process-global
+	modelLogs   map[string]g.LogLines
+	modelLogsMu sync.Mutex
+	gidModels   sync.Map // uint64 goroutine id → model name
 }
 
 // ExecutionResult holds the outcome of executing one node.
@@ -110,7 +115,7 @@ func NewExecutor(b *Build) (*Executor, error) {
 		connEntries: b.connEntries,
 		failedSet:   make(map[string]bool),
 		ctx:         g.NewContext(context.Background()),
-		OutputLines: make(chan *g.LogLine, 5000),
+		modelLogs:   make(map[string]g.LogLines),
 	}, nil
 }
 
@@ -359,8 +364,6 @@ func (e *Executor) Execute() error {
 			completed++
 			cond.Broadcast()
 			mu.Unlock()
-
-			e.printProgress(nodeIdx, total, result, false)
 		}
 	}
 
@@ -431,6 +434,9 @@ func (e *Executor) Execute() error {
 
 // runNode executes a single DAG node and returns its result.
 func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResult {
+	unbind := e.bindModel(nodeName)
+	defer unbind()
+
 	start := time.Now()
 	node := e.Build.DAG.Nodes[nodeName]
 
@@ -440,6 +446,7 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 	if node == nil {
 		result.Err = g.Error("node '%s' not found in DAG", nodeName)
 		result.Duration = time.Since(start)
+		e.printProgress(nodeIndex, total, result, false)
 		e.syncModelStatus(nodeName, result, sling.ExecStatusError)
 		return result
 	}
@@ -466,6 +473,7 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 			result.Mode = e.Build.GetModelMode(node.Model)
 			result.Name = node.Model.FullTableName
 		}
+		e.printProgress(nodeIndex, total, result, false)
 		e.syncModelStatus(nodeName, result, sling.ExecStatusSkipped)
 		return result
 	}
@@ -485,6 +493,7 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 		snap := result
 		e.ctx.Unlock()
 		stopHB()
+		e.printProgress(nodeIndex, total, snap, false)
 		e.syncModelStatus(nodeName, snap, resultStatus(snap))
 		return snap
 	}
@@ -514,6 +523,7 @@ func (e *Executor) runNode(nodeName string, nodeIndex, total int) ExecutionResul
 		snap := result
 		e.ctx.Unlock()
 		stopHB()
+		e.printProgress(nodeIndex, total, snap, false)
 		e.syncModelStatus(nodeName, snap, resultStatus(snap))
 		return snap
 	}
@@ -1071,16 +1081,14 @@ func (e *Executor) attachLogSink() {
 	prev := env.LogSink
 	e.prevLogSink = prev
 	env.LogSink = func(ll *g.LogLine) {
+		name := e.modelForGID()
+		if name != "" {
+			ll.Group = g.F("%s,%s", env.ExecID, name)
+		}
 		if prev != nil {
 			prev(ll)
 		}
-		if e.OutputLines == nil {
-			return
-		}
-		select {
-		case e.OutputLines <- ll:
-		default:
-		}
+		e.appendLog(name, ll)
 	}
 }
 
@@ -1088,19 +1096,63 @@ func (e *Executor) detachLogSink() {
 	env.LogSink = e.prevLogSink
 }
 
-func (e *Executor) drainLogs() g.LogLines {
-	lines := g.LogLines{}
-	if e.OutputLines == nil {
-		return lines
+const maxModelLogBuf = 5000
+
+func (e *Executor) bindModel(modelName string) func() {
+	gid := goroutineID()
+	e.gidModels.Store(gid, modelName)
+	return func() {
+		e.gidModels.Delete(gid)
 	}
-	for {
-		select {
-		case ol := <-e.OutputLines:
-			lines = append(lines, *ol)
-		default:
-			return lines
+}
+
+func (e *Executor) modelForGID() string {
+	v, ok := e.gidModels.Load(goroutineID())
+	if !ok {
+		return ""
+	}
+	name, _ := v.(string)
+	return name
+}
+
+func (e *Executor) appendLog(modelName string, ll *g.LogLine) {
+	if ll == nil {
+		return
+	}
+	e.modelLogsMu.Lock()
+	defer e.modelLogsMu.Unlock()
+	if e.modelLogs == nil {
+		e.modelLogs = make(map[string]g.LogLines)
+	}
+	if len(e.modelLogs[modelName]) >= maxModelLogBuf {
+		return
+	}
+	e.modelLogs[modelName] = append(e.modelLogs[modelName], *ll)
+}
+
+func (e *Executor) drainLogs(modelName string) g.LogLines {
+	e.modelLogsMu.Lock()
+	defer e.modelLogsMu.Unlock()
+	lines := e.modelLogs[modelName]
+	e.modelLogs[modelName] = nil
+	return lines
+}
+
+// goroutineID returns the current goroutine's id from the stack prefix.
+// Used to route process-global LogSink lines to the in-flight model.
+func goroutineID() uint64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	// "goroutine 123 [running]..."
+	id := uint64(0)
+	for i := 10; i < n; i++ {
+		c := buf[i]
+		if c < '0' || c > '9' {
+			break
 		}
+		id = id*10 + uint64(c-'0')
 	}
+	return id
 }
 
 func (e *Executor) fileName() *string {
@@ -1157,7 +1209,7 @@ func (e *Executor) makeModelStatus(modelName string, result ExecutionResult, sta
 		Order:      e.selectedOrder(modelName),
 		Tries:      e.tryNumber(),
 		TryNumber:  e.tryNumber(),
-		NewLines:   e.drainLogs(),
+		NewLines:   e.drainLogs(modelName),
 		TimeNs:     time.Now().UnixNano(),
 		AgentID:    g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID")),
 	}
@@ -1248,7 +1300,7 @@ func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store
 		ModelCount: 0,
 		Tries:      e.tryNumber(),
 		TryNumber:  e.tryNumber(),
-		NewLines:   e.drainLogs(),
+		NewLines:   e.drainLogs(""),
 		TimeNs:     time.Now().UnixNano(),
 		AgentID:    g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID")),
 	}
@@ -1297,7 +1349,7 @@ func (e *Executor) printProgress(index, total int, result ExecutionResult, start
 
 	// Format: [1/8] staging.country_codes (seed) ........... START
 	// Format: [1/8] staging.country_codes (seed) ........... OK (0.2s)
-	prefix := g.F("[%d/%d] %s (%s) ", index, total, result.Name, env.DarkGrayString(nodeType))
+	prefix := progressPrefix(index, total, result.Name, nodeType)
 
 	dotsLen := 70 - len(prefix)
 	if dotsLen < 3 {
@@ -1321,6 +1373,12 @@ func (e *Executor) printProgress(index, total int, result ExecutionResult, start
 		status = env.RedString("FAIL")
 	}
 	e.ctx.Info("%s%s %s (%s)", prefix, dots, status, durationStr)
+}
+
+// progressPrefix is the left side of a progress line, including the dim
+// "(mode)" so both parentheses share the same color as the mode name.
+func progressPrefix(index, total int, name, nodeType string) string {
+	return g.F("[%d/%d] %s %s ", index, total, name, env.DarkGrayString("("+nodeType+")"))
 }
 
 // formatDuration formats a duration as a human-readable string.

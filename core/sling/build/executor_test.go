@@ -4,12 +4,15 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -556,8 +559,106 @@ func TestFormatResumeCommand_WithStep(t *testing.T) {
 	assert.Equal(t, "2024-02-01,2024-04-01,1mo", formatResumeCommand(failed, last, "1mo"))
 }
 
+func TestProgressPrefixModeParensColored(t *testing.T) {
+	old := env.NoColor
+	env.NoColor = false
+	t.Cleanup(func() { env.NoColor = old })
+
+	prefix := progressPrefix(1, 2, "analytics.gitbook_insights_questions", "full-refresh")
+	assert.Equal(t, "[1/2] analytics.gitbook_insights_questions (full-refresh) ", stripANSI(prefix))
+	// Closing paren must sit inside the dark-gray span, not after the reset.
+	assert.Contains(t, prefix, "\x1b[90m(full-refresh)\x1b[0m")
+}
+
 func TestFormatResumeCommand_WithoutStep(t *testing.T) {
 	failed := RangeChunk{LowerRaw: "2024-02-01"}
 	last := RangeChunk{UpperRaw: "2024-04-01"}
 	assert.Equal(t, "2024-02-01,2024-04-01", formatResumeCommand(failed, last, ""))
+}
+
+func TestModelLogIsolationAcrossThreads(t *testing.T) {
+	e := &Executor{modelLogs: make(map[string]g.LogLines)}
+	e.attachLogSink()
+	defer e.detachLogSink()
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		unbind := e.bindModel("gitbook_insights_questions")
+		defer unbind()
+		for i := 0; i < n; i++ {
+			env.LogSink(&g.LogLine{Text: "gitbook line %d", Args: []any{i}})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		unbind := e.bindModel("gsc_indexed_questions")
+		defer unbind()
+		for i := 0; i < n; i++ {
+			env.LogSink(&g.LogLine{Text: "gsc line %d", Args: []any{i}})
+		}
+	}()
+	wg.Wait()
+
+	// Unscoped logs must not leak into a model drain.
+	env.LogSink(&g.LogLine{Text: "parent summary"})
+
+	gitbook := e.drainLogs("gitbook_insights_questions")
+	gsc := e.drainLogs("gsc_indexed_questions")
+	parent := e.drainLogs("")
+
+	require.Len(t, gitbook, n)
+	require.Len(t, gsc, n)
+	require.Len(t, parent, 1)
+	assert.Equal(t, "parent summary", parent[0].Text)
+
+	for _, ll := range gitbook {
+		assert.Equal(t, "gitbook line %d", ll.Text)
+		assert.Contains(t, ll.Group, "gitbook_insights_questions")
+	}
+	for _, ll := range gsc {
+		assert.Equal(t, "gsc line %d", ll.Text)
+		assert.Contains(t, ll.Group, "gsc_indexed_questions")
+	}
+
+	// Draining one model must not steal the other's leftover (already drained).
+	assert.Empty(t, e.drainLogs("gitbook_insights_questions"))
+	assert.Empty(t, e.drainLogs("gsc_indexed_questions"))
+}
+
+func TestDrainLogsDoesNotStealOtherModel(t *testing.T) {
+	e := &Executor{modelLogs: make(map[string]g.LogLines)}
+	e.attachLogSink()
+	defer e.detachLogSink()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		unbind := e.bindModel("model_a")
+		defer unbind()
+		env.LogSink(&g.LogLine{Text: "a-1"})
+		close(started)
+		<-release
+		env.LogSink(&g.LogLine{Text: "a-2"})
+	}()
+
+	<-started
+	unbindB := e.bindModel("model_b")
+	env.LogSink(&g.LogLine{Text: "b-1"})
+	bLines := e.drainLogs("model_b")
+	unbindB()
+	close(release)
+	wg.Wait()
+
+	aLines := e.drainLogs("model_a")
+	require.Len(t, bLines, 1)
+	assert.Equal(t, "b-1", bLines[0].Text)
+	require.Len(t, aLines, 2)
+	assert.Equal(t, "a-1", aLines[0].Text)
+	assert.Equal(t, "a-2", aLines[1].Text)
 }

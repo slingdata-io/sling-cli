@@ -218,6 +218,16 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 		os.Setenv("SLING_RUN_MODE", "build")
 	}
 
+	// Print the same startup marker as `sling run` so the agent can detect
+	// that the process is alive before the first build-status heartbeat.
+	if !env.IsThreadChild {
+		if env.NoColor {
+			g.Info(env.Marker)
+		} else {
+			g.Info(env.CyanString(env.Marker))
+		}
+	}
+
 	// Validate flag combinations
 	if opts.Prod && opts.Schema != "" {
 		return ok, g.Error("cannot combine --prod and --schema")
