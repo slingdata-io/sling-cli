@@ -13,4 +13,4 @@ select
   o_orderdate::date as order_date,
   o_totalprice as total_price
 from orders
-where {incremental_where_cond}
+where {{ incremental_where_cond() }}

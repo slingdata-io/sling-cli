@@ -8,4 +8,4 @@ range:
 **/
 SELECT id, name, created_at::date AS created_at
 FROM {{ ref('stg_orders') }}
-WHERE {incremental_where_cond}
+WHERE {{ incremental_where_cond() }}

@@ -299,7 +299,7 @@
   run: 'sling build tests/build/range_bad_dbt_with_range --compile --target POSTGRES'
   err: true
   output_contains:
-    - 'range.* requires {incremental_where_cond}'
+    - 'range.* requires incremental_where_cond()'
 
 
 - id: 423
@@ -308,7 +308,7 @@
   run: 'sling build tests/build/range_bad_mixed_style --compile --target POSTGRES'
   err: true
   output_contains:
-    - 'cannot mix is_incremental() and {incremental_where_cond}'
+    - 'cannot mix is_incremental() and incremental_where_cond()'
 
 # expanded BuildDefaults — layered schema, additive tags/hooks,
 # enabled:false skip, defaults unique_key/update_key/merge_strategy.
