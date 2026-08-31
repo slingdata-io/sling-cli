@@ -52,8 +52,7 @@ type PromptContext struct {
 	Connections     []ProbeConn
 	ConnectionExtra int
 	RecentRuns      []LocalExec
-	TargetExec      *LocalExec    // set by --id: investigate this failure
-	PlatformExec    *PlatformExec // set by --id when the exec is on the platform only
+	TargetExec      *LocalExec // set by --id: investigate this failure
 	MCPWired        bool
 	Signature       string
 	Lookup          *ErrorLookupResult
@@ -151,9 +150,6 @@ func Probe(opts ProbeOptions) PromptContext {
 // Order: ask > recent failed run > zero connections > no project in cwd > default.
 // Free function: PromptContext already has a Route field.
 func Route(p PromptContext) string {
-	if p.PlatformExec != nil {
-		return "platform_failed_run"
-	}
 	if p.TargetExec != nil {
 		return "failed_run"
 	}
@@ -510,14 +506,6 @@ func (p PromptContext) renderContext() string {
 	b.WriteString("- recent runs: ")
 	b.WriteString(formatRecentRuns(p.RecentRuns))
 	b.WriteByte('\n')
-	if p.PlatformExec != nil {
-		pe := p.PlatformExec
-		fmt.Fprintf(&b, "- platform exec: %s [%s] type=%s job=%s file=%s host=%s\n",
-			pe.ExecID, pe.Status, pe.Type, pe.JobName, pe.FileName, pe.HostLabel)
-		if strings.TrimSpace(pe.ErrSummary) != "" {
-			fmt.Fprintf(&b, "- platform error: %s\n", pe.ErrSummary)
-		}
-	}
 	if p.Signature != "" {
 		fmt.Fprintf(&b, "- error signature: %s\n", p.Signature)
 		if p.Lookup != nil && p.Lookup.Title != "" {
@@ -598,9 +586,6 @@ func formatRecentRuns(runs []LocalExec) string {
 func (p PromptContext) renderAsk() string {
 	if strings.TrimSpace(p.Ask) != "" {
 		return p.Ask
-	}
-	if p.PlatformExec != nil {
-		return fmt.Sprintf("Investigate platform execution %s (%s)", p.PlatformExec.ExecID, p.PlatformExec.Status)
 	}
 	if p.TargetExec != nil {
 		return failedRunLabel(*p.TargetExec)

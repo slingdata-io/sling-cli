@@ -42,9 +42,6 @@ type ReportDraft struct {
 	SignatureID  string `json:"signature_id"`
 	Skeleton     string `json:"skeleton"`
 	ExecID       string `json:"exec_id"`
-	Origin       string `json:"origin,omitempty"`
-	PlatformHost string `json:"platform_host,omitempty"`
-	JobName      string `json:"job_name,omitempty"`
 	ConnName     string `json:"conn_name,omitempty"`
 	// CustomDescription is caller-supplied context, shown above the error.
 	CustomDescription string `json:"custom_description,omitempty"`
@@ -73,7 +70,6 @@ func ComposeReport(execID string) (ReportDraft, error) {
 	}
 	connName := cast.ToString(meta["conn_name"])
 	sigID := strings.ToLower(cast.ToString(meta["error_signature"]))
-	origin, platformHost, jobName := reportOriginFromMeta(meta)
 
 	skel := Skeleton(errText)
 	if sigID == "" || len(sigID) != CompositeIDLen {
@@ -105,9 +101,6 @@ func ComposeReport(execID string) (ReportDraft, error) {
 		SignatureID:  sigID,
 		Skeleton:     skel,
 		ExecID:       le.ID,
-		Origin:       origin,
-		PlatformHost: platformHost,
-		JobName:      jobName,
 		ConnName:     connName,
 	}
 	return d, nil
@@ -224,9 +217,6 @@ func (d ReportDraft) BodyMarkdown() string {
 	fmt.Fprintf(&b, "Exec ID: %s\n", d.ExecID)
 	fmt.Fprintf(&b, "Sling version: %s\n", d.Version)
 	fmt.Fprintf(&b, "OS: %s\n", d.OS)
-	if strings.EqualFold(d.Origin, "platform") {
-		fmt.Fprintf(&b, "Platform execution (host: %s, job: %s)\n", d.PlatformHost, d.JobName)
-	}
 	if d.ConnName != "" {
 		fmt.Fprintf(&b, "Connection: %s\n", d.ConnName)
 	}
@@ -396,17 +386,6 @@ func OpenBrowser(rawURL string) error {
 	return exec.Command(cmd, args...).Start()
 }
 
-func composeReportWithPlatformFallback(execID string, localErr error) (ReportDraft, error) {
-	pe, err := resolvePlatformFallback(execID, localErr)
-	if err != nil {
-		return ReportDraft{}, err
-	}
-	if _, err := materializePlatformExec(pe); err != nil {
-		return ReportDraft{}, err
-	}
-	return ComposeReport(execID)
-}
-
 // ReportCmd is the `sling assist report` entry.
 type ReportCmd struct {
 	ExecID      string
@@ -421,10 +400,7 @@ type ReportCmd struct {
 func RunReport(opts ReportCmd) error {
 	d, err := ComposeReport(opts.ExecID)
 	if err != nil {
-		d, err = composeReportWithPlatformFallback(opts.ExecID, err)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	if opts.Title != "" {
 		d.Title = opts.Title
@@ -536,39 +512,3 @@ func confirmSendReport() (bool, error) {
 	return ok, nil
 }
 
-// PlatformExec is the platform view of one execution.
-type PlatformExec struct {
-	ExecID     string
-	Status     string // success | error | running | ...
-	Type       string // replication | pipeline | query | monitor
-	JobName    string
-	FileName   string
-	StartTime  string // formatted, may be empty
-	EndTime    string
-	ErrSummary string // first error line from the record, if present
-	HostLabel  string
-	Rows       string
-	Duration   string
-	Object     string
-	Version    string
-}
-
-// resolvePlatformFallback looks up a missed local exec on the Sling Platform.
-var resolvePlatformFallback = func(execID string, localErr error) (*PlatformExec, error) {
-	if localErr == nil {
-		return nil, g.Error("see ~/.sling/assist/errors/")
-	}
-	return nil, g.Error(localErr, "see ~/.sling/assist/errors/")
-}
-
-// materializePlatformExec writes a local snapshot from platform data.
-var materializePlatformExec = func(pe *PlatformExec) (LocalExec, error) {
-	return LocalExec{}, g.Error("use the official release of sling-cli to materialize platform executions")
-}
-
-func reportOriginFromMeta(meta map[string]any) (origin, host, job string) {
-	if len(meta) == 0 {
-		return "", "", ""
-	}
-	return cast.ToString(meta["origin"]), cast.ToString(meta["platform_host"]), cast.ToString(meta["job_name"])
-}

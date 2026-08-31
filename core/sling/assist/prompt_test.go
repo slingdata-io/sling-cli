@@ -97,10 +97,6 @@ func TestPrintSnapshots(t *testing.T) {
 }
 
 func TestRouteLadder(t *testing.T) {
-	plat := PromptContext{PlatformExec: &PlatformExec{ExecID: "x"}, Ask: "do it"}
-	if Route(plat) != "platform_failed_run" {
-		t.Fatalf("platform rung lost: %s", Route(plat))
-	}
 	ask := PromptContext{Ask: "do it", RecentRuns: []LocalExec{{Status: "err"}}}
 	if Route(ask) != "ask" {
 		t.Fatalf("ask rung lost to failure: %s", Route(ask))
@@ -191,7 +187,7 @@ func TestFailureDetailsGatedByIntent(t *testing.T) {
 }
 
 func TestPromptAssemblyDoesNotCallExpandEnvVars(t *testing.T) {
-	files := []string{"prompt.go", "session.go", "assist_platform..go"}
+	files := []string{"prompt.go", "session.go"}
 	for _, name := range files {
 		b, err := os.ReadFile(name)
 		if err != nil {

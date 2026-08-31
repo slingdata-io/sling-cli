@@ -87,14 +87,8 @@ func Session(opts SessionOptions) (string, error) {
 		IncludeFailure: opts.Ask == "",
 	})
 	if opts.ExecID != "" && ctx.TargetExec == nil {
-		_, localErr := ResolveLocalExec(opts.ExecID)
-		if localErr != nil {
-			pe, err := resolvePlatformFallback(opts.ExecID, localErr)
-			if err != nil {
-				return "", err
-			}
-			ctx.PlatformExec = pe
-			ctx.Route = "platform_failed_run"
+		if _, err := ResolveLocalExec(opts.ExecID); err != nil {
+			return "", g.Error(err, "see ~/.sling/assist/errors/")
 		}
 	}
 	mode := modeAsk
