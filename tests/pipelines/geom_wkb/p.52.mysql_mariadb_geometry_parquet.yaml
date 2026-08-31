@@ -1,0 +1,191 @@
+# MySQL & MariaDB geometry to Parquet as native geometry (issue #794 follow-up).
+# The source emits hex WKB (hex(st_aswkb(col))); duckdb parses it at parquet
+# export, so the file carries a GEOMETRY column plus GeoParquet metadata. The
+# LOCAL_CRS target conn prop geometry_crs stamps the CRS that WKB does not
+# carry. Requires the MYSQL, MARIADB and LOCAL_CRS connections; see
+# run_docker_test.sh.
+
+steps:
+  # Cleanup any prior state
+  - connection: MYSQL
+    query: DROP TABLE IF EXISTS geom_test.geom_src;
+
+  - connection: MARIADB
+    query: DROP TABLE IF EXISTS geom_test.geom_src;
+
+  # MySQL source table: point SRID 4326, NULL row, polygon SRID 0
+  - connection: MYSQL
+    query: |
+      CREATE TABLE geom_test.geom_src (
+        id INT PRIMARY KEY,
+        g GEOMETRY
+      );
+      INSERT INTO geom_test.geom_src VALUES
+        (1, ST_GeomFromText('POINT(1 2)', 4326)),
+        (2, NULL),
+        (3, ST_GeomFromText('POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))', 0));
+
+  # MariaDB source table: same shapes, no srid
+  - connection: MARIADB
+    query: |
+      CREATE TABLE geom_test.geom_src (
+        id INT PRIMARY KEY,
+        g GEOMETRY
+      );
+      INSERT INTO geom_test.geom_src VALUES
+        (1, ST_GeomFromText('POINT(1 2)')),
+        (2, NULL),
+        (3, ST_GeomFromText('POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))'));
+
+  - replication:
+      source: MYSQL
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        geom_test.geom_src:
+          object: file:///tmp/sling_p52/mysql.parquet
+          mode: full-refresh
+
+  # LOCAL_CRS is the local conn with the geometry_crs prop
+  - replication:
+      source: MYSQL
+      target: LOCAL_CRS
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        geom_test.geom_src:
+          object: file:///tmp/sling_p52/mysql_crs.parquet
+          mode: full-refresh
+
+  - replication:
+      source: MARIADB
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        geom_test.geom_src:
+          object: file:///tmp/sling_p52/mariadb.parquet
+          mode: full-refresh
+
+  # columns must read as GEOMETRY
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT typeof(g) FROM read_parquet('/tmp/sling_p52/mysql.parquet') LIMIT 1) AS mysql_type,
+        (SELECT typeof(g) FROM read_parquet('/tmp/sling_p52/mariadb.parquet') LIMIT 1) AS mariadb_type
+    into: col_types
+
+  - type: log
+    message: "MySQL geom column type={substring(store.col_types[0].mysql_type, 0, 8)}, MariaDB geom column type={substring(store.col_types[0].mariadb_type, 0, 8)}"
+
+  - type: check
+    check: substring(store.col_types[0].mysql_type, 0, 8) == "GEOMETRY" && substring(store.col_types[0].mariadb_type, 0, 8) == "GEOMETRY"
+    message: "expected GEOMETRY, got mysql={store.col_types[0].mysql_type} mariadb={store.col_types[0].mariadb_type}"
+
+  # values must be plain WKB (srid stripped, lon-lat order)
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(g)) = '0101000000000000000000F03F0000000000000040') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(g)) = '01030000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND g IS NULL) AS null_ok,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p52/mysql.parquet')
+    into: mysql_vals
+
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(g)) = '0101000000000000000000F03F0000000000000040') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(g)) = '01030000000100000005000000000000000000000000000000000000000000000000000000000000000000F03F000000000000F03F000000000000F03F000000000000F03F000000000000000000000000000000000000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND g IS NULL) AS null_ok,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p52/mariadb.parquet')
+    into: mariadb_vals
+
+  - type: log
+    message: "mysql check: point={store.mysql_vals[0].point_ok} polygon={store.mysql_vals[0].polygon_ok} null={store.mysql_vals[0].null_ok} total={store.mysql_vals[0].total}"
+
+  - type: log
+    message: "mariadb check: point={store.mariadb_vals[0].point_ok} polygon={store.mariadb_vals[0].polygon_ok} null={store.mariadb_vals[0].null_ok} total={store.mariadb_vals[0].total}"
+
+  - type: check
+    check: int_parse(store.mysql_vals[0].point_ok) == 1 && int_parse(store.mysql_vals[0].polygon_ok) == 1 && int_parse(store.mysql_vals[0].null_ok) == 1 && int_parse(store.mysql_vals[0].total) == 3
+    message: "MySQL WKB values do not match expected plain WKB"
+
+  - type: check
+    check: int_parse(store.mariadb_vals[0].point_ok) == 1 && int_parse(store.mariadb_vals[0].polygon_ok) == 1 && int_parse(store.mariadb_vals[0].null_ok) == 1 && int_parse(store.mariadb_vals[0].total) == 3
+    message: "MariaDB WKB values do not match expected plain WKB"
+
+  - type: log
+    message: "MySQL & MariaDB WKB match expected plain WKB (lon-lat, no SRID flag)"
+
+  # each file carries one geo metadata key
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p52/mysql.parquet')
+          WHERE key = 'geo') AS mysql_geo_keys,
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p52/mariadb.parquet')
+          WHERE key = 'geo') AS mariadb_geo_keys
+    into: geo_keys
+
+  - type: log
+    message: "geo keys: mysql={store.geo_keys[0].mysql_geo_keys} mariadb={store.geo_keys[0].mariadb_geo_keys}"
+
+  - type: check
+    check: int_parse(store.geo_keys[0].mysql_geo_keys) == 1 && int_parse(store.geo_keys[0].mariadb_geo_keys) == 1
+    message: "expected one geo metadata key per file"
+
+  # without geometry_crs, duckdb omits crs (GeoParquet default OGC:CRS84)
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p52/mysql.parquet')
+          WHERE key = 'geo' AND strpos(CAST(value AS VARCHAR), 'crs') > 0) AS mysql_crs_cnt,
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p52/mysql_crs.parquet')
+          WHERE key = 'geo' AND strpos(CAST(value AS VARCHAR), '4326') > 0) AS mysql_crs_stamped
+    into: crs_vals
+
+  - type: log
+    message: "crs check: omitted_cnt={store.crs_vals[0].mysql_crs_cnt} stamped_cnt={store.crs_vals[0].mysql_crs_stamped}"
+
+  - type: check
+    check: int_parse(store.crs_vals[0].mysql_crs_cnt) == 0
+    message: "crs must be omitted without geometry_crs"
+
+  - type: check
+    check: int_parse(store.crs_vals[0].mysql_crs_stamped) == 1
+    message: "geometry_crs must stamp 4326 in geo metadata"
+
+  - type: log
+    message: "MySQL WKB parquet test PASSED"
+
+  - type: log
+    message: "MariaDB WKB parquet test PASSED"
+
+  # Cleanup
+  - connection: MYSQL
+    query: DROP TABLE IF EXISTS geom_test.geom_src;
+
+  - connection: MARIADB
+    query: DROP TABLE IF EXISTS geom_test.geom_src;

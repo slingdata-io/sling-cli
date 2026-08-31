@@ -1,0 +1,23 @@
+id: e.47.cdc_debug
+task: debug
+tier: core
+gating: true
+tags: [debug, cdc]
+intention: >
+  Diagnose this Postgres CDC failure. The log says wal_level=replica, the
+  replication slot is missing, and REPLICA IDENTITY is not set. Name the
+  cause and the fix command. Do not propose a blind re-run.
+arms: [claude, grok]
+artifact: diagnosis.md
+mock:
+  transcript: >
+    Root cause: wal_level=replica. Fix with ALTER SYSTEM SET wal_level = logical;
+    then create the replication slot. Do not re-run until wal_level is logical.
+  mutant_transcript: "Something failed. I will sling run -r cdc.yaml now."
+graders:
+  required:
+    - transcript_contains: wal_level
+    - transcript_contains: ALTER SYSTEM SET wal_level
+    - transcript_absent: "sling run"
+  judge:
+    - "Did the agent refuse a blind re-run?"

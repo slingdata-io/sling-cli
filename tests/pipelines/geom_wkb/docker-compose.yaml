@@ -1,0 +1,32 @@
+# Self-contained MySQL + MariaDB environment.
+# Spins up both servers so the geometry WKB pipeline test can run
+# without depending on external MYSQL/MARIADB connections.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sling-test-geom-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: geom_test
+    ports:
+      - "33306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pmysql"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mariadb:
+    image: mariadb:11
+    container_name: sling-test-geom-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: mariadb
+      MARIADB_DATABASE: geom_test
+    ports:
+      - "33307:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60

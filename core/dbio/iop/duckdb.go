@@ -60,6 +60,14 @@ func (duck *DuckDb) setQuery(dq *duckDbQuery) {
 	duck.query = dq
 }
 
+// TouchQueryActivity resets the stall clock for the in-flight query.
+// Call it only on real evidence of progress.
+func (duck *DuckDb) TouchQueryActivity() {
+	if dq := duck.getQuery(); dq != nil {
+		dq.touch()
+	}
+}
+
 // duckDbQuery holds the state of one query. err/started/done are written by the
 // scanner and watcher goroutines, so use the accessors below.
 type duckDbQuery struct {
@@ -487,6 +495,19 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return nil
 	}
 
+	// another process may still hold the file lock; retry briefly
+	for attempt := 0; ; attempt++ {
+		err = duck.openOnce(timeOut...)
+		if err == nil || attempt >= 4 || !strings.Contains(err.Error(), "Conflicting lock") {
+			return err
+		}
+		g.Debug("duckdb file lock busy, retrying (attempt %d)", attempt+1)
+		duck.kill()
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+	}
+}
+
+func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
 		return g.Error(err, "could not get duckdb binary")
@@ -1376,33 +1397,44 @@ type DuckDbCopyOptions struct {
 	PartitionKey       string
 	WritePartitionCols bool
 	FileSizeBytes      int64
-	Columns            Columns // optional, used to decode hex-encoded binary back to BLOB
+	GeometryCRS        string  // optional, stamps exported geometry columns with this CRS
+	Columns            Columns // optional, used to decode hex-encoded binary and geometry
 }
 
-// buildSelectProjection returns the SELECT list for export. For binary columns
+// buildSelectProjection returns the SELECT list for export. Binary columns
 // (which are streamed through CSV as hex-encoded varchar), it emits
 // `unhex(col)::BLOB AS col` so parquet output preserves true binary type.
-// If no binary columns are present, returns `*`.
+// Geometry columns (hex WKB varchar) are parsed into native geometry so
+// parquet output carries GeoParquet metadata. If neither is present,
+// returns `*`.
 func (opts DuckDbCopyOptions) buildSelectProjection() string {
 	if len(opts.Columns) == 0 {
 		return "*"
 	}
-	hasBinary := false
+	hasConversion := false
 	for _, c := range opts.Columns {
-		if c.IsBinary() {
-			hasBinary = true
+		if c.IsBinary() || c.Type.IsGeometry() {
+			hasConversion = true
 			break
 		}
 	}
-	if !hasBinary {
+	if !hasConversion {
 		return "*"
 	}
 	parts := make([]string, len(opts.Columns))
 	for i, c := range opts.Columns {
 		qName := dbio.TypeDbDuckDb.Quote(c.Name)
-		if c.IsBinary() {
+		switch {
+		case c.Type.IsGeometry():
+			// try() makes malformed hex a null instead of failing the copy
+			expr := g.F("try(st_geomfromwkb(unhex(%s)))", qName)
+			if opts.GeometryCRS != "" {
+				expr = g.F("st_setcrs(%s, '%s')", expr, strings.ReplaceAll(opts.GeometryCRS, "'", "''"))
+			}
+			parts[i] = g.F("%s AS %s", expr, qName)
+		case c.IsBinary():
 			parts[i] = g.F("unhex(%s)::BLOB AS %s", qName, qName)
-		} else {
+		default:
 			parts[i] = qName
 		}
 	}
@@ -1425,26 +1457,27 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 			return "", g.Error("missing partition key")
 		}
 
+		keyExpr := duck.partitionKeyTimestampExpr(options.PartitionKey, options.Columns)
 		pe := partExpression{
 			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), pl),
-			expression: g.F("date_part('%s', %s)", pl, options.PartitionKey),
+			expression: g.F("date_part('%s', %s)", pl, keyExpr),
 		}
 
 		switch pl {
 		case PartitionLevelYear:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%Y")
 		case PartitionLevelYearMonth:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y-%m")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%Y-%m")
 		case PartitionLevelMonth:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%m")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%m")
 		case PartitionLevelWeek:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%V")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%V")
 		case PartitionLevelDay:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%d")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%d")
 		case PartitionLevelHour:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%H")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%H")
 		case PartitionLevelMinute:
-			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%M")
+			pe.expression = g.F("strftime(%s, '%s')", keyExpr, "%M")
 		default:
 			return sql, g.Error("invalid partition field: %s", pl)
 		}
@@ -1474,6 +1507,16 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	selectExpr := "*"
 	if options.Format == dbio.FileTypeParquet {
 		selectExpr = options.buildSelectProjection()
+		if options.GeometryCRS != "" {
+			for _, c := range options.Columns {
+				if c.Type.IsGeometry() {
+					// st_setcrs resolves a crs string to projjson only when
+					// spatial is loaded explicitly, not through autoload
+					duck.AddExtension("spatial")
+					break
+				}
+			}
+		}
 	}
 
 	if len(partExpressions) > 0 {
@@ -1512,6 +1555,30 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	}
 
 	return
+}
+
+// partitionKeyTimestampExpr wraps epoch-integer partition keys so DuckDB
+// strftime/date_part receive a TIMESTAMP. _sling_loaded_at is Unix seconds
+// by default (SLING_LOADED_AT_COLUMN=timestamp stores a real timestamptz).
+func (duck *DuckDb) partitionKeyTimestampExpr(key string, cols Columns) string {
+
+	partitionKeyIsEpoch := func(name string, cols Columns) bool {
+		if strings.EqualFold(name, "_sling_loaded_at") {
+			return true
+		}
+		for i := range cols {
+			if strings.EqualFold(cols[i].Name, name) {
+				return cols[i].IsInteger()
+			}
+		}
+		return false
+	}
+
+	name := strings.Trim(key, `"`)
+	if partitionKeyIsEpoch(name, cols) {
+		return g.F("to_timestamp(%s)", key)
+	}
+	return key
 }
 
 // Quote quotes a column name
@@ -1734,6 +1801,22 @@ type HttpStreamPart struct {
 	Cancel context.CancelFunc
 }
 
+// activityReader resets the stall clock as duckdb consumes the HTTP stream.
+type activityReader struct {
+	io.Reader
+	duck *DuckDb
+	last time.Time
+}
+
+func (ar *activityReader) Read(p []byte) (n int, err error) {
+	n, err = ar.Reader.Read(p)
+	if n > 0 && time.Since(ar.last) > time.Second { // throttle lock churn
+		ar.duck.TouchQueryActivity()
+		ar.last = time.Now()
+	}
+	return n, err
+}
+
 // closeBatchReader stops reading a batch's pipe. The arrow/csv writer flushes
 // the tail of a batch into this pipe; if the consumer abandoned it (duckdb
 // dropped the response), that flush blocks forever. Closing makes it fail fast.
@@ -1815,7 +1898,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					case <-importContext.Ctx.Done():
 					}
 				}()
-				return c.Stream(200, contentType, reader)
+				return c.Stream(200, contentType, &activityReader{Reader: reader, duck: duck})
 			}
 			return c.NoContent(http.StatusOK)
 		})
@@ -2057,6 +2140,12 @@ func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
 			nativeType = "varchar"
 		}
 
+		// geometry rides the csv as hex WKB varchar; st_geomfromwkb parses it
+		// in the select that reads this csv
+		if nativeType == "geometry" {
+			nativeType = "varchar"
+		}
+
 		colsArr[i] = g.F("'%s':'%s'", col.Name, nativeType)
 	}
 
@@ -2094,7 +2183,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	}
 
 	duckdbFilenameStr := ""
-	if fsc.DuckDBFilename {
+	if fsc.AddsFilenameColumn() {
 		duckdbFilenameStr = g.F(", filename = true")
 	}
 

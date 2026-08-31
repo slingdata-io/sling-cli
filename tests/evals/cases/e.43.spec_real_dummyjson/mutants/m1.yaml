@@ -1,0 +1,9 @@
+name: dummyjson
+endpoints:
+  categories:
+    request:
+      url: https://dummyjson.com/products/categories
+      method: GET
+    response:
+      records:
+        jmespath: "data"

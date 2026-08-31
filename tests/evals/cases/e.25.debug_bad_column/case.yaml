@@ -1,0 +1,21 @@
+id: e.25.debug_bad_column
+task: debug
+tier: core
+gating: true
+tags: [debug]
+intention: >
+  Diagnose this failed POSTGRES to DUCKDB run. The error is a bad column name
+  (email_verified does not exist). Do not invent a fix that reruns the job.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [POSTGRES, DUCKDB]
+artifact: diagnosis.md
+mock:
+  transcript: "Root cause: column email_verified does not exist on public.users."
+  mutant_transcript: "Something failed. I will try again later."
+graders:
+  required:
+    - transcript_contains: email_verified
+    - transcript_contains: column
+  judge:
+    - "Did the agent name the missing column as the root cause?"

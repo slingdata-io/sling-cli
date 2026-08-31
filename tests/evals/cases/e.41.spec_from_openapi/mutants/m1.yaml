@@ -1,0 +1,9 @@
+name: MOCK_API
+endpoints:
+  widgets:
+    request:
+      url: "{secrets.base_url}/nope"
+      method: GET
+    response:
+      records:
+        jmespath: "data"

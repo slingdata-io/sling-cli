@@ -181,16 +181,35 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 		rowEnd = len(allRows) - 1
 	}
 
-	if len(allRows) < rowEnd {
+	// a range can end past the last row with data (`A2:C1000` over a short
+	// sheet). Clamp to the data, so no empty rows are added to the dataset.
+	if rowEnd > len(allRows)-1 {
+		rowEnd = len(allRows) - 1
+	}
+
+	// the start row must hold data. rowEnd is clamped above, so an empty range
+	// here means the range begins past the last row.
+	if rowStart > rowEnd {
 		err = g.Error(
 			"Input row range is larger than file row range: %d < %d",
-			len(allRows), rowEnd,
+			len(allRows), rowStart+1,
 		)
 		return
-	} else if len(allRows[0]) < colEnd {
+	}
+
+	// the widest row in the range sets the file col range. The first row can be
+	// narrower than the rows below it (a comment line above a header, say).
+	maxCol := 0
+	for r := rowStart; r <= rowEnd; r++ {
+		if len(allRows[r]) > maxCol {
+			maxCol = len(allRows[r])
+		}
+	}
+
+	if maxCol < colEnd {
 		err = g.Error(
 			"Input col range is larger than file col range: %d < %d",
-			len(allRows[0]), colEnd,
+			maxCol, colEnd,
 		)
 		return
 	}
@@ -198,15 +217,14 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 	i := 0
 	rangeRows := make([][]string, rowEnd-rowStart+1)
 	for r := rowStart; r <= rowEnd; r++ {
-		row0 := []string{}
-		if r >= len(allRows) {
-			continue
-		}
+		// keep every row the full width of the range, so short rows pad with
+		// blanks instead of shifting the columns to their left
+		row0 := make([]string, colEnd-colStart+1)
 		for c := colStart; c <= colEnd; c++ {
 			if c >= len(allRows[r]) {
 				continue
 			}
-			row0 = append(row0, strings.TrimSpace(allRows[r][c]))
+			row0[c-colStart] = strings.TrimSpace(allRows[r][c])
 		}
 		rangeRows[i] = row0
 		i++

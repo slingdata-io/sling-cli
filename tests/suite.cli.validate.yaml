@@ -1,0 +1,354 @@
+- id: 500
+  name: 'sling validate replication fixture'
+  run: 'sling validate tests/replications/r.00.yaml --json'
+  output_contains:
+    - '"kind": "replication"'
+    - '"ok": true'
+    - '"compiled": true'
+    - 'tests/replications/r.00.yaml'
+    - '"source"'
+    - '"streams"'
+
+- id: 501
+  name: 'sling validate pipeline fixture'
+  run: 'sling validate tests/pipelines/p.01.yaml --json'
+  output_contains:
+    - '"kind": "pipeline"'
+    - '"ok": true'
+    - 'tests/pipelines/p.01.yaml'
+    - '"steps"'
+
+- id: 502
+  name: 'sling validate env fixture'
+  run: 'sling validate tests/validate/env.yaml --json'
+  output_contains:
+    - '"kind": "env"'
+    - '"ok": true'
+    - 'tests/validate/env.yaml'
+    - '"connections"'
+    - 'MY_PG'
+
+- id: 503
+  name: 'sling validate api spec fixture'
+  run: 'sling validate tests/validate/spec.yaml --json'
+  output_contains:
+    - '"kind": "api_spec"'
+    - '"ok": true'
+    - 'validate-test-api'
+    - '"endpoints"'
+    - 'ping'
+  output_does_not_contain:
+    - 'LiteralTokenDoNotLeak'
+
+- id: 504
+  name: 'sling validate build project sling_build.yml'
+  run: 'sling validate tests/build/sample_project/sling_build.yml --json'
+  output_contains:
+    - '"kind": "build"'
+    - '"ok": true'
+    - 'POSTGRES'
+    - 'sling_build.yml'
+
+- id: 505
+  name: 'sling validate multi-file one invocation'
+  run: 'sling validate tests/replications/r.00.yaml tests/pipelines/p.01.yaml tests/validate/env.yaml --json'
+  output_contains:
+    - '"kind": "replication"'
+    - '"kind": "pipeline"'
+    - '"kind": "env"'
+    - 'tests/replications/r.00.yaml'
+    - 'tests/pipelines/p.01.yaml'
+    - 'tests/validate/env.yaml'
+
+- id: 506
+  name: 'sling validate folder walk skips docker-compose.yml'
+  run: 'sling validate tests/validate/walk --json'
+  output_contains:
+    - '"kind": "replication"'
+    - 'replication_ok.yaml'
+    - '"ok": true'
+  output_does_not_contain:
+    - 'docker-compose.yml'
+    - 'ComposePassDoNotParse'
+    - 'notes.yaml'
+
+- id: 507
+  name: 'sling validate -q success'
+  run: 'sling validate -q tests/validate/env.yaml tests/validate/spec.yaml'
+  output_does_not_contain:
+    - '"kind"'
+    - 'LiteralPass123ABC'
+
+- id: 508
+  name: 'sling validate -q fail unknown kind'
+  err: true
+  run: 'sling validate -q tests/validate/unknown.yaml'
+  output_contains:
+    - 'unknown kind'
+
+- id: 509
+  name: 'sling validate unknown-kind explicit file error'
+  err: true
+  run: 'sling validate tests/validate/unknown.yaml --json'
+  output_contains:
+    - '"kind": "unknown"'
+    - '"ok": false'
+    - 'unknown kind'
+    - 'tests/validate/unknown.yaml'
+
+- id: 510
+  name: 'sling validate env redacts password value'
+  run: 'sling validate tests/validate/env.yaml --json'
+  output_contains:
+    - '"password": "***"'
+    - '"token": "***"'
+    - '${MY_VALIDATE_SECRET}'
+  output_does_not_contain:
+    - 'LiteralPass123ABC'
+    - 'LiteralTokenXYZ'
+
+- id: 511
+  name: 'sling validate env does not interpolate secret env var'
+  env:
+    MY_VALIDATE_SECRET: SuperSecretValueXYZ
+  run: 'sling validate tests/validate/env.yaml --json'
+  output_contains:
+    - '${MY_VALIDATE_SECRET}'
+    - '"kind": "env"'
+  output_does_not_contain:
+    - 'SuperSecretValueXYZ'
+    - 'LiteralPass123ABC'
+
+- id: 512
+  name: 'sling validate --parse-only keeps ${VAR} un-interpolated'
+  env:
+    MY_VALIDATE_SECRET: SuperSecretValueXYZ
+  run: 'sling validate --parse-only tests/replications/r.00.yaml --json'
+  output_contains:
+    - '"kind": "replication"'
+    - '"ok": true'
+    - '"compiled": false'
+    - '{source}'
+  output_does_not_contain:
+    - 'SuperSecretValueXYZ'
+
+- id: 513
+  name: 'sling validate --detailed renders per-kind tables'
+  run: 'sling validate --detailed tests/replications/r.00.yaml tests/pipelines/p.01.yaml tests/validate/env.yaml tests/validate/spec.yaml tests/build/sample_project/sling_build.yml'
+  output_contains:
+    - '# Replications'
+    - '# Pipelines'
+    - '# API Specs'
+    - '# Connections'
+    - '# Build Projects'
+    - 'SQLITE'
+    - 'test1.1.csv'
+    - 'full-refresh'
+    - 'ping'
+    - 'https://example.com/ping'
+    - 'MY_PG'
+    - 'postgres'
+    - 'POSTGRES'
+  output_does_not_contain:
+    - 'LiteralPass123ABC'
+    - 'LiteralTokenXYZ'
+    - 'LiteralTokenDoNotLeak'
+
+- id: 514
+  name: 'sling validate --detailed shows pipeline step type and id'
+  run: 'sling validate --detailed --parse-only tests/pipelines/p.04.test_inspect_hook.yaml'
+  output_contains:
+    - '# Pipelines'
+    - 'create_test_table'
+    - 'inspect_postgres_table'
+    - 'inspect'
+    - 'query'
+  output_does_not_contain:
+    - 'ORDER'
+    - 'ON_FAILURE'
+
+- id: 515
+  name: 'sling validate --detailed reports errors in a table'
+  err: true
+  run: 'sling validate --detailed tests/validate/unknown.yaml'
+  output_contains:
+    - '# Errors'
+    - 'unknown kind'
+    - 'tests/validate/unknown.yaml'
+
+- id: 516
+  name: 'sling validate --help shows the new verb and -q'
+  run: 'sling validate --help'
+  output_contains:
+    - 'Validate Sling files'
+    - '-q --quiet'
+    - 'project'
+    - '--parse-only'
+    - 'ready to run'
+  output_does_not_contain:
+    - '--no-compile'
+
+- id: 517
+  name: 'sling parse no longer validates'
+  run: 'sling parse tests/validate/env.yaml --json'
+  output_contains:
+    - 'Slings data from a data source to a data target.'
+  output_does_not_contain:
+    - '"kind"'
+    - 'MY_PG'
+
+- id: 518
+  name: 'sling validate bare at a project root'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    sling validate --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - '"kind": "project"'
+    - '"kind": "pipeline"'
+    - '"kind": "replication"'
+    - '"ok": true'
+    - sling_project.yml
+
+- id: 519
+  name: 'sling validate bare from a subfolder'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    cd replications
+    sling validate --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - '"kind": "project"'
+    - '"ok": true'
+
+- id: 570
+  name: 'sling validate project job with a missing file and a bad cron'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'jobs:\n  gone:\n    file: replications/nope.yaml\n' >> sling_project.yml
+    sling validate sling_project.yml --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - '"ok": false'
+    - does not exist
+
+- id: 571
+  name: 'sling validate project bad cron fails'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'jobs:\n  daily:\n    file: pipelines/daily.yaml\n    schedules: ["not a cron"]\n' >> sling_project.yml
+    sling validate sling_project.yml --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - invalid schedule
+    - '"ok": false'
+
+- id: 572
+  name: 'sling validate warns on two schedules without failing'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    unset SLING_PROJECT_TOKEN
+    sling init --target POSTGRES --source SQLITE --yes
+    printf 'jobs:\n  daily:\n    file: pipelines/daily.yaml\n    schedules: ["0 6 * * *", "0 7 * * *"]\n' >> sling_project.yml
+    sling validate sling_project.yml --json
+  env:
+    SLING_PROJECT_TOKEN: ''
+  output_contains:
+    - '"warnings"'
+    - only the first cron fires
+    - '"ok": true'
+
+- id: 573
+  name: 'sling validate warns on a pipeline step with a bad path'
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    printf 'steps:\n  - type: replication\n    path: replications/nope.yaml\n' > p.yaml
+    sling validate p.yaml --json
+  output_contains:
+    - '"warnings"'
+    - does not exist
+    - '"ok": true'
+
+- id: 574
+  name: 'MCP replication action validate works and parse errors'
+  run: |
+    printf '%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+      '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"replication","arguments":{"action":"validate","input":{"file_path":"tests/replications/r.00.yaml","compile":false}}}}' \
+      '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"replication","arguments":{"action":"parse","input":{"file_path":"tests/replications/r.00.yaml","compile":false}}}}' \
+      | sling mcp 2>/dev/null
+  output_contains:
+    - "'invalid' action: parse"
+    - STREAM_NAME
+    - 'Parse-only'
+    - 'compiled: false'
+
+- id: 580
+  name: 'sling validate compile fails without object'
+  err: true
+  run: 'sling validate tests/validate/repl_missing_object.yaml --json'
+  output_contains:
+    - '"ok": false'
+    - 'need to specify `object`'
+
+- id: 583
+  name: 'sling validate --parse-only warns on unknown connection'
+  run: 'sling validate --parse-only tests/validate/repl_unknown_conn.yaml --json'
+  output_contains:
+    - '"ok": true'
+    - '"compiled": false'
+    - '"warnings"'
+    - WAREHOUSE_PROD_EVAL_XYZ
+
+- id: 584
+  name: 'sling validate --parse-only fails api spec without url'
+  err: true
+  run: 'sling validate --parse-only tests/validate/spec_missing_url.yaml --json'
+  output_contains:
+    - '"ok": false'
+    - 'url'
+
+- id: 585
+  name: 'sling validate --parse-only fails api spec with unknown depends_on'
+  err: true
+  run: 'sling validate --parse-only tests/validate/spec_bad_depends.yaml --json'
+  output_contains:
+    - '"ok": false'
+    - 'does_not_exist'
+
+- id: 586
+  name: 'sling validate fails on nested group unknown step type'
+  err: true
+  run: 'sling validate tests/validate/pipeline_nested_bad_type.yaml --json'
+  output_contains:
+    - '"ok": false'
+    - 'pipeline step 0.steps.1 has unknown type "run"'
+
+- id: 587
+  name: 'sling validate --parse-only fails on nested group unknown step type'
+  err: true
+  run: 'sling validate --parse-only tests/validate/pipeline_nested_bad_type.yaml --json'
+  output_contains:
+    - '"ok": false'
+    - 'pipeline step 0.steps.1 has unknown type "run"'

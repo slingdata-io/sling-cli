@@ -1,0 +1,9 @@
+name: omdb
+endpoints:
+  title:
+    request:
+      url: https://www.omdbapi.com/
+      method: GET
+    response:
+      records:
+        jmespath: "@"

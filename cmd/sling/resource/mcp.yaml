@@ -85,6 +85,7 @@ tools:
       - `"get_schemata"` - Get database schemata (schemas, tables, columns)
       - `"get_schemas"` - Get list of schema names
       - `"query"` - Execute SQL queries (read-only)
+      - `"query_cancel"` - Cancel a running query by query_id
       - `"get_columns"` - Get column metadata for a table
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
         
@@ -103,13 +104,19 @@ tools:
     - `description` (string, required): A brief description of the intent and expected result of this query. Explain *why* you are running this query and what the result should tell you. Always provide this when executing a query.
     - `limit` (number, optional): The limit of rows to return (defaults to 100)
     - `transient` (boolean, optional): Whether to use a transient connection (default: false)
+    - `query_id` (string, optional): Client-supplied id (`[A-Za-z0-9_-]`, max 64) so a concurrent `query_cancel` can target this query. Generated if omitted.
 
-      This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+      This action executes a SQL query on a database connection and return the results. Long queries are supported. Interrupting the client (Ctrl+C / Escape) cancels the running query. Pass an optional `query_id` to cancel from another concurrent call via `query_cancel`. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
 
       *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
       *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
       *   Always use the LIMIT clause to minimize the number of rows returned.
       *   If the SQL is already saved as a file, pass `file:///abs/path/to/query.sql` as `query` instead of inlining the SQL text.
+
+    **For `action: "query_cancel"`**:
+    - `query_id` (string, required): The id of the running query to cancel.
+
+      Cancels a running `query`. Idempotent; returns `{cancelled: bool, query_id: string}`. `{cancelled: false}` means that id was not running. Requires a client that can issue a second tool call while `query` is in flight; sequential clients rely on interrupting the first call.
     
     **For `action: "get_columns"`**:
     - `connection` (string, required): The name of the database connection
@@ -130,6 +137,14 @@ tools:
         "connection": "MY_PG",
         "query": "SELECT * FROM users LIMIT 10",
         "description": "Preview first 10 user records to understand table structure and data format"
+      }
+    }
+
+    # Cancel a running query
+    {
+      "action": "query_cancel",
+      "input": {
+        "query_id": "my-q1"
       }
     }
     
@@ -322,12 +337,12 @@ tools:
     
     **Parameters**:
     - `action` (string, required): The API spec action to perform. Valid values:
-      - `"parse"` - Load and parse the API specification file, will return various details
+      - `"validate"` - Load and validate the API specification file, will return various details
       - `"docs"` - Fetch the Sling API specification documentation
       - `"test"` - Test an existing API Spec connection
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
-    **For `action: "parse"`**:
+    **For `action: "validate"`**:
     - `file_path` (string, required): The file path of the API specification.
     - `working_dir` (string, optional): Working directory to change to before running
     
@@ -367,7 +382,7 @@ tools:
     
     # Parse API specification content
     {
-      "action": "parse",
+      "action": "validate",
       "input": {
         "file_path": "path/to/github_api.yaml",
         "working_dir": "/path/to/dir"
@@ -383,31 +398,28 @@ tools:
     **Parameters**:
     - `action` (string, required): The replication action to perform. Valid values:
       - `"docs"` - Fetch documentation on how to use replications
-      - `"parse"` - Parse the content of a replication configuration file (non-compile validation)
-      - `"compile"` - Compile/validate a replication configuration
-      - `"run"` - Execute a replication configuration
+      - `"validate"` - Validate and compile a replication configuration file
     
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
     **For `action: "docs"`**:
     - No parameters required (empty object)
     
-    **For `action: "parse"`**:
+    **For `action: "validate"`**:
     - `file_path` (string, required): Path to the replication configuration file to read
+    - `compile` (boolean, optional): Compile the configuration (default: true). Compile resolves
+      connections, interpolates `${VAR}` and `{var}` references, and returns the task list.
+      Set to false only for a parse-only syntax check. Parse-only does not mean the file is ready to run.
+      Prefer compile: true when connections exist.
+    - `select_streams` (array, optional): List of specific streams to compile (default: all streams)
     - `working_dir` (string, optional): Working directory to change to before reading
     
-    **For `action: "compile"`**:
-    - `file_path` (string, required): Path to the replication configuration file to compile
-    - `select_streams` (array, optional): List of specific streams to compile (default: all streams)
-    - `working_dir` (string, optional): Working directory to change to before compiling
-    
-    **For `action: "run"`**:
-    - `file_path` (string, required): Path to the replication configuration file to execute
-    - `select_streams` (array, optional): List of specific streams to run (default: all streams)
-    - `working_dir` (string, optional): Working directory to change to before running
-    - `range` (string, optional): Backfill range for source options (e.g., "2024-01-01:2024-01-31")
-    - `mode` (string, optional): Mode override for replication (e.g., "full-refresh", "incremental")
-    - `env` (object, optional): Environment variables to set for the replication run
+    **To execute a replication, use the CLI** (there is no MCP `run` action):
+    ```
+    sling run -r path/to/my_replication.yaml
+    sling run -r path/to/my_replication.yaml --streams table1,table2 -m incremental
+    sling run -r path/to/my_replication.yaml --debug
+    ```
     
     **Output**: The output format depends on the action and audience:
     - **For User**: Human-readable messages, CSV tables, or status updates
@@ -421,29 +433,11 @@ tools:
       "input": {}
     }
 
-    # Parse a replication file
+    # Parse and compile a replication file (default; prefer this when connections exist)
     {
-      "action": "parse",
+      "action": "validate",
       "input": {
-        "file_path": "path/to/my_replication.yaml",
-      }
-    }
-
-    # Compile a replication file
-    {
-      "action": "compile",
-      "input": {
-        "file_path": "path/to/my_replication.yaml",
-      }
-    }
-    
-    # Run a replication with specific streams
-    {
-      "action": "run",
-      "input": {
-        "file_path": "path/to/my_replication.yaml",
-        "select_streams": ["table1", "table2"],
-        "mode": "incremental"
+        "file_path": "path/to/my_replication.yaml"
       }
     }
     ```
@@ -456,21 +450,28 @@ tools:
     **Parameters**:
     - `action` (string, required): The pipeline action to perform. Valid values:
       - `"docs"` - Fetch documentation on how to use pipelines
-      - `"parse"` - Parse and validate the content of a pipeline configuration file
-      - `"run"` - Execute a pipeline configuration
+      - `"validate"` - Validate the content of a pipeline configuration file
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
     **For `action: "docs"`**:
     - No parameters required (empty object)
 
-    **For `action: "parse"`**:
+    **For `action: "validate"`**:
     - `file_path` (string, required): Path to the pipeline configuration file to read.
     - `working_dir` (string, optional): Working directory to change to before reading
     
-    **For `action: "run"`**:
-    - `file_path` (string, required): Path to the pipeline configuration file to execute.
-    - `working_dir` (string, optional): Working directory to change to before running
-    - `env` (object, optional): Environment variables to set for the pipeline run.
+    **To execute a pipeline, use the CLI** (there is no MCP `run` action):
+    ```
+    sling run -p path/to/my_pipeline.yaml
+    sling run -p path/to/my_pipeline.yaml --debug
+    ```
+    
+    **To execute SQL models, use the CLI** (there is no MCP `build` action):
+    ```
+    sling build
+    sling build --compile
+    sling build -s stg_users,fct_orders
+    ```
     
     **Output**: The output format depends on the action and audience:
     - **For User**: Human-readable messages, CSV tables, or status updates
@@ -486,28 +487,9 @@ tools:
 
     # Parse a pipeline file
     {
-      "action": "parse",
+      "action": "validate",
       "input": {
         "file_path": "path/to/my_pipeline.yaml"
-      }
-    }
-    
-    # Run a pipeline
-    {
-      "action": "run",
-      "input": {
-        "file_path": "path/to/my_pipeline.yaml"
-      }
-    }
-
-    # Run a pipeline with environment variables
-    {
-      "action": "run",
-      "input": {
-        "file_path": "path/to/my_pipeline.yaml",
-        "env": {
-          "MY_VAR": "my_value"
-        }
       }
     }
     ```
@@ -547,7 +529,7 @@ prompts:
          
          The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
 
-         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user. Recommend `sling assist setup` so the agent-browser MCP server is wired. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
          
       3. **Create Specification**: Now that the API is greatly understood, formulate and create a fully functional Sling API Spec in file path {spec_file_path}. If the assistant sees obstacles or issues in developing the spec, or does not have sufficient information, this is the time to alert the user with any concerns or questions for clarification.
 
@@ -600,9 +582,9 @@ prompts:
         
       1. **Get Documentation**: Call the tool `api_spec/docs` to obtain the latest Sling API specification guide
 
-      2. **Load Existing Spec**: Use `api_spec/parse` to load the current specification content. 
+      2. **Load Existing Spec**: Use `api_spec/validate` to load the current specification content. 
 
-      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/parse` until there are no errors or determining that no progress can be made.
+      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/validate` until there are no errors or determining that no progress can be made.
 
       4. **Analyze Endpoint Documentation**: Navigate to the endpoint docs URL (if provided) or the main API docs, using the browser to fully understand:
          - Endpoint URL structure and parameters
@@ -614,7 +596,7 @@ prompts:
          
          The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
 
-         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user. Recommend `sling assist setup` so the agent-browser MCP server is wired. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
       
       5. **Implement Endpoint**: Add the new endpoint configuration to the spec file following existing patterns.
 
@@ -654,9 +636,9 @@ prompts:
       ## Workflow Steps:
       1. **Get Documentation**: Use `api_spec/docs` to access the Sling API specification guide
 
-      2. **Load Existing Spec**: Use `api_spec/parse` to load the current specification content. 
+      2. **Load Existing Spec**: Use `api_spec/validate` to load the current specification content. 
 
-      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/parse` until there are no errors or determining that no progress can be made.
+      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/validate` until there are no errors or determining that no progress can be made.
 
       4. **Analyze API Documentation**: Navigate to the API docs using the browser to fully understand and verify:
          - Correct endpoint URL and parameters
@@ -667,7 +649,7 @@ prompts:
          
          The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
 
-         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user. Recommend `sling assist setup` so the agent-browser MCP server is wired. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
       
       5. **Test and Diagnose**: Use `api_spec/test` with debug enabled, specifying the endpoint name
          - Examine error messages and response details

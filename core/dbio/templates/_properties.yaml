@@ -154,7 +154,7 @@ redshift:
       secret: true
 
 postgres:
-  title: 'Postges'
+  title: 'Postgres'
   kind: database
   required: ["host", "port", "database", "username"]
   url_template: 'postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}'

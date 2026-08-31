@@ -1,0 +1,13 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer eval-token-literal-DO-NOT-EMBED"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+    response:
+      records:
+        jmespath: "data"

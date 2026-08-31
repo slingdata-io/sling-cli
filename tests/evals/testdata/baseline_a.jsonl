@@ -1,0 +1,2 @@
+{"run":"base","case":"e.01.repl_pg_duckdb_incremental","arm":"mock","trial":1,"pass":true,"score":1}
+{"run":"base","case":"e.11.repl_unknown_conn","arm":"mock","trial":1,"pass":true,"score":1}

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -69,24 +70,72 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 		g.Info("connection `%s` has been removed from %s", name, ec.EnvFile.Path)
 	case "set":
-		if len(c.Vals) == 0 {
+		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
+		if name == "" {
 			flaggy.ShowHelp("")
 			return ok, nil
 		}
 
+		setOutput, outErr := ResolveOutputFormat(c, "json")
+		if outErr != nil {
+			return ok, outErr
+		}
+		asJSON = setOutput == "json"
+
+		kvMap := map[string]any{}
+		if cast.ToBool(c.Vals["stdin"]) {
+			stat, _ := os.Stdin.Stat()
+			if stat != nil && stat.Mode()&os.ModeCharDevice != 0 {
+				return ok, g.Error("stdin is a terminal; pipe a YAML or JSON property map")
+			}
+			raw, readErr := io.ReadAll(os.Stdin)
+			if readErr != nil {
+				return ok, g.Error(readErr, "could not read stdin")
+			}
+			stdinMap, parseErr := connection.ParsePropsInput(string(raw))
+			if parseErr != nil {
+				return ok, parseErr
+			}
+			kvMap = stdinMap
+		}
+
 		kvArr := []string{cast.ToString(c.Vals["value properties..."])}
-		kvMap := map[string]interface{}{}
 		for k, v := range g.KVArrToMap(append(kvArr, flaggy.TrailingArguments...)...) {
 			k = strings.ToLower(k)
+			if k == "" {
+				continue
+			}
 			kvMap[k] = v
 		}
-		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
+		if t := strings.TrimSpace(cast.ToString(c.Vals["type"])); t != "" {
+			kvMap["type"] = strings.ToLower(t)
+		}
 
-		err := ec.Set(name, kvMap)
+		if err = connection.RejectLiteralSecrets(name, kvMap); err != nil {
+			return ok, err
+		}
+
+		err = ec.Set(name, kvMap)
 		if err != nil {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
-		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
+
+		loc, locErr := ec.EnvFile.LookupConnection(name)
+		if locErr != nil {
+			loc = env.ConnLocation{Path: ec.EnvFile.Path, Connection: name, Missing: []env.MissingRef{}}
+		}
+
+		if asJSON {
+			fmt.Println(g.Marshal(loc))
+			return ok, nil
+		}
+
+		g.Info("connection `%s` has been set in %s:%d", name, loc.Path, loc.Line)
+		if len(loc.Missing) > 0 {
+			g.Info("set the env var(s), then: sling conns test %s", name)
+		} else {
+			g.Info("next: sling conns test %s", name)
+		}
 	case "exec":
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
@@ -305,9 +354,29 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
 
-		if conn := entries.Get(name); conn.Name != "" {
+		conn := entries.Get(name)
+		if conn.Name != "" {
 			env.SetTelVal("conn_type", conn.Connection.Type.String())
 			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
+			if g.IsDebugLow() {
+				g.Debug("connection %s properties: %s", name, g.Marshal(conn.Connection.Data))
+			}
+		}
+
+		refData := conn.Connection.Data
+		if len(refData) == 0 {
+			if cdata, ok := ef.Connections[strings.ToUpper(name)]; ok {
+				refData = cdata
+			}
+		}
+		if refs := connection.FindUnsetEnvRefs(refData); len(refs) > 0 {
+			loc, _ := ef.LookupConnection(strings.ToUpper(name))
+			err = connection.FormatUnsetRefError(refs, loc)
+			if os.Getenv("SLING_OUTPUT") == "json" {
+				fmt.Println(g.Marshal(g.M("success", false, "error", g.ErrMsg(err))))
+				return
+			}
+			return ok, err
 		}
 
 		// for testing specific endpoints

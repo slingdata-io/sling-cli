@@ -1,0 +1,15 @@
+source: POSTGRES
+target: CLICKHOUSE
+defaults:
+  mode: full-refresh
+  object: public.{stream_table}
+streams:
+  finance.invoices:
+    mode: full-refresh
+    object: public.invoices
+  finance.payments:
+    mode: full-refresh
+    object: public.payments
+  public.products:
+    mode: snapshot
+    object: public.products

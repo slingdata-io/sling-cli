@@ -1,0 +1,14 @@
+name: sling assist --out - replication ask
+seed: home_with_claude
+timeout_s: 30
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+
+  - run: sling assist --out - "create a replication from MY_PG"
+  - wait_for: "Gather first"
+  - expect_contains: "# Rules"
+  - expect_contains: "# State"
+  - expect_contains: "# Context"
+  - expect_contains: "MY_PG"
+  - expect_contains: "Load the matching Sling skill"

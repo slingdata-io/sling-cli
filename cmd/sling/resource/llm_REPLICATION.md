@@ -57,15 +57,15 @@ Sling replications are YAML or JSON configuration files that define data movemen
 
 The Sling MCP tool provides these replication commands:
 - `replication/docs` - Get documentation
-- `replication/parse` - Parse and validate configuration
-- `replication/compile` - Compile configuration with validation
-- `replication/run` - Execute the replication
+- `replication/validate` - Parse and compile configuration (default compile is true). `compile: false` is parse-only and does not mean the file is ready to run.
+
+There is no MCP `run` action. Execute replications with the CLI: `sling run -r /path/to/replication.yaml`.
 
 ---
 
 ## 2. Quick Start Guide
 
-### Essential MCP Commands
+### Essential Commands
 
 ```json
 // Get replication documentation
@@ -76,20 +76,17 @@ The Sling MCP tool provides these replication commands:
 
 // Parse a replication file
 {
-  "action": "parse",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/replication.yaml"
   }
 }
+```
 
-// Run a replication
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml",
-    "mode": "incremental"
-  }
-}
+```bash
+# Run a replication (CLI only — no MCP run action)
+sling run -r /path/to/replication.yaml -m incremental
+sling run -r /path/to/replication.yaml --streams table1 --debug
 ```
 
 ### Basic Replication Structure
@@ -1443,7 +1440,7 @@ streams:
 #### Parse Configuration
 ```json
 {
-  "action": "parse",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/replication.yaml",
     "working_dir": "/optional/work/dir"
@@ -1452,9 +1449,10 @@ streams:
 ```
 
 #### Validate Configuration
+Parsing compiles by default, which checks connections and streams. Prefer this when connections exist. `compile: false` is parse-only and does not mean the file is ready to run.
 ```json
 {
-  "action": "compile",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/replication.yaml",
     "select_streams": ["table1", "table2"],  // Optional
@@ -1464,21 +1462,14 @@ streams:
 ```
 
 #### Execute Replication
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml",
-    "select_streams": ["specific_table"],     // Optional: run specific streams
-    "working_dir": "/project/directory",      // Optional: change directory
-    "range": "2024-01-01,2024-01-31",       // Optional: backfill range
-    "mode": "incremental",                    // Optional: override mode
-    "env": {                                  // Optional: environment variables
-      "CUSTOM_VAR": "value",
-      "SLING_THREADS": "5"
-    }
-  }
-}
+
+There is no MCP `run` action. Use the CLI:
+
+```bash
+sling run -r /path/to/replication.yaml
+sling run -r /path/to/replication.yaml --streams specific_table -m incremental
+sling run -r /path/to/replication.yaml --range 2024-01-01,2024-01-31
+sling run -r /path/to/replication.yaml --env '{CUSTOM_VAR: value, SLING_THREADS: "5"}'
 ```
 
 ### Combining with Connection Tools
@@ -1502,23 +1493,18 @@ Then test connections:
 }
 ```
 
-Finally run replication:
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml"
-  }
-}
+Finally run the replication with the CLI:
+
+```bash
+sling run -r /path/to/replication.yaml
 ```
 
 ### Development Workflow
 
-1. **Parse** configuration for syntax validation
-2. **Compile** to check connections and streams
-3. **Test** on subset of streams first
-4. **Run** full replication
-5. **Monitor** with debug/trace options
+1. **Validate** configuration with MCP `replication/validate` (compile is the default)
+2. **Test** on a subset of streams first: `sling run -r file.yaml --streams small_table`
+3. **Run** the full replication: `sling run -r file.yaml`
+4. **Monitor** with `--debug` / `--trace`
 
 ---
 
@@ -1648,14 +1634,8 @@ hooks:
 ### Testing Strategies
 
 #### Test with Subsets First
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml",
-    "select_streams": ["small_test_table"]
-  }
-}
+```bash
+sling run -r /path/to/replication.yaml --streams small_test_table
 ```
 
 #### Use Development Targets
@@ -1780,23 +1760,15 @@ target_options:
 ### Debug Options
 
 #### Enable Debug Logging
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml",
-    "env": {
-      "DEBUG": "true"
-    }
-  }
-}
+```bash
+sling run -r /path/to/replication.yaml --debug
 ```
 
 #### Parse Configuration
 Always validate before running:
 ```json
 {
-  "action": "parse",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/replication.yaml"
   }
@@ -1804,10 +1776,10 @@ Always validate before running:
 ```
 
 #### Compile Configuration
-Check connections and streams:
+Parsing compiles by default, which checks connections and streams. Prefer this when connections exist.
 ```json
 {
-  "action": "compile",
+  "action": "validate",
   "input": {
     "file_path": "/path/to/replication.yaml"
   }
@@ -1889,14 +1861,8 @@ streams:
 Sling automatically tracks progress, but you can:
 
 1. **Run specific streams:**
-```json
-{
-  "action": "run",
-  "input": {
-    "file_path": "/path/to/replication.yaml",
-    "select_streams": ["failed_stream"]
-  }
-}
+```bash
+sling run -r /path/to/replication.yaml --streams failed_stream
 ```
 
 2. **Use retry configuration:**
@@ -1906,4 +1872,4 @@ env:
   SLING_RETRY_DELAY: 60s
 ```
 
-This comprehensive guide provides everything needed to effectively use Sling replications with the MCP tool, from basic concepts to advanced troubleshooting techniques.
+This comprehensive guide provides everything needed to effectively use Sling replications: validate with MCP, then execute with `sling run`.

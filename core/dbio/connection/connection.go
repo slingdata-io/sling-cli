@@ -984,7 +984,6 @@ func (c *Connection) setURL() (err error) {
 		switch {
 		case port_ok && instance_ok:
 			template += ":{port}/{instance}"
-			g.Debug("SQL Server: port %s and instance %s are both set. The driver uses the port and ignores the instance name.", c.Data["port"], c.Data["instance"])
 			if buildingURL && cast.ToInt(c.Data["port"]) == 1433 {
 				g.Warn("SQL Server: port 1433 and instance %s are both set. The driver uses port 1433 and ignores the instance name. For a named instance, set `port` to the instance TCP port or omit `port`.", c.Data["instance"])
 			}

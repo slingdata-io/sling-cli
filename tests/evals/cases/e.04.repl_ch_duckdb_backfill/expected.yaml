@@ -1,0 +1,8 @@
+source: CLICKHOUSE
+target: DUCKDB
+streams:
+  events:
+    object: main.events
+    mode: backfill
+    source_options:
+      range: '2024-01-01,2024-12-31'

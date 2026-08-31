@@ -1,0 +1,81 @@
+# Pipeline with type: build — load-adjacent transform in one YAML (review §5.3).
+steps:
+  - type: log
+    message: 'starting pipeline build step test'
+
+  # Full form: type + build path + options
+  - type: build
+    id: build
+    build: tests/build/pipeline_step_project
+    target: POSTGRES
+    full_refresh: true
+    fail_fast: true
+    threads: 2
+    select:
+      - stg_orders
+      - fct_orders
+    vars:
+      run_label: from_pipeline
+
+  - type: log
+    message: 'build total={state.build.total} ok={state.build.ok} failed={state.build.failed} skipped={state.build.skipped}'
+
+  - type: check
+    check: state.build.total >= 2
+    failure_message: 'expected at least 2 build results, got total={state.build.total}'
+
+  - type: check
+    check: state.build.failed == 0
+    failure_message: 'build reported failures: {state.build.failed}'
+
+  - type: check
+    check: state.build.ok >= 2
+    failure_message: 'expected ok >= 2, got {state.build.ok}'
+
+  - type: query
+    connection: POSTGRES
+    query: |
+      SELECT count(*) AS cnt,
+             max(run_label) AS run_label
+      FROM marts.fct_orders
+    into: fct
+
+  - type: check
+    check: store.fct[0].cnt == 2
+    failure_message: 'expected 2 rows in marts.fct_orders'
+
+  - type: check
+    check: store.fct[0].run_label == "from_pipeline"
+    failure_message: 'vars not passed into model (run_label={store.fct[0].run_label})'
+
+  # Shortcut form: type inferred from `build:` key (like `replication:`)
+  - build: tests/build/pipeline_step_project
+    id: build_shortcut
+    target: POSTGRES
+    full_refresh: true
+    select: stg_orders
+    vars:
+      run_label: from_shortcut
+
+  - type: check
+    check: state.build_shortcut.ok >= 1
+    failure_message: 'shortcut build: form did not run'
+
+  - type: query
+    connection: POSTGRES
+    query: SELECT max(run_label) AS run_label FROM staging.stg_orders
+    into: stg_shortcut
+
+  - type: check
+    check: store.stg_shortcut[0].run_label == "from_shortcut"
+    failure_message: 'shortcut build vars not applied'
+
+  - type: log
+    message: 'SUCCESS: pipeline type:build step completed (rows={store.fct[0].cnt}, label={store.fct[0].run_label})'
+
+  # Cleanup
+  - type: query
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS marts.fct_orders;
+      DROP TABLE IF EXISTS staging.stg_orders;

@@ -1,0 +1,44 @@
+# copy accepts a list step's bare path as local cwd-relative / absolute.
+steps:
+  - type: write
+    to: local//tmp/sling/p51/data/a.csv
+    content: |
+      id,name
+      1,alice
+
+  - type: write
+    to: local//tmp/sling/p51/data/b.csv
+    content: |
+      id,name
+      2,bob
+
+  - type: list
+    id: files
+    location: local//tmp/sling/p51/data/*.csv
+    only: files
+
+  - type: group
+    loop: state.files.result
+    steps:
+      - type: copy
+        from: "{loop.value.path}"
+        to: local//tmp/sling/p51/out/{loop.value.name}
+        single_file: true
+
+  - type: list
+    id: out
+    location: local//tmp/sling/p51/out/*.csv
+    only: files
+
+  - type: log
+    message: "copied via bare path: {state.out.result}"
+
+  - type: check
+    check: length(state.out.result) == 2
+    failure_message: "expected 2 files copied from bare list path"
+    on_failure: abort
+
+  - type: delete
+    location: local//tmp/sling/p51
+    recursive: true
+    on_failure: quiet

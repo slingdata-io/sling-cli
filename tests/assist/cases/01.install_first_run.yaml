@@ -1,0 +1,29 @@
+name: install first run wires claude + writes profile
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - expect_contains: "claude"
+  - expect_contains: "skills=yes"
+  - expect_contains: "authed="
+  - expect_contains: "Run `sling assist setup --doctor`"
+
+assert_files:
+  - path: "$HOME/.sling/env.yaml"
+    contains:
+      - "SLING_ASSIST:"
+      - "agent: claude"
+      - "hint_in_errors: true"
+  - path: "$HOME/.agents/skills/sling/SKILL.md"
+    contains:
+      - "name: sling"
+      - "Sling - Data Integration Platform"
+    md5_matches_embedded: true
+  - path: "$HOME/.claude/skills/sling/SKILL.md"
+    is_redirect_to: "$HOME/.agents/skills/sling/SKILL.md"
+  - path: "$HOME/.claude.json"
+    contains:
+      - "mcpServers"
+      - "sling"
+      - "serve"

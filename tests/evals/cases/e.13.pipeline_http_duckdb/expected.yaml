@@ -1,0 +1,10 @@
+steps:
+  - type: http
+    url: https://example.com/data.csv
+    into: data.csv
+  - type: query
+    connection: DUCKDB
+    query: select count(*) as n from read_csv_auto('data.csv')
+    into: n
+  - type: check
+    check: store.n[0].n > 0

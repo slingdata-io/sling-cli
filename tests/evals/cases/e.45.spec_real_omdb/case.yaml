@@ -1,0 +1,21 @@
+id: e.45.spec_real_omdb
+task: spec_create
+tier: deep
+gating: false
+tags: [spec, lane-b]
+intention: >
+  Create an OMDb spec that uses queue_only: a search producer then a title
+  consumer. Use OMDB_API_KEY. Write ./spec.yaml.
+arms: [claude, grok]
+timeout: 300s
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - endpoints.search.response.records.primary_key

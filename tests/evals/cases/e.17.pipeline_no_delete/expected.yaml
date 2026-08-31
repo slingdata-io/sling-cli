@@ -1,0 +1,7 @@
+steps:
+  - type: query
+    connection: POSTGRES
+    query: select count(*) as n from public.orders
+    into: n
+  - type: log
+    message: '{store.n}'

@@ -1,0 +1,8 @@
+source: POSTGRES
+target: DUCKDB
+streams:
+  public.orders:
+    object: public.orders
+    mode: full-refresh
+    primary_key: [id]
+    update_key: updated_at

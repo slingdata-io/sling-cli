@@ -426,6 +426,12 @@ func TestEvaluator(t *testing.T) {
 				"state": map[string]any{"name": "Alice"},
 			},
 		},
+		{
+			name:     "single_quoted_string_literal",
+			input:    `{ coalesce(nil, '%Y-%m-%d') }`,
+			expected: "%Y-%m-%d",
+			state:    map[string]any{},
+		},
 
 		// Edge cases
 		{
@@ -1356,22 +1362,19 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "single_quote_error",
+			name:        "single_quote_ok",
 			expression:  `state.name == 'John'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "single_quote_in_middle",
 			expression:  `state.name == "John" && state.title == 'Mr'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "single_quote_at_beginning",
 			expression:  `'test' == state.value`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "apostrophe_outside_double_quotes",
@@ -1381,8 +1384,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "apostrophe_and_single_quote_mix",
 			expression:  `state.name == "John's car" && state.other == 'test'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "escaped_double_quote",
@@ -1397,8 +1399,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "single_quote_after_escaped_double_quote",
 			expression:  `state.text == "He said \"hello\"" && state.bad == 'world'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "complex_valid_expression",
@@ -1406,10 +1407,9 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "backslash_before_single_quote_still_error",
+			name:        "backslash_before_single_quote_is_escaped",
 			expression:  `state.test == "valid" && state.invalid == \'bad\'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "double_backslash_before_double_quote",
@@ -1430,8 +1430,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "only_single_quotes",
 			expression:  `'hello world'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "only_double_quotes",
@@ -1441,8 +1440,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "mixed_quotes_complex",
 			expression:  `state.a == "test" && state.b == 'invalid' && state.c == "valid"`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "unicode_characters_with_double_quotes",
@@ -1452,8 +1450,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "unicode_characters_with_single_quotes",
 			expression:  `state.emoji == 'Hello 👋 world'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "json_like_string",
@@ -1468,8 +1465,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "regex_like_pattern_single_quotes",
 			expression:  `state.pattern == '^[a-zA-Z0-9]+$'`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "empty_string_double_quotes",
@@ -1479,8 +1475,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		{
 			name:        "empty_string_single_quotes",
 			expression:  `state.value == ''`,
-			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			expectError: false,
 		},
 		{
 			name:        "multiple_consecutive_escapes",
@@ -1496,7 +1491,7 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 			name:        "single_quote_at_very_end",
 			expression:  `someexpression'`,
 			expectError: true,
-			errorMsg:    "cannot use single quotes",
+			errorMsg:    "unclosed single quote",
 		},
 		{
 			name:        "double_quote_at_very_end",
@@ -2500,8 +2495,8 @@ func TestEvaluatorFindMatches(t *testing.T) {
 			expected: []string{`"{\"key\": \"" + state.value + "\"}"`},
 		},
 		{
-			name:     "mixed_quoted_and_unquoted_braces",
-			input:    `{ repository(owner: "{state.owner}") { name } }`,
+			name:  "mixed_quoted_and_unquoted_braces",
+			input: `{ repository(owner: "{state.owner}") { name } }`,
 			// The outer has unquoted nested braces, so recurse. Inner "{state.owner}" has braces in quotes - ok.
 			// { name } has no nested braces inside it.
 			expected: []string{"state.owner", " name "},
@@ -2734,5 +2729,25 @@ func TestEvaluatorRenderJmespathJq(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestRenderStringMethodCallHint(t *testing.T) {
+	eval := NewEvaluator(g.ArrStr("loop"), g.M("loop", g.M("value", g.M("name", "orders.csv"))))
+	_, err := eval.RenderString("main.{loop.value.name.split('.')}")
+	if err == nil {
+		t.Fatal("expected render error for method-call syntax")
+	}
+	if !strings.Contains(err.Error(), "method calls are not supported") {
+		t.Fatalf("missing hint: %s", err.Error())
+	}
+
+	// correct function syntax renders fine
+	got, err := eval.RenderString(`main.{split_part(loop.value.name, ".", 0)}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "main.orders" {
+		t.Fatalf("got %q", got)
 	}
 }

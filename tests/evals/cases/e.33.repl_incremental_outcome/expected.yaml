@@ -1,0 +1,8 @@
+source: POSTGRES
+target: DUCKDB
+streams:
+  eval_tpch.orders:
+    object: main.orders
+    mode: incremental
+    primary_key: [o_orderkey]
+    update_key: o_orderdate

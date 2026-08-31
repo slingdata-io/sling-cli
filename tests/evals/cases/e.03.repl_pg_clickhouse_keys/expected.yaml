@@ -1,0 +1,11 @@
+source: POSTGRES
+target: CLICKHOUSE
+streams:
+  public.orders:
+    object: public.orders
+    mode: incremental
+    primary_key: [id]
+    update_key: updated_at
+    target_options:
+      table_keys:
+        order_by: [id]

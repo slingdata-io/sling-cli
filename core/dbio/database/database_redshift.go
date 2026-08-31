@@ -83,7 +83,6 @@ func loadAWSCredentialsFromChain(conn Connection) error {
 	return nil
 }
 
-
 func isRedshift(URL string) (isRs bool) {
 	db, err := sqlx.Open("postgres", URL)
 	if err != nil {
@@ -175,12 +174,7 @@ func (conn *RedshiftConn) getS3Props() []string {
 
 // redactCredentials masks AWS secrets in a SQL string, for safe logging.
 func (conn *RedshiftConn) redactCredentials(sql string) string {
-	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN"} {
-		if val := conn.GetProp(key); val != "" {
-			sql = strings.ReplaceAll(sql, val, "*****")
-		}
-	}
-	return sql
+	return env.Clean(conn.Props(), sql)
 }
 
 // ensureAWSCredentials ensures AWS credentials are available for Redshift's COPY/UNLOAD

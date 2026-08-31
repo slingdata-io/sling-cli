@@ -1,0 +1,5 @@
+target: POSTGRES
+dbt_project: true
+
+defaults:
+  mode: full-refresh

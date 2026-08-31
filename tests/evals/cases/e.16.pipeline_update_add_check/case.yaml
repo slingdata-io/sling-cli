@@ -1,0 +1,25 @@
+id: e.16.pipeline_update_add_check
+task: pipeline_update
+tier: core
+gating: true
+tags: [pipeline]
+intention: >
+  Update the pipeline at pipe.yaml: add a check step after the query.
+  Keep the existing query step.
+edit_path: pipe.yaml
+arms: [claude, grok, opencode2, codex]
+conns: [POSTGRES]
+artifact: pipe.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: query, connection: POSTGRES}
+          - {type: check}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

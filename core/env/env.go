@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +18,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 	"github.com/segmentio/ksuid"
-	"github.com/slingdata-io/sling-cli/core"
 	"github.com/spf13/cast"
 )
 
@@ -42,12 +40,7 @@ var (
 	RunnerID       = g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID"))
 	IsRunnerMode   = RunnerID != ""
 
-	// File logging
-	debugLogFile *os.File
-	traceLogFile *os.File
-	logFileInit  = false
-	logFileMux   sync.Mutex
-	GetOAuthMap  = func() map[string]map[string]any {
+	GetOAuthMap = func() map[string]map[string]any {
 		return map[string]map[string]any{}
 	}
 	ExecFolder      = func() string { return filepath.Join(HomeDir, "executions", ExecID) }
@@ -187,14 +180,16 @@ func SetLogger() {
 		}
 	}
 
-	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
-	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
-	outputOut.FormatErrFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
+	formatMsg := func(i interface{}) string {
+		return ScrubLine(g.ZLogFormatMessage(i))
 	}
-	outputErr.FormatErrFieldValue = func(i interface{}) string {
-		return fmt.Sprintf("%s", i)
+	formatErr := func(i interface{}) string {
+		return ScrubLine(fmt.Sprintf("%s", i))
 	}
+	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: formatMsg}
+	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: formatMsg}
+	outputOut.FormatErrFieldValue = formatErr
+	outputErr.FormatErrFieldValue = formatErr
 
 	if os.Getenv("SLING_LOGGING") == "NO_COLOR" {
 		NoColor = true
@@ -211,10 +206,11 @@ func SetLogger() {
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
-		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
+		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM", FormatLevel: g.ZLogFormatLevel, FormatMessage: formatMsg}
 		if g.IsDebugLow() {
-			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
+			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: formatMsg}
 		}
+		outputErr.FormatErrFieldValue = formatErr
 		g.ZLogOut = zerolog.New(outputErr).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	}
@@ -245,280 +241,68 @@ func InitLogger() {
 	setupFileLogging()
 	setupOtel()
 }
-
-// setupFileLogging initializes file logging based on SLING_DEBUG_FILE and SLING_TRACE_FILE env vars
-func setupFileLogging() {
-	if IsThreadChild {
-		return // don't write log from child processes
-	}
-
-	logFileMux.Lock()
-	defer logFileMux.Unlock()
-
-	// Close existing files if any (for re-initialization)
-	if debugLogFile != nil {
-		debugLogFile.Close()
-		debugLogFile = nil
-	}
-	if traceLogFile != nil {
-		traceLogFile.Close()
-		traceLogFile = nil
-	}
-
-	// setup env from env.yaml and .env.sling
-	LoadSlingEnvFile()
-	LoadDotEnvSling()
-
-	// Open debug log file
-	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {
-		f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			g.Warn("could not open debug log file: %s", err.Error())
-		} else {
-			debugLogFile = f
-		}
-	}
-
-	// Open debug log file from SLING_LOG_DIR (date-based rotation)
-	// Only if SLING_DEBUG_FILE wasn't set and this is not a thread child process
-	if logDir := os.Getenv("SLING_LOG_DIR"); logDir != "" && debugLogFile == nil {
-		// Expand ~ to home directory
-		if strings.HasPrefix(logDir, "~/") {
-			logDir = filepath.Join(g.UserHomeDir(), logDir[2:])
-		}
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			g.Warn("could not create log directory: %s", err.Error())
-		} else {
-			logFileName := "sling_debug_" + time.Now().Format("2006_01_02") + ".log"
-			logPath := filepath.Join(logDir, logFileName)
-
-			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-			if err != nil {
-				g.Warn("could not open log file: %s", err.Error())
-			} else {
-				debugLogFile = f
-				cleanupOldLogFiles(logDir, 15)
-			}
-		}
-	}
-
-	// Open trace log file
-	if tracePath := os.Getenv("SLING_TRACE_FILE"); tracePath != "" {
-		f, err := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			g.Warn("could not open trace log file: %s", err.Error())
-		} else {
-			traceLogFile = f
-		}
-	}
-}
-
-// CloseFileLogging closes any open log files
-func CloseFileLogging() {
-	logFileMux.Lock()
-	defer logFileMux.Unlock()
-
-	if debugLogFile != nil {
-		debugLogFile.Close()
-		debugLogFile = nil
-	}
-	if traceLogFile != nil {
-		traceLogFile.Close()
-		traceLogFile = nil
-	}
-}
-
-// cleanupOldLogFiles removes old .log files from the directory, keeping the latest `keep` files.
-// Files are sorted by name (which sorts chronologically for date-based filenames).
-func cleanupOldLogFiles(dir string, keep int) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		g.Warn("could not read log directory for cleanup: %s", err.Error())
-		return
-	}
-
-	var logFiles []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
-			logFiles = append(logFiles, entry.Name())
-		}
-	}
-
-	sort.Strings(logFiles)
-
-	if len(logFiles) > keep {
-		for _, name := range logFiles[:len(logFiles)-keep] {
-			if err := os.Remove(filepath.Join(dir, name)); err != nil {
-				g.Warn("could not remove old log file %s: %s", name, err.Error())
-			}
-		}
-	}
-}
-
-// stripANSI removes ANSI escape codes from a string
-func stripANSI(text string) string {
-	// Match ANSI escape sequences: ESC[ followed by any number of params and a letter
-	// This handles color codes like \x1b[32m, \x1b[0m, \x1b[90m, etc.
-	result := strings.Builder{}
-	i := 0
-	for i < len(text) {
-		if i+1 < len(text) && text[i] == '\x1b' && text[i+1] == '[' {
-			// Skip the escape sequence
-			j := i + 2
-			for j < len(text) && ((text[j] >= '0' && text[j] <= '9') || text[j] == ';') {
-				j++
-			}
-			if j < len(text) && text[j] >= 'A' && text[j] <= 'z' {
-				j++ // Skip the final letter
-			}
-			i = j
-		} else {
-			result.WriteByte(text[i])
-			i++
-		}
-	}
-	return result.String()
-}
-
-func shortExecID() string {
-	val := ExecID
-	if len(val) > 8 {
-		val = val[len(val)-8:]
-	}
-	return val
-}
-
-// formatLogLine formats a log line for file output (no colors)
-func formatLogLine(ll *g.LogLine) string {
-	var levelPrefix string
-
-	switch zerolog.Level(ll.Level) {
-	case zerolog.TraceLevel:
-		levelPrefix = "TRC "
-	case zerolog.DebugLevel:
-		levelPrefix = "DBG "
-	case zerolog.InfoLevel:
-		levelPrefix = "INF "
-	case zerolog.WarnLevel:
-		levelPrefix = "WRN "
-	case zerolog.ErrorLevel:
-		levelPrefix = "ERR "
-	default:
-		levelPrefix = ""
-	}
-
-	timeText := ll.Time.Format("2006-01-02 15:04:05")
-
-	// Filter out map arguments and special strings (used internally by g library for context logging)
-	filteredArgs := []any{}
-	for _, arg := range ll.Args {
-		switch arg.(type) {
-		case map[string]any:
-			// Skip map arguments - they're context fields, not format args
-			continue
-		default:
-			if s, ok := arg.(string); ok && strings.HasPrefix(s, "_DEBUG_CALLER_START=") {
-				// Skip internal caller tracking string
-				continue
-			}
-			filteredArgs = append(filteredArgs, arg)
-		}
-	}
-
-	text := g.F(ll.Text, filteredArgs...)
-
-	// Strip any ANSI codes from the text
-	text = stripANSI(text)
-
-	return fmt.Sprintf("%s | %s %s%s\n", shortExecID(), timeText, levelPrefix, text)
-}
-
-func writeHeader(logFile *os.File) {
-	// Write session header
-	wd, _ := os.Getwd()
-	header := fmt.Sprintf(
-		"\n%s\n== %s | version: %s | exec_id: %s\n== dir: %s | command: %s\n%s\n",
-		strings.Repeat("=", 100),
-		time.Now().Format("2006-01-02 15:04:05"),
-		core.Version,
-		ExecID,
-		wd,
-		strings.Join(os.Args, " "),
-		strings.Repeat("=", 80),
-	)
-	logFile.WriteString(header)
-}
-
-// writeToLogFile writes the log entry to configured log file(s)
-func writeToLogFile(ll *g.LogLine) {
-	logFileMux.Lock()
-	defer logFileMux.Unlock()
-
-	// Skip if no log files configured
-	if debugLogFile == nil && traceLogFile == nil {
-		return
-	}
-
-	if !logFileInit {
-		if debugLogFile != nil {
-			writeHeader(debugLogFile)
-		}
-		if traceLogFile != nil {
-			writeHeader(traceLogFile)
-		}
-		logFileInit = true
-	}
-
-	level := zerolog.Level(ll.Level)
-
-	// Handle Print/Println entries (level 9) - these are raw output from child processes
-	// Write them directly with ANSI codes stripped, but only if they have content
-	if ll.Level == 9 {
-		text := stripANSI(ll.Text)
-		if strings.TrimSpace(text) == "" {
-			return
-		}
-
-		// Add execID prefix
-		text = shortExecID() + " | " + text
-
-		// Ensure text ends with newline
-		if !strings.HasSuffix(text, "\n") {
-			text = text + "\n"
-		}
-		// Write to both files (Print output is considered important)
-		if traceLogFile != nil {
-			traceLogFile.WriteString(text)
-		}
-		if debugLogFile != nil {
-			debugLogFile.WriteString(text)
-		}
-		return
-	}
-
-	line := formatLogLine(ll)
-
-	// Write to trace file (all levels)
-	if traceLogFile != nil {
-		traceLogFile.WriteString(line)
-	}
-
-	// Write to debug file (debug level and above)
-	// zerolog levels: Trace=-1, Debug=0, Info=1, Warn=2, Error=3
-	if debugLogFile != nil && level >= zerolog.DebugLevel {
-		debugLogFile.WriteString(line)
-	}
-}
-
 func Print(text string) {
 	fmt.Fprintf(os.Stderr, "%s", text)
-	processLogEntry(&g.LogLine{Level: 9, Text: text})
-	writeToLogFile(&g.LogLine{Level: 9, Text: text})
+	ll := &g.LogLine{Level: 9, Text: text, Time: time.Now()}
+	processLogEntry(ll)
+	writeToLogFile(ll)
 }
 
 func Println(text string) {
 	text = text + "\n"
 	Print(text)
+}
+
+// PrintFatal prints the fatal error (same text as g.PrintFatal) and captures
+// it in the run-log buffer via Println, so stderr.log includes it.
+func PrintFatal(E error, args ...interface{}) {
+	makeErrStrings := func(payload string) string {
+		cancelledCount := 0
+		payload = strings.ReplaceAll(payload, "---\n\n---", "---\n---")
+		errParts := strings.Split(payload, "\n\n")
+		errStrings := []string{}
+		errHash := map[string]struct{}{}
+		for _, errPart := range errParts {
+			if _, ok := errHash[errPart]; !ok && errPart != "context canceled" {
+				if ps := strings.Split(errPart, "\n"); ps[len(ps)-1] == "context canceled" {
+					cancelledCount++
+				}
+				errStrings = append(errStrings, errPart)
+			}
+			errHash[errPart] = struct{}{}
+		}
+
+		if cancelledCount == len(errStrings) {
+			return "cancelled"
+		}
+		return strings.Join(errStrings, "\n\n")
+	}
+
+	prefix := "fatal:\n"
+	if E != nil {
+		err, ok := E.(*g.ErrType)
+		if !ok {
+			err = g.NewError(3, E, args...).(*g.ErrType)
+		}
+
+		eG, ok := E.(*g.ErrorGroup)
+		if ok {
+			if !g.IsDebugLow() {
+				Println(RedString(prefix + eG.Error()))
+			} else {
+				Println(RedString(prefix + eG.Debug()))
+			}
+		} else {
+			if !g.IsDebugLow() {
+				joined := makeErrStrings(err.Error())
+				Println(RedString(prefix + joined))
+			} else {
+				joined := makeErrStrings(err.Err)
+				output := g.F("%s\n%s", strings.Join(err.Stack(), "\n"), joined)
+				Println(RedString(prefix + output))
+			}
+		}
+	}
 }
 
 func LoadSlingEnvFile() (ef EnvFile) {
@@ -643,13 +427,6 @@ func CleanWindowsPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
 }
 
-func processLogEntry(ll *g.LogLine) {
-	// Existing LogSink functionality
-	if LogSink != nil {
-		LogSink(ll)
-	}
-}
-
 // RemoveLocalTempFile deletes the local file
 func RemoveLocalTempFile(localPath string) {
 	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
@@ -662,17 +439,6 @@ func RemoveAllLocalTempFile(localPath string) {
 	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 		os.RemoveAll(localPath)
 	}
-}
-
-func WriteTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
-	sqlPath = filepath.Join(GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
-
-	err = os.WriteFile(sqlPath, []byte(sql), 0777)
-	if err != nil {
-		return "", g.Error(err, "could not create temp sql")
-	}
-
-	return
 }
 
 func LogSQL(props map[string]string, query string, args ...any) {
@@ -701,8 +467,9 @@ func LogSQL(props map[string]string, query string, args ...any) {
 		}
 		g.Trace(query, contextArgs)
 	} else {
+		query = Clean(props, query)
 		if !noColor {
-			query = CyanString(Clean(props, query))
+			query = CyanString(query)
 		}
 		if !cast.ToBool(props["silent"]) {
 			g.Debug(query + connIdSuffix)
@@ -710,26 +477,24 @@ func LogSQL(props map[string]string, query string, args ...any) {
 	}
 }
 
-// Clean removes creds from a log line
+// Skip short values so passwords like "postgres" don't redact unrelated log text.
+const minSecretLen = 12
+
+func redactable(val string) bool {
+	val = strings.TrimSpace(val)
+	return len(val) >= minSecretLen && !IsEnvVarRef(val)
+}
+
+// Clean removes creds from a log line. CREATE/INSERT/etc. still redact:
+// Redshift COPY/UNLOAD embeds keys in those statements.
 func Clean(props map[string]string, line string) string {
 	line = strings.TrimSpace(line)
-	sqlLower := strings.ToLower(line)
-
-	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
-
-	switch {
-	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
-		return line
-	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
-		return line
-	case startsWith("select *"):
-		return line
-	}
-
+	keys := secretKeysLower()
 	for k, v := range props {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
+		}
+		if _, ok := keys[strings.ToLower(k)]; ok {
 			line = strings.ReplaceAll(line, v, "***")
 		}
 	}
@@ -745,4 +510,50 @@ func ExpandEnvVars(text string) string {
 		text = strings.ReplaceAll(text, "${"+key+"}", value)
 	}
 	return text
+}
+
+// CleanConnData redacts registry secrets and every nested secrets: value.
+// Nested API keys are secret even when the key name is not in the registry.
+func CleanConnData(data map[string]any, line string) string {
+
+	asStringAnyMap := func(v any) map[string]any {
+		switch m := v.(type) {
+		case map[string]any:
+			return m
+		case map[any]any:
+			out := map[string]any{}
+			for k, val := range m {
+				out[cast.ToString(k)] = val
+			}
+			return out
+		default:
+			return nil
+		}
+	}
+
+	if data == nil {
+		return line
+	}
+	flat := map[string]string{}
+	var nested map[string]any
+	for k, v := range data {
+		if strings.EqualFold(k, "secrets") {
+			if m := asStringAnyMap(v); m != nil {
+				nested = m
+			}
+			continue
+		}
+		if val := cast.ToString(v); redactable(val) {
+			flat[k] = val
+		}
+	}
+	line = Clean(flat, line)
+	for _, v := range nested {
+		val := strings.TrimSpace(cast.ToString(v))
+		if !redactable(val) {
+			continue
+		}
+		line = strings.ReplaceAll(line, val, "***")
+	}
+	return line
 }

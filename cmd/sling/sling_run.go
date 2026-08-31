@@ -23,6 +23,8 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling/project"
+	"github.com/slingdata-io/sling-cli/core/sling/validate"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -50,6 +52,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	var replicationCfgPath, pipelineCfgPath, directoryPath string
+	var jobKey, barePath string
 
 	showExamples := false
 	selectStreams := []string{}
@@ -88,10 +91,17 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "directory":
 			env.SetTelVal("run_mode", "directory")
 			directoryPath = cast.ToString(v)
+		case "job":
+			jobKey = cast.ToString(v)
 		case "path":
 			filePath := cast.ToString(v)
 			fileInfo, err := os.Stat(filePath)
 			if err != nil {
+				// Missing path: try it as a job key after the flag loop.
+				if jobKey == "" && strings.TrimSpace(filePath) != "" {
+					barePath = filePath
+					continue
+				}
 				return true, g.Error(err, "error accessing path: %s", filePath)
 			}
 
@@ -252,6 +262,23 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		env.InitLogger()
 	}
 
+	if key := lo.Ternary(jobKey != "", jobKey, barePath); key != "" {
+		path, isPipeline, jobErr := resolveJob(key, cfg, &selectStreams)
+		if jobErr != nil {
+			if jobKey == "" {
+				return true, g.Error(jobErr, "error accessing path: %s", barePath)
+			}
+			return true, jobErr
+		}
+		if isPipeline {
+			env.SetTelVal("run_mode", "pipeline")
+			pipelineCfgPath = path
+		} else {
+			env.SetTelVal("run_mode", "replication")
+			replicationCfgPath = path
+		}
+	}
+
 	if showExamples {
 		println(examples)
 		return ok, nil
@@ -297,7 +324,7 @@ runReplication:
 			return ok, g.Error(err, "failure running directory (see docs @ https://docs.slingdata.io)")
 		}
 	} else if pipelineCfgPath != "" {
-		err = runPipeline(pipelineCfgPath)
+		err = runPipeline(pipelineCfgPath, cfg.Env)
 		if err != nil {
 			return ok, g.Error(err, "failure running pipeline (see docs @ https://docs.slingdata.io)")
 		}
@@ -311,8 +338,17 @@ runReplication:
 		// run task, add replication config for md5
 		rc := cfg.AsReplication()
 
-		// run as replication is stream is wildcard
-		if cfg.HasWildcard() {
+		// stdin only counts as the source if no source connection is given,
+		// since Options.StdIn is also true for any non-interactive shell
+		isStdInOut := (cfg.Options.StdIn && cfg.Source.Conn == "") || cfg.Options.StdOut
+
+		if isStdInOut && (cfg.WithRetries() || cfg.WithChunking() || cfg.WithThreads()) {
+			g.Warn("chunking, threads and retries are not supported with stdin/stdout")
+		}
+
+		// run as replication if stream is wildcard, or if a pro feature
+		// needs the replication path
+		if cfg.HasWildcard() || (cfg.RequiresPro() && !isStdInOut) {
 			replicationCfgPath = path.Join(env.GetTempFolder(), g.NewTsID("replication.temp")+".json")
 			err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
 			if err != nil {
@@ -335,6 +371,57 @@ runReplication:
 	err = testOutput(rowCount, totalBytes, constraintFails)
 
 	return ok, err
+}
+
+// resolveJob turns a manifest key into a replication/pipeline path.
+// Streams, mode, and variables from the spec fill cfg only when the CLI left them empty.
+func resolveJob(key string, cfg *sling.Config, selectStreams *[]string) (path string, isPipeline bool, err error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", false, g.Error(err, "could not get working directory")
+	}
+	root, spec, err := project.ResolveJob(wd, key)
+	if err != nil {
+		return "", false, err
+	}
+
+	file := strings.TrimSpace(spec.File)
+	if file == "" {
+		return "", false, g.Error("job %s has no file", key)
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(root, file)
+	}
+	body, err := os.ReadFile(file)
+	if err != nil {
+		return "", false, g.Error(err, "could not read the file for job %s", key)
+	}
+
+	kind := validate.DetectFileKind(body, file)
+	if kind != validate.KindReplication && kind != validate.KindPipeline {
+		return "", false, g.Error("job %s file %s is a %s; expected a replication or pipeline", key, spec.File, kind)
+	}
+
+	if len(spec.Streams) > 0 && len(*selectStreams) == 0 {
+		*selectStreams = spec.Streams
+	}
+	if spec.Mode != "" && strings.TrimSpace(string(cfg.Mode)) == "" {
+		cfg.Mode = sling.Mode(spec.Mode)
+	}
+	if len(spec.Variables) > 0 {
+		if cfg.Env == nil {
+			cfg.Env = map[string]string{}
+		}
+		for k, v := range spec.Variables {
+			if _, set := cfg.Env[k]; !set {
+				cfg.Env[k] = v
+			}
+		}
+	}
+	if len(spec.Schedules) > 0 {
+		g.Debug("schedules fire on the platform after deploy; this run is manual")
+	}
+	return file, kind == validate.KindPipeline, nil
 }
 
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
@@ -689,10 +776,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	return eG.Err()
 }
 
-func runPipeline(pipelineCfgPath string) (err error) {
+func runPipeline(pipelineCfgPath string, overlay map[string]string) (err error) {
 	g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 
-	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath)
+	// Job / --env values overlay the file env.
+	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath, overlay)
 	if err != nil {
 		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)
 	}
@@ -780,7 +868,7 @@ func runDirectory(directoryPath string) (err error) {
 
 		switch runFile.Type {
 		case sling.RunFilePipeline:
-			err = runPipeline(runFile.File.RelPath)
+			err = runPipeline(runFile.File.RelPath, nil)
 		case sling.RunFileReplication:
 			err = runReplication(runFile.File.RelPath, nil)
 		}

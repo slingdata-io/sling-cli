@@ -575,7 +575,7 @@ native_type_map:
   datetime: datetime
   float: float
   float64: float
-  geography: string
+  geography: geometry
   int64: bigint
   integer: bigint
   json: json

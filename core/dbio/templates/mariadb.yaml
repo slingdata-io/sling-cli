@@ -557,22 +557,22 @@ native_type_map:
   double: float
   enum: string
   float: float
-  geomcollection: string
-  geometry: string
-  geometrycollection: string
+  geomcollection: geometry
+  geometry: geometry
+  geometrycollection: geometry
   int: integer
   json: json
-  linestring: string
+  linestring: geometry
   longblob: binary
   longtext: text
   mediumblob: binary
   mediumint: integer
   mediumtext: text
-  multilinestring: string
-  multipoint: string
-  multipolygon: string
-  point: string
-  polygon: string
+  multilinestring: geometry
+  multipoint: geometry
+  multipolygon: geometry
+  point: geometry
+  polygon: geometry
   set: string
   smallint: smallint
   text: text

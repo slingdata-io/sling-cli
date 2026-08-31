@@ -1,0 +1,28 @@
+id: e.22.spec_simple_rest
+task: spec_create
+tier: smoke
+gating: true
+tags: [spec]
+intention: >
+  Create a REST API spec for MOCK_API with token auth (Bearer {secrets.token})
+  and offset pagination on GET {secrets.base_url}/users. Stop when a page
+  returns fewer than the limit. Write ./spec.yaml. The test must return all 250 users.
+arms: [claude, grok, noskills, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - api_spec:
+        action: test
+        path: "{artifact}"
+        endpoint: users
+        equals: 250
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.type

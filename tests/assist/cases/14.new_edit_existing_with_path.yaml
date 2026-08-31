@@ -1,0 +1,16 @@
+name: sling assist --out - routes a failed run
+seed: home_with_claude
+timeout_s: 30
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+
+  - run: "mkdir -p $HOME/.sling/assist/errors/exec_fail1"
+  - run: "printf '%s\n' 'column missing: email_verified' > $HOME/.sling/assist/errors/exec_fail1/error.txt"
+  - run: "printf '%s\n' '{\"exit_code\":1,\"error_signature\":\"97d84811\",\"object\":\"./r.yaml\"}' > $HOME/.sling/assist/errors/exec_fail1/meta.json"
+
+  - run: sling assist --out -
+  - wait_for: "email_verified"
+  - expect_contains: "# Rules"
+  - expect_contains: "97d84811"
+  - expect_contains: "failed run"

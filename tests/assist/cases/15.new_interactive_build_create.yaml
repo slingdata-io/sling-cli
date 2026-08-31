@@ -1,0 +1,15 @@
+name: nested CLAUDECODE prints prompt instead of spawn
+seed: home_with_claude
+timeout_s: 30
+env:
+  CLAUDECODE: "1"
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+
+  - run: sling assist "hello from nested agent"
+  - wait_for: "hello from nested agent"
+  - expect_contains: "# Rules"
+  - expect_contains: "# State"
+  - expect_contains: "# Context"
+  - expect_not_contains: "stub claude"

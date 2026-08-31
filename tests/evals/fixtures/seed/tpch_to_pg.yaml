@@ -1,0 +1,16 @@
+source: DUCKDB
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+  object: eval_tpch.{stream_table}
+
+streams:
+  customer:
+  orders:
+  lineitem:
+  nation:
+  region:
+  part:
+  partsupp:
+  supplier:

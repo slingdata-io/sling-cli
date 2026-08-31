@@ -1,0 +1,11 @@
+name: eval_users
+authentication:
+  type: basic
+endpoints:
+  users:
+    request:
+      url: https://api.example.com/users
+      method: GET
+    response:
+      records:
+        jmespath: "data"

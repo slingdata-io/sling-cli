@@ -1,0 +1,24 @@
+id: e.42.spec_secrets_negative
+task: spec_create
+tier: core
+gating: true
+tags: [spec, negative]
+intention: >
+  Create a MOCK_API spec for GET /users. The token is eval-token-literal-DO-NOT-EMBED.
+  The spec must reference {secrets.token}, never the literal. Write ./spec.yaml.
+arms: [claude, grok, opencode2, codex]
+conns: [MOCK_API]
+artifact: spec.yaml
+mock:
+  transcript: "Use {secrets.token} in Authorization. Do not write the literal token."
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - transcript_contains: secrets.token
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.headers.Authorization

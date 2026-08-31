@@ -1,0 +1,7 @@
+source: WAREHOUSE_PROD_EVAL_XYZ
+target: LOCAL
+defaults:
+  object: main.{stream_table}
+streams:
+  public.orders:
+    mode: full-refresh

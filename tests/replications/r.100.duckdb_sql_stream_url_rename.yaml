@@ -1,0 +1,43 @@
+# A duckdb `sql` over a file can add its own column. When _sling_stream_url is
+# enabled, the last column was renamed to _sling_stream_url, which dropped the
+# user column and kept its values under the metadata name (issue 796).
+source: LOCAL
+target: DUCKDB
+
+env:
+  SLING_STREAM_URL_COLUMN: true
+
+defaults:
+  mode: full-refresh
+
+streams:
+  Excel_TAB:
+    object: main.issue796_stream_url
+    sql: |
+      select *, '12345' as the_comment
+      from read_xlsx('tests/files/test.excel.comment-header.xlsx', range = 'A2:C', header = true, stop_at_empty = true)
+    columns:
+      'the_comment': string
+
+hooks:
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select * from main.issue796_stream_url order by id
+      into: result
+
+    - type: log
+      message: |
+        row 0 => {store.result[0]}
+
+    # the user column must survive with its own name and values
+    - type: check
+      check: store.result[0].the_comment == "12345"
+
+    # the metadata column must hold the file uri, not the user value
+    - type: check
+      check: store.result[0]._sling_stream_url != "12345"

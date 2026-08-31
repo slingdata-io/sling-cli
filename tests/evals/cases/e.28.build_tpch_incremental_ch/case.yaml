@@ -1,0 +1,31 @@
+id: e.28.build_tpch_incremental_ch
+task: build_create
+tier: core
+gating: false # ClickHouse nullable sorting key — product still red
+tags: [build, tpch]
+intention: >
+  On CLICKHOUSE, build an incremental fct_lineitem_daily from
+  eval_tpch.lineitem, unique key (order_key, line_number), update key
+  ship_date, aggregated to one row per order line. Full-refresh must not be
+  required after the first run. Write the project to ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [tpch_clickhouse]
+conns: [CLICKHOUSE]
+reset_schemas: [marts, staging, seeds]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - target
+          - defaults.mode
+    - sling: build compile .
+    - sling: build run . --target CLICKHOUSE
+    - query:
+        connection: CLICKHOUSE
+        sql: select count(*) from marts.fct_lineitem_daily
+        equals_query: select count(*) from eval_tpch.lineitem

@@ -1,0 +1,6 @@
+steps:
+  - type: query
+    connection: POSTGRES
+    query: select count(*) as n from public.orders
+  - type: delete
+    location: LOCAL/public.orders

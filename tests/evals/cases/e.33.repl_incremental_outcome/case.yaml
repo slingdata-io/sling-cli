@@ -1,0 +1,54 @@
+id: e.33.repl_incremental_outcome
+task: replication_create
+tier: core
+gating: true
+tags: [replication, incremental]
+intention: >
+  Create an incremental replication from POSTGRES eval_tpch.orders to DUCKDB
+  main.orders. Primary key o_orderkey, update key o_orderdate. Write
+  ./orders_repl.yaml. Run it twice so the second run only moves the inserted
+  delta.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+fixtures: [tpch_postgres]
+conns: [POSTGRES, DUCKDB]
+artifact: orders_repl.yaml
+teardown:
+  - sling: conns exec POSTGRES "delete from eval_tpch.orders where o_orderkey >= 900000000"
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - streams.*.mode
+          - streams.*.primary_key
+          - streams.*.update_key
+    - outcome:
+        pre:
+          connection: POSTGRES
+          sql: delete from eval_tpch.orders where o_orderkey >= 900000000
+        first_run: sling run -r {artifact}
+        insert:
+          connection: POSTGRES
+          sql: |
+            delete from eval_tpch.orders where o_orderkey >= 900000000;
+            insert into eval_tpch.orders
+            select o_orderkey + 900000000, o_custkey, o_orderstatus, o_totalprice,
+                   (select max(o_orderdate) from eval_tpch.orders where o_orderkey < 900000000) + 1,
+                   o_orderpriority, o_clerk, o_shippriority, o_comment
+            from eval_tpch.orders
+            where o_orderkey < 900000000
+            order by o_orderkey
+            limit 100
+        second_run: sling run -r {artifact}
+        rows_moved:
+          equals: 100
+          tolerance: 5
+        query:
+          connection: DUCKDB
+          sql: select count(*) from main.orders where o_orderkey >= 900000000
+          equals: 100

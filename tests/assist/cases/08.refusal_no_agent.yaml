@@ -1,0 +1,8 @@
+name: install with no detected agents fails with hint
+# No seed, no mock agents → fully empty $HOME → no client should be detected
+no_mock_agents: true
+timeout_s: 15
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "no AI agent on $PATH"
+  - expect_contains: "claude"

@@ -1,0 +1,14 @@
+name: uninstall --all removes our entries but spares others
+seed: home_with_claude
+timeout_s: 20
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+  - run: sling assist setup --uninstall
+  - wait_for: "Removed Sling skills"
+  - run: ls $HOME/.agents/skills 2>/dev/null | wc -l
+  - run: ls $HOME/.claude/skills 2>/dev/null | wc -l
+  # Both directories should be empty (or nearly so) — nothing left under
+  # ~/.agents/skills/sling-* and nothing under ~/.claude/skills/sling-*.
+  - run: ls $HOME/.claude/skills/sling 2>&1 | head -1
+  - wait_for: "No such file"

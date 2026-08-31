@@ -410,26 +410,26 @@
     - partition_by (
 
 - id: 63
-  name: Run sling project init
-  run: sling project init
+  name: Run sling platform init
+  run: sling platform init
   output_contains:
     - .sling.json
 
 - id: 64
-  name: Run sling project status
-  run: sling project status
+  name: Run sling platform status
+  run: sling platform status
   output_contains:
     - PROJECT NAME
 
 - id: 65
-  name: Run sling project jobs
-  run: sling project jobs
+  name: Run sling platform jobs
+  run: sling platform jobs
   output_contains:
     - manage project jobs
 
 - id: 66
-  name: Run sling project jobs list
-  run: sling project jobs list
+  name: Run sling platform jobs list
+  run: sling platform jobs list
   output_contains:
     - FILE NAME
 
@@ -2231,11 +2231,11 @@
   output_contains:
     - 'SUCCESS: adjust_column_type correctly expanded varchar and decimal columns'
 
-# Platform CLI: exercises `sling project jobs/exec/files/connections` via a
+# Platform CLI: exercises `sling platform jobs/exec/files/connections` via a
 # self-contained pipeline that runs each command and asserts against stdout.
 # Relies on SLING_PROJECT_TOKEN being set (typically via ~/.sling/env.yaml).
 - id: 230
-  name: 'sling project CLI (jobs/exec/files/connections)'
+  name: 'sling platform CLI (jobs/exec/files/connections)'
   run: 'sling run -p tests/pipelines/p.28.platform_cli.yaml'
   output_contains:
     - 'Platform CLI: all checks passed'
@@ -2692,3 +2692,208 @@
     sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
   output_contains:
     - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+# Chunking with ad-hoc CLI flags (no -r) was silently ignored, since only the
+# replication path calls ProcessChunks. The task path now routes to the
+# replication path when a pro feature needs it.
+- id: 322
+  name: 'ad-hoc CLI flags trigger chunking'
+  run: |
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
+    sling conns exec POSTGRES --limit 0 "create table public.cli_chunk_test as select g as id, 'v'||g as val from generate_series(1,1000) g"
+    sling run -d --src-conn POSTGRES --src-stream 'public.cli_chunk_test' --tgt-conn DUCKDB --tgt-object 'main.cli_chunk_test' --mode full-refresh --src-options '{"chunk_size": "250"}' --update-key id --primary-key id
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
+  output_contains:
+    - 'determined 4 chunks'
+    - '(part-004)'
+    - 'execution succeeded'
+
+# Guard: an ad-hoc run with no pro feature must stay on the task path,
+# and stdout must keep streaming when chunking is requested.
+- id: 323
+  name: 'ad-hoc CLI without pro features keeps task path'
+  run: |
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_nochunk_test"
+    sling conns exec POSTGRES --limit 0 "create table public.cli_nochunk_test as select g as id from generate_series(1,10) g"
+    sling run -d --src-conn POSTGRES --src-stream 'public.cli_nochunk_test' --stdout --src-options '{"chunk_size": "5"}'
+    sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_nochunk_test"
+  output_contains:
+    - 'chunking, threads and retries are not supported with stdin/stdout'
+    - 'execution succeeded'
+
+- id: 324
+  name: 'pipeline query state.result + process env fallback'
+  env:
+    EVAL_ENV_PROBE: eval-ok
+  run: sling run -p tests/pipelines/p.50.query_state_and_env.yaml
+  output_contains:
+    - eval-env-probe:eval-ok
+
+- id: 327
+  name: 'partition tokens with epoch _sling_loaded_at'
+  env:
+    SLING_LOADED_AT_COLUMN: 'true'
+  run: sling run -d -r tests/replications/r.123.part_epoch_loaded_at.yaml
+  output_contains:
+    - partition_by (
+    - to_timestamp(_sling_loaded_at)
+    - execution succeeded
+
+- id: 328
+  name: 'copy accepts bare list path'
+  run: sling run -d -p tests/pipelines/p.51.copy_bare_list_path.yaml
+  output_contains:
+    - copied via bare path
+    - copying single file from /tmp/sling/p51/data/a.csv
+
+- id: 550
+  name: 'bare sling non-TTY prints classic help'
+  run: sling
+  output_contains:
+    - Slings data from a data source to a data target.
+    - An Extract-Load tool
+    - 'Usage:'
+  output_does_not_contain:
+    - Welcome to sling
+    - sling init scaffolds
+    - launch interactive mode
+
+- id: 588
+  name: 'incremental file source with no new files since checkpoint (issue #793)'
+  run: |
+    sling conns exec POSTGRES "drop table if exists public.issue793_no_new_files"
+    uv run tests/scripts/generate_issue793_parquet.py
+    sling run --src-stream 'file:///tmp/sling-test/issue793.parquet' --tgt-conn AZURE_STORAGE --tgt-object 'sling-issue793/data.parquet'
+    sling run -r tests/replications/r.124.incremental_no_new_files_duckdb.yaml
+    sling run -r tests/replications/r.124.incremental_no_new_files_duckdb.yaml
+  output_contains:
+    - 'no new files found since latest timestamp'
+    - '✓ issue793 target has 3 rows'
+  output_does_not_contain:
+    - 'No files provided in nodes'
+    - 'could not copy files locally to use duckdb compute'
+
+# Self-contained: run_docker_test.sh provides the POSTGIS connection.
+- id: 589
+  name: 'PostGIS geometry exports to Parquet as native geometry with geo metadata (issue 794)'
+  run: |
+    cd tests/pipelines/postgis
+    bash run_docker_test.sh
+  group: postgis
+  output_contains:
+    - 'Parquet geom column type=GEOMETRY, with geometry_crs type=GEOMETRY'
+    - 'WKB matches expected plain WKB (no SRID flag)'
+    - 'wkb check: point=1 polygon=1 null=1 total=3'
+    - 'crs check: omitted_cnt=0 stamped_cnt=1'
+    - 'PostGIS geometry parquet test PASSED'
+    - 'execution succeeded'
+
+# Self-contained: run_docker_test.sh provides the MYSQL/MARIADB connections.
+- id: 590
+  name: 'MySQL & MariaDB geometry exports to Parquet as native geometry with geo metadata (issue 794)'
+  run: |
+    cd tests/pipelines/geom_wkb
+    bash run_docker_test.sh
+  group: geometry
+  output_contains:
+    - 'MySQL geom column type=GEOMETRY, MariaDB geom column type=GEOMETRY'
+    - 'MySQL & MariaDB WKB match expected plain WKB (lon-lat, no SRID flag)'
+    - 'geo keys: mysql=1 mariadb=1'
+    - 'crs check: omitted_cnt=0 stamped_cnt=1'
+    - 'MySQL WKB parquet test PASSED'
+    - 'MariaDB WKB parquet test PASSED'
+    - 'execution succeeded'
+
+# Requires a BIGQUERY connection, resolved by name from env.yaml.
+- id: 591
+  name: 'BigQuery geography exports to Parquet as native geometry with CRS84 geo metadata (issue 794)'
+  run: sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
+  group: geometry
+  output_contains:
+    - 'BQ geography column type=GEOMETRY'
+    - 'BQ WKB matches expected plain WKB (lon-lat)'
+    - 'BQ geo metadata defaults to OGC:CRS84'
+    - 'BQ WKB parquet test PASSED'
+    - 'execution succeeded'
+
+# Self-contained: run_docker_test.sh provides the POSTGIS, GEO_DUCK and
+# GEO_DUCKLAKE connections.
+- id: 592
+  name: 'PostGIS geometry loads into DuckDB/DuckLake as native GEOMETRY columns (issue 794)'
+  run: |
+    cd tests/pipelines/postgis
+    bash run_docker_test.sh
+  group: postgis
+  output_contains:
+    - 'duckdb table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
+    - 'ducklake table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
+    - 'legacy varchar: hex=1 null=1 total=3'
+    - 'parquet roundtrip: geom_type=GEOMETRY point=1 null=1 total=3'
+    - 'partitioned parquet: geom_type=GEOMETRY point=1 null=1 years=3 total=3'
+    - 'PostGIS geometry duckdb/ducklake test PASSED'
+    - 'execution succeeded'
+
+# Sheet row 1 holds a one-cell comment, so it is narrower than the header and
+# data rows below it. The range must still read columns A:C (issue 796).
+- id: 593
+  name: 'Excel partial range below a narrow comment row (issue 796)'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C" }' --stdout
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C7" }' --stdout
+    # a range past the last row clamps to the data, it adds no empty rows
+    sling run --src-stream 'file://tests/files/test.excel.comment-header.xlsx' --src-options '{ "format": "xlsx", "sheet": "Sheet1!A2:C50" }' --stdout
+  rows: 5
+  output_contains:
+    - 'id,name,value'
+    - '1,Alice,10'
+    - '5,Eve,50'
+    - 'wrote 5 rows to stdout'
+
+- id: 594
+  name: 'DuckDB sql on file keeps its own last column when _sling_stream_url is on (issue 796)'
+  run: 'sling run -r tests/replications/r.100.duckdb_sql_stream_url_rename.yaml'
+  rows: 5
+
+# A data row is wider than the header row. Excel must widen the schema (col_N)
+# like CSV does, not index columns out of range in CastRow (issue 797).
+- id: 595
+  name: 'Excel data row wider than the header row (issue 797)'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.wide-row.xlsx' --stdout
+  rows: 4
+  output_contains:
+    - 'id,name,value,a,b,c,col_7,col_8,col_9,col_10,col_11'
+    - '2,Bob,20,1,2,3,7,8,9,10,11'
+    - 'wrote 4 rows to stdout'
+
+# The second file reorders the header and adds a column. The remap must place
+# each value in its own column and must not index the schema out of range.
+- id: 596
+  name: 'Multi-file CSV with a reordered header and a new column'
+  run: |
+    sling run --src-stream 'file://tests/files/csv_reorder/' --stdout
+  rows: 4
+  output_contains:
+    - 'id,name,value,extra'
+    - '2,Bob,20,'
+    - '3,Carl,30,x'
+    - '4,Dana,40,y'
+    - 'wrote 4 rows to stdout'
+
+# Slow source keeps a silent duckdb HTTP import in flight past the stall timeout.
+- id: 597
+  name: 'DuckDB stall watchdog spares an active silent HTTP import'
+  run: 'sling run -d -r tests/replications/r.100.duckdb_stall_watchdog.yaml'
+  group: duckdb
+  env:
+    SLING_DUCKDB_STALL_TIMEOUT: 3s
+  rows: 1300
+  output_contains:
+    - 'execution succeeded'
+
+# Nested CLI suites. Loader in sling_cli_test.go merges these in.
+- suite: suite.cli.assist.yaml
+- suite: suite.cli.build.yaml
+- suite: suite.cli.validate.yaml
+- suite: suite.cli.conns.yaml
+- suite: suite.cli.project.yaml

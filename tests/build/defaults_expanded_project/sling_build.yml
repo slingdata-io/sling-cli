@@ -1,0 +1,9 @@
+target: POSTGRES
+
+defaults:
+  schema: raw
+  tags: [core]
+  hooks:
+    start:
+      - type: log
+        message: "default start hook"

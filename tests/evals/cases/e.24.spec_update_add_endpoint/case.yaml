@@ -1,0 +1,29 @@
+id: e.24.spec_update_add_endpoint
+task: spec_update
+tier: core
+gating: true
+tags: [spec]
+intention: >
+  Update the spec at spec.yaml: add a cursor-paginated orders endpoint at
+  {secrets.base_url}/orders (next_cursor in the body). Keep the existing
+  users endpoint byte-identical.
+edit_path: spec.yaml
+arms: [claude, grok, opencode2, codex]
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - endpoints.orders.request.url
+    - expected:
+        file: seed/spec.yaml
+        compare: raw
+        must_match:
+          - endpoints.users

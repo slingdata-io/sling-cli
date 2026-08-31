@@ -1,0 +1,56 @@
+# Replication end-hook runs type: build after the load (review §5.3).
+source: local
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        CREATE SCHEMA IF NOT EXISTS build_hook;
+        DROP TABLE IF EXISTS build_hook.raw_src;
+        CREATE TABLE build_hook.raw_src (id int, name text);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - build: tests/build/pipeline_step_project
+      id: transform
+      target: POSTGRES
+      full_refresh: true
+      select: stg_orders
+      vars:
+        run_label: from_repl_hook
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT count(*) AS cnt, max(run_label) AS run_label FROM staging.stg_orders
+      into: stg
+
+    - type: check
+      check: store.stg[0].cnt == 2
+      failure_message: 'build end-hook did not materialize stg_orders'
+
+    - type: check
+      check: state.transform.ok >= 1
+      failure_message: 'transform step state missing ok count'
+
+    - type: log
+      message: 'SUCCESS: replication end-hook type:build ok (rows={store.stg[0].cnt}, label={store.stg[0].run_label})'
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS staging.stg_orders;
+        DROP TABLE IF EXISTS marts.fct_orders;
+        DROP TABLE IF EXISTS build_hook.raw_src;
+
+streams:
+  tests/files/test1.csv:
+    object: build_hook.raw_src
+    mode: full-refresh

@@ -1,0 +1,6 @@
+defaults:
+  mode: incremental
+  unique_key: id
+  update_key: updated_at
+  merge_strategy: delete+insert
+  tags: [staging]

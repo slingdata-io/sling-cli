@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sling": {
+      "command": "sling",
+      "args": ["serve", "mcp"]
+    }
+  }
+}

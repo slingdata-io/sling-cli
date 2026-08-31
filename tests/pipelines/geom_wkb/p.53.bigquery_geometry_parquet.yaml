@@ -1,0 +1,114 @@
+# BigQuery geography to Parquet as native geometry (issue #794 follow-up).
+# The source emits hex WKB (to_hex(st_asbinary(col))); duckdb parses it at
+# parquet export, so the file carries a GEOMETRY column plus GeoParquet
+# metadata. BigQuery geography is always WGS84 lon-lat, so the GeoParquet
+# default CRS84 needs no geometry_crs prop. Requires the BIGQUERY connection;
+# see suite.cli.yaml id 591.
+
+steps:
+  # sling_test is the common test dataset; create it when absent
+  - connection: BIGQUERY
+    query: CREATE SCHEMA IF NOT EXISTS sling_test;
+
+  # Source table: point, NULL row, polygon
+  - connection: BIGQUERY
+    query: |
+      CREATE OR REPLACE TABLE sling_test.sling_geom_src (
+        id INT64,
+        g GEOGRAPHY
+      );
+      INSERT INTO sling_test.sling_geom_src VALUES
+        (1, ST_GEOGPOINT(1.0, 2.0)),
+        (2, NULL),
+        (3, ST_GEOGFROMTEXT('POLYGON((0 0, 0 1, 1 1, 1 0, 0 0))'));
+
+  - replication:
+      source: BIGQUERY
+      target: local
+
+      env:
+        SLING_THREADS: 1
+        SLING_RETRIES: 0
+
+      streams:
+        sling_test.sling_geom_src:
+          object: file:///tmp/sling_p53/bq.parquet
+          mode: full-refresh
+
+  # column must read as GEOMETRY
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT typeof(g) AS col_type
+      FROM read_parquet('/tmp/sling_p53/bq.parquet')
+      LIMIT 1
+    into: wkb_type
+
+  - type: log
+    message: "BQ geography column type={substring(store.wkb_type[0].col_type, 0, 8)}"
+
+  - type: check
+    check: substring(store.wkb_type[0].col_type, 0, 8) == "GEOMETRY"
+    message: "expected GEOMETRY, got {store.wkb_type[0].col_type}"
+
+  # values must equal the WKB that bigquery itself emits.
+  # BigQuery snaps vertices through its S2 roundtrip: 1.0 becomes
+  # 0.9999999999999999 and polygon ring order is canonical.
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        count(*) FILTER (WHERE id = 1
+          AND hex(st_aswkb(g)) = '0101000000FEFFFFFFFFFFEF3F0000000000000040') AS point_ok,
+        count(*) FILTER (WHERE id = 3
+          AND hex(st_aswkb(g)) = '01030000000100000005000000000000000000F03F0000000000000000FEFFFFFFFFFFEF3F000000000000F03F0000000000000000000000000000F03F00000000000000000000000000000000000000000000F03F0000000000000000') AS polygon_ok,
+        count(*) FILTER (WHERE id = 2 AND g IS NULL) AS null_ok,
+        count(*) AS total
+      FROM read_parquet('/tmp/sling_p53/bq.parquet')
+    into: wkb_vals
+
+  - type: log
+    message: "bq check: point={store.wkb_vals[0].point_ok} polygon={store.wkb_vals[0].polygon_ok} null={store.wkb_vals[0].null_ok} total={store.wkb_vals[0].total}"
+
+  - type: check
+    check: int_parse(store.wkb_vals[0].point_ok) == 1 && int_parse(store.wkb_vals[0].polygon_ok) == 1
+    message: "BQ WKB values do not match expected plain WKB"
+
+  - type: check
+    check: int_parse(store.wkb_vals[0].null_ok) == 1 && int_parse(store.wkb_vals[0].total) == 3
+    message: "NULL geography row missing or wrong row count"
+
+  - type: log
+    message: "BQ WKB matches expected plain WKB (lon-lat)"
+
+  # one geo metadata key; crs omitted, which means GeoParquet default OGC:CRS84
+  - type: query
+    connection: DUCKDB
+    query: |
+      SELECT
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p53/bq.parquet')
+          WHERE key = 'geo') AS geo_keys,
+        (SELECT count(*) FROM parquet_kv_metadata('/tmp/sling_p53/bq.parquet')
+          WHERE key = 'geo' AND strpos(CAST(value AS VARCHAR), 'crs') > 0) AS crs_cnt
+    into: kv_vals
+
+  - type: log
+    message: "geo keys: {store.kv_vals[0].geo_keys} crs entries: {store.kv_vals[0].crs_cnt}"
+
+  - type: check
+    check: int_parse(store.kv_vals[0].geo_keys) == 1
+    message: "expected one geo metadata key"
+
+  - type: check
+    check: int_parse(store.kv_vals[0].crs_cnt) == 0
+    message: "crs must be omitted (GeoParquet default OGC:CRS84)"
+
+  - type: log
+    message: "BQ geo metadata defaults to OGC:CRS84"
+
+  - type: log
+    message: "BQ WKB parquet test PASSED"
+
+  # Cleanup
+  - connection: BIGQUERY
+    query: DROP TABLE IF EXISTS sling_test.sling_geom_src;

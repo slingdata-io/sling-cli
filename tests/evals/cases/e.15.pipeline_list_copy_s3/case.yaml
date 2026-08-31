@@ -1,0 +1,24 @@
+id: e.15.pipeline_list_copy_s3
+task: pipeline_create
+tier: core
+gating: true
+tags: [pipeline]
+intention: >
+  Create a pipeline that lists LOCAL/data/*.csv and copies those files to
+  AWS_S3_TEST/eval/. The CSVs are already in ./data/. Write ./copy_s3.yaml.
+arms: [claude, grok, opencode2, codex]
+conns: [LOCAL, AWS_S3_TEST]
+artifact: copy_s3.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: list}
+          - {type: copy}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

@@ -905,7 +905,12 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 	// }
 
 	g.Trace("BulkExportStream not implemented for %s", conn.GetType())
-	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
+	ds, err = conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
+	if err != nil {
+		return ds, err
+	}
+	table.RestoreGeometryTypes(ds)
+	return ds, nil
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -1571,6 +1576,13 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			// The metadata query uses COLUMN_TYPE which preserves this distinction.
 			// Use the fetched column type when it differs from the driver-derived type.
 			if g.In(conn.Self().GetType(), dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks) && fc.Type != "" && fc.Type != col.Type {
+				col.Type = fc.Type
+				col.Sourced = fc.Sourced
+			}
+
+			// drivers report user-defined types (e.g. geometry) as unnamed;
+			// keep the fetched type so geometry stays geometry
+			if fc.Type.IsGeometry() && !col.Type.IsGeometry() {
 				col.Type = fc.Type
 				col.Sourced = fc.Sourced
 			}

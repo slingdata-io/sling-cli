@@ -1,0 +1,11 @@
+source: POSTGRES
+target: DUCKDB
+streams:
+  custom_orders:
+    object: main.custom_orders
+    mode: full-refresh
+    sql: |
+      select o.id, o.amount, c.name
+      from public.orders o
+      join public.customers c on c.id = o.customer_id
+      where o.amount > 0

@@ -1,0 +1,27 @@
+id: e.32.build_dbt_migrate
+task: build_create
+tier: deep
+gating: true
+tags: [build, dbt]
+intention: >
+  Run this dbt project with sling build. Change nothing that alters model
+  output. The project file is ./sling_build.yml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [POSTGRES]
+reset_schemas: [staging, marts, seeds]
+artifact: sling_build.yml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - dbt_project
+    - sling: build compile .
+    - sling: build run . --target POSTGRES
+    - query:
+        connection: POSTGRES
+        sql: select count(*) from staging.stg_orders
+        equals: 1

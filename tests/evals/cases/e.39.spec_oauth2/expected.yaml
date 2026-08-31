@@ -1,0 +1,16 @@
+name: MOCK_API
+authentication:
+  type: oauth2
+  flow: client_credentials
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
+  authentication_url: "{secrets.base_url}/oauth/token"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]

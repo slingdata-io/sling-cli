@@ -1,0 +1,30 @@
+id: e.02.repl_mysql_pg_select
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication]
+intention: >
+  Create a replication from MYSQL to POSTGRES for mysql.users, full-refresh.
+  Select id, email, name. Exclude password. Write ./users_repl.yaml. Do not run it.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [MYSQL, POSTGRES]
+artifact: users_repl.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.select
+        must_not_exist:
+          - hooks
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}
+  judge:
+    - "Does the config do everything the intention asked, and nothing more?"

@@ -991,6 +991,19 @@ func TestSpecEndpointDependsOnEdgeCases(t *testing.T) {
 	})
 }
 
+func TestLoadSpecUnknownDependsOn(t *testing.T) {
+	_, err := LoadSpec(`
+name: "Bad Depends"
+endpoints:
+  child:
+    request:
+      url: "https://api.example.com/child"
+    depends_on: [does_not_exist]
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does_not_exist")
+}
+
 func TestSpecCircularDependencyHandling(t *testing.T) {
 	// While circular dependencies shouldn't occur with proper queue usage,
 	// the topological sort should handle them gracefully

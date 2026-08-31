@@ -1,0 +1,14 @@
+name: sling assist positional ask launches and records history
+seed: home_with_claude
+timeout_s: 40
+order:
+  - run: sling assist setup --non-interactive --agent claude
+  - wait_for: "Wired clients:"
+
+  - run: sling assist "backfill orders"
+  - wait_for: "stub claude"
+
+  - run: "grep -h 'backfill orders' $HOME/.sling/assist/history/*/prompt.md"
+  - wait_for: "backfill orders"
+  - run: "grep -h '# Rules' $HOME/.sling/assist/history/*/prompt.md"
+  - wait_for: "# Rules"

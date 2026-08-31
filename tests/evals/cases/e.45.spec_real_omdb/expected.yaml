@@ -1,0 +1,10 @@
+name: omdb
+endpoints:
+  search:
+    request:
+      url: https://www.omdbapi.com/
+      method: GET
+    response:
+      records:
+        jmespath: "Search"
+        primary_key: [imdbID]

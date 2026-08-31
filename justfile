@@ -3,9 +3,10 @@
 
 set shell := ["bash", "-lc"]
 
-hello:
-    infisical-load dev /dbio
-    echo $D1
+# Run all tests
+test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
+    #!/usr/bin/env bash
+    echo "✓ All tests passed!"
 
 # Build the sling binary
 build:
@@ -49,6 +50,10 @@ test-core:
     cd core/sling && go test -v -run 'TestReplication' && cd -
     cd core/sling && go test -v -run 'TestColumnCasing' && cd -
     cd core/sling && go test -run 'TestCheck' && cd -
+    cd core/sling/assist && go test -v && cd -
+    cd core/sling/project && go test -v && cd -
+    cd core/sling/validate && go test -v && cd -
+    cd core/sling/build && go test -v && cd -
 
 # Test all connections (file + database)
 test-connections: test-replication-defaults test-connections-file test-connections-database
@@ -136,10 +141,27 @@ test-cdc-soft-sustained:
 # Run all CDC test
 test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay
 
-# Run all tests
-test-all: test-cli test-connections test-dbio test-core test-python test-cdc
+# Eval assist smoke (claude, smoke tags, 1 trial)
+test-eval-smoke: build
     #!/usr/bin/env bash
-    echo "✓ All tests passed!"
+    echo "EVAL assist smoke (claude, 1 trial)"
+    export SLING_BIN="$PWD/cmd/sling/sling"
+    go test -v -count=1 ./tests/evals -run TestEvalAssist -- \
+      --arms claude --tags smoke --trials 1 --max-suite-usd 15
+
+# Eval assist full (claude+grok, 3 trials). Optional baseline: just eval-assist-full path.jsonl
+test-eval-full baseline="": build
+    #!/usr/bin/env bash
+    echo "EVAL assist full (claude+grok, 3 trials)"
+    export SLING_BIN="$PWD/cmd/sling/sling"
+    EXTRA=""
+    if [ -n "{{baseline}}" ]; then
+      EXTRA="--baseline {{baseline}}"
+    fi
+    go test -v -count=1 ./tests/evals -run TestEvalAssist -- \
+      --arms claude,grok --trials 3 --max-suite-usd 15 $EXTRA
+
+test-eval: test-eval-full
 
 test-dbio-core-python: test-dbio test-core test-python
     #!/usr/bin/env bash

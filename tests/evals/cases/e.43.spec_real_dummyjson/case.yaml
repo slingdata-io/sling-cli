@@ -1,0 +1,22 @@
+id: e.43.spec_real_dummyjson
+task: spec_create
+tier: deep
+gating: false
+tags: [spec, lane-b]
+intention: >
+  Create a working API spec for https://dummyjson.com products. Use JWT login
+  if needed (demo credentials username=emilys password=emilyspass) and
+  limit/skip pagination. Write ./spec.yaml.
+arms: [claude, grok]
+timeout: 300s
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - endpoints.products.response.records.primary_key

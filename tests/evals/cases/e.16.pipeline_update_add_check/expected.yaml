@@ -1,0 +1,7 @@
+steps:
+  - type: query
+    connection: POSTGRES
+    query: select 1 as n
+    into: result
+  - type: check
+    check: store.result[0].n == 1

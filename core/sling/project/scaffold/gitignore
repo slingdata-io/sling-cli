@@ -1,0 +1,5 @@
+.sling/
+.env
+*.log
+.DS_Store
+.sling.json

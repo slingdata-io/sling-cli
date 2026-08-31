@@ -159,7 +159,7 @@ endpoints:
         { coalesce(
              env.LAST_UPDATED,
              sync.last_updated,
-             date_format(date_add(now(), -30, 'day'), '%Y-%m-%dT%H:%M:%SZ')
+             date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%SZ")
            )
         }
       page: 1 # Example for page-based pagination
@@ -976,7 +976,7 @@ endpoints:
       start_timestamp: >
         { coalesce(
              sync.last_sync_ts,
-             date_format(date_add(now(), -7, 'day'), '%Y-%m-%dT%H:%M:%SZ')
+             date_format(date_add(now(), -7, "day"), "%Y-%m-%dT%H:%M:%SZ")
            )
         }
 
@@ -1162,7 +1162,7 @@ endpoints:
 
 You can use the following functions within `{...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
 
-**IMPORTANT:** Always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). This is required by the [goval](https://github.com/maja42/goval) expression library that Sling uses.
+**String literals:** double quotes (`"`) are preferred. Single-quoted SQL-style literals (`'%Y-%m-%d'`) are also accepted.
 
 ### String Functions
 
@@ -1207,7 +1207,7 @@ Uses Go's `time` package and `strftime` conventions via [timefmt-go](https://git
 | `date_extract(date, part)`         | Extracts part from date        | `date`, `part` ("year", "month", "day", "hour", etc.)   | Number               | `date_extract(now(), "year")` → 2023                                       |
 | `date_last(date[, period])`        | Gets last day of period        | `date`, `period` ("month", "year", default "month")     | Time object          | `date_last(now())` → Last day of current month                             |
 | `date_first(date[, period])`       | Gets first day of period       | `date`, `period` ("month", "year", default "month")     | Time object          | `date_first(now())` → First day of current month                           |
-| `range(start, end[, step])`        | Creates array of time objects  | `start`, `end` (time obj), `step` (string duration)     | Array of Time objects | `range(date_add(now(),-2,'day'), now(), '1d')` → `[t-2d, t-1d, t]`         |
+| `range(start, end[, step])`        | Creates array of time objects  | `start`, `end` (time obj), `step` (string duration)     | Array of Time objects | `range(date_add(now(),-2,"day"), now(), "1d")` → `[t-2d, t-1d, t]`         |
 
 *Date function `unit`/`part`/`period` parameters often accept: "year", "month", "week", "day", "hour", "minute", "second".*
 *`range` function with dates requires time objects as start/end.*
@@ -1230,7 +1230,7 @@ Uses Go's `time` package and `strftime` conventions via [timefmt-go](https://git
 # Format for API parameter (ISO 8601 with timezone)
 request:
   parameters:
-    updated_since: "{date_format(date_add(now(), -1, 'hour'), '%Y-%m-%dT%H:%M:%SZ')}"
+    updated_since: "{date_format(date_add(now(), -1, \"hour\"), \"%Y-%m-%dT%H:%M:%SZ\")}"
 ```
 
 ### Value Handling Functions

@@ -1,0 +1,29 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]
+      processors:
+        - expression: "record.id"
+          output: "queue.user_ids"
+  posts:
+    depends_on: [users]
+    iterate:
+      over: "queue.user_ids"
+      into: "state.user_id"
+    request:
+      url: "{secrets.base_url}/users/{state.user_id}/posts"
+      method: GET
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]

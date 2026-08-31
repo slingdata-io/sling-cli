@@ -1,0 +1,38 @@
+# Test for issue #793: an incremental file -> database run must succeed as a no-op
+# when the checkpoint filters out every source file.
+# On the remote DuckDB compute path this failed with "No files provided in nodes",
+# because CopyFromRemoteNodes errored before the empty-nodes check in GetDataflowViaDuckDB.
+# Run this replication twice: the first run loads the file and sets the checkpoint,
+# the second run finds no new files and must exit successfully.
+source: azure_storage
+target: postgres
+
+env:
+  SLING_LOADED_AT_COLUMN: timestamp
+
+defaults:
+  mode: incremental
+  primary_key: [id]
+  update_key: _sling_loaded_at
+  source_options:
+    format: parquet
+
+hooks:
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Both runs must leave exactly 3 rows: the second run adds nothing
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.issue793_no_new_files
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].count) == 3
+      success_message: "✓ issue793 target has 3 rows"
+
+streams:
+  "sling-issue793/*.parquet":
+    object: public.issue793_no_new_files

@@ -306,6 +306,19 @@ func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 	if name == "" {
 		return g.Error("name is blank")
 	}
+	name = strings.ToUpper(name)
+
+	if kvMap == nil {
+		kvMap = map[string]any{}
+	}
+	if err = NormalizeConnProps(kvMap); err != nil {
+		return err
+	}
+
+	ef := ec.EnvFile
+	if existing, ok := ef.Connections[name]; ok {
+		kvMap = MergeConnProps(existing, kvMap)
+	}
 
 	// parse url
 	if url := cast.ToString(kvMap["url"]); url != "" {
@@ -322,29 +335,9 @@ func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
 		return g.Error("invalid type (%s)", cast.ToString(t))
 	} else if !found {
-		return g.Error("need to specify valid `type` key or provide `url`.")
+		return g.Error("need to specify valid `type` key or provide `url`")
 	}
 
-	// need to set secrets and inputs as maps
-	if t == "api" {
-		if secretsStr := cast.ToString(kvMap["secrets"]); secretsStr != "" {
-			secrets, err := g.UnmarshalYAMLMap(secretsStr)
-			if err != nil {
-				return g.Error(err, "could not parse secrets string")
-			}
-			kvMap["secrets"] = secrets
-		}
-
-		if inputsStr := cast.ToString(kvMap["inputs"]); inputsStr != "" {
-			inputs, err := g.UnmarshalYAMLMap(inputsStr)
-			if err != nil {
-				return g.Error(err, "could not parse inputs string")
-			}
-			kvMap["inputs"] = inputs
-		}
-	}
-
-	ef := ec.EnvFile
 	ef.Connections[name] = kvMap
 	err = ef.WriteEnvFile()
 	if err != nil {

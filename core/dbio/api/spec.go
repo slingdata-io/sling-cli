@@ -111,6 +111,10 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 		return spec, g.Error(err, "queue validation failed")
 	}
 
+	if err = spec.validateDependsOn(compiledEndpointMap); err != nil {
+		return spec, g.Error(err, "depends_on validation failed")
+	}
+
 	// validate that all sync keys have corresponding processors
 	if err = spec.validateSync(compiledEndpointMap); err != nil {
 		return spec, g.Error(err, "sync validation failed")
@@ -184,6 +188,30 @@ func (s *Spec) validateQueueProducers(endpointMap EndpointMap) error {
 		return g.Error("queue(s) with no producer:\n  - %s\n\nDid you mistype the queue name, or forget a processor with `output: queue.<name>`?", strings.Join(missing, "\n  - "))
 	}
 
+	return nil
+}
+
+// validateDependsOn checks that each depends_on name is an endpoint in the spec.
+func (s *Spec) validateDependsOn(endpointMap EndpointMap) error {
+	var missing []string
+	for _, name := range s.endpointsOrdered {
+		ep, ok := endpointMap[name]
+		if !ok {
+			continue
+		}
+		for _, dep := range ep.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if dep == "" {
+				continue
+			}
+			if _, found := endpointMap[dep]; !found {
+				missing = append(missing, g.F("endpoint %q depends_on %q, which is not an endpoint", name, dep))
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return g.Error("depends_on validation failed:\n  - %s", strings.Join(missing, "\n  - "))
+	}
 	return nil
 }
 

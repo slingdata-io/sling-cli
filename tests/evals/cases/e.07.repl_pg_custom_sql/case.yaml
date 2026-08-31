@@ -1,0 +1,27 @@
+id: e.07.repl_pg_custom_sql
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication]
+intention: >
+  Create a replication from POSTGRES to DUCKDB with a custom SQL stream
+  named custom_orders that joins public.orders and public.customers and
+  filters amount > 0. Use full-refresh mode. The tables may be absent;
+  still write the YAML using those names. Write ./custom_orders.yaml.
+  Do not run it.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [POSTGRES, DUCKDB]
+artifact: custom_orders.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - sql_equiv:
+        connection: POSTGRES
+        actual_path: streams.custom_orders.sql
+        expected_sql: expected.sql
+        compare: rows
+        order_by: id
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

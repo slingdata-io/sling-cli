@@ -434,6 +434,18 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 	}
 	conn.Data.Columns, bQTC = conn.getItColumns(it.Schema)
 
+	// the wkb rewrite makes geometry columns scan as strings;
+	// keep the geometry type from the fetched table columns
+	if fetchedColumns, ok := opts["columns"].(iop.Columns); ok {
+		for i := range conn.Data.Columns {
+			fc := fetchedColumns.GetColumn(conn.Data.Columns[i].Name)
+			if fc != nil && fc.Type.IsGeometry() && !conn.Data.Columns[i].Type.IsGeometry() {
+				conn.Data.Columns[i].Type = fc.Type
+				conn.Data.Columns[i].Sourced = fc.Sourced
+			}
+		}
+	}
+
 	if err == iterator.Done {
 		ds = iop.NewDatastreamContext(queryContext.Ctx, conn.Data.Columns)
 		ds.SetReady()

@@ -1,0 +1,15 @@
+source: POSTGRES
+target: CLICKHOUSE
+defaults:
+  mode: change-capture
+  primary_key: [id]
+  object: eval_tpch.{stream_table}
+streams:
+  eval_tpch.orders:
+    mode: change-capture
+    primary_key: [o_orderkey]
+    object: eval_tpch.orders
+  eval_tpch.customer:
+    mode: change-capture
+    primary_key: [c_custkey]
+    object: eval_tpch.customer

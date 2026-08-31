@@ -495,6 +495,20 @@ func (cfg *Config) HasWildcard() bool {
 	return false
 }
 
+// RequiresPro returns true if the config uses a pro feature which
+// the replication path applies. An ad-hoc task ignores these.
+func (cfg *Config) RequiresPro() bool {
+	return cfg.WithChunking() || cfg.WithRetries() || cfg.WithThreads()
+}
+
+func (cfg *Config) WithRetries() bool {
+	return cast.ToInt(cfg.Env["SLING_RETRIES"]) > 0 || cast.ToInt(os.Getenv("SLING_RETRIES")) > 0
+}
+
+func (cfg *Config) WithThreads() bool {
+	return cast.ToInt(cfg.Env["SLING_THREADS"]) > 1 || cast.ToInt(os.Getenv("SLING_THREADS")) > 1
+}
+
 func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 	rc = ReplicationConfig{
 		Source: cfg.Source.Conn,
@@ -1281,7 +1295,21 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsAPI() {
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
+		streamName := strings.TrimSpace(cfg.StreamName)
+		if streamName == "" {
+			streamName = strings.TrimSpace(cfg.Source.Stream)
+		}
+		if streamName != "" {
+			m["stream_name"] = strings.ToLower(streamName)
+			// API endpoints have no table; {stream_table} resolves to the
+			// endpoint name so object templates and DuckDB temp tables render.
+			tableName := iop.CleanName(streamName)
+			if tableName != "" {
+				m["stream_table"] = tableName
+				m["stream_table_lower"] = strings.ToLower(tableName)
+				m["stream_table_upper"] = strings.ToUpper(tableName)
+			}
+		}
 	}
 
 	// pass env values

@@ -1,0 +1,34 @@
+# Stall watchdog repro (case 20260829-01): a slow source keeps the duckdb HTTP
+# import in flight, silent on stdout, past SLING_DUCKDB_STALL_TIMEOUT. The
+# first 900 rows fill the sample buffer fast; padding defeats output buffers.
+source: postgres
+target: duckdb
+
+defaults:
+  mode: full-refresh
+
+streams:
+  slow_trickle:
+    sql: |
+      select i as id, repeat('x', 2000) as pad,
+        pg_sleep(case when i <= 900 then 0 else 0.02 end) is null as slept
+      from generate_series(1, 1300) i
+    object: main.test_stall_watchdog
+
+hooks:
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from main.test_stall_watchdog
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].cnt) == 1300
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists main.test_stall_watchdog

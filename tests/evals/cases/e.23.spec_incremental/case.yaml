@@ -1,0 +1,29 @@
+id: e.23.spec_incremental
+task: spec_create
+tier: core
+gating: false # agent-quality tail (auth / quoting)
+tags: [spec]
+intention: >
+  Create an incremental API spec against MOCK_API. Filter GET {secrets.base_url}/users
+  with updated_since as the sync key. Write ./spec.yaml. A second test run
+  must return only records newer than the stored state.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - api_spec:
+        action: test
+        path: "{artifact}"
+        endpoint: users
+        then_sync:
+          equals: 0
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.type

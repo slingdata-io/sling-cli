@@ -1,0 +1,6 @@
+source: POSTGRES
+target: LOCAL
+streams:
+  eval_ecom.raw_customers:
+    object: file://./exports/
+    mode: full-refresh

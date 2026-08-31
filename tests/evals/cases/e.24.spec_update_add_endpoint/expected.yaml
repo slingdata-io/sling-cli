@@ -1,0 +1,28 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+endpoints:
+  users:
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]
+  orders:
+    request:
+      url: "{secrets.base_url}/orders"
+      method: GET
+      parameters:
+        cursor: "{state.cursor}"
+    pagination:
+      next_state:
+        cursor: "{response.json.next_cursor}"
+      stop_condition: "is_null(response.json.next_cursor)"
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]

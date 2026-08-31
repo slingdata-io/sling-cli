@@ -1,0 +1,7 @@
+source: POSTGRES
+target: DUCKDB
+streams:
+  custom_orders:
+    object: main.custom_orders
+    mode: full-refresh
+    sql: select 1 as id

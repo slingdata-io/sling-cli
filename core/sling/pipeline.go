@@ -34,7 +34,8 @@ type Pipeline struct {
 	outputMux     sync.Mutex
 }
 
-func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) {
+// LoadPipelineConfigFromFile loads a pipeline.
+func LoadPipelineConfigFromFile(cfgPath string, overlay ...map[string]string) (pipeline *Pipeline, err error) {
 	cfgFile, err := os.Open(cfgPath)
 	if err != nil {
 		err = g.Error(err, "Unable to open pipeline path: "+cfgPath)
@@ -47,7 +48,7 @@ func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) 
 		return
 	}
 
-	pipeline, err = LoadPipelineConfig(string(cfgBytes))
+	pipeline, err = LoadPipelineConfig(string(cfgBytes), overlay...)
 	pipeline.FileName = cfgPath
 	if fileName := os.Getenv("SLING_FILE_NAME"); fileName != "" {
 		pipeline.FileName = fileName
@@ -56,7 +57,7 @@ func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) 
 	return
 }
 
-func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
+func LoadPipelineConfig(content string, overlay ...map[string]string) (pipeline *Pipeline, err error) {
 	pipeline = &Pipeline{
 		Env:         map[string]any{},
 		OutputLines: make(chan *g.LogLine, 5000),
@@ -80,8 +81,15 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		}
 	}
 
-	// replace variables across the yaml file
+	// overlay values (job variables / --env) win over the file env
 	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
+	for _, ov := range overlay {
+		for k, v := range ov {
+			Env[k] = v
+		}
+	}
+
+	// replace variables across the yaml file
 	content = g.Rm(content, Env)
 
 	// set env
@@ -442,7 +450,7 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 		pl.state = &PipelineState{
 			State: map[string]map[string]any{},
 			Store: map[string]any{},
-			Env:   pl.Env,
+			Env:   env.MergeDeclaredEnv(pl.Env),
 			Runs:  map[string]*RunState{},
 			mu:    &sync.RWMutex{},
 		}

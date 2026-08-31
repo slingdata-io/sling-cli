@@ -1,0 +1,7 @@
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+vars:
+  run_label: default

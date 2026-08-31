@@ -92,6 +92,19 @@ type FileStreamConfig struct {
 	Props            map[string]string `json:"props"`
 }
 
+// AddsFilenameColumn tells whether the scan query appends a filename column,
+// which becomes _sling_stream_url. A custom sql must ask for it with the
+// {filename_expr} placeholder, otherwise its own last column is the last one.
+func (sc *FileStreamConfig) AddsFilenameColumn() bool {
+	if !sc.DuckDBFilename {
+		return false
+	}
+	if sc.SQL != "" {
+		return strings.Contains(sc.SQL, "{filename_expr}")
+	}
+	return true
+}
+
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
 	if !env.UseDuckDbCompute() {
 		return false
@@ -1671,6 +1684,17 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		}
 
 		if colMap != nil {
+			// a stale colMap can target an index past the current schema, widen it
+			maxCorrectI := -1
+			for _, correctI := range colMap {
+				if correctI > maxCorrectI {
+					maxCorrectI = correctI
+				}
+			}
+			if maxCorrectI >= len(it.ds.Columns) {
+				it.addNewColumns(maxCorrectI + 1)
+			}
+
 			// remake row in proper order. row has new structure
 			correctRow := make([]string, len(it.ds.Columns))
 			for incorrectI, correctI := range colMap {
@@ -1684,7 +1708,8 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					// This would indicate a schema synchronization issue where colMap's target index
 					// is out of bounds for the current datastream schema size (len(it.ds.Columns)).
 					// This case should ideally not be hit if schema updates are perfectly synchronized.
-					err = g.Error("CSV Schema inconsistency at row #%d (%s): colMap index %d is out of bounds for current schema length %d for column '%s'. Here are all the columns detected: %s", it.Counter+1, ds.Metadata.StreamURL.Value, correctI, len(correctRow), it.ds.Columns.Names()[correctI], g.Marshal(it.ds.Columns.Names()))
+					// correctI is out of range here, so do not index the schema with it.
+					err = g.Error("CSV Schema inconsistency at row #%d (%s): colMap index %d is out of bounds for current schema length %d. Here are all the columns detected: %s", it.Counter+1, ds.Metadata.StreamURL.Value, correctI, len(correctRow), g.Marshal(it.ds.Columns.Names()))
 					it.ds.Context.CaptureErr(err)
 					return false
 				}
@@ -1981,7 +2006,7 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig
 
 	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.AddsFilenameColumn()))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
@@ -2043,7 +2068,7 @@ func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (e
 
 	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.AddsFilenameColumn()))
 	if err != nil {
 		return g.Error(err, "could not read csv rows")
 	}

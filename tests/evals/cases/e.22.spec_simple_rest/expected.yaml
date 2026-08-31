@@ -1,0 +1,27 @@
+name: MOCK_API
+authentication:
+  type: static
+  headers:
+    Authorization: "Bearer {secrets.token}"
+defaults:
+  state:
+    base_url: "{secrets.base_url}"
+endpoints:
+  users:
+    state:
+      offset: 0
+      limit: 50
+    request:
+      url: "{secrets.base_url}/users"
+      method: GET
+      parameters:
+        offset: "{state.offset}"
+        limit: "{state.limit}"
+    pagination:
+      next_state:
+        offset: "{state.offset + state.limit}"
+      stop_condition: "length(response.records) < state.limit"
+    response:
+      records:
+        jmespath: "data"
+        primary_key: [id]

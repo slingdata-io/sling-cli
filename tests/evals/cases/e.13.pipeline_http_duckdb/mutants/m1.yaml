@@ -1,0 +1,5 @@
+steps:
+  - type: delete
+    location: LOCAL/data.csv
+  - type: log
+    message: no http

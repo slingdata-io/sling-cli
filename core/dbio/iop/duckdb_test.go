@@ -638,6 +638,25 @@ func TestDuckDbMaxLineSize(t *testing.T) {
 	})
 }
 
+func TestGenerateCopyStatementEpochPartitionKey(t *testing.T) {
+	duck := NewDuckDb(context.Background())
+	cols := NewColumnsFromFields("id", "_sling_loaded_at")
+	cols[0].Type = IntegerType
+	cols[1].Type = IntegerType
+	sql, err := duck.GenerateCopyStatement("main.t", "/tmp/out", DuckDbCopyOptions{
+		Format:          dbio.FileTypeParquet,
+		PartitionFields: []PartitionLevel{PartitionLevelYearMonth, PartitionLevelDay},
+		PartitionKey:    "_sling_loaded_at",
+		Columns:         cols,
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Contains(t, sql, "to_timestamp(_sling_loaded_at)")
+	assert.Contains(t, sql, "strftime(to_timestamp(_sling_loaded_at), '%Y-%m')")
+	assert.NotContains(t, sql, "strftime(_sling_loaded_at,")
+}
+
 // regression guard for the v1.5.25 OOM: DuckDB sizes its read_csv buffer as
 // 16 × max_line_size and allocates it eagerly. The 256MB raise thus demands a
 // 4 GiB block, which fails on hosts with memory_limit below ~4 GiB. The bridge

@@ -1,0 +1,5 @@
+steps:
+  - type: query
+    connection: POSTGRES
+    query: select 1 as n
+    into: result

@@ -1,0 +1,26 @@
+id: e.14.pipeline_query_check
+task: pipeline_create
+tier: core
+gating: true
+tags: [pipeline]
+intention: >
+  Create a pipeline that runs `select count(*) as n from eval_tpch.orders`
+  on POSTGRES into store, logs the result, and checks that n is greater
+  than 0. Write ./qcheck.yaml. Do not query public.users.
+arms: [claude, grok, opencode2, codex]
+fixtures: [tpch_postgres]
+conns: [POSTGRES]
+artifact: qcheck.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: pipeline parse {artifact}
+    - skeleton:
+        must_contain_steps:
+          - {type: query, connection: POSTGRES}
+          - {type: check}
+    - outcome:
+        run: sling run -p {artifact}
+        checks:
+          - file_exists: "{artifact}"

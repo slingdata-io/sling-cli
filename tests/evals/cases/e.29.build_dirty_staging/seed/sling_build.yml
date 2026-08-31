@@ -1,0 +1,3 @@
+target: POSTGRES
+defaults:
+  mode: table

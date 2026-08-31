@@ -1,0 +1,11 @@
+name: eval_items
+authentication:
+  type: none
+endpoints:
+  items:
+    request:
+      url: https://api.example.com/items
+      method: GET
+    response:
+      records:
+        jmespath: "data"

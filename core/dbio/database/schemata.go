@@ -463,15 +463,17 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			} else if len(fields) == 1 && fields[0] == "*" {
 				fieldsStr = "*"
 			} else {
+				// fields are already normalized: identifiers quoted,
+				// expressions (casts, function calls) pass through as-is
 				fieldsExprs := []string{}
-				for _, field := range opts.Fields {
-					field = strings.TrimSpace(field)
-					colQ := t.Dialect.Quote(field)
-					if col := toJsonCols.GetColumn(field); col != nil {
-						expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
-						fieldsExprs = append(fieldsExprs, expr)
+				q := GetQualifierQuote(t.Dialect)
+				for _, field := range fields {
+					name := strings.Trim(field, q)
+					if col := toJsonCols.GetColumn(name); col != nil {
+						colQ := q + name + q
+						fieldsExprs = append(fieldsExprs, g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ))
 					} else {
-						fieldsExprs = append(fieldsExprs, colQ)
+						fieldsExprs = append(fieldsExprs, field)
 					}
 				}
 				fieldsStr = strings.Join(fieldsExprs, ", ")
@@ -535,6 +537,95 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	)
 
 	return
+}
+
+// GeometryWKBFields maps geometry columns of fields to hex WKB expressions.
+// MySQL, MariaDB and BigQuery deliver spatial columns unusable through their
+// drivers; the expression makes the source return hex-encoded plain WKB.
+// DuckDB and DuckLake export WKT through csv, so they use the same transport.
+// Returns fields unchanged for other dialects or with no geometry column.
+func (t *Table) GeometryWKBFields(fields []string) []string {
+	var expr func(string) string
+	switch t.Dialect {
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake:
+		// st_aswkb drops the SRID and normalizes axis order to lon-lat
+		expr = func(col string) string { return g.F("hex(st_aswkb(%s))", col) }
+	case dbio.TypeDbBigQuery:
+		expr = func(col string) string { return g.F("to_hex(st_asbinary(%s))", col) }
+	default:
+		return fields
+	}
+
+	spatial := map[string]string{} // lower name -> quoted name
+	for _, col := range t.Columns {
+		if col.Type.IsGeometry() {
+			spatial[strings.ToLower(col.Name)] = t.Dialect.Quote(col.Name)
+		}
+	}
+	if len(spatial) == 0 {
+		return fields
+	}
+
+	if len(fields) == 0 || (len(fields) == 1 && fields[0] == "*") {
+		if t.Dialect == dbio.TypeDbBigQuery {
+			// bigquery can replace columns in place, keeping `select *`
+			replaceExprs := make([]string, 0, len(spatial))
+			for _, col := range t.Columns {
+				if quoted, ok := spatial[strings.ToLower(col.Name)]; ok {
+					replaceExprs = append(replaceExprs, g.F("%s as %s", expr(quoted), quoted))
+				}
+			}
+			return []string{g.F("* replace(%s)", strings.Join(replaceExprs, ", "))}
+		}
+		fields = lo.Map(t.Columns, func(col iop.Column, _ int) string { return col.Name })
+	}
+
+	mapped := make([]string, 0, len(fields))
+	for _, field := range fields {
+		original, alias, isExclude, _ := iop.ParseSelectExpr(field)
+		if isExclude {
+			mapped = append(mapped, field)
+			continue
+		}
+		quoted, ok := spatial[strings.ToLower(t.Dialect.Unquote(original))]
+		if !ok {
+			mapped = append(mapped, field)
+			continue
+		}
+		name := quoted
+		if alias != "" {
+			name = t.Dialect.Quote(alias)
+		}
+		mapped = append(mapped, g.F("%s as %s", expr(quoted), name))
+	}
+	return mapped
+}
+
+// RestoreGeometryTypes restores the geometry type on ds columns that
+// GeometryWKBFields rewrote to hex WKB text. The hex expression describes as
+// varchar; the true type lets targets parse the WKB into native geometry.
+func (t *Table) RestoreGeometryTypes(ds *iop.Datastream) {
+	switch t.Dialect {
+	case dbio.TypeDbDuckDb, dbio.TypeDbDuckLake:
+	default:
+		return
+	}
+
+	spatial := map[string]bool{} // lower name -> column is geometry
+	for _, col := range t.Columns {
+		if col.Type.IsGeometry() {
+			spatial[strings.ToLower(col.Name)] = true
+		}
+	}
+	if len(spatial) == 0 {
+		return
+	}
+
+	for i, col := range ds.Columns {
+		if spatial[strings.ToLower(col.Name)] {
+			ds.Columns[i].Type = iop.GeometryType
+		}
+	}
 }
 
 // Database represents a schemata database

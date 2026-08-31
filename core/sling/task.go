@@ -469,6 +469,11 @@ func (t *TaskExecution) isFullRefreshCDC() bool {
 	return t.Config.Mode == FullRefreshMode && t.Config.ReplicationStream != nil && t.Config.ReplicationStream.CDCOptions != nil && os.Getenv("SLING_STATE") != ""
 }
 
+// IsStateConfigured returns true iff the SLING_STATE environment variable is set.
+func IsStateConfigured() bool {
+	return os.Getenv("SLING_STATE") != ""
+}
+
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode
 func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode

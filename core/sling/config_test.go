@@ -2,6 +2,7 @@ package sling
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,4 +84,44 @@ func TestColumnCasing(t *testing.T) {
 	assert.Equal(t, "happy", df.Columns[0].Name)
 	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &normalizeCasing)
 	assert.Equal(t, "HAPPY", df.Columns[0].Name)
+}
+
+func TestGetFormatMapAPISourceStreamTable(t *testing.T) {
+	cfg := &Config{
+		Source:     Source{Conn: "MOCK_API", Stream: "users"},
+		Target:     Target{Conn: "DUCKDB", Object: "main.{stream_table}"},
+		StreamName: "users",
+	}
+	cfg.SrcConn.Type = dbio.TypeApi
+	cfg.TgtConn.Type = dbio.TypeDbDuckDb
+	cfg.initEvaluator()
+
+	m, err := cfg.GetFormatMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cast.ToString(m["stream_table"]); got != "users" {
+		t.Fatalf("stream_table=%q want users", got)
+	}
+	if got := cast.ToString(m["stream_name"]); got != "users" {
+		t.Fatalf("stream_name=%q want users", got)
+	}
+
+	cfg.Target.Object = "main.{stream_table}"
+	cfg.Target.Options = &TargetOptions{}
+	if err := cfg.FormatTargetObjectName(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cfg.Target.Object, "{stream_table}") {
+		t.Fatalf("object still has placeholder: %s", cfg.Target.Object)
+	}
+	if cfg.Target.Options.TableTmp == "" {
+		t.Fatal("expected duckdb temp table")
+	}
+	if strings.Contains(cfg.Target.Options.TableTmp, "{stream_table}") {
+		t.Fatalf("temp table still has placeholder: %s", cfg.Target.Options.TableTmp)
+	}
+	if !strings.Contains(strings.ToLower(cfg.Target.Options.TableTmp), "users") {
+		t.Fatalf("temp table should include endpoint name, got %s", cfg.Target.Options.TableTmp)
+	}
 }

@@ -1,0 +1,23 @@
+id: e.41.spec_from_openapi
+task: spec_create
+tier: core
+gating: true
+tags: [spec]
+intention: >
+  Derive a Sling API spec from the local openapi.json that describes MOCK_API.
+  Include the users endpoint with offset pagination. Authenticate with Bearer
+  {secrets.token}. Available secrets: base_url, token. Write ./spec.yaml.
+arms: [claude, grok, opencode2, codex]
+timeout: 300s
+conns: [MOCK_API]
+artifact: spec.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - sling: api_spec parse {artifact}
+    - sling: api_spec test {artifact}
+    - expected:
+        file: expected.yaml
+        compare: raw
+        must_match:
+          - authentication.type

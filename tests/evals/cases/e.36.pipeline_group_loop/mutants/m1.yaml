@@ -1,0 +1,4 @@
+steps:
+  - type: query
+    connection: DUCKDB
+    query: select 1

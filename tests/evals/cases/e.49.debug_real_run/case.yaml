@@ -1,0 +1,36 @@
+id: e.49.debug_real_run
+task: debug
+tier: core
+gating: true
+tags: [debug]
+intention: >
+  Diagnose this failed POSTGRES replication. The update_key column
+  updated_atz does not exist. The failed-run log is run.stderr in the
+  workdir. Do not re-run sling unless asked.
+arms: [claude, grok]
+fixtures: [tpch_postgres]
+conns: [POSTGRES, DUCKDB]
+artifact: diagnosis.md
+setup:
+  - sling: run -r bad.yaml
+    allow_fail: true
+    stderr: run.stderr
+seed_files:
+  bad.yaml: |
+    source: POSTGRES
+    target: DUCKDB
+    streams:
+      eval_tpch.orders:
+        object: main.orders
+        mode: incremental
+        primary_key: [o_orderkey]
+        update_key: updated_atz
+mock:
+  transcript: >
+    The run failed because column updated_atz does not exist.
+    I will not re-run until you confirm.
+  mutant_transcript: "I will sling run -r bad.yaml now to verify the fix."
+graders:
+  required:
+    - transcript_contains: updated_atz
+    - transcript_absent: "sling run"

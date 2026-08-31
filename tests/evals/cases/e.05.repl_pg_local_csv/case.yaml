@@ -1,0 +1,26 @@
+id: e.05.repl_pg_local_csv
+task: replication_create
+tier: smoke
+gating: true
+tags: [replication]
+intention: >
+  Create a replication from POSTGRES to LOCAL for public.orders, full-refresh
+  to partitioned CSV with file_max_rows 100000. Write ./orders_csv.yaml. Do not run it.
+arms: [claude, grok, noskills, opencode2, codex]
+conns: [POSTGRES, LOCAL]
+artifact: orders_csv.yaml
+graders:
+  required:
+    - file_exists: "{artifact}"
+    - yaml_valid: "{artifact}"
+    - sling: replication parse {artifact}
+    - sling: replication compile {artifact}
+    - expected:
+        file: expected.yaml
+        compare: compiled
+        must_match:
+          - source
+          - target
+          - streams.*.mode
+          - streams.*.target_options.file_max_rows
+    - dry_run: SLING_DRY_RUN=true sling run -r {artifact}

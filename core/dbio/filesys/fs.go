@@ -712,6 +712,11 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 			// duckdb read natively
 			df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
 		} else {
+			// match the error of the other paths, so callers can no-op (incremental with no new files)
+			if len(nodes.Files()) == 0 {
+				return df, g.Error("Provided 0 files for: %#v", nodes)
+			}
+
 			localRoot := path.Join(env.GetTempFolder(), g.NewTsID("duck.temp"))
 
 			// copy to local first
@@ -1443,6 +1448,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			Format:        fileFormat,
 			Compression:   sc.Compression,
 			FileSizeBytes: sc.FileMaxBytes,
+			GeometryCRS:   fs.GetProp("geometry_crs"),
 			Columns:       streamPart.Columns,
 		}
 
@@ -1459,6 +1465,16 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			if strings.Contains(localPath, "*") {
 				localPath = GetDeepestParent(localPath) // get target folder, since split by files
 				localPath = strings.TrimRight(localPath, "/")
+			}
+
+			// Trailing slash (dated folders like .../2026/08/23/) is a
+			// directory target. DuckDB COPY TO a directory fails with
+			// "Is a directory" unless we write a file inside it.
+			asDir := strings.HasSuffix(localPath, "/") || strings.HasSuffix(localPath, string(os.PathSeparator))
+			if asDir {
+				localPath = strings.TrimRight(localPath, `/\`)
+				os.MkdirAll(localPath, 0755)
+				localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
 			}
 
 			// create the parent folder if needed

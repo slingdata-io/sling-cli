@@ -1,0 +1,6 @@
+# plant that does not mention the missing column
+source: POSTGRES
+target: DUCKDB
+streams:
+  public.orders:
+    mode: incremental

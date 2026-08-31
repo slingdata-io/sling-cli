@@ -5,7 +5,6 @@ core:
   drop_index: "select 'indexes do not apply for databricks'"
   create_table: |
     create table {table} ({col_types})
-    using delta
   # create_temporary_table: |
   #   create table {table} ({col_types})
   #   using delta

@@ -1,0 +1,12 @@
+name: validate-test-api
+description: tiny spec for validate tests
+authentication:
+  type: static
+  headers:
+    Authorization: Bearer LiteralTokenDoNotLeak
+endpoints:
+  ping:
+    description: ping
+    request:
+      url: https://example.com/ping
+      method: GET

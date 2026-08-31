@@ -72,7 +72,7 @@ The `file_system` tool provides file system-specific operations through various 
 }
 ```
 
-**Important**: File system operations require a Pro token and are rate-limited.
+**Important**: File system operations are read-oriented and run locally through your configured connections.
 
 ---
 
@@ -85,7 +85,6 @@ Before using file system operations:
 1. **Connection Setup**: File system connection must be configured using the `connection` tool
 2. **Connection Testing**: Verify connection works with `connection` tool `test` action
 3. **Permissions**: Connection must have appropriate read/write permissions
-4. **Token**: Operations require a valid Sling CLI Pro token
 
 ### Operation Categories
 

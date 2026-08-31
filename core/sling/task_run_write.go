@@ -1051,7 +1051,9 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 	defer env.RemoveAllLocalTempFile(folder)
 
 	duckPath := env.CleanWindowsPath(path.Join(folder, "db"))
-	duckConn, err = database.NewConnContext(t.Context.Ctx, "duckdb://"+duckPath)
+	// geometry_as_varchar: the staging table stores geometry as hex WKB
+	// varchar; the copy projection parses it at export
+	duckConn, err = database.NewConnContext(t.Context.Ctx, "duckdb://"+duckPath, "geometry_as_varchar=true")
 	if err != nil {
 		err = g.Error(err, "Could not create temp duckdb connection")
 		return bw, err
@@ -1065,8 +1067,7 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		return bw, err
 	}
 
-	// insert into table
-	_, err = duckConn.BulkImportFlow(tempTable.Name, df)
+	_, err = duckConn.BulkImportFlow(tempTable.FullName(), df)
 	if err != nil {
 		err = g.Error(err, "Could not write to temp duckdb table")
 		return bw, err
@@ -1088,6 +1089,8 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		PartitionKey:       t.Config.Source.UpdateKey,
 		WritePartitionCols: true,
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
+		GeometryCRS:        fs.GetProp("geometry_crs"),
+		Columns:            df.Columns,
 	}
 
 	// if one wishes to not write the partition columns

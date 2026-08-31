@@ -1,0 +1,12 @@
+name: bare sling TTY landing prints classic help then the journey card
+timeout_s: 15
+no_mock_agents: true
+order:
+  - run: sling
+  - wait_for: "Welcome to sling"
+  - expect_contains: "Slings data from a data source to a data target."
+  - expect_contains: "Usage:"
+  - expect_contains: "sling assist"
+  - expect_contains: "-h --help"
+  - expect_contains: "https://docs.slingdata.io"
+  - expect_not_contains: "conns set"

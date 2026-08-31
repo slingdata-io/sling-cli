@@ -1,0 +1,5 @@
+-- {mode: view}
+SELECT
+  id,
+  name
+FROM {{ src('raw_{{SOURCE_SLUG}}.{{ENTITY}}') }}
