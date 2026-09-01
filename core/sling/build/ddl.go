@@ -17,11 +17,6 @@ func (e *Executor) quoteFullTableName(fullName string) (string, error) {
 	return table.FDQN(), nil
 }
 
-// quotedName returns just the quoted bare table name (no schema).
-func (e *Executor) quotedName(name string) string {
-	return e.DbConn.Quote(name)
-}
-
 // supportsDropCascade reports whether the dialect accepts CASCADE on DROP.
 func supportsDropCascade(t dbio.Type) bool {
 	return g.In(t,
@@ -258,20 +253,4 @@ func (e *Executor) renameTable(oldFull, newFull string) error {
 	sql := g.R(tpl, "table", oldQuoted, "new_table", newRef)
 	_, err = e.DbConn.Exec(sql)
 	return err
-}
-
-// bareTableName extracts the unqualified table name from schema.table.
-func bareTableName(fullName string) string {
-	if idx := strings.LastIndex(fullName, "."); idx >= 0 {
-		return fullName[idx+1:]
-	}
-	return fullName
-}
-
-// schemaOf extracts the schema from schema.table.
-func schemaOf(fullName string) string {
-	if idx := strings.LastIndex(fullName, "."); idx >= 0 {
-		return fullName[:idx]
-	}
-	return ""
 }
