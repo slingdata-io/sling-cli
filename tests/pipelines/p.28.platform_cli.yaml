@@ -46,7 +46,7 @@ steps:
   - log: '=== Platform CLI: exec list default ==='
 
   - id: exec_list_table
-    command: sling platform execs list
+    command: sling platform executions list
 
   - check: 'contains(state.exec_list_table.output.stdout, "EXEC ID")'
     failure_message: 'exec list (table) missing header'
@@ -54,7 +54,7 @@ steps:
   - log: '=== Platform CLI: exec list -o json ==='
 
   - id: exec_list_json
-    command: sling platform execs list -o json --limit 5
+    command: sling platform executions list -o json --limit 5
 
   - check: contains(state.exec_list_json.output.stdout, "exec_id")
     failure_message: 'exec list (json) missing exec_id key'
@@ -62,7 +62,7 @@ steps:
   - log: '=== Platform CLI: exec list --job-id filter ==='
 
   - id: exec_list_jobfilter
-    command: sling platform execs list --job-id {env.JOB_ID} --limit 3
+    command: sling platform executions list --job-id {env.JOB_ID} --limit 3
 
   - check: 'contains(state.exec_list_jobfilter.output.stdout, "job_0vnx9sjkjzmd95nh")'
     failure_message: 'exec list --job-id filter missing job id in results'

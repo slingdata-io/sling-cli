@@ -222,7 +222,7 @@ endpoints:
 - Use `maximum` aggregation for timestamps
 - Use `last` aggregation for cursors
 - Context variables are read-only
-- Inspect the run log to see sync state (CLI: `--debug`; platform: `execs.log`)
+- Inspect the run log to see sync state (CLI: `--debug`; platform: `executions.log`)
 
 ## Related Topics
 
