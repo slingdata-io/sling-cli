@@ -84,7 +84,7 @@ tools:
     - `action` (string, required): The database action to perform. Valid values:
       - `"get_schemata"` - Get database schemata (schemas, tables, columns)
       - `"get_schemas"` - Get list of schema names
-      - `"query"` - Execute SQL queries (read-only)
+      - `"query"` - Execute SQL queries
       - `"query_cancel"` - Cancel a running query by query_id
       - `"get_columns"` - Get column metadata for a table
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
@@ -106,7 +106,7 @@ tools:
     - `transient` (boolean, optional): Whether to use a transient connection (default: false)
     - `query_id` (string, optional): Client-supplied id (`[A-Za-z0-9_-]`, max 64) so a concurrent `query_cancel` can target this query. Generated if omitted.
 
-      This action executes a SQL query on a database connection and return the results. Long queries are supported. Interrupting the client (Ctrl+C / Escape) cancels the running query. Pass an optional `query_id` to cancel from another concurrent call via `query_cancel`. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+      This action executes a SQL query on a database connection and return the results. Long queries are supported. Interrupting the client (Ctrl+C / Escape) cancels the running query. Pass an optional `query_id` to cancel from another concurrent call via `query_cancel`.
 
       *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
       *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
