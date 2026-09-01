@@ -40,6 +40,20 @@ type ReplicationState struct {
 	mu *sync.RWMutex `json:"-" yaml:"-"`
 }
 
+func NewReplicationState() *ReplicationState {
+	return &ReplicationState{
+		mu: &sync.RWMutex{},
+	}
+}
+
+func (rs *ReplicationState) Lock() {
+	rs.lock()
+}
+
+func (rs *ReplicationState) Unlock() {
+	rs.unlock()
+}
+
 func (rs *ReplicationState) lock() {
 	if rs.mu == nil {
 		rs.mu = &sync.RWMutex{}
