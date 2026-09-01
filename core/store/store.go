@@ -272,6 +272,65 @@ func StoreSetPipelineExec(pl *sling.Pipeline) {
 	syncStatus(pl)
 }
 
+// BuildStatus is the parent-level build run payload
+type BuildStatus struct {
+	ProjectID    *string          `json:"project_id,omitempty"`
+	JobID        string           `json:"job_id,omitempty"`
+	ExecID       string           `json:"exec_id,omitempty"`
+	FileName     *string          `json:"file_name"`
+	Target       string           `json:"target,omitempty"`
+	Select       []string         `json:"select,omitempty"`
+	Exclude      []string         `json:"exclude,omitempty"`
+	FullRefresh  bool             `json:"full_refresh,omitempty"`
+	Status       sling.ExecStatus `json:"status,omitempty"`
+	Error        *string          `json:"error,omitempty"`
+	ExitCode     int              `json:"exit_code,omitempty"`
+	ModelCount   int              `json:"model_count"`
+	OkCount      int              `json:"ok_count"`
+	FailedCount  int              `json:"failed_count"`
+	SkippedCount int              `json:"skipped_count"`
+	Rows         uint64           `json:"rows,omitempty"`
+	Bytes        uint64           `json:"bytes,omitempty"`
+	Tries        int              `json:"tries,omitempty"`
+	NewLines     g.LogLines       `json:"new_lines,omitempty"`
+
+	TimeNs       int64          `json:"time_ns,omitempty"`
+	StartTimeNs  *int64         `json:"start_time_ns,omitempty"`
+	EndTimeNs    *int64         `json:"end_time_ns,omitempty"`
+	TelemetryMap map[string]any `json:"telemetry_map,omitempty"`
+	Hostname     string         `json:"hostname,omitempty"`
+	AgentID      string         `json:"agent_id,omitempty"`
+	TryNumber    int            `json:"try_number,omitempty"`
+}
+
+// BuildModelStatus is the per-model/seed/test payload.
+type BuildModelStatus struct {
+	ProjectID  *string          `json:"project_id,omitempty"`
+	JobID      string           `json:"job_id,omitempty"`
+	ExecID     string           `json:"exec_id,omitempty"`
+	FileName   *string          `json:"file_name"`
+	Target     string           `json:"target,omitempty"`
+	ModelName  string           `json:"model_name"`
+	NodeType   string           `json:"node_type,omitempty"`
+	ObjectName string           `json:"object_name,omitempty"`
+	Mode       string           `json:"mode,omitempty"`
+	Status     sling.ExecStatus `json:"status,omitempty"`
+	Error      *string          `json:"error,omitempty"`
+	Rows       uint64           `json:"rows,omitempty"`
+	Bytes      uint64           `json:"bytes,omitempty"`
+	Order      int              `json:"order,omitempty"`
+	Tries      int              `json:"tries,omitempty"`
+	NewLines   g.LogLines       `json:"new_lines,omitempty"`
+
+	TimeNs       int64          `json:"time_ns,omitempty"`
+	StartTimeNs  *int64         `json:"start_time_ns,omitempty"`
+	EndTimeNs    *int64         `json:"end_time_ns,omitempty"`
+	TelemetryMap map[string]any `json:"telemetry_map,omitempty"`
+	Hostname     string         `json:"hostname,omitempty"`
+	AgentID      string         `json:"agent_id,omitempty"`
+	TryNumber    int            `json:"try_number,omitempty"`
+}
+
 func StoreSetBuildExec(bs *BuildStatus) {
 	syncStatus(bs)
 }
