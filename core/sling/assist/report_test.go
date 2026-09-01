@@ -356,3 +356,72 @@ func TestHandleReportComposeRedacts(t *testing.T) {
 		t.Fatalf("compose leaked path: %q", d.LogExcerpt)
 	}
 }
+
+func TestComposeReportFromRedactsSecrets(t *testing.T) {
+	d := ReportParts{
+		ExecID:    "exec_platform1",
+		ErrorText: "could not read /Users/alice/secret/file.csv from host",
+		LogText: strings.Join([]string{
+			"opened https://user:s3cretpass@db.internal.example.com/sync",
+			"path=/Users/alice/secret/file.csv",
+			"failed to copy rows",
+		}, "\n"),
+		ConfigBody:        "source: postgres\nurl: https://user:s3cretpass@db.internal.example.com/prod\n",
+		Version:           "1.4.24",
+		OS:                "Linux",
+		SourceType:        "postgres",
+		TargetType:        "snowflake",
+		CustomDescription: "reproduced on first stream",
+	}.ComposeReport()
+	if d.SignatureID == "" {
+		t.Fatal("missing signature")
+	}
+	if !strings.Contains(d.Title, "postgres→snowflake") {
+		t.Fatalf("title = %q", d.Title)
+	}
+	md := d.BodyMarkdown()
+	for _, secret := range []string{"/Users/alice", "db.internal.example.com", "s3cretpass"} {
+		if strings.Contains(d.LogExcerpt, secret) {
+			t.Fatalf("secret %q leaked in LogExcerpt: %q", secret, d.LogExcerpt)
+		}
+		if strings.Contains(d.Config, secret) {
+			t.Fatalf("secret %q leaked in Config: %q", secret, d.Config)
+		}
+		if strings.Contains(md, secret) {
+			t.Fatalf("secret %q leaked in markdown", secret)
+		}
+		if strings.Contains(d.GitHubIssueURL(), secret) {
+			t.Fatalf("secret %q leaked in GitHub URL", secret)
+		}
+	}
+	if !strings.Contains(md, "reproduced on first stream") {
+		t.Fatalf("custom description missing:\n%s", md)
+	}
+}
+
+func TestComposeReportFromContactFormFits(t *testing.T) {
+	small := ReportParts{
+		ExecID:    "exec_small",
+		ErrorText: "boom",
+		LogText:   "log",
+		Version:   "1.4.24",
+		OS:        "Mac",
+	}.ComposeReport()
+	if !small.ContactFormFits() {
+		t.Fatal("small report should fit")
+	}
+	big := ReportDraft{
+		Title:       "boom",
+		Description: "kept",
+		Config:      strings.Repeat("col: value\n", 4000),
+		LogExcerpt:  strings.Repeat("log line\n", 4000),
+		Version:     "1.4.24",
+		OS:          "Mac",
+	}
+	if big.ContactFormFits() {
+		t.Fatal("oversized report should not fit")
+	}
+	if n := len(big.GitHubIssueURL()); n > githubIssueURLMax {
+		t.Fatalf("github url len %d > %d", n, githubIssueURLMax)
+	}
+}
