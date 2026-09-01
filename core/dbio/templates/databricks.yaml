@@ -150,10 +150,10 @@ core:
     )
 
   merge_update: |
-    UPDATE {tgt_table} tgt
-    SET {set_fields}
-    FROM {src_table} src
-    WHERE {src_tgt_pk_equal}
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
 
   merge_update_insert: |
     MERGE INTO {tgt_table} tgt
