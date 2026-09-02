@@ -1,4 +1,5 @@
 core:
+  explain: ""
   drop_table: '{"action": "delete_table", "table": "{table}"}'
 
 variable:

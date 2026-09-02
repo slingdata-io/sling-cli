@@ -1,4 +1,5 @@
 core:
+  explain: ""
   incremental_select: '{incremental_where_cond}'
   incremental_where: '{ "update_key": "{update_key}", "value": "{value}" }'
   backfill_where: '{ "update_key": "{update_key}", "start_value": "{start_value}", "end_value": "{end_value}" }'

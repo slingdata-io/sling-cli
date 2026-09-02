@@ -1,4 +1,5 @@
 core:
+  explain: explain formatted {sql}
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   create_schema: create schema if not exists {schema}

@@ -1,4 +1,9 @@
 core:
+  # T-SQL has no EXPLAIN. Wrap so WITH CTEs stay inside the derived table.
+  explain: |
+    select top 0 * from (
+    {sql}
+    ) as _sling_explain
   drop_table: IF OBJECT_ID(N'{table}', N'U') IS NOT NULL DROP TABLE {table}
   drop_view: IF OBJECT_ID(N'{view}', N'V') IS NOT NULL DROP VIEW {view}
   drop_index: |

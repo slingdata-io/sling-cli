@@ -1,4 +1,11 @@
 core:
+  # BigQuery has no SQL EXPLAIN (dry-run is API-only). Wrap with WHERE FALSE
+  # so WITH CTEs stay inside the subquery and no rows are returned.
+  explain: |
+    select * from (
+    {sql}
+    ) as _sling_explain
+    where false
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for bigquery'"

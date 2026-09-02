@@ -1,4 +1,9 @@
 core:
+  # T-SQL has no EXPLAIN. Wrap so WITH CTEs stay inside the derived table.
+  explain: |
+    select top 0 * from (
+    {sql}
+    ) as _sling_explain
   drop_table: drop table {table}
   drop_view: drop view {view}
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}

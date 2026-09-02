@@ -728,6 +728,28 @@ func (t Type) GetTemplateValue(path string) (value string) {
 	return value
 }
 
+// ExplainSQL wraps sql with the dialect's core.explain template so the
+// statement can be validated without executing it. Prefix form (not a
+// subquery wrap) keeps top-level WITH CTEs valid on engines that reject
+// WITH inside a derived table.
+func (t Type) ExplainSQL(sql string) (string, error) {
+	tpl := strings.TrimSpace(t.GetTemplateValue("core.explain"))
+	if tpl == "" {
+		return "", g.Error("explain is not supported for %s", t)
+	}
+	sql = strings.TrimSpace(sql)
+	for strings.HasSuffix(sql, ";") {
+		sql = strings.TrimSpace(strings.TrimSuffix(sql, ";"))
+	}
+	if sql == "" {
+		return "", g.Error("sql is required")
+	}
+	if strings.HasPrefix(strings.ToUpper(sql), "EXPLAIN") {
+		return sql, nil
+	}
+	return g.R(tpl, "sql", sql), nil
+}
+
 type FileType string
 
 const (
