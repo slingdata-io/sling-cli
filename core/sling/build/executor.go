@@ -902,6 +902,7 @@ func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
 		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
+	staged := e.countIfColumnStore(tempTable, 0)
 
 	// Generate and execute merge SQL using sling's merge infrastructure
 	uniqueKeys := getUniqueKeys(model)
@@ -923,7 +924,10 @@ func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 	if err != nil {
 		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}
-	return e.countIfColumnStore(tempTable, rows), nil
+	if e.DbConn != nil && e.DbConn.GetType().IsColumnStore() {
+		return staged, nil
+	}
+	return rows, nil
 }
 
 // executeAppend handles append-only mode (formerly "snapshot").
@@ -1969,6 +1973,7 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (u
 	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
 		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
+	staged := e.countIfColumnStore(tempTable, 0)
 
 	tgtQuoted, err := e.quoteFullTableName(t)
 	if err != nil {
@@ -1987,7 +1992,10 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (u
 	if err != nil {
 		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}
-	return e.countIfColumnStore(tempTable, rows), nil
+	if e.DbConn != nil && e.DbConn.GetType().IsColumnStore() {
+		return staged, nil
+	}
+	return rows, nil
 }
 
 // handleChunkError formats an error from a failed chunk and optionally prints

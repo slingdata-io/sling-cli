@@ -1,0 +1,104 @@
+# ClickHouse incremental must count the staging temp table before the merge.
+#
+# The merge consumes that table, and on ClickHouse it is ENGINE = Memory.
+# Counting it after the merge reads back empty, so the model reports 0 rows even
+# though the data landed. A row total alone does not catch this: with a small
+# fixture the merge finishes before the table empties, and the count comes back
+# right by luck. So assert the operation order from system.query_log as well.
+steps:
+  - type: query
+    connection: CLICKHOUSE
+    query: |
+      CREATE DATABASE IF NOT EXISTS staging;
+      DROP TABLE IF EXISTS staging.stg_events;
+      DROP TABLE IF EXISTS staging.events_inc;
+
+  # Seed: 2 source rows, materialized full-refresh.
+  - type: build
+    id: seed
+    build: tests/build/column_store_modes_project
+    target: CLICKHOUSE
+    full_refresh: true
+    select: '+events_inc'
+
+  - type: check
+    check: state.seed.failed == 0
+    failure_message: 'seed build failed: {state.seed.failed}'
+
+  # Mark the boundary so only the incremental run below is inspected. The seed
+  # build issues the same statements and would otherwise be counted.
+  - type: query
+    connection: CLICKHOUSE
+    query: SELECT toString(now64(3)) AS marker
+    into: mark
+
+  # Incremental: extra=true adds 1 new row, merged with delete+insert.
+  - type: build
+    id: incremental
+    build: tests/build/column_store_modes_project
+    target: CLICKHOUSE
+    select: '+events_inc'
+    vars:
+      extra: true
+
+  - type: check
+    check: state.incremental.failed == 0
+    failure_message: 'incremental build failed: {state.incremental.failed}'
+
+  # stg_events full-refresh 3 + events_inc temp table 1 = 4.
+  # Counting after the merge gives 3 + 0 = 3.
+  - type: check
+    check: state.incremental.rows == 4
+    failure_message: 'expected 4 rows (3 stg + 1 staged), got {state.incremental.rows}'
+
+  # system.query_log flushes on its own (7.5s by default). SYSTEM FLUSH LOGS
+  # drops the connection through this driver, so wait it out instead.
+  - type: command
+    command: [sleep, "10"]
+
+  # COUNT_FIRST when the temp table is counted before the merge consumes it.
+  - type: query
+    connection: CLICKHOUSE
+    query: |
+      SELECT multiIf(
+               countIf(kind = 'merge') = 0, 'NO_MERGE',
+               countIf(kind = 'cnt') = 0, 'MERGE_FIRST',
+               minIf(t, kind = 'cnt') < minIf(t, kind = 'merge'), 'COUNT_FIRST',
+               'MERGE_FIRST') AS verdict
+      FROM (
+        SELECT event_time_microseconds AS t,
+               multiIf(query ILIKE '%count(%_sling_build_tmp_events_inc%', 'cnt',
+                       query ILIKE '%ALTER TABLE%events_inc%DELETE%', 'merge',
+                       'other') AS kind
+        FROM system.query_log
+        WHERE type = 'QueryStart'
+          AND event_time_microseconds >= toDateTime64('{store.mark[0].marker}', 3)
+          AND (query ILIKE '%count(%_sling_build_tmp_events_inc%'
+               OR query ILIKE '%ALTER TABLE%events_inc%DELETE%')
+      )
+      WHERE kind != 'other'
+    into: order_check
+
+  - type: check
+    check: store.order_check[0].verdict == "COUNT_FIRST"
+    failure_message: 'temp table was counted after the merge consumed it ({store.order_check[0].verdict})'
+
+  # The data must actually be in the target, so a wrong count cannot be
+  # mistaken for a genuinely empty merge.
+  - type: query
+    connection: CLICKHOUSE
+    query: SELECT toInt32(count(*)) AS cnt FROM staging.events_inc
+    into: tgt
+
+  - type: check
+    check: int_parse(store.tgt[0].cnt) == 3
+    failure_message: 'expected 3 rows in staging.events_inc, got {store.tgt[0].cnt}'
+
+  - type: log
+    message: 'SUCCESS: clickhouse incremental reported rows={state.incremental.rows} target={store.tgt[0].cnt} order={store.order_check[0].verdict}'
+
+  - type: query
+    connection: CLICKHOUSE
+    query: |
+      DROP TABLE IF EXISTS staging.stg_events;
+      DROP TABLE IF EXISTS staging.events_inc;

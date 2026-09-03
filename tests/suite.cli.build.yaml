@@ -593,6 +593,16 @@
     - 'OK'
     - 'Build Completed'
 
+- id: 462
+  name: 'sling build clickhouse incremental counts temp table before merge'
+  group: build
+  after: [440]
+  run: 'sling run -p tests/pipelines/p.49.build_clickhouse_incremental_rows.yaml'
+  output_contains:
+    - 'SUCCESS: clickhouse incremental reported'
+    - 'rows=4'
+    - 'target=3'
+
 - id: 444
   name: 'sling build clickhouse append counts temp table rows'
   group: build
