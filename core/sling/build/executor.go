@@ -1736,17 +1736,17 @@ func resolveIncrementalRange(e *Executor, model *Model) (*Range, error) {
 	if lowerRaw == "" {
 		maxVal, maxType, err := e.queryTargetMax(model, updateKey)
 		if err != nil {
-			g.Warn("build[%s]: tier B probe failed (%s); falling through to first-run", model.Name, err)
+			g.Warn("build[%s]: probe failed (%s); falling through to first-run", model.Name, err)
 		} else if maxVal != "" {
 			lowerRaw = maxVal
 			colType = maxType
-			g.Debug("build[%s]: tier B — target MAX %q", model.Name, lowerRaw)
+			g.Debug("build[%s]: target MAX %q", model.Name, lowerRaw)
 		}
 	}
 
 	// Tier C: first run — unbounded lower
 	if lowerRaw == "" {
-		g.Debug("build[%s]: tier C — first run, no lower bound", model.Name)
+		g.Debug("build[%s]: first run, no lower bound", model.Name)
 		r := &Range{
 			UpdateState: true,
 			Chunks: []RangeChunk{{
