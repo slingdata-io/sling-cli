@@ -29,7 +29,7 @@ type Build struct {
 	connEntries connection.ConnEntries // pre-resolved connection entries for parallel execution
 	ExecRows    uint64                 // sum of model/seed rows after Execute
 	ExecBytes   uint64
-	Results     []ExecutionResult      // per-node results after Execute
+	Results     []ExecutionResult // per-node results after Execute
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -502,55 +502,96 @@ func (b *Build) PrintCompileJSON() {
 	if len(b.SubBuilds) > 0 {
 		var all []map[string]any
 		for _, sub := range b.SubBuilds {
-			all = append(all, sub.compileJSONPayload())
+			all = append(all, sub.CompileJSONPayload())
 		}
 		fmt.Println(g.Marshal(all))
 		return
 	}
-	fmt.Println(g.Marshal(b.compileJSONPayload()))
+	fmt.Println(g.Marshal(b.CompileJSONPayload()))
 }
 
-// CompileJSONPayload returns the --compile --json object.
+// NodeTypeModel and NodeTypeSeed are the compiled node types.
+const (
+	NodeTypeModel = "model"
+	NodeTypeSeed  = "seed"
+)
+
+// Compiled returns the project config with the compile output set: the resolved
+// target, the selected nodes in execution order, and the compiled SQL of each.
 // Safe when Compile did not finish (e.g. a cycle): order/nodes stay empty.
-func (b *Build) CompileJSONPayload() map[string]any {
+func (b *Build) Compiled() *BuildConfig {
 	if b == nil {
-		return map[string]any{"order": []string{}, "nodes": []map[string]any{}, "target": ""}
+		return &BuildConfig{Order: []string{}, Nodes: []Node{}}
 	}
-	if b.DAG == nil {
-		return map[string]any{"order": []string{}, "nodes": []map[string]any{}, "target": b.GetTarget()}
-	}
-	return b.compileJSONPayload()
-}
 
-func (b *Build) compileJSONPayload() map[string]any {
-	nodes := make([]map[string]any, 0, len(b.Selected))
+	// set the output on the project config itself, so the config and its
+	// compile output stay one object (like sling.ReplicationConfig.Tasks)
+	cfg := b.Project.GetConfig()
+	cfg.Target = b.GetTarget()
+	cfg.Order = []string{}
+	cfg.Nodes = []Node{}
+	cfg.Compiled = false
+
+	if b.DAG == nil {
+		return cfg
+	}
+
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
 		if node == nil {
 			continue
 		}
-		m := map[string]any{"name": name}
+		n := Node{Name: name}
 		if node.Seed != nil {
-			m["type"] = "seed"
-			m["table"] = node.Seed.FullTableName
-			m["file"] = filepath.ToSlash(node.Seed.RelPath)
+			n.Type = NodeTypeSeed
+			n.Table = node.Seed.FullTableName
+			n.File = filepath.ToSlash(node.Seed.RelPath)
 		} else if node.Model != nil {
-			m["type"] = "model"
-			m["table"] = node.Model.FullTableName
-			m["file"] = filepath.ToSlash(node.Model.RelPath)
-			m["mode"] = b.GetModelMode(node.Model)
-			m["dependencies"] = node.Dependencies
-			m["sql"] = node.Model.CompiledSQL
-			if len(node.Model.Config.Tests) > 0 {
-				m["tests"] = node.Model.Config.Tests
+			n.Type = NodeTypeModel
+			n.Table = node.Model.FullTableName
+			n.File = filepath.ToSlash(node.Model.RelPath)
+			n.Mode = b.GetModelMode(node.Model)
+			n.Dependencies = node.Dependencies
+			n.SQL = node.Model.CompiledSQL
+			n.Tests = node.Model.Config.Tests
+		}
+		cfg.Nodes = append(cfg.Nodes, n)
+	}
+	cfg.Order = append(cfg.Order, b.Selected...)
+	cfg.Compiled = true
+
+	return cfg
+}
+
+// CompileJSONPayload returns the --compile --json object.
+func (b *Build) CompileJSONPayload() map[string]any {
+	return b.Compiled().JSONPayload()
+}
+
+// JSONPayload renders the compile output as the --compile --json object.
+// Node keys are omitted when empty, to keep the payload as it was.
+func (c *BuildConfig) JSONPayload() map[string]any {
+	nodes := make([]map[string]any, 0, len(c.Nodes))
+	for _, node := range c.Nodes {
+		m := map[string]any{"name": node.Name}
+		setIf := func(key string, val any, ok bool) {
+			if ok {
+				m[key] = val
 			}
 		}
+		setIf("type", node.Type, node.Type != "")
+		setIf("table", node.Table, node.Table != "")
+		setIf("file", node.File, node.File != "")
+		setIf("mode", node.Mode, node.Mode != "")
+		setIf("dependencies", node.Dependencies, node.Type == NodeTypeModel)
+		setIf("sql", node.SQL, node.SQL != "")
+		setIf("tests", node.Tests, len(node.Tests) > 0)
 		nodes = append(nodes, m)
 	}
 	return map[string]any{
-		"order":  append([]string{}, b.Selected...),
+		"order":  c.Order,
 		"nodes":  nodes,
-		"target": b.GetTarget(),
+		"target": c.Target,
 	}
 }
 

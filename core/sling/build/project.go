@@ -187,13 +187,44 @@ type Seed struct {
 
 // BuildConfig represents the contents of sling_build.yml.
 type BuildConfig struct {
-	Target     string         `yaml:"target"`
-	Dev        *DevConfig     `yaml:"dev,omitempty"`
-	DbtProject any            `yaml:"dbt_project,omitempty"`
-	Vars       map[string]any `yaml:"vars,omitempty"`
-	Defaults   BuildDefaults  `yaml:"defaults,omitempty"`
+	Target     string         `json:"target,omitempty" yaml:"target"`
+	Dev        *DevConfig     `json:"dev,omitempty" yaml:"dev,omitempty"`
+	DbtProject any            `json:"dbt_project,omitempty" yaml:"dbt_project,omitempty"`
+	Vars       map[string]any `json:"vars,omitempty" yaml:"vars,omitempty"`
+	Defaults   BuildDefaults  `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+
+	// Order and Nodes are the compiled output, set by Build.Compile.
+	// They live on the root config only; mergeConfigs does not carry them.
+	Order    []string `json:"order" yaml:"-"`
+	Nodes    []Node   `json:"nodes" yaml:"-"`
+	Compiled bool     `json:"compiled" yaml:"-"`
 
 	unresolvedVars []string // ${VAR} names that had no value and no fallback
+}
+
+// Node is one selected model or seed of a compiled build project.
+type Node struct {
+	Name         string   `json:"name" yaml:"name"`
+	Type         string   `json:"type,omitempty" yaml:"type,omitempty"` // model or seed
+	Table        string   `json:"table,omitempty" yaml:"table,omitempty"`
+	File         string   `json:"file,omitempty" yaml:"file,omitempty"`
+	Mode         string   `json:"mode,omitempty" yaml:"mode,omitempty"`                 // models only
+	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"` // models only
+	SQL          string   `json:"sql,omitempty" yaml:"sql,omitempty"`                   // models only
+	Tests        []any    `json:"tests,omitempty" yaml:"tests,omitempty"`               // models only
+}
+
+// ModelNames returns the names of the compiled nodes that are models, in order.
+func (c *BuildConfig) ModelNames() (names []string) {
+	if c == nil {
+		return
+	}
+	for _, node := range c.Nodes {
+		if node.Type == NodeTypeModel {
+			names = append(names, node.Name)
+		}
+	}
+	return
 }
 
 // DevConfig holds dev-mode settings in sling_build.yml.
@@ -1436,6 +1467,17 @@ func effectiveDefaults(project *BuildProject, relPath string) BuildDefaults {
 		return BuildDefaults{}
 	}
 	return cfg.Defaults
+}
+
+// GetConfig returns the project root config, creating it when absent.
+func (p *BuildProject) GetConfig() *BuildConfig {
+	if p == nil {
+		return &BuildConfig{}
+	}
+	if p.Config == nil {
+		p.Config = &BuildConfig{}
+	}
+	return p.Config
 }
 
 // GetEffectiveConfig returns the merged config for the project, applying child overrides.
