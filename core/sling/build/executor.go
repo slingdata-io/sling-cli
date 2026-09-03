@@ -1087,15 +1087,15 @@ func (e *Executor) getTempTableName(model *Model) string {
 	return getTempTableName(model, e.RunID)
 }
 
-// createTempTable stages SQL into a temp table. ClickHouse uses Memory engine
-// (no ORDER BY). Other dialects use CREATE TABLE AS.
+// createTempTable stages SQL into a temp table. ClickHouse gets an explicit
+// MergeTree engine.
 func (e *Executor) createTempTable(tempTable, sql string) (uint64, error) {
 	if e.isClickHouse() {
 		quoted, err := e.quoteFullTableName(tempTable)
 		if err != nil {
 			return 0, err
 		}
-		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = Memory AS (%s)", quoted, sql)))
+		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = MergeTree() ORDER BY tuple() AS (%s)", quoted, sql)))
 	}
 	return e.createTableAs(tempTable, sql, nil)
 }

@@ -168,7 +168,7 @@ func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) (uint
 	dbType := e.DbConn.GetType()
 
 	if e.isClickHouse() {
-		engineClause := "ENGINE = Memory"
+		engineClause := "ENGINE = MergeTree()"
 		orderByClause := "ORDER BY tuple()"
 		settings := ""
 		if model != nil {
