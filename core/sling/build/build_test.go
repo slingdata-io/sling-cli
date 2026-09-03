@@ -482,3 +482,13 @@ WHERE created_at > (SELECT MAX(created_at) FROM {{ this }})
 	fmt.Println("style:", style, "err:", err)
 	fmt.Println("StyleDbt:", StyleDbt, "StyleSling:", StyleSling)
 }
+
+func TestCompileDatabaseUnsupportedDialect(t *testing.T) {
+	project, err := LoadProject(getTestFixturePath("database_project"), BuildOptions{Prod: true})
+	require.NoError(t, err)
+
+	b := &Build{Project: project, Options: BuildOptions{Target: "POSTGRES", Prod: true}}
+	err = b.Compile()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support database.schema.table")
+}

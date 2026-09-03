@@ -33,13 +33,13 @@ type BuildProject struct {
 
 // Model represents a SQL model file in the project.
 type Model struct {
-	Name              string      // e.g., "dim_customers"
+	Name              string      // file stem, unique across the project, e.g. "events"
 	FilePath          string      // absolute path
 	RelPath           string      // relative path from project root
-	Schema            string      // derived from folder or override
-	Prefix            string      // underscore-joined nested folder names
-	FullTableName     string      // schema.prefix_name (current mode)
-	ProdFullTableName string      // schema.prefix_name (always prod-mode, for SQL matching)
+	Schema            string      // derived from first folder or override
+	Database          string      // optional catalog; three-part dialects only
+	FullTableName     string      // [database.]schema.name (current mode)
+	ProdFullTableName string      // [database.]schema.name (always prod-mode, for SQL matching)
 	RawSQL            string      // raw file content (frontmatter stripped)
 	CompiledSQL       string      // after Jinja rendering
 	PreStatements     []string    // SQL statements before the model query (from multi-statement splitting)
@@ -66,6 +66,7 @@ type ModelConfig struct {
 	PreHook       string        `yaml:"pre_hook,omitempty"`  // deprecated: kept for validation only
 	PostHook      string        `yaml:"post_hook,omitempty"` // deprecated: kept for validation only
 	Schema        string        `yaml:"schema,omitempty"`
+	Database      string        `yaml:"database,omitempty"`
 	Enabled       *bool         `yaml:"enabled,omitempty"`
 	Engine        string        `yaml:"engine,omitempty"`
 	Range         *RangeConfig  `yaml:"range,omitempty"`
@@ -174,13 +175,13 @@ func validateModel(m *Model) error {
 
 // Seed represents a seed file (CSV, JSON, Parquet) in the project.
 type Seed struct {
-	Name              string // e.g., "country_codes"
+	Name              string // file stem, unique across the project
 	FilePath          string // absolute path
 	RelPath           string // relative path from project root
 	Schema            string
-	Prefix            string
-	FullTableName     string // schema.prefix_name (current mode)
-	ProdFullTableName string // schema.prefix_name (always prod-mode, for SQL matching)
+	Database          string // optional catalog; three-part dialects only
+	FullTableName     string // [database.]schema.name (current mode)
+	ProdFullTableName string // [database.]schema.name (always prod-mode, for SQL matching)
 	Format            string // csv, json, parquet
 }
 
@@ -191,13 +192,16 @@ type BuildConfig struct {
 	DbtProject any            `yaml:"dbt_project,omitempty"`
 	Vars       map[string]any `yaml:"vars,omitempty"`
 	Defaults   BuildDefaults  `yaml:"defaults,omitempty"`
+
+	unresolvedVars []string // ${VAR} names that had no value and no fallback
 }
 
 // DevConfig holds dev-mode settings in sling_build.yml.
 // When present, dev mode is the default (override with --prod).
 type DevConfig struct {
-	Target string `yaml:"target,omitempty"` // optional, falls back to top-level target
-	Schema string `yaml:"schema"`           // mandatory for dev mode
+	Target   string `yaml:"target,omitempty"`   // optional, falls back to top-level target
+	Schema   string `yaml:"schema"`             // mandatory for dev mode
+	Database string `yaml:"database,omitempty"` // optional; falls back to defaults.database
 }
 
 // DbtProjectConfig holds dbt project compatibility settings.
@@ -210,7 +214,8 @@ type DbtProjectConfig struct {
 type BuildDefaults struct {
 	Mode          string        `yaml:"mode,omitempty"`
 	Schema        string        `yaml:"schema,omitempty"`
-	Tags          []string      `yaml:"tags,omitempty"` // additive across nesting
+	Database      string        `yaml:"database,omitempty"` // three-part dialects only
+	Tags          []string      `yaml:"tags,omitempty"`     // additive across nesting
 	UniqueKey     any           `yaml:"unique_key,omitempty"`
 	UpdateKey     string        `yaml:"update_key,omitempty"`
 	MergeStrategy string        `yaml:"merge_strategy,omitempty"`
@@ -237,6 +242,9 @@ type BuildOptions struct {
 	Recursive   bool    // CLI --recursive/-R: discover sling_build.yml in immediate subdirectories
 	Test        bool    // CLI --test: run data tests only (no materialization)
 	JSON        bool    // CLI --json: machine-readable compile/list output
+	// SkipUnresolvedCheck skips the ${VAR} error for fields in effect.
+	// sling validate uses this because it does not choose a run mode.
+	SkipUnresolvedCheck bool
 }
 
 // DefaultThreads is the default parallelism for model execution.
@@ -453,6 +461,10 @@ func LoadProject(dir string, opts ...BuildOptions) (*BuildProject, error) {
 		return nil, err
 	}
 
+	if err := project.checkUnresolvedVars(cliOpts); err != nil {
+		return nil, err
+	}
+
 	return project, nil
 }
 
@@ -463,10 +475,13 @@ func loadConfig(path string) (*BuildConfig, error) {
 		return nil, g.Error(err, "could not read config file")
 	}
 
+	expanded, unresolved := expandConfigVars(string(data))
+
 	cfg := &BuildConfig{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, g.Error(err, "could not parse config file")
 	}
+	cfg.unresolvedVars = unresolved
 
 	if cfg.Defaults.Mode != "" {
 		canonical, warn := normalizeMode(cfg.Defaults.Mode)
@@ -483,6 +498,127 @@ func loadConfig(path string) (*BuildConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// configVarRe matches ${VAR} and ${VAR:-fallback}. Bare $VAR is not expanded.
+var configVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
+
+// ExpandConfigVars expands ${VAR} and ${VAR:-fallback} in sling_build.yml text.
+func ExpandConfigVars(text string) (string, []string) {
+	return expandConfigVars(text)
+}
+
+// ExpandConfigVarsEnv is ExpandConfigVars with extra names checked before the process environment.
+func ExpandConfigVarsEnv(text string, extra map[string]string) (string, []string) {
+	return expandConfigVarsLookup(text, func(name string) (string, bool) {
+		if extra != nil {
+			if v, ok := extra[name]; ok && v != "" {
+				return v, true
+			}
+		}
+		return os.LookupEnv(name)
+	})
+}
+
+// expandConfigVars expands ${VAR} and ${VAR:-fallback} in sling_build.yml text.
+// Unset or empty variables without a fallback stay literal and are listed in unresolved.
+func expandConfigVars(text string) (string, []string) {
+	return expandConfigVarsLookup(text, os.LookupEnv)
+}
+
+func expandConfigVarsLookup(text string, lookup func(string) (string, bool)) (out string, unresolved []string) {
+	seen := map[string]bool{}
+	out = configVarRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := configVarRe.FindStringSubmatch(m)
+		name := sub[1]
+		rest := m[2+len(name):] // after `${NAME`
+		hasFallback := strings.HasPrefix(rest, ":-")
+
+		val, ok := lookup(name)
+		if ok && val != "" {
+			return val
+		}
+		if hasFallback {
+			return sub[2]
+		}
+		if !seen[name] {
+			seen[name] = true
+			unresolved = append(unresolved, name)
+		}
+		return m
+	})
+	return out, unresolved
+}
+
+// UnresolvedConfigVars returns ${VAR} names that had no value and no fallback.
+func (p *BuildProject) UnresolvedConfigVars() []string {
+	if p == nil || p.Config == nil {
+		return nil
+	}
+	return p.Config.unresolvedVars
+}
+
+// checkUnresolvedVars reports the first unresolved ${VAR} in a field that is
+// in effect for this run. See D3 in the build-dev-ux plan.
+func (p *BuildProject) checkUnresolvedVars(opts BuildOptions) error {
+	if opts.SkipUnresolvedCheck {
+		return nil
+	}
+	if err := p.Config.checkUnresolved(p.Mode, opts); err != nil {
+		return err
+	}
+	for _, cfg := range p.ChildConfigs {
+		if err := cfg.checkUnresolved(p.Mode, opts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *BuildConfig) checkUnresolved(mode string, opts BuildOptions) error {
+	if c == nil || len(c.unresolvedVars) == 0 {
+		return nil
+	}
+
+	// vars are always in effect
+	for k, v := range c.Vars {
+		s := cast.ToString(v)
+		if name, ok := firstUnresolvedVar(s); ok {
+			return unresolvedVarError("vars."+k, name, "")
+		}
+	}
+
+	// target: only when the resolved value still holds a token
+	if name, ok := firstUnresolvedVar(c.Target); ok {
+		return unresolvedVarError("target", name, ",\nor pass --target <name>.")
+	}
+
+	if mode == "dev" && c.Dev != nil {
+		if opts.Schema == "" {
+			if name, ok := firstUnresolvedVar(c.Dev.Schema); ok {
+				return unresolvedVarError("dev.schema", name, ",\nor pass --schema <name>.")
+			}
+		}
+		if opts.Target == "" {
+			if name, ok := firstUnresolvedVar(c.Dev.Target); ok {
+				return unresolvedVarError("dev.target", name, ",\nor pass --target <name>.")
+			}
+		}
+	}
+
+	return nil
+}
+
+func firstUnresolvedVar(s string) (string, bool) {
+	sub := configVarRe.FindStringSubmatch(s)
+	if sub == nil {
+		return "", false
+	}
+	return sub[1], true
+}
+
+func unresolvedVarError(field, name, extraHint string) error {
+	return g.Error("sling_build.yml: %s uses ${%s} but %s is not set.\nSet it in ~/.sling/env.yaml under `env:`, export it in the shell%s", field, name, name, extraHint)
 }
 
 // mergeHookMaps produces a HookMap whose slices are the ordered concatenation
@@ -522,10 +658,11 @@ func mergeConfigs(parent, child *BuildConfig) *BuildConfig {
 	}
 
 	merged := &BuildConfig{
-		Target:     parent.Target,
-		Dev:        parent.Dev,
-		DbtProject: parent.DbtProject,
-		Defaults:   parent.Defaults,
+		Target:         parent.Target,
+		Dev:            parent.Dev,
+		DbtProject:     parent.DbtProject,
+		Defaults:       parent.Defaults,
+		unresolvedVars: lo.Uniq(append(append([]string{}, parent.unresolvedVars...), child.unresolvedVars...)),
 	}
 
 	// Deep merge vars
@@ -555,6 +692,9 @@ func mergeConfigs(parent, child *BuildConfig) *BuildConfig {
 	}
 	if child.Defaults.Schema != "" {
 		merged.Defaults.Schema = child.Defaults.Schema
+	}
+	if child.Defaults.Database != "" {
+		merged.Defaults.Database = child.Defaults.Database
 	}
 	if child.Defaults.UniqueKey != nil {
 		merged.Defaults.UniqueKey = child.Defaults.UniqueKey
@@ -626,6 +766,10 @@ func loadIndependentBuilds(project *BuildProject, cliOpts BuildOptions) (*BuildP
 		warnMacroShadows(subProject)
 
 		if err := validateUniqueNames(subProject); err != nil {
+			return nil, err
+		}
+
+		if err := subProject.checkUnresolvedVars(cliOpts); err != nil {
 			return nil, err
 		}
 
@@ -1035,8 +1179,9 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		return g.Error(err, "could not read model file: %s", absPath)
 	}
 
-	schema, prefix, name, fullTableName := resolveTableName(relPath, project.Mode, project.SchemaOverride, project.DefaultSchema)
-	_, _, _, prodFullTableName := resolveTableName(relPath, "prod", "", project.DefaultSchema)
+	identity := identityFromPath(relPath, project.Mode, project.SchemaOverride, project.DefaultSchema)
+	prodIdentity := identityFromPath(relPath, "prod", "", project.DefaultSchema)
+	name := identity.Name
 
 	// Apply merged defaults (root + child sling_build.yml) for this file's location.
 	defaults := effectiveDefaults(project, relPath)
@@ -1083,6 +1228,9 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		if fmConfig.Schema != "" {
 			modelConfig.Schema = fmConfig.Schema
 		}
+		if fmConfig.Database != "" {
+			modelConfig.Database = fmConfig.Database
+		}
 		if fmConfig.Enabled != nil {
 			modelConfig.Enabled = fmConfig.Enabled
 		}
@@ -1106,18 +1254,17 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		}
 	}
 
-	// Schema override from defaults or frontmatter — recompute FullTableName.
-	// (Before this change, a frontmatter `schema:` was silently ignored at the
-	// table-name level; only modelConfig.Schema was set.)
-	// ProdFullTableName is intentionally NOT rewritten: it exists specifically
-	// as the prod-mode reference for SQL ref() matching.
+	// Schema and database overrides from defaults or frontmatter.
+	// ProdFullTableName keeps the folder-derived schema: it exists as the
+	// prod-mode reference for SQL ref() matching. Its database follows the
+	// same resolution, since database is never folder-derived.
 	if modelConfig.Schema != "" {
-		schema = modelConfig.Schema
-		qualifiedName := name
-		if prefix != "" {
-			qualifiedName = prefix + "_" + name
-		}
-		fullTableName = schema + "." + qualifiedName
+		identity.Schema = modelConfig.Schema
+	}
+	identity.Database = resolveDatabase(project, modelConfig.Database, defaults.Database)
+	prodIdentity.Database = prodDatabase(project, modelConfig.Database, defaults.Database)
+	if modelConfig.Database == "" {
+		modelConfig.Database = identity.Database
 	}
 
 	// Detect incremental pattern (dbt-style vs sling-native). Errors at load time
@@ -1131,10 +1278,10 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		Name:              name,
 		FilePath:          absPath,
 		RelPath:           relPath,
-		Schema:            schema,
-		Prefix:            prefix,
-		FullTableName:     fullTableName,
-		ProdFullTableName: prodFullTableName,
+		Schema:            identity.Schema,
+		Database:          identity.Database,
+		FullTableName:     identity.FullName(),
+		ProdFullTableName: prodIdentity.FullName(),
 		RawSQL:            sqlContent,
 		Config:            modelConfig,
 		HasFrontmatter:    hasFrontmatter,
@@ -1155,82 +1302,93 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 
 // addSeed creates a Seed from a file and adds it to the project.
 func addSeed(project *BuildProject, absPath, relPath, format string) error {
-	schema, prefix, name, fullTableName := resolveTableName(relPath, project.Mode, project.SchemaOverride, project.DefaultSchema)
-	_, _, _, prodFullTableName := resolveTableName(relPath, "prod", "", project.DefaultSchema)
+	identity := identityFromPath(relPath, project.Mode, project.SchemaOverride, project.DefaultSchema)
+	prodIdentity := identityFromPath(relPath, "prod", "", project.DefaultSchema)
 
-	// Seeds only honor defaults.schema from the merged config — no tags,
-	// enabled, hooks, or unique_key semantics apply to seeds today.
-	if defaults := effectiveDefaults(project, relPath); defaults.Schema != "" {
-		schema = defaults.Schema
-		qualifiedName := name
-		if prefix != "" {
-			qualifiedName = prefix + "_" + name
-		}
-		fullTableName = schema + "." + qualifiedName
+	// Seeds only honor defaults.schema and defaults.database from the merged
+	// config — no tags, enabled, hooks, or unique_key semantics apply to seeds.
+	defaults := effectiveDefaults(project, relPath)
+	if defaults.Schema != "" {
+		identity.Schema = defaults.Schema
 	}
+	identity.Database = resolveDatabase(project, "", defaults.Database)
+	prodIdentity.Database = prodDatabase(project, "", defaults.Database)
 
 	seed := &Seed{
-		Name:              name,
+		Name:              identity.Name,
 		FilePath:          absPath,
 		RelPath:           relPath,
-		Schema:            schema,
-		Prefix:            prefix,
-		FullTableName:     fullTableName,
-		ProdFullTableName: prodFullTableName,
+		Schema:            identity.Schema,
+		Database:          identity.Database,
+		FullTableName:     identity.FullName(),
+		ProdFullTableName: prodIdentity.FullName(),
 		Format:            format,
 	}
 
-	if existing, ok := project.Seeds[name]; ok {
-		return g.Error("duplicate seed name '%s': found in both '%s' and '%s'", name, existing.RelPath, relPath)
+	if existing, ok := project.Seeds[identity.Name]; ok {
+		return g.Error("duplicate seed name '%s': found in both '%s' and '%s'", identity.Name, existing.RelPath, relPath)
 	}
 
-	project.Seeds[name] = seed
+	project.Seeds[identity.Name] = seed
 	return nil
 }
 
-// resolveTableName determines the schema, prefix, name, and full table name from a relative path.
-func resolveTableName(relPath, mode, schemaOverride, defaultSchema string) (schema, prefix, name, fullTableName string) {
-	// Normalize path separators
-	relPath = filepath.ToSlash(relPath)
+// resolveDatabase returns the database for the current mode. An explicit
+// front-matter value always wins. Otherwise dev mode uses dev.database when
+// set, and both modes fall back to defaults.database.
+func resolveDatabase(project *BuildProject, frontmatter, defaultDatabase string) string {
+	if frontmatter != "" {
+		return frontmatter
+	}
+	if project.Mode == "dev" && project.Config != nil && project.Config.Dev != nil && project.Config.Dev.Database != "" {
+		return project.Config.Dev.Database
+	}
+	return defaultDatabase
+}
 
-	// Split path into parts
-	parts := strings.Split(relPath, "/")
+// prodDatabase returns the database used for the prod-mode reference name.
+func prodDatabase(project *BuildProject, frontmatter, defaultDatabase string) string {
+	if frontmatter != "" {
+		return frontmatter
+	}
+	return defaultDatabase
+}
 
-	// Extract filename and remove extension
+// TableIdentity is the resolved warehouse location of a model or seed.
+type TableIdentity struct {
+	Name     string // file stem
+	Schema   string
+	Database string // optional; three-part dialects only
+}
+
+// FullName returns [database.]schema.name.
+func (t TableIdentity) FullName() string {
+	if t.Database != "" {
+		return t.Database + "." + t.Schema + "." + t.Name
+	}
+	return t.Schema + "." + t.Name
+}
+
+// identityFromPath derives the table identity from a relative file path.
+// The file stem is the table name. In prod mode the first folder is the
+// schema. In dev mode the schema is the override. Deeper folders organize
+// files only; they do not change the name.
+func identityFromPath(relPath, mode, schemaOverride, defaultSchema string) TableIdentity {
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+
 	fileName := parts[len(parts)-1]
-	ext := filepath.Ext(fileName)
-	name = strings.TrimSuffix(fileName, ext)
-
-	// Get directory parts (excluding filename)
+	name := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	dirParts := parts[:len(parts)-1]
 
-	if mode == "dev" {
-		// Dev mode: all folder parts become prefix, use override schema
+	schema := defaultSchema
+	switch {
+	case mode == "dev":
 		schema = schemaOverride
-		if len(dirParts) > 0 {
-			prefix = strings.Join(dirParts, "_")
-		}
-	} else {
-		// Prod mode: 1st folder = schema, remaining = prefix
-		if len(dirParts) == 0 {
-			// Root-level file
-			schema = defaultSchema
-		} else {
-			schema = dirParts[0]
-			if len(dirParts) > 1 {
-				prefix = strings.Join(dirParts[1:], "_")
-			}
-		}
+	case len(dirParts) > 0:
+		schema = dirParts[0]
 	}
 
-	// Build full table name
-	qualifiedName := name
-	if prefix != "" {
-		qualifiedName = prefix + "_" + name
-	}
-	fullTableName = schema + "." + qualifiedName
-
-	return
+	return TableIdentity{Name: name, Schema: schema}
 }
 
 // validateUniqueNames checks that there are no duplicate names across models and seeds.
@@ -1299,13 +1457,11 @@ func (p *BuildProject) AllNames() []string {
 
 // LookupFullTableName returns the full table name for a given model or seed name.
 func (p *BuildProject) LookupFullTableName(name string) (string, bool) {
-	if m, ok := p.Models[name]; ok {
-		return m.FullTableName, true
+	ref, err := p.ResolveName(name)
+	if err != nil || ref == nil {
+		return "", false
 	}
-	if s, ok := p.Seeds[name]; ok {
-		return s.FullTableName, true
-	}
-	return "", false
+	return ref.FullTableName, true
 }
 
 // prodNameEntry maps a prod-mode name to its model/seed name and current-mode FullTableName.

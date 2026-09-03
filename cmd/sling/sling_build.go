@@ -14,7 +14,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var cliBuildFlags = []g.Flag{
+var buildPathFlag = g.Flag{
+	Name:        "path",
+	Type:        "string",
+	Description: "The project directory path (default: current directory).\n",
+	Required:    false,
+}
+
+var buildCommonFlags = []g.Flag{
 	{
 		Name:        "target",
 		ShortName:   "t",
@@ -33,12 +40,6 @@ var cliBuildFlags = []g.Flag{
 		Description: "Exclude models matching pattern.",
 	},
 	{
-		Name:        "full-refresh",
-		ShortName:   "f",
-		Type:        "bool",
-		Description: "Force full-refresh for all models.",
-	},
-	{
 		Name:        "schema",
 		Type:        "string",
 		Description: "Override dev schema (forces dev mode, cannot combine with --prod).",
@@ -54,53 +55,10 @@ var cliBuildFlags = []g.Flag{
 		Description: "Variables as YAML/JSON string.",
 	},
 	{
-		Name:        "compile",
-		ShortName:   "c",
-		Type:        "bool",
-		Description: "Compile only — show SQL + DAG, don't execute.",
-	},
-	{
-		Name:        "list",
-		ShortName:   "l",
-		Type:        "bool",
-		Description: "List selected models and exit.",
-	},
-	{
-		Name:        "fail-fast",
-		ShortName:   "x",
-		Type:        "bool",
-		Description: "Stop on first failure (in-flight models finish).",
-	},
-	{
-		Name:        "no-seeds",
-		Type:        "bool",
-		Description: "Skip seed loading.",
-	},
-	{
-		Name:        "range",
-		Type:        "string",
-		Description: "Backfill range for incremental models: 'start,end[,step]'. E.g. '2024-01-01,2024-12-31,1mo'. Does not advance SLING_STATE.",
-	},
-	{
-		Name:        "threads",
-		Type:        "string",
-		Description: "Parallel model executions (default: 4).",
-	},
-	{
 		Name:        "recursive",
 		ShortName:   "R",
 		Type:        "bool",
 		Description: "Recursively discover sling_build.yml in immediate subdirectories.",
-	},
-	{
-		Name:        "test",
-		Type:        "bool",
-		Description: "Run declarative data tests only (skip materialization).",
-	},
-	{
-		Name:        "json",
-		Type:        "bool",
-		Description: "Emit machine-readable JSON for --compile / --list.",
 	},
 	{
 		Name:        "debug",
@@ -115,18 +73,103 @@ var cliBuildFlags = []g.Flag{
 	},
 }
 
+var buildRunFlags = []g.Flag{
+	{
+		Name:        "full-refresh",
+		ShortName:   "f",
+		Type:        "bool",
+		Description: "Force full-refresh for all models.",
+	},
+	{
+		Name:        "range",
+		Type:        "string",
+		Description: "Backfill range for incremental models: 'start,end[,step]'. E.g. '2024-01-01,2024-12-31,1mo'. Does not advance SLING_STATE.",
+	},
+	{
+		Name:        "no-seeds",
+		Type:        "bool",
+		Description: "Skip seed loading.",
+	},
+	{
+		Name:        "threads",
+		Type:        "string",
+		Description: "Parallel model executions (default: 4).",
+	},
+	{
+		Name:        "fail-fast",
+		ShortName:   "x",
+		Type:        "bool",
+		Description: "Stop on first failure (in-flight models finish).",
+	},
+}
+
+var buildTestFlags = []g.Flag{
+	{
+		Name:        "threads",
+		Type:        "string",
+		Description: "Parallel model executions (default: 4).",
+	},
+	{
+		Name:        "fail-fast",
+		ShortName:   "x",
+		Type:        "bool",
+		Description: "Stop on first failure (in-flight models finish).",
+	},
+}
+
+var buildOutputFlags = []g.Flag{
+	{
+		Name:        "json",
+		Type:        "bool",
+		Description: "Emit machine-readable JSON.",
+	},
+}
+
+func concatFlags(parts ...[]g.Flag) []g.Flag {
+	n := 0
+	for _, p := range parts {
+		n += len(p)
+	}
+	out := make([]g.Flag, 0, n)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
 var cliBuild = &g.CliSC{
-	Name:                  "build",
-	Description:           "Build and execute SQL models",
-	AdditionalHelpPrepend: "\nA lightweight SQL model builder with dependency resolution, Jinja templating, and incremental materializations.",
-	ExecuteWithoutFlags:   true,
-	Flags:                 cliBuildFlags,
-	PosFlags: []g.Flag{
+	Name:        "build",
+	Description: "Build and execute SQL models",
+	AdditionalHelpPrepend: "\nCommands:\n" +
+		"  run      Materialize models, then run each model's declarative tests\n" +
+		"  list     List selected models without executing\n" +
+		"  test     Run declarative data tests only (skip materialization and seeds)\n" +
+		"  compile  Render SQL and DAG without executing\n",
+	ExecuteWithoutFlags: true,
+	SubComs: []*g.CliSC{
 		{
-			Name:        "path",
-			Type:        "string",
-			Description: "The project directory path (default: current directory).\n",
-			Required:    false,
+			Name:        "run",
+			Description: "Materialize models, then run each model's declarative tests",
+			PosFlags:    []g.Flag{buildPathFlag},
+			Flags:       concatFlags(buildCommonFlags, buildRunFlags),
+		},
+		{
+			Name:        "list",
+			Description: "List selected models without executing",
+			PosFlags:    []g.Flag{buildPathFlag},
+			Flags:       concatFlags(buildCommonFlags, buildOutputFlags),
+		},
+		{
+			Name:        "test",
+			Description: "Run declarative data tests only (skip materialization and seeds)",
+			PosFlags:    []g.Flag{buildPathFlag},
+			Flags:       concatFlags(buildCommonFlags, buildTestFlags, buildOutputFlags),
+		},
+		{
+			Name:        "compile",
+			Description: "Render SQL and DAG without executing",
+			PosFlags:    []g.Flag{buildPathFlag},
+			Flags:       concatFlags(buildCommonFlags, buildOutputFlags),
 		},
 	},
 	ExecProcess: processBuild,
@@ -144,7 +187,29 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	}
 
 	projectPath := "."
-	compileMode := false
+
+	switch c.UsedSC() {
+	case "run":
+		// default execute path
+	case "list":
+		opts.List = true
+	case "test":
+		opts.Test = true
+	case "compile":
+		opts.Compile = true
+	default:
+		flaggy.ShowHelp("")
+		for _, a := range os.Args[1:] {
+			if a == "build" || strings.HasPrefix(a, "-") {
+				continue
+			}
+			if a == "run" || a == "list" || a == "test" || a == "compile" {
+				continue
+			}
+			return ok, g.Error("unknown build command %q, expected run, list, test, or compile", a)
+		}
+		return ok, nil
+	}
 
 	for k, v := range c.Vals {
 		switch k {
@@ -176,10 +241,6 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 				}
 				opts.Vars = varsMap
 			}
-		case "compile":
-			compileMode = cast.ToBool(v)
-		case "list":
-			opts.List = cast.ToBool(v)
 		case "fail-fast":
 			opts.FailFast = cast.ToBool(v)
 		case "no-seeds":
@@ -194,8 +255,6 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 			}
 		case "recursive":
 			opts.Recursive = cast.ToBool(v)
-		case "test":
-			opts.Test = cast.ToBool(v)
 		case "json":
 			opts.JSON = cast.ToBool(v)
 		case "debug":
@@ -210,8 +269,6 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 			}
 		}
 	}
-
-	opts.Compile = compileMode
 
 	os.Setenv("SLING_CLI", "TRUE")
 	if os.Getenv("SLING_RUN_MODE") == "" {
@@ -236,7 +293,7 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	// If there's no sling_build.yml at the path and the user gave us nothing to
 	// work with (no --target, no -r), show help instead of walking the tree.
 	// This avoids slurping every .sql file under cwd as "models".
-	if opts.Target == "" && !opts.Recursive {
+	if c.UsedSC() == "run" && opts.Target == "" && !opts.Recursive {
 		if _, found := build.FindConfigFile(projectPath); !found {
 			flaggy.ShowHelp("")
 			return ok, nil
@@ -262,7 +319,7 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
-	if compileMode {
+	if opts.Compile {
 		if opts.JSON {
 			b.PrintCompileJSON()
 		} else {
@@ -273,7 +330,14 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 
 	// Execute the build
 	if err := b.Execute(); err != nil {
+		if opts.Test && opts.JSON {
+			b.PrintTestJSON()
+		}
 		return ok, g.Error(err, "build execution failed")
+	}
+	if opts.Test && opts.JSON {
+		b.PrintTestJSON()
+		return ok, nil
 	}
 	if err := testOutput(int64(b.ExecRows), b.ExecBytes, 0); err != nil {
 		return ok, err

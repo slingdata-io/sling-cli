@@ -468,9 +468,9 @@ tools:
     
     **To execute SQL models, use the CLI** (there is no MCP `build` action):
     ```
-    sling build
-    sling build --compile
-    sling build -s stg_users,fct_orders
+    sling build run
+    sling build compile
+    sling build run -s stg_users,fct_orders
     ```
     
     **Output**: The output format depends on the action and audience:

@@ -243,6 +243,13 @@ func TestGetTempTableName(t *testing.T) {
 	assert.NotEqual(t, tempName, tempName2)
 }
 
+func TestGetTempTableNameThreePart(t *testing.T) {
+	model := &Model{Name: "fct_orders", Schema: "marts", Database: "ANALYTICS_DB"}
+
+	tempName := getTempTableName(model, "abc123")
+	assert.Equal(t, "ANALYTICS_DB.marts._sling_build_tmp_fct_orders_abc123", tempName)
+}
+
 func TestNormalizeMode(t *testing.T) {
 	m, warn := normalizeMode("snapshot")
 	assert.Equal(t, "append", m)

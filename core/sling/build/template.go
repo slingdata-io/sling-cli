@@ -445,7 +445,8 @@ func restoreLiterals(sql string, placeholders []string) string {
 // RewriteTableReferences scans compiled SQL for table references matching prod-mode names
 // of known models/seeds and rewrites them to current-mode FullTableNames.
 // Returns the rewritten SQL and matched model/seed names (for DependsOn).
-func RewriteTableReferences(sql string, project *BuildProject, selfName string) (string, []string) {
+// An ambiguous bare name is an error.
+func RewriteTableReferences(sql string, project *BuildProject, selfName string) (string, []string, error) {
 	// Protect literals so we don't rewrite inside strings/comments
 	protected, placeholders := protectLiterals(sql)
 
@@ -456,9 +457,6 @@ func RewriteTableReferences(sql string, project *BuildProject, selfName string) 
 			cteNames[strings.ToLower(match[1])] = true
 		}
 	}
-
-	// Build lookup index
-	index := project.BuildProdNameIndex()
 
 	// Find all table reference positions
 	matches := tableRefRegex.FindAllStringSubmatchIndex(protected, -1)
@@ -496,20 +494,22 @@ func RewriteTableReferences(sql string, project *BuildProject, selfName string) 
 			continue
 		}
 
-		// Look up in prod-name index
-		entry, ok := index[normalizedLower]
-		if !ok || entry.Name == selfName {
+		resolved, err := project.ResolveName(normalized)
+		if err != nil {
+			continue
+		}
+		if resolved.Name == selfName {
 			continue
 		}
 
 		// Replace the table ref with current-mode FullTableName,
 		// preserving the original quoting style (double quotes, backticks, or none)
 		result.WriteString(protected[lastEnd:refStart])
-		result.WriteString(requoteTableRef(ref, entry.FullTableName))
+		result.WriteString(requoteTableRef(ref, resolved.FullTableName))
 		lastEnd = refEnd
 
-		if !containsStr(deps, entry.Name) {
-			deps = append(deps, entry.Name)
+		if !containsStr(deps, resolved.Name) {
+			deps = append(deps, resolved.Name)
 		}
 	}
 
@@ -517,7 +517,7 @@ func RewriteTableReferences(sql string, project *BuildProject, selfName string) 
 
 	// Restore protected regions
 	final := restoreLiterals(result.String(), placeholders)
-	return final, deps
+	return final, deps, nil
 }
 
 // =============================================================================
@@ -530,30 +530,25 @@ var atRefRegex = regexp.MustCompile(`(?:^|[^@])@([a-zA-Z_]\w*)`)
 
 // preprocessAtRefs replaces @model_name references with the current-mode FullTableName.
 // Must be called before Jinja rendering. Populates model.DependsOn for each resolved reference.
-func (te *TemplateEngine) preprocessAtRefs(sql string, model *Model) string {
-	return atRefRegex.ReplaceAllStringFunc(sql, func(match string) string {
-		// Find where @ starts in the match (the prefix char may be included)
+func (te *TemplateEngine) preprocessAtRefs(sql string, model *Model) (string, error) {
+	out := atRefRegex.ReplaceAllStringFunc(sql, func(match string) string {
 		atIdx := strings.Index(match, "@")
 		prefix := match[:atIdx]
 		name := match[atIdx+1:]
 
-		// Look up in models and seeds
-		if m, ok := te.project.Models[name]; ok && name != model.Name {
-			if !containsStr(model.DependsOn, name) {
-				model.DependsOn = append(model.DependsOn, name)
-			}
-			return prefix + m.FullTableName
+		ref, err := te.project.ResolveName(name)
+		if err != nil {
+			return match
 		}
-		if s, ok := te.project.Seeds[name]; ok {
-			if !containsStr(model.DependsOn, name) {
-				model.DependsOn = append(model.DependsOn, name)
-			}
-			return prefix + s.FullTableName
+		if ref.Name == model.Name {
+			return match
 		}
-
-		// Not a known model/seed — leave as-is (could be a SQL Server @variable)
-		return match
+		if !containsStr(model.DependsOn, ref.Name) {
+			model.DependsOn = append(model.DependsOn, ref.Name)
+		}
+		return prefix + ref.FullTableName
 	})
+	return out, nil
 }
 
 // =============================================================================
@@ -690,20 +685,20 @@ func (te *TemplateEngine) CompileModel(model *Model, incCtx *IncrementalContext)
 		}
 		name := params.Args[0].String()
 
-		fullName, ok := te.project.LookupFullTableName(name)
-		if !ok {
-			return "", g.Error("ref('%s'): model or seed not found in project", name)
+		ref, err := te.project.ResolveName(name)
+		if err != nil {
+			return "", err
 		}
 
-		// Record dependency
+		// Record dependency. Refs keep the literal; DependsOn uses the identity.
 		if !containsStr(model.Refs, name) {
 			model.Refs = append(model.Refs, name)
 		}
-		if !containsStr(model.DependsOn, name) {
-			model.DependsOn = append(model.DependsOn, name)
+		if !containsStr(model.DependsOn, ref.Name) {
+			model.DependsOn = append(model.DependsOn, ref.Name)
 		}
 
-		return fullName, nil
+		return ref.FullTableName, nil
 	})
 
 	// Register src()/source() functions — passthrough, records as source
@@ -766,7 +761,11 @@ func (te *TemplateEngine) CompileModel(model *Model, incCtx *IncrementalContext)
 	}
 
 	// Resolve @model_name references before Jinja rendering
-	processedSQL = te.preprocessAtRefs(processedSQL, model)
+	var atErr error
+	processedSQL, atErr = te.preprocessAtRefs(processedSQL, model)
+	if atErr != nil {
+		return "", atErr
+	}
 
 	// Create template from model SQL
 	templateID := "/" + model.Name
@@ -845,6 +844,8 @@ func (te *TemplateEngine) applyConfig(model *Model, params *exec.VarArgs) error 
 			return g.Error("pre_hook/post_hook are not supported in sling build config(). Use YAML frontmatter with hooks.start/hooks.end instead.\nSee https://docs.slingdata.io/concepts/sling-build for details")
 		case "schema":
 			model.Config.Schema = strVal
+		case "database":
+			model.Config.Database = strVal
 		case "enabled":
 			enabled := cast.ToBool(strVal)
 			model.Config.Enabled = &enabled

@@ -32,7 +32,7 @@ func getTestFixturePath(name string) string {
 	return filepath.Join(dir, "tests/build", name)
 }
 
-func TestResolveTableName(t *testing.T) {
+func TestIdentityFromPath(t *testing.T) {
 	tests := []struct {
 		name           string
 		relPath        string
@@ -40,7 +40,6 @@ func TestResolveTableName(t *testing.T) {
 		schemaOverride string
 		defaultSchema  string
 		wantSchema     string
-		wantPrefix     string
 		wantName       string
 		wantFull       string
 	}{
@@ -50,19 +49,17 @@ func TestResolveTableName(t *testing.T) {
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "staging",
-			wantPrefix:    "",
 			wantName:      "stg_orders",
 			wantFull:      "staging.stg_orders",
 		},
 		{
-			name:          "prod mode - nested folder becomes prefix",
+			name:          "prod mode - nested folder does not change the name",
 			relPath:       "marts/core/dim_customers.sql",
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "marts",
-			wantPrefix:    "core",
 			wantName:      "dim_customers",
-			wantFull:      "marts.core_dim_customers",
+			wantFull:      "marts.dim_customers",
 		},
 		{
 			name:          "prod mode - deeply nested folders",
@@ -70,9 +67,8 @@ func TestResolveTableName(t *testing.T) {
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "marts",
-			wantPrefix:    "core_finance",
 			wantName:      "revenue",
-			wantFull:      "marts.core_finance_revenue",
+			wantFull:      "marts.revenue",
 		},
 		{
 			name:          "prod mode - root level file uses default schema",
@@ -80,31 +76,28 @@ func TestResolveTableName(t *testing.T) {
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "public",
-			wantPrefix:    "",
 			wantName:      "raw",
 			wantFull:      "public.raw",
 		},
 		{
-			name:           "dev mode - all folders become prefix",
+			name:           "dev mode - one folder",
 			relPath:        "staging/stg_orders.sql",
 			mode:           "dev",
 			schemaOverride: "dev_fritz",
 			defaultSchema:  "public",
 			wantSchema:     "dev_fritz",
-			wantPrefix:     "staging",
 			wantName:       "stg_orders",
-			wantFull:       "dev_fritz.staging_stg_orders",
+			wantFull:       "dev_fritz.stg_orders",
 		},
 		{
-			name:           "dev mode - nested folders all become prefix",
+			name:           "dev mode - nested folders",
 			relPath:        "marts/core/dim_customers.sql",
 			mode:           "dev",
 			schemaOverride: "dev_fritz",
 			defaultSchema:  "public",
 			wantSchema:     "dev_fritz",
-			wantPrefix:     "marts_core",
 			wantName:       "dim_customers",
-			wantFull:       "dev_fritz.marts_core_dim_customers",
+			wantFull:       "dev_fritz.dim_customers",
 		},
 		{
 			name:           "dev mode - root level file",
@@ -113,7 +106,6 @@ func TestResolveTableName(t *testing.T) {
 			schemaOverride: "dev_fritz",
 			defaultSchema:  "public",
 			wantSchema:     "dev_fritz",
-			wantPrefix:     "",
 			wantName:       "raw",
 			wantFull:       "dev_fritz.raw",
 		},
@@ -123,7 +115,6 @@ func TestResolveTableName(t *testing.T) {
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "staging",
-			wantPrefix:    "",
 			wantName:      "country_codes",
 			wantFull:      "staging.country_codes",
 		},
@@ -133,7 +124,6 @@ func TestResolveTableName(t *testing.T) {
 			mode:          "prod",
 			defaultSchema: "public",
 			wantSchema:    "seeds",
-			wantPrefix:    "",
 			wantName:      "status_map",
 			wantFull:      "seeds.status_map",
 		},
@@ -141,13 +131,17 @@ func TestResolveTableName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			schema, prefix, name, fullTableName := resolveTableName(tt.relPath, tt.mode, tt.schemaOverride, tt.defaultSchema)
-			assert.Equal(t, tt.wantSchema, schema, "schema")
-			assert.Equal(t, tt.wantPrefix, prefix, "prefix")
-			assert.Equal(t, tt.wantName, name, "name")
-			assert.Equal(t, tt.wantFull, fullTableName, "fullTableName")
+			identity := identityFromPath(tt.relPath, tt.mode, tt.schemaOverride, tt.defaultSchema)
+			assert.Equal(t, tt.wantSchema, identity.Schema, "schema")
+			assert.Equal(t, tt.wantName, identity.Name, "name")
+			assert.Equal(t, tt.wantFull, identity.FullName(), "fullTableName")
 		})
 	}
+}
+
+func TestTableIdentityFullNameThreePart(t *testing.T) {
+	identity := TableIdentity{Name: "dim_customers", Schema: "marts", Database: "ANALYTICS_DB"}
+	assert.Equal(t, "ANALYTICS_DB.marts.dim_customers", identity.FullName())
 }
 
 func TestDiscoverFilesFlatMode(t *testing.T) {
@@ -183,23 +177,20 @@ func TestDiscoverFilesFlatMode(t *testing.T) {
 	// Check specific model properties
 	stgOrders := project.Models["stg_orders"]
 	assert.Equal(t, "staging", stgOrders.Schema)
-	assert.Equal(t, "", stgOrders.Prefix)
 	assert.Equal(t, "staging.stg_orders", stgOrders.FullTableName)
 	assert.NotEmpty(t, stgOrders.RawSQL)
 
 	dimCustomers := project.Models["dim_customers"]
 	assert.Equal(t, "marts", dimCustomers.Schema)
-	assert.Equal(t, "core", dimCustomers.Prefix)
-	assert.Equal(t, "marts.core_dim_customers", dimCustomers.FullTableName)
+	assert.Equal(t, "dim_customers", dimCustomers.Name)
+	assert.Equal(t, "marts.dim_customers", dimCustomers.FullTableName)
 
 	revenue := project.Models["revenue"]
 	assert.Equal(t, "marts", revenue.Schema)
-	assert.Equal(t, "finance", revenue.Prefix)
-	assert.Equal(t, "marts.finance_revenue", revenue.FullTableName)
+	assert.Equal(t, "marts.revenue", revenue.FullTableName)
 
 	raw := project.Models["raw"]
 	assert.Equal(t, "public", raw.Schema)
-	assert.Equal(t, "", raw.Prefix)
 	assert.Equal(t, "public.raw", raw.FullTableName)
 
 	// Check seed properties
@@ -303,6 +294,283 @@ func TestLoadProjectWithProdOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "prod", project.Mode)
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+}
+
+func TestExpandConfigVars(t *testing.T) {
+	t.Run("set", func(t *testing.T) {
+		t.Setenv("USER", "alice")
+		out, unresolved := expandConfigVars("dev_${USER}")
+		assert.Equal(t, "dev_alice", out)
+		assert.Empty(t, unresolved)
+	})
+	t.Run("unset", func(t *testing.T) {
+		unsetEnv(t, "MISSING_VAR")
+		out, unresolved := expandConfigVars("dev_${MISSING_VAR}")
+		assert.Equal(t, "dev_${MISSING_VAR}", out)
+		assert.Equal(t, []string{"MISSING_VAR"}, unresolved)
+	})
+	t.Run("empty with fallback", func(t *testing.T) {
+		t.Setenv("USER", "")
+		out, unresolved := expandConfigVars("dev_${USER:-scratch}")
+		assert.Equal(t, "dev_scratch", out)
+		assert.Empty(t, unresolved)
+	})
+	t.Run("empty without fallback", func(t *testing.T) {
+		t.Setenv("USER", "")
+		out, unresolved := expandConfigVars("dev_${USER}")
+		assert.Equal(t, "dev_${USER}", out)
+		assert.Equal(t, []string{"USER"}, unresolved)
+	})
+	t.Run("bare $VAR untouched", func(t *testing.T) {
+		t.Setenv("USER", "alice")
+		out, unresolved := expandConfigVars("dev_$USER")
+		assert.Equal(t, "dev_$USER", out)
+		assert.Empty(t, unresolved)
+	})
+	t.Run("${A} inside a longer word", func(t *testing.T) {
+		t.Setenv("A", "xx")
+		out, unresolved := expandConfigVars("foo${A}bar")
+		assert.Equal(t, "fooxxbar", out)
+		assert.Empty(t, unresolved)
+	})
+	t.Run("$USERNAME not prefix-expanded", func(t *testing.T) {
+		t.Setenv("USER", "fritz")
+		out, _ := expandConfigVars("$USERNAME")
+		assert.Equal(t, "$USERNAME", out)
+	})
+	t.Run("unset with fallback", func(t *testing.T) {
+		unsetEnv(t, "USER")
+		out, unresolved := expandConfigVars("dev_${USER:-scratch}")
+		assert.Equal(t, "dev_scratch", out)
+		assert.Empty(t, unresolved)
+	})
+}
+
+func writeDevVarProject(t *testing.T, yml string) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yml"), []byte(yml), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "staging"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "staging", "stg_orders.sql"), []byte("select 1 as id\n"), 0644))
+	return dir
+}
+
+func TestLoadProjectDevSchemaFromEnv(t *testing.T) {
+	t.Setenv("USER", "alice")
+	dir := writeDevVarProject(t, "target: POSTGRES\ndev:\n  schema: dev_${USER}\n")
+
+	project, err := LoadProject(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "dev", project.Mode)
+	m := project.Models["stg_orders"]
+	require.NotNil(t, m)
+	assert.Equal(t, "dev_alice.stg_orders", m.FullTableName)
+}
+
+func TestLoadProjectDevSchemaUnresolvedErrors(t *testing.T) {
+	unsetEnv(t, "USER")
+	dir := writeDevVarProject(t, "target: POSTGRES\ndev:\n  schema: dev_${USER}\n")
+
+	_, err := LoadProject(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "USER")
+	assert.Contains(t, err.Error(), "dev.schema")
+}
+
+func TestLoadProjectDevSchemaUnresolvedProdOK(t *testing.T) {
+	unsetEnv(t, "USER")
+	dir := writeDevVarProject(t, "target: POSTGRES\ndev:\n  schema: dev_${USER}\n")
+
+	project, err := LoadProject(dir, BuildOptions{Prod: true})
+	require.NoError(t, err)
+	assert.Equal(t, "prod", project.Mode)
+	m := project.Models["stg_orders"]
+	require.NotNil(t, m)
+	assert.Equal(t, "staging.stg_orders", m.FullTableName)
+}
+
+func TestLoadProjectDevSchemaUnresolvedSchemaFlagOK(t *testing.T) {
+	unsetEnv(t, "USER")
+	dir := writeDevVarProject(t, "target: POSTGRES\ndev:\n  schema: dev_${USER}\n")
+
+	project, err := LoadProject(dir, BuildOptions{Schema: "dev_x"})
+	require.NoError(t, err)
+	assert.Equal(t, "dev", project.Mode)
+	m := project.Models["stg_orders"]
+	require.NotNil(t, m)
+	assert.Equal(t, "dev_x.stg_orders", m.FullTableName)
+}
+
+func TestLoadProjectVarsUnresolvedErrors(t *testing.T) {
+	unsetEnv(t, "MISSING")
+	yml := "target: POSTGRES\nvars:\n  d: ${MISSING}\n"
+	dir := writeDevVarProject(t, yml)
+
+	_, err := LoadProject(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MISSING")
+	assert.Contains(t, err.Error(), "vars.d")
+
+	_, err = LoadProject(dir, BuildOptions{Prod: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MISSING")
+}
+
+func TestLoadProjectDuplicateStemsError(t *testing.T) {
+	dir := getTestFixturePath("duplicate_stems_project")
+
+	_, err := LoadProject(dir, BuildOptions{Prod: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate model name 'events'")
+	assert.Contains(t, err.Error(), filepath.Join("a", "events.sql"))
+	assert.Contains(t, err.Error(), filepath.Join("b", "events.sql"))
+}
+
+func TestResolveNameStemAndSchemaTable(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+
+	ref, err := project.ResolveName("events")
+	require.NoError(t, err)
+	assert.Equal(t, "events", ref.Name)
+	assert.Equal(t, "analytics.events", ref.FullTableName)
+
+	ref, err = project.ResolveName("analytics.events")
+	require.NoError(t, err)
+	assert.Equal(t, "events", ref.Name)
+
+	// dev mode: the stem and the prod schema.table spelling both resolve
+	dev := loadMartsEventsProject(t, BuildOptions{Schema: "dev_x"})
+	ref, err = dev.ResolveName("events")
+	require.NoError(t, err)
+	assert.Equal(t, "dev_x.events", ref.FullTableName)
+
+	ref, err = dev.ResolveName("analytics.events")
+	require.NoError(t, err)
+	assert.Equal(t, "dev_x.events", ref.FullTableName)
+}
+
+func TestResolveNameBareUnique(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yml"), []byte("target: POSTGRES\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "staging"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "staging/stg_events.sql"), []byte("select 1 as id\n"), 0644))
+	project, err := LoadProject(dir, BuildOptions{Prod: true})
+	require.NoError(t, err)
+
+	ref, err := project.ResolveName("stg_events")
+	require.NoError(t, err)
+	assert.Equal(t, "stg_events", ref.Name)
+
+	ref, err = project.ResolveName("events")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Did you mean")
+	assert.Contains(t, err.Error(), "stg_events")
+}
+
+func TestResolveNameNotFoundSuggests(t *testing.T) {
+	project := loadNestedEventsProject(t)
+
+	_, err := project.ResolveName("plausible_event")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "Did you mean")
+	assert.Contains(t, err.Error(), "plausible_events")
+
+	// old prefixed names are gone: not found, no suggestion for them
+	_, err = project.ResolveName("dim_customers")
+	require.Error(t, err)
+	var notFound *NameNotFoundError
+	require.ErrorAs(t, err, &notFound)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDefaultsDatabase(t *testing.T) {
+	project := loadDatabaseProject(t, BuildOptions{Prod: true})
+
+	m := project.Models["dim_customers"]
+	require.NotNil(t, m)
+	assert.Equal(t, "ANALYTICS_DB", m.Database)
+	assert.Equal(t, "ANALYTICS_DB.marts.dim_customers", m.FullTableName)
+	assert.Equal(t, "ANALYTICS_DB.marts.dim_customers", m.ProdFullTableName)
+}
+
+func TestFrontmatterDatabase(t *testing.T) {
+	project := loadDatabaseProject(t, BuildOptions{Prod: true})
+
+	m := project.Models["revenue"]
+	require.NotNil(t, m)
+	assert.Equal(t, "FIN_DB", m.Database)
+	assert.Equal(t, "FIN_DB.marts.revenue", m.FullTableName)
+	assert.Equal(t, "FIN_DB.marts.revenue", m.ProdFullTableName)
+}
+
+func TestDevDatabase(t *testing.T) {
+	project := loadDatabaseProject(t)
+	require.Equal(t, "dev", project.Mode)
+
+	// dev.database applies where no explicit database is set
+	assert.Equal(t, "SCRATCH_DB.dev_test.dim_customers", project.Models["dim_customers"].FullTableName)
+	assert.Equal(t, "ANALYTICS_DB.marts.dim_customers", project.Models["dim_customers"].ProdFullTableName)
+
+	// front-matter database wins in both modes
+	assert.Equal(t, "FIN_DB.dev_test.revenue", project.Models["revenue"].FullTableName)
+}
+
+func TestMergeConfigsDatabase(t *testing.T) {
+	parent := &BuildConfig{Defaults: BuildDefaults{Database: "PARENT_DB", Schema: "parent"}}
+	child := &BuildConfig{Defaults: BuildDefaults{Database: "CHILD_DB"}}
+
+	merged := mergeConfigs(parent, child)
+	assert.Equal(t, "CHILD_DB", merged.Defaults.Database)
+	assert.Equal(t, "parent", merged.Defaults.Schema)
+
+	merged = mergeConfigs(parent, &BuildConfig{})
+	assert.Equal(t, "PARENT_DB", merged.Defaults.Database)
+}
+
+func TestConfigCallDatabase(t *testing.T) {
+	project := loadDatabaseProject(t, BuildOptions{Prod: true})
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{%- config(database='OTHER_DB') -%}\nselect 1 as id"}
+	_, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "OTHER_DB", model.Config.Database)
+}
+
+func loadDatabaseProject(t *testing.T, opts ...BuildOptions) *BuildProject {
+	t.Helper()
+	project, err := LoadProject(getTestFixturePath("database_project"), opts...)
+	require.NoError(t, err)
+	return project
+}
+
+func loadMartsEventsProject(t *testing.T, opts BuildOptions) *BuildProject {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yml"), []byte("target: POSTGRES\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "analytics/plausible"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "analytics/plausible/events.sql"), []byte("select 1 as id\n"), 0644))
+	project, err := LoadProject(dir, opts)
+	require.NoError(t, err)
+	return project
+}
+
+func loadNestedEventsProject(t *testing.T) *BuildProject {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sling_build.yml"), []byte("target: POSTGRES\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "analytics/plausible"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "analytics/plausible_events.sql"), []byte("select 1 as id\n"), 0644))
+	project, err := LoadProject(dir, BuildOptions{Prod: true})
+	require.NoError(t, err)
+	return project
 }
 
 func TestFindConfigFile(t *testing.T) {

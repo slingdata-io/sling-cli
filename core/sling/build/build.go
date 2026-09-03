@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/golyglot"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
@@ -27,6 +29,7 @@ type Build struct {
 	connEntries connection.ConnEntries // pre-resolved connection entries for parallel execution
 	ExecRows    uint64                 // sum of model/seed rows after Execute
 	ExecBytes   uint64
+	Results     []ExecutionResult      // per-node results after Execute
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -50,7 +53,7 @@ func NewBuild(dir string, opts BuildOptions) (*Build, error) {
 func (b *Build) Compile() error {
 	// For sub-projects (independent builds), compile each one
 	if len(b.Project.SubProjects) > 0 {
-		if !b.Options.Compile {
+		if !b.Options.Compile && !b.Options.List {
 			return nil // sub-projects are compiled individually during Execute
 		}
 		for _, subProject := range b.Project.SubProjects {
@@ -74,7 +77,7 @@ func (b *Build) Compile() error {
 	if b.Options.Target != "" {
 		target = b.Options.Target
 	}
-	if target == "" {
+	if target == "" && !b.Options.List {
 		return g.Error("No target specified. Use '--target <conn>' or set target in sling_build.yml.")
 	}
 
@@ -102,7 +105,10 @@ func (b *Build) Compile() error {
 		if model.Config.Rewrite != nil && !*model.Config.Rewrite {
 			continue
 		}
-		rewritten, deps := RewriteTableReferences(model.CompiledSQL, b.Project, model.Name)
+		rewritten, deps, err := RewriteTableReferences(model.CompiledSQL, b.Project, model.Name)
+		if err != nil {
+			return g.Error(err, "could not rewrite table references in model '%s'", model.Name)
+		}
 		model.CompiledSQL = rewritten
 		for _, dep := range deps {
 			if !containsStr(model.DependsOn, dep) {
@@ -111,9 +117,15 @@ func (b *Build) Compile() error {
 		}
 	}
 
-	// Split multi-statement models into pre-statements, model query, and post-statements
-	if err := b.splitMultiStatementModels(); err != nil {
-		return g.Error(err, "could not parse multi-statement models")
+	// Split multi-statement models into pre-statements, model query, and post-statements.
+	// List without a target skips this — splitting needs a dialect.
+	if target != "" {
+		if err := b.validateDatabaseSupport(); err != nil {
+			return err
+		}
+		if err := b.splitMultiStatementModels(); err != nil {
+			return g.Error(err, "could not parse multi-statement models")
+		}
 	}
 
 	// Auto-detect SQL references as a safety net for DependsOn (catches edge cases
@@ -149,6 +161,7 @@ func (b *Build) Compile() error {
 
 	// Apply selectors
 	selector := NewSelector(b.Options.Select, b.Options.Exclude)
+	selector.Project = b.Project
 	selected, err := selector.Apply(b.DAG)
 	if err != nil {
 		return g.Error(err, "could not apply selectors")
@@ -208,6 +221,33 @@ func (b *Build) splitMultiStatementModels() error {
 		model.PostStatements = result.PostStatements
 	}
 	return nil
+}
+
+// validateDatabaseSupport fails when a model or seed sets a database but the
+// target dialect cannot address objects as database.schema.table.
+func (b *Build) validateDatabaseSupport() error {
+	dbType := b.resolveDbType()
+	if dbType == dbio.TypeUnknown || dbType.SupportsThreePartName() {
+		return nil
+	}
+	for _, name := range sortedKeys(b.Project.Models) {
+		if db := b.Project.Models[name].Database; db != "" {
+			return g.Error("model '%s': database '%s' is set but %s does not support database.schema.table names", name, db, dbType)
+		}
+	}
+	for _, name := range sortedKeys(b.Project.Seeds) {
+		if db := b.Project.Seeds[name].Database; db != "" {
+			return g.Error("seed '%s': database '%s' is set but %s does not support database.schema.table names", name, db, dbType)
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns map keys in sorted order for deterministic error output.
+func sortedKeys[T any](m map[string]T) []string {
+	keys := lo.Keys(m)
+	sort.Strings(keys)
+	return keys
 }
 
 // resolveDbType determines the database type from the target connection
@@ -283,6 +323,7 @@ func (b *Build) Execute() error {
 	}
 
 	err = executor.Execute()
+	b.Results = executor.Results
 	for _, r := range executor.Results {
 		b.ExecRows += r.Rows
 		b.ExecBytes += r.Bytes
@@ -306,27 +347,56 @@ func (b *Build) PrintListOutput() {
 		return
 	}
 
+	showTable := b.GetTarget() != ""
+	type row struct {
+		name, table, mode, file string
+	}
+	var rows []row
+	nameW, tableW := 0, 0
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
+		if node == nil {
+			continue
+		}
 		if b.Options.NoSeeds && node.Seed != nil {
 			continue
 		}
-		nodeType := ""
+		r := row{name: name}
 		if node.Seed != nil {
-			nodeType = "seed"
+			r.mode = "seed"
+			r.table = node.Seed.FullTableName
+			r.file = node.Seed.RelPath
 		} else if node.Model != nil {
-			nodeType = b.GetModelMode(node.Model)
+			r.mode = b.GetModelMode(node.Model)
+			r.table = node.Model.FullTableName
+			r.file = node.Model.RelPath
 		}
-		fmt.Printf("%s (%s)\n", name, nodeType)
+		if len(r.name) > nameW {
+			nameW = len(r.name)
+		}
+		if len(r.table) > tableW {
+			tableW = len(r.table)
+		}
+		rows = append(rows, r)
+	}
+	for _, r := range rows {
+		if showTable {
+			fmt.Printf("%-*s   %-*s   (%s)\n", nameW, r.name, tableW, r.table, r.mode)
+		} else {
+			fmt.Printf("%-*s   %s   (%s)\n", nameW, r.name, r.file, r.mode)
+		}
 	}
 }
 
 // PrintListJSON prints selected nodes as JSON.
 func (b *Build) PrintListJSON() {
 	type item struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Table string `json:"table,omitempty"`
+		File  string `json:"file,omitempty"`
 	}
+	showTable := b.GetTarget() != ""
 	var items []item
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
@@ -339,8 +409,42 @@ func (b *Build) PrintListJSON() {
 		it := item{Name: name}
 		if node.Seed != nil {
 			it.Type = "seed"
+			it.File = node.Seed.RelPath
+			if showTable {
+				it.Table = node.Seed.FullTableName
+			}
 		} else if node.Model != nil {
 			it.Type = b.GetModelMode(node.Model)
+			it.File = node.Model.RelPath
+			if showTable {
+				it.Table = node.Model.FullTableName
+			}
+		}
+		items = append(items, it)
+	}
+	fmt.Println(g.Marshal(items))
+}
+
+// PrintTestJSON prints per-node test results as JSON.
+func (b *Build) PrintTestJSON() {
+	type item struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Status   string `json:"status"`
+		Error    string `json:"error,omitempty"`
+		Duration string `json:"duration,omitempty"`
+	}
+	items := make([]item, 0, len(b.Results))
+	for _, r := range b.Results {
+		it := item{Name: r.Name, Type: r.NodeType, Duration: r.Duration.String()}
+		switch {
+		case r.Skipped:
+			it.Status = "skip"
+		case r.Err != nil:
+			it.Status = "fail"
+			it.Error = r.Err.Error()
+		default:
+			it.Status = "ok"
 		}
 		items = append(items, it)
 	}

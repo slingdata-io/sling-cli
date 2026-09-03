@@ -2,3 +2,4 @@ target: POSTGRES
 
 defaults:
   mode: full-refresh
+  schema: build_nested # own schema: model stems collide with sample_project

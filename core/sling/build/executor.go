@@ -74,6 +74,7 @@ type BuildState struct {
 type BuildModelState struct {
 	Name     string `json:"name,omitempty"`
 	Schema   string `json:"schema,omitempty"`
+	Database string `json:"database,omitempty"`
 	FullName string `json:"full_name,omitempty"`
 	Mode     string `json:"mode,omitempty"`
 }
@@ -192,31 +193,62 @@ func (e *Executor) Close() {
 
 // CreateSchemas creates all unique schemas needed by the selected nodes.
 func (e *Executor) CreateSchemas() error {
-	schemas := make(map[string]bool)
+	type schemaKey struct{ database, schema string }
+	schemas := make(map[schemaKey]bool)
 	for _, name := range e.Build.Selected {
 		node := e.Build.DAG.Nodes[name]
 		if node.Model != nil {
-			schemas[node.Model.Schema] = true
+			schemas[schemaKey{node.Model.Database, node.Model.Schema}] = true
 		}
 		if node.Seed != nil {
-			schemas[node.Seed.Schema] = true
+			schemas[schemaKey{node.Seed.Database, node.Seed.Schema}] = true
 		}
 	}
 
-	for schema := range schemas {
+	dbType := e.DbConn.GetType()
+	for key := range schemas {
+		// SQL Server family cannot CREATE SCHEMA in another database.
+		if key.database != "" && g.In(dbType, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbFabric) {
+			if !strings.EqualFold(key.database, e.DbConn.GetProp("database")) {
+				g.Warn("skipping schema creation for '%s.%s': %s cannot create a schema in another database", key.database, key.schema, dbType)
+				continue
+			}
+		}
+
+		qualifier, err := e.quoteSchemaQualifier(key.database, key.schema)
+		if err != nil {
+			return err
+		}
 		sql := g.R(
 			e.DbConn.Template().Value("core.create_schema"),
-			"schema", e.DbConn.Quote(schema),
+			"schema", qualifier,
 		)
 		if _, err := e.DbConn.Exec(sql); err != nil {
 			// Ignore "already exists" errors for databases without IF NOT EXISTS
 			errLower := strings.ToLower(err.Error())
 			if !strings.Contains(errLower, "already exists") && !strings.Contains(errLower, "duplicate") {
-				return g.Error(err, "could not create schema '%s'", schema)
+				return g.Error(err, "could not create schema '%s'", key.schema)
 			}
 		}
 	}
 	return nil
+}
+
+// quoteSchemaQualifier renders [database.]schema quoted for the dialect. It
+// goes through ParseTableName so the case normalization matches the one
+// applied to the model's own table name.
+func (e *Executor) quoteSchemaQualifier(db, schema string) (string, error) {
+	name := schema
+	if db != "" {
+		name = db + "." + schema
+	}
+	// ParseTableName needs a table part; add a placeholder and drop it after.
+	table, err := database.ParseTableName(name+"._", e.DbConn.GetType())
+	if err != nil {
+		return "", g.Error(err, "could not parse schema name '%s'", name)
+	}
+	table.Name = ""
+	return table.FDQN(), nil
 }
 
 // Execute runs all selected nodes with a ready-queue scheduler.
@@ -579,6 +611,7 @@ func (e *Executor) parseModelHooks(model *Model, mode string) error {
 		Model: BuildModelState{
 			Name:     model.Name,
 			Schema:   model.Schema,
+			Database: model.Database,
 			FullName: model.FullTableName,
 			Mode:     mode,
 		},
@@ -840,7 +873,10 @@ func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 
 	// Re-apply table reference rewriting after incremental recompilation
 	if model.Config.Rewrite == nil || *model.Config.Rewrite {
-		rewritten, _ := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+		rewritten, _, err := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+		if err != nil {
+			return 0, err
+		}
 		model.CompiledSQL = rewritten
 	}
 
@@ -1074,7 +1110,7 @@ func getTempTableName(model *Model, runID string) string {
 		return '_'
 	}, model.Name)
 	tempName := g.F("_sling_build_tmp_%s_%s", safeName, runID)
-	return g.F("%s.%s", model.Schema, tempName)
+	return TableIdentity{Name: tempName, Schema: model.Schema, Database: model.Database}.FullName()
 }
 
 func (e *Executor) attachLogSink() {
@@ -1342,6 +1378,9 @@ func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store
 // When started is true, prints the "START" line (no duration).
 // When started is false, prints the final status with duration.
 func (e *Executor) printProgress(index, total int, result ExecutionResult, started bool) {
+	if e.Build != nil && e.Build.Options.JSON {
+		return
+	}
 	nodeType := result.Mode
 	if result.NodeType == "seed" {
 		nodeType = "seed"
@@ -1748,7 +1787,11 @@ func (e *Executor) probeSourceMin(model *Model, updateKey string) (string, iop.C
 		return "", "", g.Error(err, "probeSourceMin: could not compile model '%s'", model.Name)
 	}
 
-	rewritten, _ := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+	rewritten, _, rwErr := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+	if rwErr != nil {
+		model.CompiledSQL = savedSQL
+		return "", "", rwErr
+	}
 	result, err := MakeModelSQL(rewritten, e.DbConn.GetType())
 	model.CompiledSQL = savedSQL // always restore
 
@@ -1875,7 +1918,10 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (u
 
 	// Honor rewrite: false
 	if model.Config.Rewrite == nil || *model.Config.Rewrite {
-		rewritten, _ := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+		rewritten, _, err := RewriteTableReferences(model.CompiledSQL, e.Build.Project, model.Name)
+		if err != nil {
+			return 0, err
+		}
 		model.CompiledSQL = rewritten
 	}
 

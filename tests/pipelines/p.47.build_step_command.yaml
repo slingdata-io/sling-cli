@@ -1,0 +1,33 @@
+# Pipeline type: build with command: compile | list (no materialization).
+steps:
+  - type: build
+    id: compile
+    build: tests/build/pipeline_step_project
+    target: POSTGRES
+    command: compile
+    select: stg_orders
+
+  - type: check
+    check: state.compile.total >= 1
+    failure_message: 'compile command did not select models, total={state.compile.total}'
+
+  - type: check
+    check: state.compile.command == "compile"
+    failure_message: 'expected command=compile, got {state.compile.command}'
+
+  - type: build
+    id: listed
+    build: tests/build/pipeline_step_project
+    command: list
+    select: stg_orders
+
+  - type: check
+    check: state.listed.total >= 1
+    failure_message: 'list command did not select models, total={state.listed.total}'
+
+  - type: check
+    check: state.listed.command == "list"
+    failure_message: 'expected command=list, got {state.listed.command}'
+
+  - type: log
+    message: 'SUCCESS: pipeline build command compile+list ok total={state.compile.total}'

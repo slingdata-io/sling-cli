@@ -1,0 +1,8 @@
+target: SNOWFLAKE
+
+defaults:
+  database: ANALYTICS_DB
+
+dev:
+  schema: dev_test
+  database: SCRATCH_DB

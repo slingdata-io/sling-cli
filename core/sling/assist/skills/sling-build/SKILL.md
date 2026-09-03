@@ -81,7 +81,7 @@ Put YAML in a `/** **/` block. It must be the first content in the file. Leading
 
 You can also use `/* { ... } */` or `-- { ... }` with a brace object.
 
-Front-matter does not rename the model. The model name is the file stem.
+Front-matter does not rename the model. The model name is the file stem. `ref()`, selectors, and `@name` accept the stem or the prod table `schema.table`. Model names are unique across the project.
 
 ## sling_build.yml essentials
 
@@ -90,7 +90,7 @@ target: MY_SNOWFLAKE
 defaults:
   mode: full-refresh
 dev:
-  schema: dev_$USER
+  schema: dev_${USER}
   target: MY_SNOWFLAKE_DEV
 dbt_project: false   # set true for models/+seeds/ layout
 ```
@@ -131,23 +131,25 @@ Never reference a SELECT alias inside the same query's JOIN or WHERE. Use the so
 
 When the warehouse stores an authoritative total (for example `o_totalprice`), aggregate that column. Recompute from components only when asked.
 
-| Goal                                | Command                                              |
-|-------------------------------------|------------------------------------------------------|
-| Compile (no execute)                | `sling build --compile`                              |
-| Run a subset                        | `sling build -s stg_users,fct_orders`                |
-| Run a model + downstream            | `sling build -s +stg_users`                          |
-| Run models by tag                   | `sling build -s tag:daily`                           |
-| List selected models (no execute)   | `sling build -s tag:daily --list`                    |
-| Force full-refresh on incrementals  | `sling build --full-refresh`                         |
-| Dev mode override                   | `sling build --schema dev_alice`                     |
-| Force prod mode                     | `sling build --prod`                                 |
-| Backfill range                      | `sling build -s fct_orders -r 2024-01-01,2024-12-31` |
-| Pass variables                      | `sling build --vars '{start_date: 2024-01-01}'`      |
-| Parallel model runs                 | `sling build --threads 4`                            |
-| Skip seed loading                   | `sling build --no-seeds`                             |
-| Stop on first failure               | `sling build --fail-fast`                            |
-| Sub-project discovery               | `sling build -R` (scans immediate subdirectories)    |
-| Create a project                    | `sling init` (writes `models/sling_build.yml`) |
+| Goal                                | Command                                                    |
+|-------------------------------------|------------------------------------------------------------|
+| Compile (no execute)                | `sling build compile`                                      |
+| Run a subset                        | `sling build run -s stg_users,fct_orders`                  |
+| Run a model + downstream            | `sling build run -s +stg_users`                            |
+| Run models by tag                   | `sling build run -s tag:daily`                             |
+| List selected models (no execute)   | `sling build list -s tag:daily`                            |
+| Path glob                           | `sling build list -s analytics/plausible/*`                |
+| Force full-refresh on incrementals  | `sling build run --full-refresh`                           |
+| Dev mode override                   | `sling build run --schema dev_alice`                       |
+| Force prod mode                     | `sling build run --prod`                                   |
+| Backfill range                      | `sling build run -s fct_orders --range 2024-01-01,2024-12-31,1mo` |
+| Pass variables                      | `sling build run --vars '{start_date: 2024-01-01}'`        |
+| Parallel model runs                 | `sling build run --threads 4`                              |
+| Skip seed loading                   | `sling build run --no-seeds`                               |
+| Stop on first failure               | `sling build run --fail-fast`                              |
+| Sub-project discovery               | `sling build run -R` (scans immediate subdirectories)      |
+| Run declarative tests only          | `sling build test`                                         |
+| Create a project                    | `sling init` (writes `models/sling_build.yml`)              |
 
 Notes:
 - Seeds (CSV files, in `seeds/` with `dbt_project: true`) load before models unless `--no-seeds` is passed.
@@ -156,7 +158,9 @@ Notes:
 - One project root. Do not leave nested scratch projects (`probe/`, `.probe/`). Parent compile skips a subdirectory that has its own `sling_build.yml` unless you pass `-R`.
 - Resolve the Gather first checklist before you write a new model. When you edit an incremental model, preserve saved-state semantics unless asked otherwise.
 
-Definition of done: `sling build . --target X` (or `--test`) completes with 0 failures. Compile alone does not execute SQL, so it does not prove correctness.
+Definition of done: `sling build run . --target X` (or `sling build test`) completes with 0 failures. Compile alone does not execute SQL, so it does not prove correctness.
+
+`${VAR}` in `sling_build.yml` (for example `dev.schema: dev_${USER}`) is expanded from the environment. An unset variable in an active field is an error; use `${VAR:-fallback}` or `--prod` / `--schema` to skip the field.
 
 ## Use the MCP tools to validate
 
@@ -167,8 +171,8 @@ Definition of done: `sling build . --target X` (or `--test`) completes with 0 fa
 When the user asks for a new model, prefer to:
 1. Inspect upstream columns with `database.get_columns` (or `sling conns discover CONN --columns`).
 2. Draft the SQL, including YAML frontmatter when materialization isn't `full-refresh`.
-3. Run `sling build --compile -s <model>` to confirm the SQL renders cleanly.
-4. Run `sling build . --target <conn>` (or `-s <model>`) until it completes with 0 failures.
+3. Run `sling build compile -s <model>` to confirm the SQL renders cleanly.
+4. Run `sling build run . --target <conn>` (or `-s <model>`) until it completes with 0 failures.
 5. Remove scratch files and nested probe projects before you finish.
 
 ## Full Documentation

@@ -119,7 +119,7 @@ Probe state before you change files. Then tell the user the next step. Every har
 |--------------|-----------|
 | Zero connections | Scaffold connections. Load [CONNECTIONS.md](CONNECTIONS.md). Do not ask for secrets in chat. |
 | No project (no `replications/`, `models/`, or `pipelines/`) | Run `sling init` to scaffold the canonical layout above. |
-| Project present | Lint, then `sling build models --compile`, then run. |
+| Project present | Lint, then `sling build compile models`, then `sling build run`. |
 
 Always end with the next step on this ladder. Do not skip the probe.
 
@@ -154,7 +154,7 @@ Keep **one model per file**. Split when:
 * A mart query mixes two grains (order vs order line) — make two marts.
 * A file grows past one SELECT with a clear name — extract the shared logic to intermediate or a macro.
 
-Do not split only to match a BI folder. Nested folders under `marts/` become a name prefix (`marts/core/fct_orders.sql` → `marts.core_fct_orders`). Prefer a flat `marts/` unless the prefix is deliberate.
+Do not split only to match a BI folder. Nested folders under `marts/` do not change the table name (`marts/core/fct_orders.sql` → `marts.fct_orders`). Model names are unique across the project.
 
 ### Layer
 

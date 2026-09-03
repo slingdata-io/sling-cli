@@ -70,7 +70,7 @@ sling run -p /path/to/pipeline.yaml
 sling run -p /path/to/pipeline.yaml --debug
 ```
 
-SQL models use `sling build` (there is no MCP `build` action).
+SQL models use `sling build run` (there is no MCP `build` action).
 
 ## Step Types
 
@@ -80,7 +80,7 @@ See [STEPS.md](STEPS.md) for full syntax and options of each type.
 |------|-------------|
 | `log` | Output messages |
 | `replication` | Run a replication (file or inline) |
-| `build` | Run a SQL model project (`sling build`) |
+| `build` | Run a SQL model project (`sling build run`) |
 | `query` | Execute SQL |
 | `http` | HTTP requests |
 | `command` | Shell commands |

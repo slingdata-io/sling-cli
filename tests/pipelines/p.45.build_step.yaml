@@ -41,12 +41,12 @@ steps:
     query: |
       SELECT count(*) AS cnt,
              max(run_label) AS run_label
-      FROM marts.fct_orders
+      FROM build_pipeline_step.fct_orders
     into: fct
 
   - type: check
     check: store.fct[0].cnt == 2
-    failure_message: 'expected 2 rows in marts.fct_orders'
+    failure_message: 'expected 2 rows in build_pipeline_step.fct_orders'
 
   - type: check
     check: store.fct[0].run_label == "from_pipeline"
@@ -71,7 +71,7 @@ steps:
 
   - type: query
     connection: POSTGRES
-    query: SELECT max(run_label) AS run_label FROM staging.stg_orders
+    query: SELECT max(run_label) AS run_label FROM build_pipeline_step.stg_orders
     into: stg_shortcut
 
   - type: check
@@ -85,5 +85,5 @@ steps:
   - type: query
     connection: POSTGRES
     query: |
-      DROP TABLE IF EXISTS marts.fct_orders;
-      DROP TABLE IF EXISTS staging.stg_orders;
+      DROP TABLE IF EXISTS build_pipeline_step.fct_orders;
+      DROP TABLE IF EXISTS build_pipeline_step.stg_orders;

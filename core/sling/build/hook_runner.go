@@ -29,6 +29,8 @@ func RunForHook(path string, opts sling.HookBuildRunOptions) (map[string]any, er
 		NoSeeds:     opts.NoSeeds,
 		Recursive:   opts.Recursive,
 		Test:        opts.Test,
+		Compile:     opts.Compile,
+		List:        opts.List,
 	}
 	if buildOpts.Threads < 1 {
 		buildOpts.Threads = DefaultThreads
@@ -44,6 +46,13 @@ func RunForHook(path string, opts sling.HookBuildRunOptions) (map[string]any, er
 
 	if err := b.Compile(); err != nil {
 		return nil, g.Error(err, "could not compile build project")
+	}
+
+	if opts.List {
+		return listToState(path, b), nil
+	}
+	if opts.Compile {
+		return compileToState(path, b), nil
 	}
 
 	// Multi-target / recursive sub-projects use Build.Execute (no per-node results).
@@ -144,4 +153,88 @@ func joinResultNames(results []ExecutionResult, wantStatus string) string {
 		}
 	}
 	return strings.Join(names, ",")
+}
+
+func compileToState(path string, b *Build) map[string]any {
+	if len(b.SubBuilds) > 0 {
+		var all []map[string]any
+		total := 0
+		for _, sub := range b.SubBuilds {
+			p := sub.CompileJSONPayload()
+			all = append(all, p)
+			if order, ok := p["order"].([]string); ok {
+				total += len(order)
+			}
+		}
+		return g.M(
+			"path", path,
+			"command", "compile",
+			"sub_projects", all,
+			"results", []map[string]any{},
+			"total", total,
+			"ok", total,
+			"failed", 0,
+			"skipped", 0,
+		)
+	}
+	payload := b.CompileJSONPayload()
+	order, _ := payload["order"].([]string)
+	nodes, _ := payload["nodes"].([]map[string]any)
+	return g.M(
+		"path", path,
+		"target", b.GetTarget(),
+		"command", "compile",
+		"order", payload["order"],
+		"nodes", payload["nodes"],
+		"results", nodes,
+		"total", len(order),
+		"ok", len(order),
+		"failed", 0,
+		"skipped", 0,
+	)
+}
+
+func listToState(path string, b *Build) map[string]any {
+	showTable := b.GetTarget() != ""
+	var rows []map[string]any
+	if b.DAG != nil {
+		for _, name := range b.Selected {
+			node := b.DAG.Nodes[name]
+			if node == nil {
+				continue
+			}
+			if b.Options.NoSeeds && node.Seed != nil {
+				continue
+			}
+			item := g.M("name", name)
+			if node.Seed != nil {
+				item["type"] = "seed"
+				item["file"] = node.Seed.RelPath
+				if showTable {
+					item["table"] = node.Seed.FullTableName
+				}
+			} else if node.Model != nil {
+				item["type"] = "model"
+				item["mode"] = b.GetModelMode(node.Model)
+				item["file"] = node.Model.RelPath
+				if showTable {
+					item["table"] = node.Model.FullTableName
+				}
+			}
+			rows = append(rows, item)
+		}
+	}
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	return g.M(
+		"path", path,
+		"target", b.GetTarget(),
+		"command", "list",
+		"results", rows,
+		"total", len(rows),
+		"ok", len(rows),
+		"failed", 0,
+		"skipped", 0,
+	)
 }

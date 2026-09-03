@@ -68,7 +68,7 @@ func runInit(opts project.Options, testConns bool) error {
 		g.Info("wrote `%s`", f)
 	}
 	fmt.Println()
-	fmt.Println("  Next: Add .sql models to schema folders and run 'sling build'")
+	fmt.Println("  Next: Add .sql models to schema folders and run 'sling build run'")
 	fmt.Println("  Run a job locally with 'sling run -j <key>'. Schedules fire on the platform once this folder is linked.")
 	fmt.Println()
 

@@ -91,8 +91,8 @@ sling conns exec MY_PG "select 1"   # Run a SQL query (add -o json|csv|arrow)
 sling run -r replication.yaml       # Run replication
 sling run -p pipeline.yaml          # Run pipeline
 sling run -r replication.yaml --debug   # Run with debug logging
-sling build                         # Run SQL models
-sling build --compile               # Compile models without executing
+sling build run                     # Run SQL models
+sling build compile                 # Compile models without executing
 sling assist --id <id>              # Investigate a failure (id from the error footer)
 sling assist error <sig>            # Look up an error signature (from prompt context)
 sling assist report --id <id>       # Review a redacted issue report

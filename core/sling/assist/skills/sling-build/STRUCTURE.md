@@ -4,26 +4,50 @@ Companion to the main build guide. Folder layout for a full ELT repo: https://do
 
 A build project is a directory with `sling_build.yml` plus `.sql` models (and optional seeds). In the canonical project that directory is `models/`.
 
-## Folder = schema
+## Folder = schema, file = table
 
-The 1st folder level is the schema name. Nested folders become an underscore-joined prefix on the model name. Root-level files use the `public` schema.
+The 1st folder level is the schema name. The file name is the table name. Nested folders organize files only; they do not change the table name. Root-level files use the `public` schema.
 
-| File Path | Schema | Prefix | Name | Full Table Name |
-|-----------|--------|--------|------|-----------------|
-| `raw.sql` | public | | raw | `public.raw` |
-| `staging/stg_orders.sql` | staging | | stg_orders | `staging.stg_orders` |
-| `staging/country_codes.csv` | staging | | country_codes | `staging.country_codes` |
-| `marts/core/dim_customers.sql` | marts | core | dim_customers | `marts.core_dim_customers` |
-| `marts/core/fct_orders.sql` | marts | core | fct_orders | `marts.core_fct_orders` |
-| `seeds/status_map.json` | seeds | | status_map | `seeds.status_map` |
+| File Path | Schema | Name | Full Table Name |
+|-----------|--------|------|-----------------|
+| `raw.sql` | public | raw | `public.raw` |
+| `staging/stg_orders.sql` | staging | stg_orders | `staging.stg_orders` |
+| `staging/country_codes.csv` | staging | country_codes | `staging.country_codes` |
+| `marts/core/dim_customers.sql` | marts | dim_customers | `marts.dim_customers` |
+| `marts/core/fct_orders.sql` | marts | fct_orders | `marts.fct_orders` |
+| `seeds/status_map.json` | seeds | status_map | `seeds.status_map` |
 
 Docs: https://docs.slingdata.io/concepts/build/structure.md#naming-rules
 
 ## Names are global
 
-Model and seed names must be unique across the whole project, in every folder. Duplicate names are a hard engine error (`validateUniqueNames`).
+Model names must be unique across the whole project. Two `events.sql` files in different folders are a hard engine error at load:
 
-`stg_customers.sql` in `staging/` and `marts/` still collides. Use `stg_<source>__<entity>` so two sources with the same entity do not collide.
+```
+duplicate model name 'events': found in both 'analytics/plausible/events.sql' and 'analytics/stripe/events.sql'
+```
+
+`ref()`, selectors, and `@name` accept the model name or the prod table (`analytics.events`).
+
+## Database (three-part names)
+
+Folders never set the database. Set it with the `database` key, at the same three levels as `schema`:
+
+```yaml
+# sling_build.yml
+target: MY_SNOWFLAKE
+defaults:
+  database: ANALYTICS_DB
+dev:
+  schema: dev_${USER}
+  database: SCRATCH_DB     # optional; falls back to defaults.database
+```
+
+A model overrides it in front-matter with `database: FIN_DB`.
+
+Order: front-matter, then `dev.database` in dev mode, then `defaults.database`, else empty (two-part name).
+
+Supported dialects: Snowflake, BigQuery, Databricks, Trino, DuckDB family, SQL Server family, Fabric. Other dialects give a compile error.
 
 ## Four layers (project convention)
 
@@ -49,8 +73,10 @@ Staging selects from raw via `src()`. Marts use `ref()` to staging or intermedia
 
 | File Path | Prod | Dev (`dev_fritz`) |
 |-----------|------|-------------------|
-| `staging/stg_orders.sql` | `staging.stg_orders` | `dev_fritz.staging_stg_orders` |
-| `marts/core/dim_customers.sql` | `marts.core_dim_customers` | `dev_fritz.marts_core_dim_customers` |
+| `staging/stg_orders.sql` | `staging.stg_orders` | `dev_fritz.stg_orders` |
+| `marts/core/dim_customers.sql` | `marts.dim_customers` | `dev_fritz.dim_customers` |
+
+Dev and prod names differ only by schema. Names are unique project-wide, so one dev schema never has a collision.
 
 Dev mode is on when `dev:` is present in `sling_build.yml`. Prod mode writes folder-based schemas (CLI `--prod`, pipeline step `prod: true`). Forcing a schema (CLI `--schema`, step `schema:`) selects a dev schema.
 

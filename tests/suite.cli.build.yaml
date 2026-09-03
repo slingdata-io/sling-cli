@@ -2,7 +2,7 @@
 
 - id: 400
   name: 'sling build execute nested_yml_project with config inheritance'
-  run: 'sling build tests/build/nested_yml_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/nested_yml_project --target POSTGRES --full-refresh'
   group: build
   output_contains:
     - 'OK'
@@ -11,7 +11,7 @@
 
 - id: 401
   name: 'sling build execute dbt_compat_project'
-  run: 'sling build tests/build/dbt_compat_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/dbt_compat_project --target POSTGRES --full-refresh'
   group: build
   after: [400]
   output_contains:
@@ -22,7 +22,7 @@
 
 - id: 402
   name: 'sling build execute -R multi_target_project'
-  run: 'sling build tests/build/multi_target_project -R --full-refresh'
+  run: 'sling build run tests/build/multi_target_project -R --full-refresh'
   group: build
   after: [401]
   output_contains:
@@ -35,7 +35,7 @@
 
 - id: 403
   name: 'sling build --compile multi_statement_project shows pre/post'
-  run: 'sling build tests/build/multi_statement_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/multi_statement_project --target POSTGRES'
   output_contains:
     - 'stg_multi'
     - 'mode: full-refresh'
@@ -48,7 +48,7 @@
 
 - id: 404
   name: 'sling build execute multi_statement_project'
-  run: 'sling build tests/build/multi_statement_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/multi_statement_project --target POSTGRES --full-refresh'
   group: build
   after: [402]
   output_contains:
@@ -60,7 +60,7 @@
 
 - id: 405
   name: 'sling build --compile macro_project shows expanded macros'
-  run: 'sling build tests/build/macro_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/macro_project --target POSTGRES'
   output_contains:
     - 'stg_products'
     - 'product_margins'
@@ -74,7 +74,7 @@
 
 - id: 406
   name: 'sling build execute macro_project'
-  run: 'sling build tests/build/macro_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/macro_project --target POSTGRES --full-refresh'
   output_contains:
     - 'stg_products'
     - 'product_margins'
@@ -85,7 +85,7 @@
 
 - id: 407
   name: 'sling build --compile hooks_project shows hooks'
-  run: 'sling build tests/build/hooks_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/hooks_project --target POSTGRES'
   output_contains:
     - 'stg_orders'
     - 'fct_orders'
@@ -100,7 +100,7 @@
 
 - id: 408
   name: 'sling build execute hooks_project'
-  run: 'sling build tests/build/hooks_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/hooks_project --target POSTGRES --full-refresh'
   group: build
   output_contains:
     - 'building stg_orders model'
@@ -114,7 +114,7 @@
 
 - id: 409
   name: 'sling build --compile range_test_project validates all models'
-  run: 'sling build tests/build/range_test_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/range_test_project --target POSTGRES'
   group: build
   output_contains:
     - 'range_test.stg_orders'
@@ -132,7 +132,7 @@
   run: |
     sling conns exec POSTGRES "DROP SCHEMA IF EXISTS range_test CASCADE; CREATE SCHEMA range_test"
     rm -rf tests/build/range_test_project/.sling_state/261
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh
   output_contains:
     - 'range_test.stg_orders'
     - 'range_test.fact_orders'
@@ -147,8 +147,8 @@
     SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/262
   run: |
     rm -rf tests/build/range_test_project/.sling_state/262
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders --debug
   output_contains:
     - 'incremental'
     - 'created_at" >'
@@ -160,8 +160,8 @@
   name: 'sling build plain incremental without SLING_STATE queries target MAX (tier B)'
   after: [411]
   run: |
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders --debug
   output_contains:
     - 'incremental'
     - 'tier B'
@@ -173,8 +173,8 @@
   name: 'sling build lookback-only uses inclusive bound with 2d offset'
   after: [412]
   run: |
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_lookback
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_lookback --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_lookback
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_lookback --debug
   output_contains:
     - 'fact_orders_lookback'
     - 'created_at" >='
@@ -188,8 +188,8 @@
     SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/265
   run: |
     rm -rf tests/build/range_test_project/.sling_state/265
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
   output_contains:
     - 'fact_orders_paged_start'
     - '2024-01-01'
@@ -204,8 +204,8 @@
     SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/266
   run: |
     rm -rf tests/build/range_test_project/.sling_state/266
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged --debug
   output_contains:
     - 'fact_orders_paged'
     - 'SELECT MIN('
@@ -219,9 +219,9 @@
     SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/267
   run: |
     rm -rf tests/build/range_test_project/.sling_state/267
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start --debug
   output_contains:
     - 'fact_orders_paged_start'
     - 'Build Completed'
@@ -232,7 +232,7 @@
   after: [416]
   run: |
     unset SLING_STATE
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
   err: true
   output_contains:
     - 'range.advance requires SLING_STATE'
@@ -242,8 +242,8 @@
   name: 'sling build --range single chunk runs once'
   after: [417]
   run: |
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
-    sling build tests/build/range_test_project --target POSTGRES \
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build run tests/build/range_test_project --target POSTGRES \
       --range '2024-01-01,2024-02-01' -s fact_orders --debug
   output_contains:
     - 'fact_orders'
@@ -256,8 +256,8 @@
   name: 'sling build --range multi-chunk backfill shows per-chunk progress'
   after: [418]
   run: |
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
-    sling build tests/build/range_test_project --target POSTGRES \
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders
+    sling build run tests/build/range_test_project --target POSTGRES \
       --range '2024-01-01,2024-04-01,1mo' -s fact_orders --debug
   output_contains:
     - 'chunk 1/4'
@@ -274,10 +274,10 @@
     SLING_STATE: LOCAL/tests/build/range_test_project/.sling_state/271
   run: |
     rm -rf tests/build/range_test_project/.sling_state/271
-    sling build tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
-    sling build tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES --full-refresh -s fact_orders_paged_start
+    sling build run tests/build/range_test_project --target POSTGRES -s fact_orders_paged_start
     cp tests/build/range_test_project/.sling_state/271/*.json /tmp/sling_state_before_271.json
-    sling build tests/build/range_test_project --target POSTGRES \
+    sling build run tests/build/range_test_project --target POSTGRES \
       --range '2024-01-01,2024-01-08,7d' -s fact_orders_paged_start
     diff /tmp/sling_state_before_271.json tests/build/range_test_project/.sling_state/271/*.json
   output_contains:
@@ -287,7 +287,7 @@
 - id: 421
   name: 'sling build range.start requires range.advance validation error'
   group: build
-  run: 'sling build tests/build/range_bad_start_no_advance --compile --target POSTGRES'
+  run: 'sling build compile tests/build/range_bad_start_no_advance --target POSTGRES'
   err: true
   output_contains:
     - 'range.start requires range.advance'
@@ -296,7 +296,7 @@
 - id: 422
   name: 'sling build dbt-style + range.* validation error'
   group: build
-  run: 'sling build tests/build/range_bad_dbt_with_range --compile --target POSTGRES'
+  run: 'sling build compile tests/build/range_bad_dbt_with_range --target POSTGRES'
   err: true
   output_contains:
     - 'range.* requires incremental_where_cond()'
@@ -305,7 +305,7 @@
 - id: 423
   name: 'sling build mixed is_incremental + where_cond validation error'
   group: build
-  run: 'sling build tests/build/range_bad_mixed_style --compile --target POSTGRES'
+  run: 'sling build compile tests/build/range_bad_mixed_style --target POSTGRES'
   err: true
   output_contains:
     - 'cannot mix is_incremental() and incremental_where_cond()'
@@ -316,7 +316,7 @@
 - id: 424
   name: 'sling build --compile defaults_expanded_project layers defaults'
   group: build
-  run: 'sling build tests/build/defaults_expanded_project --compile --target POSTGRES --recursive'
+  run: 'sling build compile tests/build/defaults_expanded_project --target POSTGRES --recursive'
   output_contains:
     # stg_orders inherits root defaults.schema=raw (overrides folder schema)
     - 'table: raw.stg_orders'
@@ -347,17 +347,16 @@
   run: 'sling build --help'
   output_contains:
     - 'Build and execute SQL models'
-    - '--compile'
-    - '--target'
-    - '--select'
-    - '--full-refresh'
-    - '--schema'
+    - 'run'
+    - 'list'
+    - 'test'
+    - 'compile'
   output_does_not_contain:
     - '--init'
 
 - id: 426
   name: 'sling build --compile sample_project with target'
-  run: 'sling build tests/build/sample_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/sample_project --target POSTGRES'
   group: build
   output_contains:
     - 'DAG Execution Order:'
@@ -376,7 +375,7 @@
 
 - id: 427
   name: 'sling build --compile with selector stg_*'
-  run: 'sling build tests/build/sample_project --compile --target POSTGRES -s "stg_*"'
+  run: 'sling build compile tests/build/sample_project --target POSTGRES -s "stg_*"'
   group: build
   output_contains:
     - 'stg_customers (full-refresh)'
@@ -390,22 +389,22 @@
 
 - id: 428
   name: 'sling build --compile dev mode with --schema override'
-  run: 'sling build tests/build/sample_project --compile --target POSTGRES --schema dev_test'
+  run: 'sling build compile tests/build/sample_project --target POSTGRES --schema dev_test'
   group: build
   output_contains:
-    - 'dev_test.staging_stg_orders'
-    - 'dev_test.staging_stg_customers'
-    - 'dev_test.marts_core_dim_customers'
-    - 'dev_test.marts_core_fct_orders'
-    - 'dev_test.marts_finance_revenue'
+    - 'dev_test.stg_orders'
+    - 'dev_test.stg_customers'
+    - 'dev_test.dim_customers'
+    - 'dev_test.fct_orders'
+    - 'dev_test.revenue'
     - 'dev_test.raw'
-    - 'dev_test.staging_country_codes'
-    - 'dev_test.seeds_status_map'
+    - 'dev_test.country_codes'
+    - 'dev_test.status_map'
 
 
 - id: 429
   name: 'sling build --compile with upstream selector +revenue'
-  run: 'sling build tests/build/sample_project --compile --target POSTGRES -s "+revenue"'
+  run: 'sling build compile tests/build/sample_project --target POSTGRES -s "+revenue"'
   group: build
   output_contains:
     - 'stg_orders'
@@ -419,7 +418,7 @@
 
 - id: 430
   name: 'sling build --compile dbt_compat_project'
-  run: 'sling build tests/build/dbt_compat_project --compile --target POSTGRES'
+  run: 'sling build compile tests/build/dbt_compat_project --target POSTGRES'
   group: build
   output_contains:
     - 'stg_orders'
@@ -428,7 +427,7 @@
 
 - id: 431
   name: 'sling build --compile nested_yml_project inherits config'
-  run: 'sling build tests/build/nested_yml_project --compile --target POSTGRES --recursive'
+  run: 'sling build compile tests/build/nested_yml_project --target POSTGRES --recursive'
   group: build
   output_contains:
     - 'stg_orders (truncate)'
@@ -436,16 +435,18 @@
 
 
 - id: 432
-  name: 'sling build with no config and no target shows help'
-  run: 'sling build /tmp --compile'
+  name: 'sling build with no verb prints help'
+  run: 'sling build'
   output_contains:
     - 'Build and execute SQL models'
-    - '--recursive'
+    - 'run'
+    - 'list'
+    - 'compile'
 
 
 - id: 433
   name: 'sling build execute with selector'
-  run: 'sling build tests/build/sample_project --target POSTGRES --full-refresh -s "stg_*"'
+  run: 'sling build run tests/build/sample_project --target POSTGRES --full-refresh -s "stg_*"'
   group: build
   output_contains:
     - 'stg_orders'
@@ -457,7 +458,7 @@
 
 - id: 434
   name: 'sling build execute sample_project full-refresh'
-  run: 'sling build tests/build/sample_project --target POSTGRES --full-refresh'
+  run: 'sling build run tests/build/sample_project --target POSTGRES --full-refresh'
   group: build
   output_contains:
     - 'OK'
@@ -465,7 +466,7 @@
 
 - id: 435
   name: 'sling build second run (view and incremental modes)'
-  run: 'sling build tests/build/sample_project --target POSTGRES'
+  run: 'sling build run tests/build/sample_project --target POSTGRES'
   group: build
   after: [434]
   output_contains:
@@ -475,14 +476,13 @@
     - 'Build Completed'
 
 - id: 436
-  name: 'sling build --help shows range without short -r'
-  run: 'sling build --help'
+  name: 'sling build run --help shows range without short -r'
+  run: 'sling build run --help'
   output_contains:
-    - 'Build and execute SQL models'
+    - 'Materialize models'
     - '--range'
     - '--threads'
-    - '--test'
-    - '--json'
+    - '--full-refresh'
   output_does_not_contain:
     - '-r, --range'
 
@@ -518,7 +518,7 @@
   run: |
     mkdir -p temp/duckdb_parallel
     rm -f temp/duckdb_parallel/test.duckdb
-    sling build tests/build/duckdb_parallel_project --target DUCK_PARALLEL --full-refresh --threads 4
+    sling build run tests/build/duckdb_parallel_project --target DUCK_PARALLEL --full-refresh --threads 4
   group: build
   rows: 5
   output_contains:
@@ -534,7 +534,7 @@
   run: |
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS marts"
-    sling build tests/build/clickhouse_project --target CLICKHOUSE --full-refresh
+    sling build run tests/build/clickhouse_project --target CLICKHOUSE --full-refresh
   rows: 4
   output_contains:
     - 'stg_orders'
@@ -556,8 +556,8 @@
   run: |
     mkdir -p temp/duckdb_modes
     rm -f temp/duckdb_modes/inc.duckdb
-    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_inc"
-    sling build tests/build/column_store_modes_project --target DUCK_MODES --vars 'extra: true' -s "+events_inc"
+    SLING_ROW_CNT= sling build run tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_inc"
+    sling build run tests/build/column_store_modes_project --target DUCK_MODES --vars 'extra: true' -s "+events_inc"
   rows: 4
   output_contains:
     - 'OK'
@@ -571,8 +571,8 @@
   run: |
     mkdir -p temp/duckdb_modes
     rm -f temp/duckdb_modes/append.duckdb
-    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_append"
-    sling build tests/build/column_store_modes_project --target DUCK_MODES -s "+events_append"
+    SLING_ROW_CNT= sling build run tests/build/column_store_modes_project --target DUCK_MODES --full-refresh -s "+events_append"
+    sling build run tests/build/column_store_modes_project --target DUCK_MODES -s "+events_append"
   rows: 4
   output_contains:
     - 'OK'
@@ -586,8 +586,8 @@
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.stg_events"
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_inc"
-    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_inc"
-    sling build tests/build/column_store_modes_project --target CLICKHOUSE --vars 'extra: true' -s "+events_inc"
+    SLING_ROW_CNT= sling build run tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_inc"
+    sling build run tests/build/column_store_modes_project --target CLICKHOUSE --vars 'extra: true' -s "+events_inc"
   rows: 4
   output_contains:
     - 'OK'
@@ -601,11 +601,148 @@
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.stg_events"
     SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_append"
-    SLING_ROW_CNT= sling build tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_append"
-    sling build tests/build/column_store_modes_project --target CLICKHOUSE -s "+events_append"
+    SLING_ROW_CNT= sling build run tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_append"
+    sling build run tests/build/column_store_modes_project --target CLICKHOUSE -s "+events_append"
   rows: 4
   output_contains:
     - 'OK'
     - 'Build Completed'
 
+- id: 445
+  name: 'sling build run with no config and no target shows help'
+  run: 'sling build run /tmp'
+  output_contains:
+    - 'Materialize models'
+    - '--target'
+    - '--recursive'
 
+- id: 446
+  name: 'sling build list sample_project prints names'
+  run: 'sling build list tests/build/sample_project --target POSTGRES'
+  output_contains:
+    - 'stg_orders'
+    - 'stg_customers'
+    - 'dim_customers'
+
+- id: 447
+  name: 'sling build list --json sample_project'
+  run: 'sling build list tests/build/sample_project --target POSTGRES --json'
+  output_contains:
+    - '"name":"stg_orders"'
+    - '"name":"dim_customers"'
+
+- id: 448
+  name: 'sling build test sample_project'
+  run: 'sling build test tests/build/sample_project --target POSTGRES'
+  group: build
+  output_contains:
+    - 'Build Completed'
+
+- id: 449
+  name: 'sling build unknown verb exits non-zero'
+  run: 'sling build foo'
+  err: true
+  output_contains:
+    - 'unknown build command'
+
+- id: 450
+  name: 'sling build compile --help'
+  run: 'sling build compile --help'
+  output_contains:
+    - 'Render SQL'
+    - '--json'
+    - '--select'
+  output_does_not_contain:
+    - '--full-refresh'
+    - '--range'
+
+- id: 451
+  name: 'sling build list --help'
+  run: 'sling build list --help'
+  output_contains:
+    - 'List selected models'
+    - '--json'
+  output_does_not_contain:
+    - '--full-refresh'
+    - '--range'
+
+- id: 452
+  name: 'sling build test --help'
+  run: 'sling build test --help'
+  output_contains:
+    - 'declarative data tests'
+    - '--json'
+    - '--threads'
+  output_does_not_contain:
+    - '--full-refresh'
+    - '--range'
+
+- id: 453
+  name: 'sling build list without --target uses yml target'
+  run: 'sling build list tests/build/sample_project'
+  output_contains:
+    - 'stg_orders'
+    - 'staging.stg_orders'
+    - 'dim_customers'
+    - 'marts.dim_customers'
+
+- id: 454
+  name: 'pipeline type:build command compile and list'
+  run: 'sling run -d -p tests/pipelines/p.47.build_step_command.yaml'
+  output_contains:
+    - 'SUCCESS: pipeline build command compile+list ok'
+
+- id: 455
+  name: 'pipeline type:build command test rejects full_refresh'
+  run: 'sling run -p tests/pipelines/p.48.build_step_bad_command.yaml'
+  err: true
+  output_contains:
+    - 'full_refresh'
+    - 'command: run'
+
+- id: 456
+  name: 'sling build list duplicate stems errors'
+  run: 'sling build list tests/build/duplicate_stems_project'
+  err: true
+  output_contains:
+    - "duplicate model name 'events'"
+    - 'a/events.sql'
+    - 'b/events.sql'
+
+- id: 457
+  name: 'sling build compile old prefixed selector not found'
+  run: 'sling build compile tests/build/sample_project --target POSTGRES -s core_dim_customers'
+  err: true
+  output_contains:
+    - "selector 'core_dim_customers' not found"
+
+- id: 458
+  name: 'sling build compile database_project prod uses three-part names'
+  run: 'sling build compile tests/build/database_project --target SNOWFLAKE --prod'
+  output_contains:
+    - 'ANALYTICS_DB.marts.dim_customers'
+    - 'FIN_DB.marts.revenue'
+
+- id: 459
+  name: 'sling build compile database_project dev uses dev database and schema'
+  run: 'sling build compile tests/build/database_project --target SNOWFLAKE'
+  output_contains:
+    - 'SCRATCH_DB.dev_test.dim_customers'
+    - 'FIN_DB.dev_test.revenue'
+
+- id: 460
+  name: 'sling build compile database_project on postgres rejects three-part names'
+  run: 'sling build compile tests/build/database_project --target POSTGRES --prod'
+  err: true
+  output_contains:
+    - 'does not support database.schema.table'
+
+- id: 461
+  name: 'sling build run with subfolder path glob'
+  run: 'sling build run tests/build/sample_project --target POSTGRES -s "marts/core/*"'
+  group: build
+  output_contains:
+    - 'dim_customers'
+    - 'fct_orders'
+  output_does_not_contain:
+    - 'revenue'

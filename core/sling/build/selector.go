@@ -387,6 +387,7 @@ func (dag *DAG) computeDepths() {
 type Selector struct {
 	Includes []string
 	Excludes []string
+	Project  *BuildProject
 }
 
 // NewSelector creates a new selector from include and exclude patterns.
@@ -409,7 +410,7 @@ func (s *Selector) Apply(dag *DAG) ([]string, error) {
 	} else {
 		// Apply each include pattern
 		for _, pattern := range s.Includes {
-			matched, err := matchPattern(pattern, dag)
+			matched, err := matchPattern(pattern, dag, s.Project)
 			if err != nil {
 				return nil, err
 			}
@@ -421,7 +422,7 @@ func (s *Selector) Apply(dag *DAG) ([]string, error) {
 
 	// Apply excludes
 	for _, pattern := range s.Excludes {
-		matched, err := matchPattern(pattern, dag)
+		matched, err := matchPattern(pattern, dag, s.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -452,7 +453,7 @@ func (s *Selector) Apply(dag *DAG) ([]string, error) {
 //   - modelA-modelB       slice: all nodes between A and B (inclusive)
 //   - tag:xxx             match by tag
 //   - path/pattern        match by file path
-func matchPattern(pattern string, dag *DAG) ([]string, error) {
+func matchPattern(pattern string, dag *DAG, project *BuildProject) ([]string, error) {
 	// Tag selector: tag:xxx (check early, before + parsing)
 	if strings.HasPrefix(pattern, "tag:") {
 		tag := strings.TrimPrefix(pattern, "tag:")
@@ -461,7 +462,7 @@ func matchPattern(pattern string, dag *DAG) ([]string, error) {
 
 	// Graph traversal selectors (contains "+")
 	if strings.Contains(pattern, "+") {
-		return matchGraphSelector(pattern, dag)
+		return matchGraphSelector(pattern, dag, project)
 	}
 
 	// Slice selector: modelA-modelB (all nodes between A and B inclusive)
@@ -469,10 +470,19 @@ func matchPattern(pattern string, dag *DAG) ([]string, error) {
 	if idx := strings.Index(pattern, "-"); idx > 0 && idx < len(pattern)-1 && !strings.Contains(pattern, "/") {
 		left := pattern[:idx]
 		right := pattern[idx+1:]
-		_, leftOk := dag.Nodes[left]
-		_, rightOk := dag.Nodes[right]
+		leftName, rightName := left, right
+		if project != nil {
+			if lr, err := project.ResolveName(left); err == nil {
+				leftName = lr.Name
+			}
+			if rr, err := project.ResolveName(right); err == nil {
+				rightName = rr.Name
+			}
+		}
+		_, leftOk := dag.Nodes[leftName]
+		_, rightOk := dag.Nodes[rightName]
 		if leftOk && rightOk {
-			return matchSlice(left, right, dag)
+			return matchSlice(leftName, rightName, dag)
 		}
 	}
 
@@ -481,8 +491,10 @@ func matchPattern(pattern string, dag *DAG) ([]string, error) {
 		return matchByPath(pattern, dag)
 	}
 
-	// Glob selector: match against node names
-	return matchByGlob(pattern, dag)
+	if isGlob(pattern) {
+		return matchByGlob(pattern, dag)
+	}
+	return resolveNodes(pattern, dag, project, pattern)
 }
 
 // matchGraphSelector handles all "+" based selectors:
@@ -490,7 +502,7 @@ func matchPattern(pattern string, dag *DAG) ([]string, error) {
 //	+model, model+, +model+, N+model, model+N
 //
 // The model portion can be an exact name or a glob pattern (e.g. stg_*, *_orders).
-func matchGraphSelector(pattern string, dag *DAG) ([]string, error) {
+func matchGraphSelector(pattern string, dag *DAG, project *BuildProject) ([]string, error) {
 	hasPrefix := strings.HasPrefix(pattern, "+")
 	hasSuffix := strings.HasSuffix(pattern, "+")
 
@@ -498,7 +510,7 @@ func matchGraphSelector(pattern string, dag *DAG) ([]string, error) {
 	if hasPrefix || hasSuffix {
 		modelPattern := strings.Trim(pattern, "+")
 
-		nodes, err := resolveNodes(modelPattern, dag, pattern)
+		nodes, err := resolveNodes(modelPattern, dag, project, pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -527,7 +539,7 @@ func matchGraphSelector(pattern string, dag *DAG) ([]string, error) {
 
 	// N+model (degree upstream)
 	if n, err := strconv.Atoi(left); err == nil && n >= 0 {
-		nodes, err := resolveNodes(right, dag, pattern)
+		nodes, err := resolveNodes(right, dag, project, pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -543,7 +555,7 @@ func matchGraphSelector(pattern string, dag *DAG) ([]string, error) {
 
 	// model+N (degree downstream)
 	if n, err := strconv.Atoi(right); err == nil && n >= 0 {
-		nodes, err := resolveNodes(left, dag, pattern)
+		nodes, err := resolveNodes(left, dag, project, pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -604,8 +616,18 @@ func isGlob(s string) bool {
 // resolveNodes resolves a name-or-glob to matching DAG node names.
 // For exact names, returns the single name or errors if not found.
 // For glob patterns, returns all matches (empty slice if none match).
-func resolveNodes(nameOrGlob string, dag *DAG, selectorForError string) ([]string, error) {
+func resolveNodes(nameOrGlob string, dag *DAG, project *BuildProject, selectorForError string) ([]string, error) {
 	if !isGlob(nameOrGlob) {
+		if project != nil {
+			ref, err := project.ResolveName(nameOrGlob)
+			if err != nil {
+				return nil, selectorResolveError(err)
+			}
+			if _, ok := dag.Nodes[ref.Name]; !ok {
+				return nil, &NameNotFoundError{Query: nameOrGlob, Kind: "selector"}
+			}
+			return []string{ref.Name}, nil
+		}
 		if _, ok := dag.Nodes[nameOrGlob]; !ok {
 			return nil, g.Error("selector '%s': model '%s' not found", selectorForError, nameOrGlob)
 		}
@@ -614,17 +636,34 @@ func resolveNodes(nameOrGlob string, dag *DAG, selectorForError string) ([]strin
 	return matchByGlob(nameOrGlob, dag)
 }
 
-// matchByGlob matches node names using a glob pattern.
+// matchByGlob matches node names using a glob pattern, also trying ProdFullTableName.
 func matchByGlob(pattern string, dag *DAG) ([]string, error) {
-	g, err := glob.Compile(pattern)
+	compiled, err := glob.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
 
 	var result []string
+	seen := map[string]bool{}
 	for _, name := range dag.Order {
-		if g.Match(name) {
+		if compiled.Match(name) {
 			result = append(result, name)
+			seen[name] = true
+			continue
+		}
+		node := dag.Nodes[name]
+		var prod string
+		if node.Model != nil {
+			prod = node.Model.ProdFullTableName
+		} else if node.Seed != nil {
+			prod = node.Seed.ProdFullTableName
+		}
+		if prod == "" || seen[name] {
+			continue
+		}
+		if compiled.Match(prod) || compiled.Match(stripDatabase(prod)) {
+			result = append(result, name)
+			seen[name] = true
 		}
 	}
 	return result, nil
