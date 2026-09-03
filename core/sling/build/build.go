@@ -589,9 +589,10 @@ func (c *BuildConfig) JSONPayload() map[string]any {
 		nodes = append(nodes, m)
 	}
 	return map[string]any{
-		"order":  c.Order,
-		"nodes":  nodes,
-		"target": c.Target,
+		"order":    c.Order,
+		"nodes":    nodes,
+		"target":   c.Target,
+		"compiled": c.Compiled,
 	}
 }
 
