@@ -319,6 +319,7 @@ func (b *Build) Execute() error {
 
 	executor, err := NewExecutor(b)
 	if err != nil {
+		SyncBuildFailure(err)
 		return err
 	}
 

@@ -303,11 +303,15 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	// Build and compile
 	b, err := build.NewBuild(projectPath, opts)
 	if err != nil {
-		return ok, g.Error(err, "could not load build project")
+		err = g.Error(err, "could not load build project")
+		build.SyncBuildFailure(err)
+		return ok, err
 	}
 
 	if err := b.Compile(); err != nil {
-		return ok, g.Error(err, "could not compile build project")
+		err = g.Error(err, "could not compile build project")
+		build.SyncBuildFailure(err)
+		return ok, err
 	}
 
 	if opts.List {

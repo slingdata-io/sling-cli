@@ -1346,7 +1346,6 @@ func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store
 		bs.FullRefresh = e.Build.Options.FullRefresh
 		bs.ModelCount = len(e.Build.Selected)
 	}
-	bs.Hostname, _ = os.Hostname()
 	if e.startTime != nil {
 		bs.StartTimeNs = g.Int64(e.startTime.UnixNano())
 	}
@@ -1372,6 +1371,33 @@ func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store
 		}
 	}
 	return bs
+}
+
+// SyncBuildFailure reports a build that failed before an Executor existed
+func SyncBuildFailure(runErr error) {
+	if runErr == nil || !sling.IsBuildRunMode() {
+		return
+	}
+
+	now := time.Now()
+	bs := &store.BuildStatus{
+		ProjectID: g.String(os.Getenv("SLING_PROJECT_ID")),
+		JobID:     os.Getenv("SLING_JOB_ID"),
+		ExecID:    os.Getenv("SLING_EXEC_ID"),
+		// Target is unknown this early; the platform keeps the value it has.
+		Status:      sling.ExecStatusError,
+		Error:       g.Ptr(runErr.Error()),
+		ExitCode:    1,
+		TimeNs:      now.UnixNano(),
+		StartTimeNs: g.Int64(now.UnixNano()),
+		EndTimeNs:   g.Int64(now.UnixNano()),
+		AgentID:     g.Getenv("SLING_RUNNER_ID", os.Getenv("SLING_AGENT_ID")),
+	}
+	if v := os.Getenv("SLING_FILE_NAME"); v != "" {
+		bs.FileName = g.Ptr(v)
+	}
+
+	sling.StoreSet(bs)
 }
 
 // printProgress prints a single line of execution progress.
