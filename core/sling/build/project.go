@@ -468,6 +468,12 @@ func LoadProject(dir string, opts ...BuildOptions) (*BuildProject, error) {
 	return project, nil
 }
 
+// LoadBuildConfig parses a sling_build.yml body. It expands ${VAR} references
+// and validates defaults.mode.
+func LoadBuildConfig(content string) (cfg *BuildConfig, err error) {
+	return loadBuildConfig(content, "sling_build.yml")
+}
+
 // loadConfig reads and parses a sling_build.yml file.
 func loadConfig(path string) (*BuildConfig, error) {
 	data, err := os.ReadFile(path)
@@ -475,7 +481,12 @@ func loadConfig(path string) (*BuildConfig, error) {
 		return nil, g.Error(err, "could not read config file")
 	}
 
-	expanded, unresolved := expandConfigVars(string(data))
+	return loadBuildConfig(string(data), path)
+}
+
+// loadBuildConfig parses a sling_build.yml body. name is used for messages only.
+func loadBuildConfig(content, name string) (*BuildConfig, error) {
+	expanded, unresolved := expandConfigVars(content)
 
 	cfg := &BuildConfig{}
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
@@ -486,13 +497,13 @@ func loadConfig(path string) (*BuildConfig, error) {
 	if cfg.Defaults.Mode != "" {
 		canonical, warn := normalizeMode(cfg.Defaults.Mode)
 		if warn != "" {
-			g.Warn("%s: defaults.mode: %s", path, warn)
+			g.Warn("%s: defaults.mode: %s", name, warn)
 		}
 		if canonical == "ephemeral" {
-			return nil, g.Error("%s: defaults.mode: ephemeral models are not supported; use view or table", path)
+			return nil, g.Error("%s: defaults.mode: ephemeral models are not supported; use view or table", name)
 		}
 		if !ValidModes[canonical] {
-			return nil, g.Error("%s: unknown defaults.mode '%s'; expected one of: %s", path, cfg.Defaults.Mode, validModeNames())
+			return nil, g.Error("%s: unknown defaults.mode '%s'; expected one of: %s", name, cfg.Defaults.Mode, validModeNames())
 		}
 		cfg.Defaults.Mode = canonical
 	}
