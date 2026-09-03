@@ -13,6 +13,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -1337,6 +1338,7 @@ func (e *Executor) makeBuildStatus(status sling.ExecStatus, runErr error) *store
 		FileName:   e.fileName(),
 		Target:     e.ConnName,
 		Status:     status,
+		Version:    core.Version,
 		ModelCount: 0,
 		Tries:      e.tryNumber(),
 		TryNumber:  e.tryNumber(),
@@ -1392,6 +1394,7 @@ func SyncBuildFailure(runErr error) {
 		Status:      sling.ExecStatusError,
 		Error:       g.Ptr(runErr.Error()),
 		ExitCode:    1,
+		Version:     core.Version,
 		TimeNs:      now.UnixNano(),
 		StartTimeNs: g.Int64(now.UnixNano()),
 		EndTimeNs:   g.Int64(now.UnixNano()),

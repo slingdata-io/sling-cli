@@ -285,6 +285,7 @@ type BuildStatus struct {
 	Status       sling.ExecStatus `json:"status,omitempty"`
 	Error        *string          `json:"error,omitempty"`
 	ExitCode     int              `json:"exit_code,omitempty"`
+	Version      string           `json:"version,omitempty"`
 	ModelCount   int              `json:"model_count"`
 	OkCount      int              `json:"ok_count"`
 	FailedCount  int              `json:"failed_count"`
