@@ -849,14 +849,11 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 				}
 
 				if duck.Proc != nil && !dq.isDone() && (duck.Proc.Exited() || duck.Proc.GetScanErr() != nil) {
-					reason := "duckdb process exited before query completed"
-					if duck.Proc.GetScanErr() != nil {
-						reason = "duckdb stdout scanner stopped before query completed"
-					}
-					err := g.Error("%s: %s", reason, duck.Proc.CmdErrorText())
+					err := duck.procDeathErr()
 					dq.setErr(err)
 					dq.writer.CloseWithError(err)
 					dq.reader.CloseWithError(err)
+					duck.kill() // dead or unreadable; mark disconnected so the next query reopens
 					return
 				}
 			}
@@ -864,6 +861,30 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 	}()
 
 	return dq
+}
+
+// procDeathErr describes a process that died or lost its stdout scanner
+// mid-query. Capture is off for duckdb, so CmdErrorText is normally empty and
+// the exit status (e.g. "signal: killed") is the only clue on a silent death.
+func (duck *DuckDb) procDeathErr() error {
+	if scanErr := duck.Proc.GetScanErr(); scanErr != nil {
+		return g.Error(scanErr, "duckdb stdout scanner stopped before query completed")
+	}
+
+	detail := duck.Proc.CmdErrorText()
+	if detail == "" {
+		if procErr := duck.Proc.GetErr(); procErr != nil {
+			detail = procErr.Error() // e.g. "signal: killed", "exit status 1"
+		} else if code := duck.Proc.GetExitCode(); code != nil {
+			detail = g.F("exit code %d", *code)
+		} else {
+			detail = "unknown cause"
+		}
+	}
+	if strings.Contains(detail, "signal: killed") {
+		detail += " (process was killed, possibly by the OS out-of-memory killer)"
+	}
+	return g.Error("duckdb process exited before query completed: %s", detail)
 }
 
 // waitForResult waits for the execution of a SQL query and returns the result
