@@ -8,6 +8,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling/build"
 	"github.com/spf13/cast"
@@ -185,6 +186,8 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	opts := build.BuildOptions{
 		Threads: build.DefaultThreads,
 	}
+	var b *build.Build
+	defer func() { setBuildTel(opts, b) }()
 
 	projectPath := "."
 
@@ -301,7 +304,7 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 	}
 
 	// Build and compile
-	b, err := build.NewBuild(projectPath, opts)
+	b, err = build.NewBuild(projectPath, opts)
 	if err != nil {
 		err = g.Error(err, "could not load build project")
 		build.SyncBuildFailure(err)
@@ -347,6 +350,44 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 		return ok, err
 	}
 	return ok, nil
+}
+
+func setBuildTel(opts build.BuildOptions, b *build.Build) {
+	m := g.M(
+		"full_refresh", opts.FullRefresh,
+		"fail_fast", opts.FailFast,
+		"no_seeds", opts.NoSeeds,
+		"recursive", opts.Recursive,
+		"has_range", opts.Range != nil && strings.TrimSpace(*opts.Range) != "",
+		"has_select", len(opts.Select) > 0,
+		"has_schema", opts.Schema != "",
+	)
+	if b != nil {
+		if b.Project != nil {
+			if b.Project.Mode != "" {
+				m["mode"] = b.Project.Mode
+			}
+			m["model_count"] = len(b.Project.Models)
+			m["selected_count"] = len(b.Selected)
+		}
+		if t := buildTelTargetType(b); t != "" {
+			m["target_type"] = t
+		}
+		m["rows"] = b.ExecRows
+	}
+	env.SetTelVal("build", g.Marshal(m))
+}
+
+func buildTelTargetType(b *build.Build) string {
+	name := b.GetTarget()
+	if name == "" {
+		return ""
+	}
+	entry := connection.GetLocalConns().Get(name)
+	if entry.Name == "" || entry.Connection.Type.IsUnknown() {
+		return ""
+	}
+	return entry.Connection.Type.String()
 }
 
 // askPrompt writes label and reads one answer. It returns an error on EOF so

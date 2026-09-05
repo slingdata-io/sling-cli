@@ -99,6 +99,7 @@ func init() {
 // the user must run `sling assist setup`.
 func processAssist(c *g.CliSC) (ok bool, err error) {
 	ok = true
+	setAssistTel(c)
 	if notice, refreshErr := assist.AutoRefresh(context.Background()); refreshErr == nil && notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}
@@ -523,6 +524,67 @@ func runAssistError(c *g.CliSC) error {
 		fmt.Printf("  sling assist report --id <exec_id>   # share a redacted report\n")
 	}
 	return nil
+}
+
+func setAssistTel(c *g.CliSC) {
+	vals := flatVals(c)
+	ask := ""
+	if len(flaggy.TrailingArguments) > 0 {
+		ask = strings.TrimSpace(strings.Join(flaggy.TrailingArguments, " "))
+	}
+	resumeSet, _ := resumeFromArgs(os.Args)
+	prof, profileExists, _ := assist.LoadProfile()
+
+	kind := "open"
+	switch {
+	case c.UsedSC() == "setup":
+		kind = "setup"
+	case c.UsedSC() == "error":
+		kind = "error"
+	case c.UsedSC() == "report":
+		kind = "report"
+	case resumeSet:
+		kind = "resume"
+	case !profileExists && strings.TrimSpace(cast.ToString(vals["out"])) == "":
+		kind = "setup"
+	case strings.TrimSpace(cast.ToString(vals["id"])) != "":
+		kind = "investigate"
+	case ask != "":
+		kind = "ask"
+	}
+
+	tel := g.M(
+		"session_kind", kind,
+		"headless", cast.ToBool(vals["non-interactive"]),
+		"nested", assist.NestedLaunch(),
+		"has_ask", ask != "",
+		"has_id", strings.TrimSpace(cast.ToString(vals["id"])) != "",
+		"has_model", strings.TrimSpace(cast.ToString(vals["model"])) != "",
+	)
+	if v := strings.TrimSpace(cast.ToString(vals["agent"])); v != "" {
+		tel["agent"] = v
+	} else if profileExists && prof.Agent != "" {
+		tel["agent"] = prof.Agent
+	}
+	if kind == "setup" {
+		scope := "user"
+		if strings.EqualFold(cast.ToString(vals["scope"]), "project") {
+			scope = "project"
+		}
+		tel["scope"] = scope
+		tel["first_run"] = !profileExists
+	}
+	if kind == "report" {
+		channel := "review"
+		switch {
+		case cast.ToBool(vals["github"]):
+			channel = "github"
+		case cast.ToBool(vals["email"]):
+			channel = "email"
+		}
+		tel["channel"] = channel
+	}
+	env.SetTelVal("assist", g.Marshal(tel))
 }
 
 // flatVals returns the val map from the active subcommand. CliSC stores per-

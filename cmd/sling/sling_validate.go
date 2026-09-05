@@ -87,6 +87,7 @@ func processValidate(c *g.CliSC) (ok bool, err error) {
 	}
 
 	results := validate.ParsePaths(paths, opts)
+	setValidateTel(opts, results)
 	text, err := validate.GetOutput(results, opts)
 	if err != nil {
 		return ok, g.Error(err, "could not render validate output")
@@ -99,6 +100,27 @@ func processValidate(c *g.CliSC) (ok bool, err error) {
 		return ok, validateFailErr(results)
 	}
 	return ok, nil
+}
+
+func setValidateTel(opts validate.Options, results []validate.FileResult) {
+	kinds := map[string]int{}
+	fail := 0
+	for _, r := range results {
+		k := string(r.Kind)
+		if k == "" {
+			k = "unknown"
+		}
+		kinds[k]++
+		if !r.OK {
+			fail++
+		}
+	}
+	env.SetTelVal("validate", g.Marshal(g.M(
+		"compile", opts.Compile,
+		"file_count", len(results),
+		"fail_count", fail,
+		"kinds", kinds,
+	)))
 }
 
 func collectValidatePaths(c *g.CliSC) []string {
