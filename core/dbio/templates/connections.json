@@ -427,6 +427,22 @@
         }
       }
     },
+    "odbc": {
+      "name": "ODBC",
+      "description": "Generic ODBC database connection",
+      "category": "database",
+      "properties": {
+        "conn_string": {
+          "type": "string",
+          "description": "ODBC connection string (DSN or DSN-less)",
+          "required": true
+        },
+        "conn_template": {
+          "type": "string",
+          "description": "SQL template name for query syntax (e.g. sqlserver, postgres, mysql)"
+        }
+      }
+    },
     "oracle": {
       "name": "Oracle",
       "description": "Oracle database connection",
@@ -478,6 +494,10 @@
           "description": "Port number",
           "default": 1433
         },
+        "instance": {
+          "type": "string",
+          "description": "Named instance (uses SQL Browser on UDP 1434; omit when setting port)"
+        },
         "user": {
           "type": "string",
           "description": "Username for authentication",
@@ -507,6 +527,57 @@
           "type": "boolean",
           "description": "Trust server certificate",
           "default": false
+        }
+      }
+    },
+    "scylladb": {
+      "name": "ScyllaDB",
+      "description": "ScyllaDB / Cassandra-compatible database connection",
+      "category": "database",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname / IP of the contact point",
+          "required": true
+        },
+        "port": {
+          "type": "number",
+          "description": "Port number",
+          "default": 9042
+        },
+        "user": {
+          "type": "string",
+          "description": "Username for authentication"
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for authentication"
+        },
+        "keyspace": {
+          "type": "string",
+          "description": "Default keyspace (aliases: database, schema)"
+        },
+        "hosts": {
+          "type": "string",
+          "description": "Additional contact points (comma-separated)"
+        },
+        "local_dc": {
+          "type": "string",
+          "description": "Local datacenter for DC-aware routing"
+        },
+        "consistency": {
+          "type": "string",
+          "description": "Default consistency level (e.g. QUORUM, LOCAL_QUORUM)"
+        },
+        "disable_initial_host_lookup": {
+          "type": "boolean",
+          "description": "Skip peer host lookup (useful for Docker/K8s)",
+          "default": true
+        },
+        "num_conns": {
+          "type": "number",
+          "description": "Connections per host",
+          "default": 2
         }
       }
     },
@@ -901,6 +972,78 @@
         }
       }
     },
+    "fabric": {
+      "name": "Microsoft Fabric",
+      "description": "Microsoft Fabric warehouse connection",
+      "category": "database",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Fabric warehouse hostname",
+          "required": true
+        },
+        "port": {
+          "type": "number",
+          "description": "Port number",
+          "default": 1433
+        },
+        "user": {
+          "type": "string",
+          "description": "Username for authentication"
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for authentication"
+        },
+        "database": {
+          "type": "string",
+          "description": "Warehouse or database name",
+          "required": true
+        },
+        "schema": {
+          "type": "string",
+          "description": "Default schema name"
+        },
+        "fedauth": {
+          "type": "string",
+          "description": "Azure AD authentication mode (e.g. ActiveDirectoryAzCli)"
+        },
+        "client_id": {
+          "type": "string",
+          "description": "Azure service principal application ID"
+        },
+        "tenant_id": {
+          "type": "string",
+          "description": "Microsoft Entra tenant ID"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "Azure service principal client secret"
+        },
+        "abfs_endpoint": {
+          "type": "string",
+          "description": "OneLake / ABFS endpoint for bulk staging"
+        },
+        "abfs_filesystem": {
+          "type": "string",
+          "description": "OneLake workspace UUID for bulk staging"
+        },
+        "abfs_parent": {
+          "type": "string",
+          "description": "Lakehouse UUID/Files path for bulk staging"
+        },
+        "encrypt": {
+          "type": "boolean",
+          "description": "Encrypt connection",
+          "default": true
+        },
+        "trust_server_certificate": {
+          "type": "boolean",
+          "description": "Trust server certificate",
+          "default": false
+        }
+      }
+    },
     "databricks": {
       "name": "Databricks",
       "description": "Databricks lakehouse platform",
@@ -1132,14 +1275,139 @@
       "description": "DuckLake data lakehouse",
       "category": "datalake",
       "properties": {
-        "path": {
+        "catalog_type": {
           "type": "string",
-          "description": "DuckLake path",
+          "description": "Catalog database type: duckdb, sqlite, postgres, or mysql",
+          "default": "duckdb",
+          "enum": [
+            "duckdb",
+            "sqlite",
+            "postgres",
+            "mysql"
+          ]
+        },
+        "catalog_conn_string": {
+          "type": "string",
+          "description": "Connection string for the catalog database",
           "required": true
         },
-        "format": {
+        "catalog_schema": {
           "type": "string",
-          "description": "Data format"
+          "description": "Schema for catalog tables (postgres/mysql)"
+        },
+        "data_path": {
+          "type": "string",
+          "description": "Path to data files (local, s3://, r2://, az://, gs://)"
+        },
+        "data_inlining_limit": {
+          "type": "number",
+          "description": "Row limit for DATA_INLINING_ROW_LIMIT"
+        },
+        "copy_method": {
+          "type": "string",
+          "description": "Copy method into DuckDB",
+          "default": "arrow_http",
+          "enum": [
+            "csv_http",
+            "arrow_http"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "Default schema",
+          "default": "main"
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "Write data using Parquet encryption"
+        },
+        "url_style": {
+          "type": "string",
+          "description": "S3 URL style (e.g. path for MinIO)"
+        },
+        "use_ssl": {
+          "type": "boolean",
+          "description": "Use HTTPS for S3-compatible endpoints"
+        },
+        "duckdb_version": {
+          "type": "string",
+          "description": "DuckDB CLI version to use"
+        },
+        "max_buffer_size": {
+          "type": "number",
+          "description": "Max buffer size when piping from DuckDB CLI"
+        },
+        "max_line_size": {
+          "type": "number",
+          "description": "Max CSV line size when copy_method is csv_http"
+        },
+        "s3_access_key_id": {
+          "type": "string",
+          "description": "AWS / S3 access key ID"
+        },
+        "s3_secret_access_key": {
+          "type": "string",
+          "description": "AWS / S3 secret access key"
+        },
+        "s3_session_token": {
+          "type": "string",
+          "description": "AWS session token"
+        },
+        "s3_region": {
+          "type": "string",
+          "description": "AWS region"
+        },
+        "s3_profile": {
+          "type": "string",
+          "description": "AWS profile name"
+        },
+        "s3_endpoint": {
+          "type": "string",
+          "description": "S3-compatible endpoint URL"
+        },
+        "azure_account_name": {
+          "type": "string",
+          "description": "Azure storage account name"
+        },
+        "azure_account_key": {
+          "type": "string",
+          "description": "Azure storage account key"
+        },
+        "azure_sas_token": {
+          "type": "string",
+          "description": "Azure SAS token"
+        },
+        "azure_tenant_id": {
+          "type": "string",
+          "description": "Azure tenant ID"
+        },
+        "azure_client_id": {
+          "type": "string",
+          "description": "Azure client ID"
+        },
+        "azure_client_secret": {
+          "type": "string",
+          "description": "Azure client secret"
+        },
+        "azure_connection_string": {
+          "type": "string",
+          "description": "Azure connection string"
+        },
+        "gcs_key_file": {
+          "type": "string",
+          "description": "Path to GCS service account key file"
+        },
+        "gcs_project_id": {
+          "type": "string",
+          "description": "GCS project ID"
+        },
+        "gcs_access_key_id": {
+          "type": "string",
+          "description": "GCS HMAC access key ID"
+        },
+        "gcs_secret_access_key": {
+          "type": "string",
+          "description": "GCS HMAC secret access key"
         }
       }
     },
@@ -1148,14 +1416,126 @@
       "description": "Apache Iceberg table format",
       "category": "datalake",
       "properties": {
-        "catalog_uri": {
+        "catalog_type": {
           "type": "string",
-          "description": "Iceberg catalog URI",
-          "required": true
+          "description": "Catalog type: rest, glue, or sql",
+          "default": "rest",
+          "enum": [
+            "rest",
+            "glue",
+            "sql"
+          ]
         },
-        "warehouse": {
+        "schema": {
           "type": "string",
-          "description": "Warehouse path"
+          "description": "Default schema",
+          "default": "main"
+        },
+        "rest_uri": {
+          "type": "string",
+          "description": "REST catalog endpoint URI"
+        },
+        "rest_warehouse": {
+          "type": "string",
+          "description": "Warehouse location for the REST catalog"
+        },
+        "rest_token": {
+          "type": "string",
+          "description": "OAuth token for REST catalog auth"
+        },
+        "rest_oauth_client_id": {
+          "type": "string",
+          "description": "OAuth client ID"
+        },
+        "rest_oauth_client_secret": {
+          "type": "string",
+          "description": "OAuth client secret"
+        },
+        "rest_oauth_scope": {
+          "type": "string",
+          "description": "OAuth scope"
+        },
+        "rest_oauth_server_uri": {
+          "type": "string",
+          "description": "OAuth server URI for token requests"
+        },
+        "rest_prefix": {
+          "type": "string",
+          "description": "API prefix for the REST catalog"
+        },
+        "rest_metadata_location": {
+          "type": "string",
+          "description": "Custom metadata location"
+        },
+        "rest_extra_props": {
+          "type": "string",
+          "description": "Additional REST properties as JSON string"
+        },
+        "rest_sigv4_enable": {
+          "type": "boolean",
+          "description": "Enable AWS SigV4 authentication"
+        },
+        "rest_sigv4_region": {
+          "type": "string",
+          "description": "AWS region for SigV4"
+        },
+        "rest_sigv4_service": {
+          "type": "string",
+          "description": "AWS service name for SigV4"
+        },
+        "glue_warehouse": {
+          "type": "string",
+          "description": "Glue warehouse location in S3"
+        },
+        "glue_account_id": {
+          "type": "string",
+          "description": "AWS account ID for Glue catalog"
+        },
+        "glue_namespace": {
+          "type": "string",
+          "description": "Namespace in the Glue catalog"
+        },
+        "glue_extra_props": {
+          "type": "string",
+          "description": "Extra Glue properties (JSON/object)"
+        },
+        "sql_catalog_name": {
+          "type": "string",
+          "description": "Name of the SQL catalog",
+          "default": "sql"
+        },
+        "sql_catalog_conn": {
+          "type": "string",
+          "description": "Sling database connection name for SQL catalog backend"
+        },
+        "sql_catalog_init": {
+          "type": "boolean",
+          "description": "Initialize catalog tables if missing",
+          "default": true
+        },
+        "s3_access_key_id": {
+          "type": "string",
+          "description": "AWS / S3 access key ID"
+        },
+        "s3_secret_access_key": {
+          "type": "string",
+          "description": "AWS / S3 secret access key"
+        },
+        "s3_session_token": {
+          "type": "string",
+          "description": "AWS session token"
+        },
+        "s3_region": {
+          "type": "string",
+          "description": "AWS region"
+        },
+        "s3_profile": {
+          "type": "string",
+          "description": "AWS profile name"
+        },
+        "s3_endpoint": {
+          "type": "string",
+          "description": "S3-compatible endpoint URL"
         }
       }
     },
