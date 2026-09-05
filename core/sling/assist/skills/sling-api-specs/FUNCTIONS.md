@@ -16,6 +16,12 @@ Functions available within `{...}` expressions. Double-quoted strings are prefer
 | `split_part(str, sep, idx)` | Get split part (1-based) | `split_part("a,b,c", ",", 2)` → "b" |
 | `join(array, sep)` | Join array | `join(["a","b"], ", ")` → "a, b" |
 | `length(value)` | Length of string/array/map | `length("hello")` → 5 |
+| `snake(string)` | Snake case | `snake("Hello World")` → "hello_world" |
+| `slugify(string)` | URL slug | `slugify("Hello World!")` → "hello-world" |
+| `remove_diacritics(s)` | Remove accents | `remove_diacritics("café")` → "cafe" |
+| `replace_accents(s)` | Alias of remove_diacritics | `replace_accents("café")` → "cafe" |
+| `replace_non_printable(s)` | Strip control chars | Cleans non-printable |
+| `replace_0x00(s)` | Remove null bytes | Cleans \x00 |
 
 ## Numeric Functions
 
@@ -29,6 +35,8 @@ Functions available within `{...}` expressions. Double-quoted strings are prefer
 | `least(array\|vals...)` | Minimum value | `least(1, 5, 3)` → 1 |
 | `is_greater(a, b)` | Check a > b | `is_greater(5, 3)` → true |
 | `is_less(a, b)` | Check a < b | `is_less(3, 5)` → true |
+| `int_range(start, end)` | Integer range array | `int_range(1, 3)` → [1,2,3] |
+| `bool_parse(value)` | Parse boolean | `bool_parse("true")` → true |
 
 ## Date Functions
 
@@ -45,6 +53,8 @@ Uses strftime format conventions.
 | `date_extract(date, part)` | Extract part | `date_extract(now(), "year")` → 2024 |
 | `date_last(date[, period])` | Last day of period | `date_last(now(), "month")` |
 | `date_first(date[, period])` | First day of period | `date_first(now(), "month")` |
+| `date_timezone(date, tz)` | Convert timezone | `date_timezone(now(), "UTC")` |
+| `date_range(start, end[, step])` | Alias of range for dates | `date_range(d1, d2, "1d")` |
 | `range(start, end[, step])` | Array of time objects | `range(d1, d2, "1d")` |
 
 **Units**: year, month, week, day, hour, minute, second
@@ -77,6 +87,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `null_if(val, sentinel[, …])` | Null if equal | `null_if("N/A", "N/A")` → null |
 | `nullif(val, sentinel[, …])` | Alias of null_if | `nullif(x, "")` → null |
 | `value(v1, v2, ...)` | First non-empty | `value("", "default")` → "default" |
+| `first_valid(v1, v2, ...)` | Alias of value | `first_valid("", "default")` → "default" |
 | `require(val[, msg])` | Ensure not null | `require(secrets.key, "Key required")` |
 | `cast(val, type)` | Convert type | `cast("42", "int")` → 42 |
 | `try_cast(val, type)` | Convert or null | `try_cast("abc", "int")` → null |
@@ -99,6 +110,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `values(map)` | Get values | `values({"a":1})` → [1] |
 | `exists(coll, item)` | Check existence | `exists({"a":1}, "a")` → true |
 | `jmespath(obj, expr)` | JMESPath query | `jmespath(data, "items[].id")` |
+| `jp(obj, expr)` | Alias of jmespath | `jp(data, "items[].id")` |
 | `jq(obj, expr)` | jq filter (returns array) | `jq(data, ".items[].id")` |
 | `get_path(obj, path)` | Dot notation access | `get_path(data, "a.b[0]")` |
 | `object_rename(map, old, new, ...)` | Rename keys | `object_rename(m, "a", "x")` |
@@ -107,6 +119,8 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `object_merge(m1, m2, ...)` | Merge maps | `object_merge(m1, m2)` |
 | `object_zip(keys, vals)` | Create from arrays | `object_zip(["a"], [1])` → {"a":1} |
 | `filter(array, expr)` | Filter array | `filter([1,2,3], "value > 1")` → [2,3] |
+| `pluck(array, key)` | Extract field from objects | `pluck([{a:1}], "a")` → [1] |
+| `explode(array)` | Explode array values | Used when flattening lists |
 | `map(array, expr)` | Transform array | `map([1,2,3], "value * 2")` → [2,4,6] |
 | `sort(array[, desc])` | Sort array | `sort([3,1,2])` → [1,2,3] |
 | `chunk(array\|queue, size)` | Split into chunks | `chunk(queue.ids, 50)` |
@@ -141,6 +155,7 @@ chunk(queue.ids, 50)
 | `encode_base64(string)` | Base64 encode | `encode_base64("hello")` |
 | `decode_base64(string)` | Base64 decode | `decode_base64("aGVsbG8=")` |
 | `hash(str[, algo])` | Hash string | `hash("hello", "sha256")` |
+| `json_parse(string)` | Parse JSON string | `json_parse('{"a":1}')` |
 
 **Hash algorithms**: md5, sha1, sha256
 
@@ -152,6 +167,12 @@ chunk(queue.ids, 50)
 | `log(message)` | Log and return | `log("Debug: " + record.id)` |
 | `regex_match(str, pattern)` | Check regex match | `regex_match("img.jpg", ".*\\.jpg")` |
 | `regex_extract(str, pat[, idx])` | Extract regex group | `regex_extract("id=123", "id=(\\d+)", 1)` → "123" |
+| `regex_replace(str, pat, repl)` | Regex replace | `regex_replace("a1", "\\d", "X")` → "aX" |
+| `type_of(value)` | Runtime type name | `type_of(42)` → "integer" |
+| `parse_ms_uuid(string)` | Parse MS UUID timestamp | Extracts time from MS-style UUID |
+| `pretty_table(rows)` | Format rows as table | Debug / log helper |
+| `conn_property(name)` | Connection property | Reads from active connection |
+| `machine_stats()` | Host stats object | Runtime diagnostics |
 
 ## Common Patterns
 

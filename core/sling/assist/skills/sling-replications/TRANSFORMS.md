@@ -47,6 +47,7 @@ transforms:
 | `snake(s)` | Snake case | `snake("Hello World")` -> "hello_world" |
 | `slugify(s)` | URL slug | `slugify("Hello World!")` -> "hello-world" |
 | `remove_diacritics(s)` | Remove accents | `remove_diacritics("café")` -> "cafe" |
+| `replace_accents(s)` | Alias of remove_diacritics | `replace_accents("café")` -> "cafe" |
 | `replace_non_printable(s)` | Clean string | Removes control chars |
 | `replace_0x00(s)` | Remove null bytes | Cleans null chars |
 
@@ -79,6 +80,7 @@ transforms:
 | `date_first(d, period)` | First of period | `date_first(now(), "month")` |
 | `date_last(d, period)` | Last of period | `date_last(now(), "month")` |
 | `date_range(s, e, step)` | Date range | `date_range("2024-01-01", "2024-01-03", "1d")` |
+| `range(s, e[, step])` | Alias of date_range (time array) | `range(d1, d2, "1d")` |
 | `date_timezone(d, tz)` | Convert TZ | `date_timezone(now(), "America/New_York")` |
 
 **Date units**: year, month, week, day, hour, minute, second
@@ -117,9 +119,15 @@ transforms:
 | `sort(arr, desc?)` | Sort array | `sort([3,1,2])` -> [1,2,3] |
 | `pluck(arr, key)` | Extract field | `pluck([{a:1},{a:2}], "a")` -> [1,2] |
 | `jmespath(obj, expr)` | JMESPath query | `jmespath(data, "items[].name")` |
+| `jp(obj, expr)` | Alias of jmespath | `jp(data, "items[].name")` |
 | `jq(obj, expr)` | jq filter (returns array) | `jq(data, ".items[].name")` |
 | `get_path(obj, path)` | Get by path | `get_path(obj, "a.b[0]")` |
 | `object_merge(...)` | Merge objects | `object_merge({a:1}, {b:2})` |
+| `object_delete(obj, keys...)` | Delete keys | `object_delete(obj, "a")` |
+| `object_rename(obj, map)` | Rename keys | `object_rename(obj, {"a":"b"})` |
+| `object_zip(keys, vals)` | Zip to object | `object_zip(["a"], [1])` |
+| `object_casing(obj, casing)` | Recase keys | `object_casing(obj, "snake")` |
+| `explode(arr)` | Explode array to rows | Used in staged transforms |
 | `chunk(arr, size)` | Split chunks | `chunk([1,2,3,4], 2)` |
 
 ## Encoding Functions
@@ -143,6 +151,10 @@ transforms:
 | `regex_extract(s, pat, i)` | Extract match | `regex_extract("id=123", "id=(\\d+)", 1)` |
 | `regex_replace(s, pat, r)` | Replace pattern | `regex_replace("a1b2", "\\d", "X")` |
 | `type_of(v)` | Get type | `type_of(42)` -> "integer" |
+| `parse_ms_uuid(s)` | Parse MS UUID timestamp | Extracts time from MS-style UUID |
+| `pretty_table(rows)` | Format as table string | Debug / log helper |
+| `conn_property(name)` | Connection property | Reads from active connection |
+| `machine_stats()` | Host stats object | Runtime diagnostics |
 
 ## Transform Examples
 
