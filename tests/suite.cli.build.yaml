@@ -164,7 +164,7 @@
     sling build run tests/build/range_test_project --target POSTGRES -s fact_orders --debug
   output_contains:
     - 'incremental'
-    - 'tier B'
+    - 'target MAX'
     - 'SELECT MAX('
     - 'Build Completed'
 
