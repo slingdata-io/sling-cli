@@ -866,15 +866,20 @@
           "description": "Cloudflare account ID",
           "required": true
         },
-        "database_id": {
+        "api_token": {
           "type": "string",
-          "description": "D1 database ID",
+          "description": "Cloudflare API token to access D1 resources",
           "required": true
         },
-        "token": {
+        "database": {
           "type": "string",
-          "description": "Cloudflare API token",
+          "description": "D1 database name (not UUID)",
           "required": true
+        },
+        "insert_concurrency": {
+          "type": "number",
+          "description": "Max concurrent requests when inserting data",
+          "default": 50
         }
       }
     },
