@@ -1687,6 +1687,14 @@ remap:
 				goto remap
 			}
 		}
+	} else if col.Type == UUIDType {
+		if ct.UUID != nil {
+			origType := col.Type
+			ct.UUID.Apply(col)
+			if col.Type != origType {
+				goto remap
+			}
+		}
 	}
 
 	return
@@ -2557,6 +2565,7 @@ type ColumnTyping struct {
 	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
 	JSON    *JsonColumnTyping    `json:"json,omitempty" yaml:"json,omitempty"`
 	Boolean *BooleanColumnTyping `json:"boolean,omitempty" yaml:"boolean,omitempty"`
+	UUID    *UUIDColumnTyping    `json:"uuid,omitempty" yaml:"uuid,omitempty"`
 }
 
 func (ct *ColumnTyping) MaxDecimals() int {
@@ -2691,6 +2700,20 @@ func (jct *JsonColumnTyping) Apply(col *Column) {
 	if jct.AsText {
 		// set to text type
 		col.Type = TextType
+	}
+}
+
+// UUIDColumnTyping contains uuid type mapping configurations
+type UUIDColumnTyping struct {
+	AsText bool `json:"as_text,omitempty" yaml:"as_text,omitempty"`
+}
+
+func (uct *UUIDColumnTyping) Apply(col *Column) {
+	if uct.AsText {
+		// a uuid is fixed-width, use varchar(36) instead of text
+		col.Type = StringType
+		col.DbPrecision = 36
+		col.Sourced = true
 	}
 }
 
