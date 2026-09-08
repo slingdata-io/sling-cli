@@ -1,4 +1,5 @@
 core:
+  explain: explain query plan {sql}
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   drop_index: drop index if exists {index}

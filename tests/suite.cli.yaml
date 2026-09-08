@@ -2891,6 +2891,29 @@
   output_contains:
     - 'execution succeeded'
 
+# A uniqueidentifier column in the stream makes setTransforms overwrite the
+# transforms prop, so user transforms on other columns are dropped (discussion 798).
+- id: 598
+  name: 'MSSQL uniqueidentifier drops user transforms (discussion 798)'
+  run: 'sling run -d -r tests/replications/r.101.mssql_uuid_drops_transforms.yaml'
+  group: mssql
+  output_contains:
+    - 'control passed: transform applied without uniqueidentifier'
+    - 'transform applied with uniqueidentifier present'
+
+# target_options.column_typing.uuid.as_text maps uuid columns to varchar(36)
+# instead of the target's native uuid type (discussion 798).
+- id: 599
+  name: 'column_typing uuid as_text maps uuid to varchar (discussion 798)'
+  run: 'sling run -d -r tests/replications/r.102.uuid_column_typing_as_text.yaml'
+  group: mssql
+  output_contains:
+    - 'control passed: uuid target type without the option'
+    - 'as_text landed guid_col as varchar'
+    - 'as_text used varchar(36)'
+    - 'guid value preserved as text'
+    - 'null guid preserved as text'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -27,10 +27,11 @@ from sling.options import SourceOptions, TargetOptions
 - **Source**: `src_conn`, `src_stream`, `src_options`
 - **Target**: `tgt_conn`, `tgt_object`, `tgt_options`
 - **Transforms**: `select`, `where`, `transforms`, `columns`
-- **Mode**: `mode` (full-refresh, incremental, truncate, snapshot, backfill)
+- **Mode**: `mode` (full-refresh, incremental, truncate, snapshot, backfill, definition-only, change-capture)
 - **Limits**: `limit`, `offset`, `range`
 - **Keys**: `primary_key`, `update_key`
-- **Config**: `env`, `debug`, `trace`
+- **CDC**: `cdc_options`
+- **Config**: `env`, `replication`, `pipeline`, `directory`, `job`, `debug`, `trace`, `home_dir`
 - **Python-specific**: `input` (data input from Python)
 
 ### 2. Replication Class

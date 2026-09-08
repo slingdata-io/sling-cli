@@ -17,11 +17,6 @@ func (e *Executor) quoteFullTableName(fullName string) (string, error) {
 	return table.FDQN(), nil
 }
 
-// quotedName returns just the quoted bare table name (no schema).
-func (e *Executor) quotedName(name string) string {
-	return e.DbConn.Quote(name)
-}
-
 // supportsDropCascade reports whether the dialect accepts CASCADE on DROP.
 func supportsDropCascade(t dbio.Type) bool {
 	return g.In(t,
@@ -155,26 +150,25 @@ func (e *Executor) truncateTable(fullName string) error {
 }
 
 // insertSelect inserts the result of a SELECT into an existing table.
-func (e *Executor) insertSelect(fullName, selectSQL string) error {
+func (e *Executor) insertSelect(fullName, selectSQL string) (uint64, error) {
 	quoted, err := e.quoteFullTableName(fullName)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = e.DbConn.Exec(g.F("INSERT INTO %s (%s)", quoted, selectSQL))
-	return err
+	return rowsFromExec(e.DbConn.Exec(g.F("INSERT INTO %s (%s)", quoted, selectSQL)))
 }
 
 // createTableAs creates a table from a SELECT, dialect-aware.
 // model may be nil for temp tables that don't need ClickHouse engine config.
-func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) error {
+func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) (uint64, error) {
 	quoted, err := e.quoteFullTableName(fullName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	dbType := e.DbConn.GetType()
 
 	if e.isClickHouse() {
-		engineClause := "ENGINE = Memory"
+		engineClause := "ENGINE = MergeTree()"
 		orderByClause := "ORDER BY tuple()"
 		settings := ""
 		if model != nil {
@@ -187,52 +181,46 @@ func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) error
 				settings = " SETTINGS allow_nullable_key = 1"
 			}
 		}
-		_, err = e.DbConn.Exec(g.F("CREATE TABLE %s %s %s%s AS (%s)", quoted, engineClause, orderByClause, settings, selectSQL))
-		return err
+		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s %s %s%s AS (%s)", quoted, engineClause, orderByClause, settings, selectSQL)))
 	}
 
 	if isSQLServerFamily(dbType) {
 		// SQL Server has no CTAS; use SELECT INTO
-		_, err = e.DbConn.Exec(g.F("SELECT * INTO %s FROM (%s) AS _sling_src", quoted, selectSQL))
-		return err
+		return rowsFromExec(e.DbConn.Exec(g.F("SELECT * INTO %s FROM (%s) AS _sling_src", quoted, selectSQL)))
 	}
 
 	// Standard CTAS (Postgres, MySQL, Snowflake, BigQuery, DuckDB, …)
-	_, err = e.DbConn.Exec(g.F("CREATE TABLE %s AS (%s)", quoted, selectSQL))
-	return err
+	return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s AS (%s)", quoted, selectSQL)))
 }
 
 // createOrReplaceTableAs atomically rebuilds a table from a SELECT when the
 // dialect supports CREATE OR REPLACE TABLE.
-func (e *Executor) createOrReplaceTableAs(fullName, selectSQL string, model *Model) error {
+func (e *Executor) createOrReplaceTableAs(fullName, selectSQL string, model *Model) (uint64, error) {
 	quoted, err := e.quoteFullTableName(fullName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if e.isClickHouse() {
 		// ClickHouse: drop + create (atomic path uses rename elsewhere)
 		return e.createTableAs(fullName, selectSQL, model)
 	}
-	_, err = e.DbConn.Exec(g.F("CREATE OR REPLACE TABLE %s AS (%s)", quoted, selectSQL))
-	return err
+	return rowsFromExec(e.DbConn.Exec(g.F("CREATE OR REPLACE TABLE %s AS (%s)", quoted, selectSQL)))
 }
 
 // createOrReplaceView creates/replaces a view, dialect-aware.
-func (e *Executor) createOrReplaceView(fullName, selectSQL string) error {
+func (e *Executor) createOrReplaceView(fullName, selectSQL string) (uint64, error) {
 	quoted, err := e.quoteFullTableName(fullName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	dbType := e.DbConn.GetType()
 
 	if isSQLServerFamily(dbType) {
 		// SQL Server 2016+: CREATE OR ALTER VIEW
-		_, err = e.DbConn.Exec(g.F("CREATE OR ALTER VIEW %s AS %s", quoted, selectSQL))
-		return err
+		return rowsFromExec(e.DbConn.Exec(g.F("CREATE OR ALTER VIEW %s AS %s", quoted, selectSQL)))
 	}
 
-	_, err = e.DbConn.Exec(g.F("CREATE OR REPLACE VIEW %s AS (%s)", quoted, selectSQL))
-	return err
+	return rowsFromExec(e.DbConn.Exec(g.F("CREATE OR REPLACE VIEW %s AS (%s)", quoted, selectSQL)))
 }
 
 // renameTable renames oldFull → newFull using the dialect template.
@@ -265,20 +253,4 @@ func (e *Executor) renameTable(oldFull, newFull string) error {
 	sql := g.R(tpl, "table", oldQuoted, "new_table", newRef)
 	_, err = e.DbConn.Exec(sql)
 	return err
-}
-
-// bareTableName extracts the unqualified table name from schema.table.
-func bareTableName(fullName string) string {
-	if idx := strings.LastIndex(fullName, "."); idx >= 0 {
-		return fullName[idx+1:]
-	}
-	return fullName
-}
-
-// schemaOf extracts the schema from schema.table.
-func schemaOf(fullName string) string {
-	if idx := strings.LastIndex(fullName, "."); idx >= 0 {
-		return fullName[:idx]
-	}
-	return ""
 }

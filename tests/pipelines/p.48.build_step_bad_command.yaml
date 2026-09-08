@@ -1,0 +1,6 @@
+# command: test rejects run-only keys (full_refresh).
+steps:
+  - type: build
+    build: tests/build/pipeline_step_project
+    command: test
+    full_refresh: true

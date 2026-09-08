@@ -32,17 +32,21 @@ steps:
     check: state.build.ok >= 2
     failure_message: 'expected ok >= 2, got {state.build.ok}'
 
+  - type: check
+    check: state.build.rows == 4
+    failure_message: 'expected 4 rows from stg_orders+fct_orders, got {state.build.rows}'
+
   - type: query
     connection: POSTGRES
     query: |
       SELECT count(*) AS cnt,
              max(run_label) AS run_label
-      FROM marts.fct_orders
+      FROM build_pipeline_step.fct_orders
     into: fct
 
   - type: check
     check: store.fct[0].cnt == 2
-    failure_message: 'expected 2 rows in marts.fct_orders'
+    failure_message: 'expected 2 rows in build_pipeline_step.fct_orders'
 
   - type: check
     check: store.fct[0].run_label == "from_pipeline"
@@ -61,9 +65,13 @@ steps:
     check: state.build_shortcut.ok >= 1
     failure_message: 'shortcut build: form did not run'
 
+  - type: check
+    check: state.build_shortcut.rows == 2
+    failure_message: 'expected 2 rows from stg_orders shortcut, got {state.build_shortcut.rows}'
+
   - type: query
     connection: POSTGRES
-    query: SELECT max(run_label) AS run_label FROM staging.stg_orders
+    query: SELECT max(run_label) AS run_label FROM build_pipeline_step.stg_orders
     into: stg_shortcut
 
   - type: check
@@ -71,11 +79,11 @@ steps:
     failure_message: 'shortcut build vars not applied'
 
   - type: log
-    message: 'SUCCESS: pipeline type:build step completed (rows={store.fct[0].cnt}, label={store.fct[0].run_label})'
+    message: 'SUCCESS: pipeline type:build step completed (rows={store.fct[0].cnt}, build_rows={state.build.rows}, label={store.fct[0].run_label})'
 
   # Cleanup
   - type: query
     connection: POSTGRES
     query: |
-      DROP TABLE IF EXISTS marts.fct_orders;
-      DROP TABLE IF EXISTS staging.stg_orders;
+      DROP TABLE IF EXISTS build_pipeline_step.fct_orders;
+      DROP TABLE IF EXISTS build_pipeline_step.stg_orders;

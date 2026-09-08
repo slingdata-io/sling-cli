@@ -51,7 +51,7 @@ The Sling MCP tool provides these pipeline commands:
 - `pipeline/validate` - Parse and validate the pipeline configuration.
 
 There is no MCP `run` action. Execute pipelines with the CLI: `sling run -p /path/to/pipeline.yaml`.
-There is no MCP `build` action. Execute SQL models with the CLI: `sling build`.
+There is no MCP `build` action. Execute SQL models with the CLI: `sling build run`.
 
 ---
 

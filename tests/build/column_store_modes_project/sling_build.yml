@@ -1,0 +1,7 @@
+target: CLICKHOUSE
+
+defaults:
+  mode: full-refresh
+
+vars:
+  extra: false

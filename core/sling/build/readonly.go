@@ -44,7 +44,11 @@ func ValidateReadOnlyQuery(sql string, dbType dbio.Type) error {
 	for k := range obj {
 		typeKey = k
 	}
-	if !readOnlyASTKeys[typeKey] {
+	if typeKey == "command" {
+		if err := validateCommandReadOnly(sql); err != nil {
+			return err
+		}
+	} else if !readOnlyASTKeys[typeKey] {
 		return readOnlyErrorf("%s statement", typeKey)
 	}
 
@@ -86,6 +90,24 @@ var readOnlyASTKeys = map[string]bool{
 	"values":        true,
 	"show":          true,
 	"describe":      true,
+	"explain":       true,
+}
+
+// validateCommandReadOnly allows SHOW/DESCRIBE/DESC/EXPLAIN when golyglot
+// emits a generic command node. SET/USE/PRAGMA stay denied.
+func validateCommandReadOnly(sql string) error {
+	stripped := strings.TrimSpace(stripSQLCommentsAndLiterals(sql))
+	for strings.HasSuffix(stripped, ";") {
+		stripped = strings.TrimSpace(strings.TrimSuffix(stripped, ";"))
+	}
+	tokens := sqlWordTokens(stripped)
+	if len(tokens) == 0 {
+		return readOnlyErrorf("command statement")
+	}
+	if !readOnlyFirstKeywords[tokens[0]] {
+		return readOnlyErrorf("%s statement", strings.ToLower(tokens[0]))
+	}
+	return nil
 }
 
 var mutatingASTKeys = map[string]bool{

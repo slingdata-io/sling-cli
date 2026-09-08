@@ -594,16 +594,14 @@ func newTestProjectDev() *BuildProject {
 			"stg_orders": {
 				Name:              "stg_orders",
 				Schema:            "dev_fritz",
-				Prefix:            "staging",
-				FullTableName:     "dev_fritz.staging_stg_orders",
+				FullTableName:     "dev_fritz.stg_orders",
 				ProdFullTableName: "staging.stg_orders",
 				RawSQL:            "SELECT 1 as id, 'order_1' as name",
 			},
 			"stg_customers": {
 				Name:              "stg_customers",
 				Schema:            "dev_fritz",
-				Prefix:            "staging",
-				FullTableName:     "dev_fritz.staging_stg_customers",
+				FullTableName:     "dev_fritz.stg_customers",
 				ProdFullTableName: "staging.stg_customers",
 				RawSQL:            "SELECT 1 as id, 'customer_1' as name",
 			},
@@ -612,8 +610,7 @@ func newTestProjectDev() *BuildProject {
 			"country_codes": {
 				Name:              "country_codes",
 				Schema:            "dev_fritz",
-				Prefix:            "staging",
-				FullTableName:     "dev_fritz.staging_country_codes",
+				FullTableName:     "dev_fritz.country_codes",
 				ProdFullTableName: "staging.country_codes",
 				Format:            "csv",
 			},
@@ -990,6 +987,24 @@ SELECT * FROM {{ ref('stg_customers') }}`,
 	assert.Equal(t, "view", model.Config.Mode)
 }
 
+func TestCompileWithConfigUnknownModeRejected(t *testing.T) {
+	project := newTestProject()
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{
+		Name:          "bad_mode",
+		Schema:        "marts",
+		FullTableName: "marts.bad_mode",
+		RawSQL: `{%- config(mode='vew') -%}
+SELECT 1`,
+	}
+	project.Models["bad_mode"] = model
+
+	_, err := te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown mode 'vew'")
+}
+
 func TestCompileWithConfigEnabled(t *testing.T) {
 	project := newTestProject()
 	te := NewTemplateEngine(project, nil)
@@ -1214,7 +1229,7 @@ func TestRewriteTableReferences_ProdMode(t *testing.T) {
 
 	// In prod mode, prod name == current name, so rewriting is a no-op
 	sql := "SELECT * FROM staging.stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	assert.Equal(t, "SELECT * FROM staging.stg_orders", rewritten)
 	assert.Contains(t, deps, "stg_orders")
@@ -1224,9 +1239,9 @@ func TestRewriteTableReferences_DevMode(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := "SELECT * FROM staging.stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Equal(t, "SELECT * FROM dev_fritz.staging_stg_orders", rewritten)
+	assert.Equal(t, "SELECT * FROM dev_fritz.stg_orders", rewritten)
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1236,10 +1251,10 @@ func TestRewriteTableReferences_DevModeMultiple(t *testing.T) {
 	sql := `SELECT o.*, c.name
 FROM staging.stg_orders o
 JOIN staging.stg_customers c ON o.id = c.id`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Contains(t, rewritten, "FROM dev_fritz.staging_stg_orders o")
-	assert.Contains(t, rewritten, "JOIN dev_fritz.staging_stg_customers c")
+	assert.Contains(t, rewritten, "FROM dev_fritz.stg_orders o")
+	assert.Contains(t, rewritten, "JOIN dev_fritz.stg_customers c")
 	assert.Contains(t, deps, "stg_orders")
 	assert.Contains(t, deps, "stg_customers")
 }
@@ -1249,7 +1264,7 @@ func TestRewriteTableReferences_NoMatch(t *testing.T) {
 
 	// External table not in project — should not be rewritten
 	sql := "SELECT * FROM external_db.raw_events"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	assert.Equal(t, "SELECT * FROM external_db.raw_events", rewritten)
 	assert.Empty(t, deps)
@@ -1260,10 +1275,10 @@ func TestRewriteTableReferences_StringsNotRewritten(t *testing.T) {
 
 	// Table name inside string literal should NOT be rewritten
 	sql := "SELECT 'staging.stg_orders' as table_name FROM staging.stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	assert.Contains(t, rewritten, "'staging.stg_orders'") // string preserved
-	assert.Contains(t, rewritten, "FROM dev_fritz.staging_stg_orders") // real ref rewritten
+	assert.Contains(t, rewritten, "FROM dev_fritz.stg_orders") // real ref rewritten
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1272,10 +1287,10 @@ func TestRewriteTableReferences_CommentsNotRewritten(t *testing.T) {
 
 	sql := `-- FROM staging.stg_orders
 SELECT * FROM staging.stg_customers`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	assert.Contains(t, rewritten, "-- FROM staging.stg_orders") // comment preserved
-	assert.Contains(t, rewritten, "FROM dev_fritz.staging_stg_customers")
+	assert.Contains(t, rewritten, "FROM dev_fritz.stg_customers")
 	assert.Contains(t, deps, "stg_customers")
 }
 
@@ -1287,7 +1302,7 @@ func TestRewriteTableReferences_CTENotRewritten(t *testing.T) {
     SELECT 1 as id
 )
 SELECT * FROM stg_orders`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	// The CTE reference should not be rewritten
 	assert.Contains(t, rewritten, "FROM stg_orders")
@@ -1300,9 +1315,9 @@ func TestRewriteTableReferences_UnqualifiedName(t *testing.T) {
 
 	// Bare table name without schema should match by model name
 	sql := "SELECT * FROM stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Equal(t, "SELECT * FROM dev_fritz.staging_stg_orders", rewritten)
+	assert.Equal(t, "SELECT * FROM dev_fritz.stg_orders", rewritten)
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1311,7 +1326,7 @@ func TestRewriteTableReferences_SelfNotRewritten(t *testing.T) {
 
 	// Self-references should not be rewritten
 	sql := "SELECT * FROM staging.stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "stg_orders")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "stg_orders")
 
 	assert.Equal(t, "SELECT * FROM staging.stg_orders", rewritten)
 	assert.Empty(t, deps)
@@ -1321,10 +1336,10 @@ func TestRewriteTableReferences_DoubleQuoted(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := `SELECT * FROM "staging"."stg_orders"`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	// Quotes should be preserved in the replacement
-	assert.Equal(t, `SELECT * FROM "dev_fritz"."staging_stg_orders"`, rewritten)
+	assert.Equal(t, `SELECT * FROM "dev_fritz"."stg_orders"`, rewritten)
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1332,10 +1347,10 @@ func TestRewriteTableReferences_Backticked(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := "SELECT * FROM `staging`.`stg_orders`"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	// Backticks should be preserved in the replacement
-	assert.Equal(t, "SELECT * FROM `dev_fritz`.`staging_stg_orders`", rewritten)
+	assert.Equal(t, "SELECT * FROM `dev_fritz`.`stg_orders`", rewritten)
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1343,10 +1358,10 @@ func TestRewriteTableReferences_UnquotedPreserved(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := "SELECT * FROM staging.stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	// No quotes in original, no quotes in replacement
-	assert.Equal(t, "SELECT * FROM dev_fritz.staging_stg_orders", rewritten)
+	assert.Equal(t, "SELECT * FROM dev_fritz.stg_orders", rewritten)
 	assert.Contains(t, deps, "stg_orders")
 }
 
@@ -1354,10 +1369,10 @@ func TestRewriteTableReferences_MixedQuotesAndPlain(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := `SELECT * FROM "staging"."stg_orders" o JOIN staging.stg_customers c ON o.id = c.id`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Contains(t, rewritten, `"dev_fritz"."staging_stg_orders"`)
-	assert.Contains(t, rewritten, "dev_fritz.staging_stg_customers")
+	assert.Contains(t, rewritten, `"dev_fritz"."stg_orders"`)
+	assert.Contains(t, rewritten, "dev_fritz.stg_customers")
 	assert.Contains(t, deps, "stg_orders")
 	assert.Contains(t, deps, "stg_customers")
 }
@@ -1367,7 +1382,7 @@ func TestRewriteTableReferences_QuotedProdMode(t *testing.T) {
 
 	// In prod mode, quoted identifiers should still be preserved (identity rewrite)
 	sql := `SELECT * FROM "staging"."stg_orders"`
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
 	assert.Equal(t, `SELECT * FROM "staging"."stg_orders"`, rewritten)
 	assert.Contains(t, deps, "stg_orders")
@@ -1377,9 +1392,9 @@ func TestRewriteTableReferences_SeedRewritten(t *testing.T) {
 	project := newTestProjectDev()
 
 	sql := "SELECT * FROM staging.country_codes"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Equal(t, "SELECT * FROM dev_fritz.staging_country_codes", rewritten)
+	assert.Equal(t, "SELECT * FROM dev_fritz.country_codes", rewritten)
 	assert.Contains(t, deps, "country_codes")
 }
 
@@ -1388,11 +1403,71 @@ func TestRewriteTableReferences_RefOutputNotDoubleRewritten(t *testing.T) {
 
 	// In dev mode, ref() already returns the dev name.
 	// The rewriter should NOT match it again (dev name is not in the prod-name index).
-	sql := "SELECT * FROM dev_fritz.staging_stg_orders"
-	rewritten, deps := RewriteTableReferences(sql, project, "some_model")
+	sql := "SELECT * FROM dev_fritz.stg_orders"
+	rewritten, deps, _ := RewriteTableReferences(sql, project, "some_model")
 
-	assert.Equal(t, "SELECT * FROM dev_fritz.staging_stg_orders", rewritten)
+	assert.Equal(t, "SELECT * FROM dev_fritz.stg_orders", rewritten)
 	assert.Empty(t, deps) // no match since dev name != prod name
+}
+
+func TestRefStemAndSchemaTable(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+	te := NewTemplateEngine(project, nil)
+	model := &Model{Name: "downstream", RawSQL: `select * from {{ ref("events") }}`}
+	sql, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "analytics.events")
+	assert.Contains(t, model.DependsOn, "events")
+	assert.Contains(t, model.Refs, "events")
+
+	model = &Model{Name: "downstream2", RawSQL: `select * from {{ ref("analytics.events") }}`}
+	sql, err = te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "analytics.events")
+	assert.Contains(t, model.DependsOn, "events")
+}
+
+func TestRefOldPrefixedNameNotFound(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+	te := NewTemplateEngine(project, nil)
+	model := &Model{Name: "downstream", RawSQL: `select * from {{ ref("plausible_events") }}`}
+	_, err := te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestRewriteTableReferencesProdQualified(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+	rewritten, deps, err := RewriteTableReferences("select * from analytics.events", project, "downstream")
+	require.NoError(t, err)
+	assert.Equal(t, "select * from analytics.events", rewritten)
+	assert.Contains(t, deps, "events")
+}
+
+func TestRefThreePart(t *testing.T) {
+	project := loadDatabaseProject(t, BuildOptions{Prod: true})
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "downstream", RawSQL: `select * from {{ ref("dim_customers") }}`}
+	sql, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "ANALYTICS_DB.marts.dim_customers")
+
+	// `this` renders the three-part name
+	revenue := project.Models["revenue"]
+	revenue.RawSQL = "select * from {{ this }}"
+	sql, err = te.CompileModel(revenue, nil)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "FIN_DB.marts.revenue")
+}
+
+func TestRewriteTableReferencesThreePart(t *testing.T) {
+	project := loadDatabaseProject(t, BuildOptions{Prod: true})
+
+	rewritten, deps, err := RewriteTableReferences("select * from marts.dim_customers", project, "downstream")
+	require.NoError(t, err)
+	assert.Equal(t, "select * from ANALYTICS_DB.marts.dim_customers", rewritten)
+	assert.Contains(t, deps, "dim_customers")
 }
 
 // =============================================================================
@@ -1437,7 +1512,8 @@ func TestPreprocessAtRefs(t *testing.T) {
 		FullTableName: "staging.test_model",
 	}
 
-	result := te.preprocessAtRefs("SELECT * FROM @stg_orders o JOIN @stg_customers c ON o.id = c.id", model)
+	result, err := te.preprocessAtRefs("SELECT * FROM @stg_orders o JOIN @stg_customers c ON o.id = c.id", model)
+	require.NoError(t, err)
 
 	assert.Contains(t, result, "staging.stg_orders")
 	assert.Contains(t, result, "staging.stg_customers")
@@ -1455,10 +1531,11 @@ func TestPreprocessAtRefsDevMode(t *testing.T) {
 		FullTableName: "dev_fritz.test_model",
 	}
 
-	result := te.preprocessAtRefs("SELECT * FROM @stg_orders", model)
+	result, err := te.preprocessAtRefs("SELECT * FROM @stg_orders", model)
+	require.NoError(t, err)
 
 	// Should resolve to dev-mode FullTableName
-	assert.Contains(t, result, "dev_fritz.staging_stg_orders")
+	assert.Contains(t, result, "dev_fritz.stg_orders")
 	assert.Contains(t, model.DependsOn, "stg_orders")
 }
 
@@ -1474,14 +1551,14 @@ func TestCompileModel_SlingStyle_Placeholder_Default(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
 	result, err := te.CompileModel(model, nil)
 	require.NoError(t, err)
 	assert.Contains(t, result, "WHERE 1=1")
-	assert.NotContains(t, result, "{incremental_where_cond}")
+	assert.NotContains(t, result, "incremental_where_cond")
 }
 
 func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
@@ -1492,7 +1569,7 @@ func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1500,7 +1577,7 @@ func TestCompileModel_SlingStyle_Placeholder_Custom(t *testing.T) {
 	result, err := te.CompileModel(model, ctx)
 	require.NoError(t, err)
 	assert.Contains(t, result, `"created_at" > '2024-01-01'`)
-	assert.NotContains(t, result, "{incremental_where_cond}")
+	assert.NotContains(t, result, "incremental_where_cond")
 }
 
 func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
@@ -1511,7 +1588,7 @@ func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT {incremental_value} AS watermark FROM raw",
+		RawSQL:        "SELECT {{ incremental_value() }} AS watermark FROM raw",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1519,7 +1596,7 @@ func TestCompileModel_SlingStyle_IncrementalValue(t *testing.T) {
 	result, err := te.CompileModel(model, ctx)
 	require.NoError(t, err)
 	assert.Contains(t, result, "'2024-01-01' AS watermark")
-	assert.NotContains(t, result, "{incremental_value}")
+	assert.NotContains(t, result, "incremental_value")
 }
 
 func TestCompileModel_DbtStyle_IsIncrementalTrue(t *testing.T) {
@@ -1570,7 +1647,7 @@ func TestCompileModel_NilContext_UsesDefault(t *testing.T) {
 		Name:          "stg_orders",
 		Schema:        "staging",
 		FullTableName: "staging.stg_orders",
-		RawSQL:        "SELECT * FROM raw WHERE {incremental_where_cond}",
+		RawSQL:        "SELECT * FROM raw WHERE {{ incremental_where_cond() }}",
 	}
 	project.Models["stg_orders"] = model
 
@@ -1578,6 +1655,22 @@ func TestCompileModel_NilContext_UsesDefault(t *testing.T) {
 	require.NoError(t, err)
 	// nil context → DefaultIncrementalContext → WhereCond="1=1"
 	assert.Contains(t, result, "WHERE 1=1")
+}
+
+func TestDetectModelStyle_LegacyPlaceholderErrors(t *testing.T) {
+	_, err := detectModelStyle("SELECT * FROM raw WHERE {incremental_where_cond}")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "{{ incremental_where_cond() }}")
+
+	_, err = detectModelStyle("SELECT {incremental_value} AS watermark FROM raw")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "{{ incremental_value() }}")
+}
+
+func TestDetectModelStyle_SlingJinja(t *testing.T) {
+	style, err := detectModelStyle("SELECT * FROM raw WHERE {{ incremental_where_cond() }}")
+	require.NoError(t, err)
+	assert.Equal(t, StyleSling, style)
 }
 
 func TestCompileModel_ViewModel_NoPlaceholders_NoOp(t *testing.T) {

@@ -1,0 +1,89 @@
+# target_options.column_typing.uuid.as_text lands uuid columns as varchar(36)
+# instead of the target's native uuid type (discussion 798).
+source: MSSQL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.uuid_typing_test', 'U') IS NOT NULL DROP TABLE dbo.uuid_typing_test;
+        CREATE TABLE dbo.uuid_typing_test (id INT PRIMARY KEY, guid_col UNIQUEIDENTIFIER);
+        INSERT INTO dbo.uuid_typing_test (id, guid_col) VALUES
+        (1, '6F9619FF-8B86-D011-B42D-00C04FC964FF'),
+        (2, NULL);
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select table_name, data_type, character_maximum_length
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name in ('uuid_typing_default', 'uuid_typing_as_text')
+          and column_name = 'guid_col'
+        order by table_name
+      into: types
+
+    - type: query
+      connection: '{target.name}'
+      query: select guid_col::text as v from public.uuid_typing_as_text order by id
+      into: vals
+
+    - type: log
+      message: |
+        types => {store.types}
+        values => {store.vals}
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE dbo.uuid_typing_test;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE public.uuid_typing_default;
+        DROP TABLE public.uuid_typing_as_text;
+
+    # control: without the option, the column stays a native uuid
+    - type: check
+      check: store.types[1].data_type == "uuid"
+      failure_message: "control: guid_col should land as uuid without column_typing"
+      success_message: "control passed: uuid target type without the option"
+
+    - type: check
+      check: store.types[0].data_type == "character varying"
+      failure_message: "column_typing.uuid.as_text did not land guid_col as varchar"
+      success_message: "as_text landed guid_col as varchar"
+
+    - type: check
+      check: store.types[0].character_maximum_length == 36
+      failure_message: "as_text should use varchar(36), got {store.types[0].character_maximum_length}"
+      success_message: "as_text used varchar(36)"
+
+    - type: check
+      check: store.vals[0].v == "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+      failure_message: "guid value did not survive the text mapping"
+      success_message: "guid value preserved as text"
+
+    - type: check
+      check: store.vals[1].v == nil
+      success_message: "null guid preserved as text"
+
+streams:
+  # control: default target typing
+  default:
+    sql: select id, guid_col from dbo.uuid_typing_test
+    object: public.uuid_typing_default
+
+  as_text:
+    sql: select id, guid_col from dbo.uuid_typing_test
+    object: public.uuid_typing_as_text
+    target_options:
+      column_typing:
+        uuid:
+          as_text: true

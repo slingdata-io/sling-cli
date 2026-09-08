@@ -39,7 +39,7 @@ require (
 	github.com/exasol/exasol-driver-go v1.0.14
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.178
+	github.com/flarco/g v0.1.179
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gobwas/glob v0.2.3

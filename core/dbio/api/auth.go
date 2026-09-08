@@ -45,7 +45,7 @@ func (ac *APIConnection) Authenticate() (err error) {
 
 	authenticator, err := ac.MakeAuthenticator()
 	if err != nil {
-		return g.Error(err, "could not make authenticator for: %s", authenticator.AuthType())
+		return g.Error(err, "could not make authenticator for: %s", ac.Spec.Authentication.Type())
 	}
 
 	if err = authenticator.Authenticate(ac.Context.Ctx, &ac.State.Auth); err != nil {
@@ -86,6 +86,8 @@ func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err e
 		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
 	case AuthTypeHMAC:
 		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
+	default:
+		return nil, g.Error("unsupported authentication type: %s", baseAuth.Type)
 	}
 
 	// so we write all the properties

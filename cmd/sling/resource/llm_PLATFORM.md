@@ -13,7 +13,7 @@
 9. [`sling platform jobs get`](#9-sling-platform-jobs-get)
 10. [`sling platform jobs save`](#10-sling-platform-jobs-save)
 11. [`sling platform jobs delete`](#11-sling-platform-jobs-delete)
-12. [`sling platform execs`](#12-sling-platform-execs)
+12. [`sling platform executions`](#12-sling-platform-executions)
 13. [`sling platform files`](#13-sling-platform-files)
 14. [`sling platform connections`](#14-sling-platform-connections)
 15. [Job Payload Reference](#15-job-payload-reference)
@@ -208,7 +208,7 @@ Uses `GET /project/job/get?job_id=<id>`. The positional argument must begin with
 
 ## 10. `sling platform jobs save`
 
-Create a job (if `id` is empty/missing) or update an existing one (if `id` is present). A single command handles both.
+Create a job (if `id` is empty/missing) or update an existing one (if `id` is present). A single command handles both. The auto-created default job (`default: true`) is not editable — omit `id` and create a new job to set a schedule.
 
 ```bash
 # Create: omit id
@@ -272,21 +272,21 @@ Uses `POST /project/job/delete` with body `{"job_id": "<id>"}`.
 
 ---
 
-## 12. `sling platform execs`
+## 12. `sling platform executions`
 
 Manage and inspect executions.
 
-### `execs list`
+### `executions list`
 
 List recent executions with a job-name column, derived status, and optional time range. Newest first.
 
 ```bash
-sling platform execs list                                    # default: 10 rows, table
-sling platform execs list --status error --limit 5          # filter by status
-sling platform execs list --job-id job_abc123 -o json       # scope to one job, JSON
-sling platform execs list --since 24h                        # last 24 hours
-sling platform execs list --since 7d --status success
-sling platform execs list --since 2026-04-10 --until 2026-04-17
+sling platform executions list                                    # default: 10 rows, table
+sling platform executions list --status error --limit 5          # filter by status
+sling platform executions list --job-id job_abc123 -o json       # scope to one job, JSON
+sling platform executions list --since 24h                        # last 24 hours
+sling platform executions list --since 7d --status success
+sling platform executions list --since 2026-04-10 --until 2026-04-17
 ```
 
 Flags:
@@ -299,37 +299,37 @@ Flags:
 
 Columns (table): `Name`, `Exec ID`, `Job ID`, `Start Time`, `Rows`, `Bytes`, `Status`. Status is derived from per-state counts (Running > Queued > Stalled > Cancelled > Created > Success > Error). When the source run wasn't triggered from a saved job, `Name` falls back to the replication name or `cli-<md5>` for ad-hoc CLI runs.
 
-### `execs status <exec-id>`
+### `executions status <exec-id>`
 
 Fetch the full server-side status record for one execution as pretty-printed JSON.
 
 ```bash
-sling platform execs status exec_abc123
-sling platform execs status exec_abc123 | jq '.status_map'
+sling platform executions status exec_abc123
+sling platform executions status exec_abc123 | jq '.status_map'
 ```
 
 Uses `GET /execution/list?filters=%7B%22exec_id%22%3A%22...%22%7D`.
 
-### `execs cancel <exec-id>`
+### `executions cancel <exec-id>`
 
 Cancel a running execution.
 
 ```bash
-sling platform execs cancel exec_abc123
+sling platform executions cancel exec_abc123
 ```
 
 Uses `POST /execution/cancel` with body `{"exec_id": "<id>"}`.
 
-### `execs log <exec-id>`
+### `executions log <exec-id>`
 
 Print the full log output captured during an execution. Each task/step's log is prefixed with a `=== <name> (status=...) ===` banner. The log contains ANSI color codes by default; use `--no-color` to strip them for grep/diff/save-to-file.
 
 ```bash
-sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X                       # all streams, colored
-sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --no-color             # plain text
-sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --task users           # only the "users" stream
-sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X --status error         # only errored tasks/steps
-sling platform execs log 3CUJmxllsG8YC1kDYGzU6jYjS5X -o json > tasks.json   # raw task records
+sling platform executions log 3CUJmxllsG8YC1kDYGzU6jYjS5X                       # all streams, colored
+sling platform executions log 3CUJmxllsG8YC1kDYGzU6jYjS5X --no-color             # plain text
+sling platform executions log 3CUJmxllsG8YC1kDYGzU6jYjS5X --task users           # only the "users" stream
+sling platform executions log 3CUJmxllsG8YC1kDYGzU6jYjS5X --status error         # only errored tasks/steps
+sling platform executions log 3CUJmxllsG8YC1kDYGzU6jYjS5X -o json > tasks.json   # raw task records
 ```
 
 Flags:
@@ -632,15 +632,17 @@ Set `SLING_PLATFORM_HOST=https://your-host.example.com` before any command. The 
 
 ## 18. Platform MCP HTTP server
 
-The master also speaks MCP Streamable HTTP at `POST|GET|DELETE /mcp`. Authenticate with the same project token:
+The server also speaks MCP Streamable HTTP at `POST|GET|DELETE /mcp`. Authenticate with the same project token:
 
 ```
 Authorization: Sling-Project-Token <uuid>
 ```
 
+Claude Code:
+
 ```bash
-claude mcp add --transport http sling-platform https://<master>/mcp \
+claude mcp add --transport http sling-platform https://<server>/mcp \
   --header "Authorization: Sling-Project-Token <token>"
 ```
 
-Tools: `project`, `file`, `job`, `execution`, `connection`, `compile`, `monitor`, `infra`. Call `docs` first. `job.run` returns `{exec_id}` — poll `execution.list`.
+Tools (one coarse tool per domain, `action` + `input`): `project`, `file`, `job`, `execution`, `connection`, `compile`, `monitor`, `infra`. Call `docs` on a tool before other actions. `job.run` returns `{exec_id}` — poll `execution.list` (stateless; no server push). The project must enable MCP in Settings → Project. Discover/preview/exec (`connection.discover`, `connection.preview`, `connection.exec`, `compile.replication_preview`) require an online agent and follow Enable Data Preview. `connection.exec` runs **read-only** SQL only — queries are parsed and must be a single read-only statement; mutating statements, DDL, and locking clauses are rejected. Never issue destructive or altering commands (INSERT/UPDATE/DELETE/DDL). Long queries are supported; client disconnect cancels the query. Optional `query_id` on `exec` plus `connection.exec_cancel` cancels from another session. Token, user, org, billing, and git-write routes are not exposed.

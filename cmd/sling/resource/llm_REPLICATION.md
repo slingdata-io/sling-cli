@@ -185,7 +185,7 @@ streams:
     object: <target_table_or_file>
     
     # Load behavior
-    mode: full-refresh | incremental | truncate | snapshot | backfill
+    mode: full-refresh | incremental | truncate | snapshot | backfill | definition-only | change-capture
     disabled: true | false
     
     # Key columns
@@ -260,6 +260,8 @@ streams:
 | `truncate` | Clear table, preserve structure | Refresh while keeping DDL |
 | `snapshot` | Append with timestamp | Historical data tracking |
 | `backfill` | Load specific date/ID ranges | Historical data recovery |
+| `definition-only` | Create target table/file structure without data | Schema-only setup |
+| `change-capture` | Stream transaction-log changes (inserts, updates, deletes) | Real-time CDC sync |
 
 ### Incremental Mode Strategies
 

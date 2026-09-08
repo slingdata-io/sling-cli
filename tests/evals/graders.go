@@ -261,9 +261,8 @@ func gradeSling(ctx GradeContext, cmd string) GraderResult {
 		if rest := fields[1:]; len(rest) > 0 && rest[0] == "run" && ctx.SkipExecute {
 			return GraderResult{Name: "sling:" + cmd, Pass: true, Skip: true, Detail: "SKIPPED (mock: no execute)"}
 		}
-		fields = rewriteBuildArgs(fields)
 	}
-	// Exec the real sling binary for everything else (build --compile, conns, …).
+	// Exec the real sling binary for everything else (build compile, conns, …).
 	if ctx.SlingBin == "" {
 		return GraderResult{Name: "sling:" + cmd, Pass: false, Detail: "SLING_BIN not set"}
 	}
@@ -278,28 +277,6 @@ func gradeSling(ctx GradeContext, cmd string) GraderResult {
 		return GraderResult{Name: "sling:" + cmd, Pass: false, Detail: strings.TrimSpace(buf.String()) + " " + err.Error()}
 	}
 	return GraderResult{Name: "sling:" + cmd, Pass: true, Detail: strings.TrimSpace(buf.String())}
-}
-
-func rewriteBuildArgs(fields []string) []string {
-	// sling: build compile .  →  sling build --compile --json .
-	// sling: build run . --target X  →  sling build --target X .
-	if len(fields) < 2 {
-		return fields
-	}
-	out := []string{"build"}
-	rest := fields[1:]
-	switch rest[0] {
-	case "compile":
-		out = append(out, "--compile", "--json")
-		if len(rest) > 1 {
-			out = append(out, rest[1:]...)
-		}
-		return out
-	case "run":
-		out = append(out, rest[1:]...)
-		return out
-	}
-	return fields
 }
 
 func gradeAPISpecMap(ctx GradeContext, raw any) GraderResult {
@@ -1313,7 +1290,7 @@ func gradeDAG(ctx GradeContext, raw any) GraderResult {
 	if dir == "" {
 		dir = "."
 	}
-	c := exec.Command(ctx.SlingBin, "build", "--compile", "--json", dir)
+	c := exec.Command(ctx.SlingBin, "build", "compile", "--json", dir)
 	c.Dir = ctx.WorkDir
 	c.Env = ctx.Env
 	var buf bytes.Buffer
@@ -1372,7 +1349,7 @@ func gradeTestsPass(ctx GradeContext, raw any) GraderResult {
 		}
 		target = cast.ToString(m["target"])
 	}
-	args := []string{"build", "--compile", "--json", dir}
+	args := []string{"build", "compile", "--json", dir}
 	c := exec.Command(ctx.SlingBin, args...)
 	c.Dir = ctx.WorkDir
 	c.Env = ctx.Env
@@ -1386,7 +1363,7 @@ func gradeTestsPass(ctx GradeContext, raw any) GraderResult {
 	if nTests == 0 {
 		return GraderResult{Name: "tests_pass", Pass: false, Detail: "no declarative tests defined"}
 	}
-	runArgs := []string{"build", "--test"}
+	runArgs := []string{"build", "test"}
 	if target != "" {
 		runArgs = append(runArgs, "--target", target)
 	}

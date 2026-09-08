@@ -128,6 +128,12 @@ func TestDetectFileKindOrder(t *testing.T) {
 			want: KindBuild,
 		},
 		{
+			name: "sling_build.yaml path rule",
+			body: "target: POSTGRES\ndefaults:\n  mode: full-refresh\n",
+			path: "sling_build.yaml",
+			want: KindBuild,
+		},
+		{
 			name: "unknown yaml stays unknown",
 			body: "services:\n  db:\n    image: postgres\n",
 			path: "docker-compose.yml",
@@ -156,6 +162,19 @@ func TestDetectFileKindBuildDir(t *testing.T) {
 	got := DetectFileKind(nil, dir)
 	if got != KindBuild {
 		t.Fatalf("directory with sling_build.yml: got %q want %q", got, KindBuild)
+	}
+}
+
+func TestDetectFileKindBuildDirYAML(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sling_build.yaml")
+	if err := os.WriteFile(path, []byte("target: POSTGRES\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := DetectFileKind(nil, dir)
+	if got != KindBuild {
+		t.Fatalf("directory with sling_build.yaml: got %q want %q", got, KindBuild)
 	}
 }
 

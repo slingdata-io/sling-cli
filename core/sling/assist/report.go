@@ -26,23 +26,22 @@ const (
 	githubIssueBaseURL = "https://github.com/slingdata-io/sling-cli/issues/new"
 	contactFormBaseURL = "https://slingdata.io/contact/"
 	maxLogExcerptBytes = 64 * 1024
-	maxSkeletonBytes   = 4 * 1024
 )
 
 // ReportDraft is the composed, redacted report. Both routes consume it.
 type ReportDraft struct {
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Config       string `json:"config"`
-	LogExcerpt   string `json:"log_excerpt"`
-	Version      string `json:"version"`
-	OS           string `json:"os"`
-	SourceType   string `json:"source_type"`
-	TargetType   string `json:"target_type"`
-	SignatureID  string `json:"signature_id"`
-	Skeleton     string `json:"skeleton"`
-	ExecID       string `json:"exec_id"`
-	ConnName     string `json:"conn_name,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Config      string `json:"config"`
+	LogExcerpt  string `json:"log_excerpt"`
+	Version     string `json:"version"`
+	OS          string `json:"os"`
+	SourceType  string `json:"source_type"`
+	TargetType  string `json:"target_type"`
+	SignatureID string `json:"signature_id"`
+	Skeleton    string `json:"skeleton"`
+	ExecID      string `json:"exec_id"`
+	ConnName    string `json:"conn_name,omitempty"`
 	// CustomDescription is caller-supplied context, shown above the error.
 	CustomDescription string `json:"custom_description,omitempty"`
 }
@@ -90,20 +89,78 @@ func ComposeReport(execID string) (ReportDraft, error) {
 	}
 
 	d := ReportDraft{
-		Title:        reportTitle(label, src, tgt),
-		Description:  reportDescription(redactForReport(errText)),
-		Config:       reportConfig(configPath, connName, le.LogDir),
-		LogExcerpt:   reportLogExcerpt(redactForReport(runLog)),
-		Version:      core.Version,
-		OS:           reportOSName(),
-		SourceType:   src,
-		TargetType:   tgt,
-		SignatureID:  sigID,
-		Skeleton:     skel,
-		ExecID:       le.ID,
-		ConnName:     connName,
+		Title:       reportTitle(label, src, tgt),
+		Description: reportDescription(redactForReport(errText)),
+		Config:      reportConfig(configPath, connName, le.LogDir),
+		LogExcerpt:  reportLogExcerpt(redactForReport(runLog)),
+		Version:     core.Version,
+		OS:          reportOSName(),
+		SourceType:  src,
+		TargetType:  tgt,
+		SignatureID: sigID,
+		Skeleton:    skel,
+		ExecID:      le.ID,
+		ConnName:    connName,
 	}
 	return d, nil
+}
+
+// ReportParts is raw evidence collected outside a local snapshot.
+// ComposeReport redacts it the same way the exec-id ComposeReport
+// redacts on-disk files.
+type ReportParts struct {
+	ExecID            string
+	ErrorText         string
+	LogText           string
+	ConfigBody        string
+	Version           string
+	OS                string
+	SourceType        string
+	TargetType        string
+	ConnName          string
+	CustomDescription string
+}
+
+// ComposeReport builds a redacted ReportDraft from already-collected fields.
+func (p ReportParts) ComposeReport() ReportDraft {
+	src := p.SourceType
+	tgt := p.TargetType
+	skel := Skeleton(p.ErrorText)
+	sig := SignError(p.ErrorText, SignMeta{SourceType: dbio.Type(src), TargetType: dbio.Type(tgt)})
+	label := sig.ShortLabel
+	if src == "" {
+		src = string(sig.Meta.SourceType)
+	}
+	if tgt == "" {
+		tgt = string(sig.Meta.TargetType)
+	}
+	version := p.Version
+	if version == "" {
+		version = core.Version
+	}
+	osName := p.OS
+	if osName == "" {
+		osName = reportOSName()
+	}
+	config := strings.TrimSpace(redactForReport(p.ConfigBody))
+	if config == "" {
+		config = "(not captured)"
+	}
+	return ReportDraft{
+		Title:             reportTitle(label, src, tgt),
+		Description:       reportDescription(redactForReport(p.ErrorText)),
+		Config:            config,
+		LogExcerpt:        reportLogExcerpt(redactForReport(p.LogText)),
+		Version:           version,
+		OS:                osName,
+		SourceType:        src,
+		TargetType:        tgt,
+		SignatureID:       sig.ID,
+		Skeleton:          skel,
+		ExecID:            p.ExecID,
+		ConnName:          p.ConnName,
+		CustomDescription: p.CustomDescription,
+	}
 }
 
 func reportTitle(label, src, tgt string) string {
@@ -300,6 +357,13 @@ func (d ReportDraft) GitHubIssueURL() string {
 // instead (see deliverContactForm).
 func (d ReportDraft) ContactFormURL() string {
 	return contactFormBaseURL + "?issue=" + base64.RawURLEncoding.EncodeToString([]byte(d.BodyMarkdown()))
+}
+
+// ContactFormFits reports whether ContactFormURL stays under the Cloudflare
+// request-line budget. When false, callers should return BodyMarkdown for
+// manual paste instead of the prefilled URL.
+func (d ReportDraft) ContactFormFits() bool {
+	return len(d.ContactFormURL()) <= contactFormURLMax
 }
 
 // deliverGitHubIssue opens a prefilled GitHub issue when the URL fits.
@@ -511,4 +575,3 @@ func confirmSendReport() (bool, error) {
 	}
 	return ok, nil
 }
-

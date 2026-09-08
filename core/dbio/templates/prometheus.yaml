@@ -1,3 +1,6 @@
+core:
+  explain: ""
+
 variable:
   tmp_folder: /tmp
   timestamp_layout_str: '{value}'

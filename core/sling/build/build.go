@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/golyglot"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
@@ -25,6 +27,9 @@ type Build struct {
 	Selected    []string               // selected node names after selector filtering
 	SubBuilds   []*Build               // compiled sub-projects (for multi-target compile mode)
 	connEntries connection.ConnEntries // pre-resolved connection entries for parallel execution
+	ExecRows    uint64                 // sum of model/seed rows after Execute
+	ExecBytes   uint64
+	Results     []ExecutionResult // per-node results after Execute
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -48,7 +53,7 @@ func NewBuild(dir string, opts BuildOptions) (*Build, error) {
 func (b *Build) Compile() error {
 	// For sub-projects (independent builds), compile each one
 	if len(b.Project.SubProjects) > 0 {
-		if !b.Options.Compile {
+		if !b.Options.Compile && !b.Options.List {
 			return nil // sub-projects are compiled individually during Execute
 		}
 		for _, subProject := range b.Project.SubProjects {
@@ -72,7 +77,7 @@ func (b *Build) Compile() error {
 	if b.Options.Target != "" {
 		target = b.Options.Target
 	}
-	if target == "" {
+	if target == "" && !b.Options.List {
 		return g.Error("No target specified. Use '--target <conn>' or set target in sling_build.yml.")
 	}
 
@@ -100,7 +105,10 @@ func (b *Build) Compile() error {
 		if model.Config.Rewrite != nil && !*model.Config.Rewrite {
 			continue
 		}
-		rewritten, deps := RewriteTableReferences(model.CompiledSQL, b.Project, model.Name)
+		rewritten, deps, err := RewriteTableReferences(model.CompiledSQL, b.Project, model.Name)
+		if err != nil {
+			return g.Error(err, "could not rewrite table references in model '%s'", model.Name)
+		}
 		model.CompiledSQL = rewritten
 		for _, dep := range deps {
 			if !containsStr(model.DependsOn, dep) {
@@ -109,9 +117,15 @@ func (b *Build) Compile() error {
 		}
 	}
 
-	// Split multi-statement models into pre-statements, model query, and post-statements
-	if err := b.splitMultiStatementModels(); err != nil {
-		return g.Error(err, "could not parse multi-statement models")
+	// Split multi-statement models into pre-statements, model query, and post-statements.
+	// List without a target skips this — splitting needs a dialect.
+	if target != "" {
+		if err := b.validateDatabaseSupport(); err != nil {
+			return err
+		}
+		if err := b.splitMultiStatementModels(); err != nil {
+			return g.Error(err, "could not parse multi-statement models")
+		}
 	}
 
 	// Auto-detect SQL references as a safety net for DependsOn (catches edge cases
@@ -147,6 +161,7 @@ func (b *Build) Compile() error {
 
 	// Apply selectors
 	selector := NewSelector(b.Options.Select, b.Options.Exclude)
+	selector.Project = b.Project
 	selected, err := selector.Apply(b.DAG)
 	if err != nil {
 		return g.Error(err, "could not apply selectors")
@@ -206,6 +221,33 @@ func (b *Build) splitMultiStatementModels() error {
 		model.PostStatements = result.PostStatements
 	}
 	return nil
+}
+
+// validateDatabaseSupport fails when a model or seed sets a database but the
+// target dialect cannot address objects as database.schema.table.
+func (b *Build) validateDatabaseSupport() error {
+	dbType := b.resolveDbType()
+	if dbType == dbio.TypeUnknown || dbType.SupportsThreePartName() {
+		return nil
+	}
+	for _, name := range sortedKeys(b.Project.Models) {
+		if db := b.Project.Models[name].Database; db != "" {
+			return g.Error("model '%s': database '%s' is set but %s does not support database.schema.table names", name, db, dbType)
+		}
+	}
+	for _, name := range sortedKeys(b.Project.Seeds) {
+		if db := b.Project.Seeds[name].Database; db != "" {
+			return g.Error("seed '%s': database '%s' is set but %s does not support database.schema.table names", name, db, dbType)
+		}
+	}
+	return nil
+}
+
+// sortedKeys returns map keys in sorted order for deterministic error output.
+func sortedKeys[T any](m map[string]T) []string {
+	keys := lo.Keys(m)
+	sort.Strings(keys)
+	return keys
 }
 
 // resolveDbType determines the database type from the target connection
@@ -277,10 +319,17 @@ func (b *Build) Execute() error {
 
 	executor, err := NewExecutor(b)
 	if err != nil {
+		SyncBuildFailure(err)
 		return err
 	}
 
-	return executor.Execute()
+	err = executor.Execute()
+	b.Results = executor.Results
+	for _, r := range executor.Results {
+		b.ExecRows += r.Rows
+		b.ExecBytes += r.Bytes
+	}
+	return err
 }
 
 // PrintListOutput prints the selected models/seeds and exits.
@@ -299,27 +348,56 @@ func (b *Build) PrintListOutput() {
 		return
 	}
 
+	showTable := b.GetTarget() != ""
+	type row struct {
+		name, table, mode, file string
+	}
+	var rows []row
+	nameW, tableW := 0, 0
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
+		if node == nil {
+			continue
+		}
 		if b.Options.NoSeeds && node.Seed != nil {
 			continue
 		}
-		nodeType := ""
+		r := row{name: name}
 		if node.Seed != nil {
-			nodeType = "seed"
+			r.mode = "seed"
+			r.table = node.Seed.FullTableName
+			r.file = node.Seed.RelPath
 		} else if node.Model != nil {
-			nodeType = b.GetModelMode(node.Model)
+			r.mode = b.GetModelMode(node.Model)
+			r.table = node.Model.FullTableName
+			r.file = node.Model.RelPath
 		}
-		fmt.Printf("%s (%s)\n", name, nodeType)
+		if len(r.name) > nameW {
+			nameW = len(r.name)
+		}
+		if len(r.table) > tableW {
+			tableW = len(r.table)
+		}
+		rows = append(rows, r)
+	}
+	for _, r := range rows {
+		if showTable {
+			fmt.Printf("%-*s   %-*s   (%s)\n", nameW, r.name, tableW, r.table, r.mode)
+		} else {
+			fmt.Printf("%-*s   %s   (%s)\n", nameW, r.name, r.file, r.mode)
+		}
 	}
 }
 
 // PrintListJSON prints selected nodes as JSON.
 func (b *Build) PrintListJSON() {
 	type item struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Table string `json:"table,omitempty"`
+		File  string `json:"file,omitempty"`
 	}
+	showTable := b.GetTarget() != ""
 	var items []item
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
@@ -332,8 +410,42 @@ func (b *Build) PrintListJSON() {
 		it := item{Name: name}
 		if node.Seed != nil {
 			it.Type = "seed"
+			it.File = node.Seed.RelPath
+			if showTable {
+				it.Table = node.Seed.FullTableName
+			}
 		} else if node.Model != nil {
 			it.Type = b.GetModelMode(node.Model)
+			it.File = node.Model.RelPath
+			if showTable {
+				it.Table = node.Model.FullTableName
+			}
+		}
+		items = append(items, it)
+	}
+	fmt.Println(g.Marshal(items))
+}
+
+// PrintTestJSON prints per-node test results as JSON.
+func (b *Build) PrintTestJSON() {
+	type item struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Status   string `json:"status"`
+		Error    string `json:"error,omitempty"`
+		Duration string `json:"duration,omitempty"`
+	}
+	items := make([]item, 0, len(b.Results))
+	for _, r := range b.Results {
+		it := item{Name: r.Name, Type: r.NodeType, Duration: r.Duration.String()}
+		switch {
+		case r.Skipped:
+			it.Status = "skip"
+		case r.Err != nil:
+			it.Status = "fail"
+			it.Error = r.Err.Error()
+		default:
+			it.Status = "ok"
 		}
 		items = append(items, it)
 	}
@@ -390,55 +502,97 @@ func (b *Build) PrintCompileJSON() {
 	if len(b.SubBuilds) > 0 {
 		var all []map[string]any
 		for _, sub := range b.SubBuilds {
-			all = append(all, sub.compileJSONPayload())
+			all = append(all, sub.CompileJSONPayload())
 		}
 		fmt.Println(g.Marshal(all))
 		return
 	}
-	fmt.Println(g.Marshal(b.compileJSONPayload()))
+	fmt.Println(g.Marshal(b.CompileJSONPayload()))
 }
 
-// CompileJSONPayload returns the --compile --json object.
+// NodeTypeModel and NodeTypeSeed are the compiled node types.
+const (
+	NodeTypeModel = "model"
+	NodeTypeSeed  = "seed"
+)
+
+// Compiled returns the project config with the compile output set: the resolved
+// target, the selected nodes in execution order, and the compiled SQL of each.
 // Safe when Compile did not finish (e.g. a cycle): order/nodes stay empty.
-func (b *Build) CompileJSONPayload() map[string]any {
+func (b *Build) Compiled() *BuildConfig {
 	if b == nil {
-		return map[string]any{"order": []string{}, "nodes": []map[string]any{}, "target": ""}
+		return &BuildConfig{Order: []string{}, Nodes: []Node{}}
 	}
-	if b.DAG == nil {
-		return map[string]any{"order": []string{}, "nodes": []map[string]any{}, "target": b.GetTarget()}
-	}
-	return b.compileJSONPayload()
-}
 
-func (b *Build) compileJSONPayload() map[string]any {
-	nodes := make([]map[string]any, 0, len(b.Selected))
+	// set the output on the project config itself, so the config and its
+	// compile output stay one object (like sling.ReplicationConfig.Tasks)
+	cfg := b.Project.GetConfig()
+	cfg.Target = b.GetTarget()
+	cfg.Order = []string{}
+	cfg.Nodes = []Node{}
+	cfg.Compiled = false
+
+	if b.DAG == nil {
+		return cfg
+	}
+
 	for _, name := range b.Selected {
 		node := b.DAG.Nodes[name]
 		if node == nil {
 			continue
 		}
-		m := map[string]any{"name": name}
+		n := Node{Name: name}
 		if node.Seed != nil {
-			m["type"] = "seed"
-			m["table"] = node.Seed.FullTableName
-			m["file"] = filepath.ToSlash(node.Seed.RelPath)
+			n.Type = NodeTypeSeed
+			n.Table = node.Seed.FullTableName
+			n.File = filepath.ToSlash(node.Seed.RelPath)
 		} else if node.Model != nil {
-			m["type"] = "model"
-			m["table"] = node.Model.FullTableName
-			m["file"] = filepath.ToSlash(node.Model.RelPath)
-			m["mode"] = b.GetModelMode(node.Model)
-			m["dependencies"] = node.Dependencies
-			m["sql"] = node.Model.CompiledSQL
-			if len(node.Model.Config.Tests) > 0 {
-				m["tests"] = node.Model.Config.Tests
+			n.Type = NodeTypeModel
+			n.Table = node.Model.FullTableName
+			n.File = filepath.ToSlash(node.Model.RelPath)
+			n.Mode = b.GetModelMode(node.Model)
+			n.Dependencies = node.Dependencies
+			n.SQL = node.Model.CompiledSQL
+			n.Tests = node.Model.Config.Tests
+		}
+		cfg.Nodes = append(cfg.Nodes, n)
+	}
+	cfg.Order = append(cfg.Order, b.Selected...)
+	cfg.Compiled = true
+
+	return cfg
+}
+
+// CompileJSONPayload returns the --compile --json object.
+func (b *Build) CompileJSONPayload() map[string]any {
+	return b.Compiled().JSONPayload()
+}
+
+// JSONPayload renders the compile output as the --compile --json object.
+// Node keys are omitted when empty, to keep the payload as it was.
+func (c *BuildConfig) JSONPayload() map[string]any {
+	nodes := make([]map[string]any, 0, len(c.Nodes))
+	for _, node := range c.Nodes {
+		m := map[string]any{"name": node.Name}
+		setIf := func(key string, val any, ok bool) {
+			if ok {
+				m[key] = val
 			}
 		}
+		setIf("type", node.Type, node.Type != "")
+		setIf("table", node.Table, node.Table != "")
+		setIf("file", node.File, node.File != "")
+		setIf("mode", node.Mode, node.Mode != "")
+		setIf("dependencies", node.Dependencies, node.Type == NodeTypeModel)
+		setIf("sql", node.SQL, node.SQL != "")
+		setIf("tests", node.Tests, len(node.Tests) > 0)
 		nodes = append(nodes, m)
 	}
 	return map[string]any{
-		"order":  append([]string{}, b.Selected...),
-		"nodes":  nodes,
-		"target": b.GetTarget(),
+		"order":    c.Order,
+		"nodes":    nodes,
+		"target":   c.Target,
+		"compiled": c.Compiled,
 	}
 }
 

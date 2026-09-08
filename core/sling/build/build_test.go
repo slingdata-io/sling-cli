@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/flarco/g"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -481,4 +483,37 @@ WHERE created_at > (SELECT MAX(created_at) FROM {{ this }})
 	style, err := detectModelStyle(sql)
 	fmt.Println("style:", style, "err:", err)
 	fmt.Println("StyleDbt:", StyleDbt, "StyleSling:", StyleSling)
+}
+
+func TestCompileDatabaseUnsupportedDialect(t *testing.T) {
+	project, err := LoadProject(getTestFixturePath("database_project"), BuildOptions{Prod: true})
+	require.NoError(t, err)
+
+	b := &Build{Project: project, Options: BuildOptions{Target: "POSTGRES", Prod: true}}
+	err = b.Compile()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support database.schema.table")
+}
+
+// The platform scheduler gates a build run on the "compiled" flag surviving the
+// agent-to-master JSON round-trip. Dropping it errors with "no model compiled".
+func TestJSONPayloadCarriesCompiled(t *testing.T) {
+	dir := getTestFixturePath("sample_project")
+
+	b, err := NewBuild(dir, BuildOptions{Target: "POSTGRES"})
+	require.NoError(t, err)
+	require.NoError(t, b.Compile())
+
+	payload := b.CompileJSONPayload()
+	require.Contains(t, payload, "compiled")
+	assert.Equal(t, true, payload["compiled"])
+
+	var got *BuildConfig
+	require.NoError(t, g.JSONConvert(payload, &got))
+	assert.True(t, got.Compiled)
+	assert.NotEmpty(t, got.Nodes)
+
+	// a build that never compiled must stay false
+	var nilBuild *Build
+	assert.Equal(t, false, nilBuild.Compiled().JSONPayload()["compiled"])
 }

@@ -27,7 +27,7 @@ _skeleton: |-
 _rules: |-
   - You help with Sling CLI (https://docs.slingdata.io/llms.txt).
   - Use Sling MCP tools when they are wired (connection, database, replication, pipeline, api_spec, file_system).
-  - Validate YAML with MCP `validate`. Execute replications and pipelines with `sling run`. Execute SQL models with `sling build`. There is no MCP `run` or `build` action.
+  - Validate YAML with MCP `validate`. Execute replications and pipelines with `sling run`. Execute SQL models with `sling build run`. There is no MCP `run` or `build` action.
   - Do not invent connection names, streams, or modes. Ask one focused question instead.
   - Never ask for credentials in chat. Use ${VAR} refs and `sling conns set`.
   - Do not read env.yaml or print secrets. Connection names and types only.

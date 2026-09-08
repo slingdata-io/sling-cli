@@ -1,7 +1,7 @@
 ---
 name: sling-platform
 description: >
-  Sling Platform CLI — `sling platform jobs|execs|files|connections`, creating and scheduling jobs, activating/deactivating, checking run history, investigating failed executions, and pushing file fixes back to the platform. Also indexes docs for monitors (freshness, schema drift, anomaly detection), agents, and self-hosting. Use when the user is managing or debugging anything hosted on Sling Platform.
+  Sling Platform CLI — `sling platform jobs|executions|files|connections`, creating and scheduling jobs, activating/deactivating, checking run history, investigating failed executions, and pushing file fixes back to the platform. Also indexes docs for monitors (freshness, schema drift, anomaly detection), agents, and self-hosting. Use when the user is managing or debugging anything hosted on Sling Platform.
 ---
 
 # Sling Platform — Working with Hosted Projects
@@ -32,10 +32,10 @@ sling platform status             # smoke test: project info + counts
 | `sling platform jobs activate <id>` | Enable a job's schedules                          |
 | `sling platform jobs deactivate <id>` | Disable a job's schedules                       |
 | `sling platform jobs delete <id>`  | Remove a job (`--force` skips confirm)             |
-| `sling platform execs list`        | Run history; `--job-id`, `--job-name`, `--status`, `--since`, `--until`, `--limit` |
-| `sling platform execs status <id>` | Per-task / per-step state of one execution         |
-| `sling platform execs log <id>`    | Full log; `--task <stream/step>`, `--status error` to filter |
-| `sling platform execs cancel <id>` | Cancel a running exec                              |
+| `sling platform executions list`        | Run history; `--job-id`, `--job-name`, `--status`, `--since`, `--until`, `--limit` |
+| `sling platform executions status <id>` | Per-task / per-step state of one execution         |
+| `sling platform executions log <id>`    | Full log; `--task <stream/step>`, `--status error` to filter |
+| `sling platform executions cancel <id>` | Cancel a running exec                              |
 | `sling platform files list`        | List YAML files (replications, pipelines, specs)   |
 | `sling platform files get <name>`  | Print a file                                       |
 | `sling platform files save <name>` | Write a file: `-f <path>`, `-f -` (stdin), or `-b '<body>'` |
@@ -51,14 +51,14 @@ Most list/get commands accept `-o json` — prefer it when parsing output.
 If both the CLI stdio MCP (`sling serve mcp`) and the Platform HTTP MCP are attached, pick by location:
 
 - **Local** `env.yaml`, local files, local validate → stdio tools `connection`, `database`, `file_system`, `replication`, `pipeline`, `api_spec`.
-- **Hosted project** (this skill) → platform tools `jobs`, `execs`, `files`, `connections`, `agents`, `compile`, `project`, `monitor`.
+- **Hosted project** (this skill) → platform tools `jobs`, `executions`, `files`, `connections`, `agents`, `replications`, `pipelines`, `builds`, `project`, `monitors`, `specs`.
 
 Same vocabulary as the CLI. `jobs trigger` in the shell is `jobs.trigger` over MCP.
 
 | CLI | MCP |
 |-----|-----|
 | `sling platform jobs list/get/save/trigger/activate/deactivate/status` | `jobs.list` / `get` / `save` / `trigger` / `activate` / `deactivate` / `status` |
-| `sling platform execs list/status/log/cancel` | `execs.list` / `status` / `log` / `cancel` |
+| `sling platform executions list/status/log/cancel` | `executions.list` / `status` / `log` / `cancel` |
 | `sling platform files list/get/save/delete/rename` | `files.list` / `get` / `save` / `delete` / `rename` |
 | `sling platform connections list/test` | `connections.list` / `test` |
 | `sling platform status` | `project.status` |
@@ -116,18 +116,18 @@ cat job.json | sling platform jobs save -f -
 
 ```bash
 sling platform jobs status --name users        # per-job: status, last executed, next scheduled
-sling platform execs list --job-name users --limit 1     # most recent run (name must match one job)
-sling platform execs list --job-id <id> --since 7d       # last week's history
-sling platform execs list --status error --since 24h     # all recent failures
+sling platform executions list --job-name users --limit 1     # most recent run (name must match one job)
+sling platform executions list --job-id <id> --since 7d       # last week's history
+sling platform executions list --status error --since 24h     # all recent failures
 ```
 
 ### Investigate a failed exec
 
 `sling assist --id <exec_id>` starts an assist session with this workflow pre-loaded when the exec exists on the platform.
 
-1. `sling platform execs list --status error --limit 5` — find the failure.
-2. `sling platform execs status <exec_id>` — which task/stream/step failed.
-3. `sling platform execs log <exec_id> --status error` — logs for failing tasks only (add `--task <name>` to zoom in; `--no-color` for clean text).
+1. `sling platform executions list --status error --limit 5` — find the failure.
+2. `sling platform executions status <exec_id>` — which task/stream/step failed.
+3. `sling platform executions log <exec_id> --status error` — logs for failing tasks only (add `--task <name>` to zoom in; `--no-color` for clean text).
 4. `sling platform files get <file_name>` — pull the YAML to read/edit locally.
 5. Validate the fix locally with MCP `replication validate` / `pipeline validate`, then run it: `sling run -r users.yaml` or `sling run -p pipeline.yaml`.
 6. `cat fixed.yaml | sling platform files save <file_name> -f -` — push back.

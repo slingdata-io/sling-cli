@@ -1,4 +1,5 @@
 core:
+  explain: explain using tabular {sql}
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for snowflake'"

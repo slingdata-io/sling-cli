@@ -94,6 +94,7 @@ var projectRootMarkers = []string{
 	"pyproject.toml",
 	"Cargo.toml",
 	"sling_build.yml",
+	"sling_build.yaml",
 	".sling",
 }
 

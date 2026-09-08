@@ -1,4 +1,5 @@
 core:
+  explain: explain plan for {sql}
   drop_table: |
     BEGIN
       DECLARE CONTINUE HANDLER FOR SQLSTATE '42704' BEGIN END;

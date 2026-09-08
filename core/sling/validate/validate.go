@@ -134,11 +134,12 @@ func parseBody(display, abs string, kind Kind, body []byte, opts Options) FileRe
 
 	useCompile := opts.Compile && (kind == KindReplication || kind == KindPipeline || kind == KindBuild)
 	var (
-		parsed any
-		err    error
+		parsed   any
+		err      error
+		warnings []string
 	)
 	if useCompile {
-		parsed, err = parseCompile(kind, abs, body)
+		parsed, warnings, err = parseCompile(kind, abs, body)
 	} else {
 		parsed, err = parseDTO(kind, body)
 	}
@@ -149,6 +150,7 @@ func parseBody(display, abs string, kind Kind, body []byte, opts Options) FileRe
 	res.OK = true
 	res.Compiled = useCompile
 	res.Parsed = parsed
+	res.Warnings = append(res.Warnings, warnings...)
 	if kind == KindPipeline {
 		res.Warnings = append(res.Warnings, pipelineStepPathWarnings(abs, parsed)...)
 	}
@@ -332,41 +334,46 @@ func AnyFailed(results []FileResult) bool {
 	return false
 }
 
-func parseCompile(kind Kind, absPath string, body []byte) (any, error) {
+func parseCompile(kind Kind, absPath string, body []byte) (any, []string, error) {
 	env.LoadDotEnvSlingFrom(filepath.Dir(absPath))
 
 	switch kind {
 	case KindReplication:
 		cfg, err := sling.LoadReplicationConfigFromFile(absPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err = cfg.Compile(nil); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return Redact(compiledReplication(cfg)), nil
+		return Redact(compiledReplication(cfg)), nil, nil
 	case KindPipeline:
 		pipeline, err := sling.LoadPipelineConfigFromFile(absPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := validatePipelineSteps(pipeline.Steps, ""); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		dto := PipelineDTO{Steps: pipeline.Steps, Env: pipeline.Env}
-		return Redact(dtoToMap(dto)), nil
+		return Redact(dtoToMap(dto)), nil, nil
 	case KindBuild:
 		projDir := absPath
 		if isBuildConfigName(filepath.Base(absPath)) {
 			projDir = filepath.Dir(absPath)
 		}
-		project, err := build.LoadProject(projDir)
+		project, err := build.LoadProject(projDir, build.BuildOptions{SkipUnresolvedCheck: true})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return Redact(compiledBuild(project)), nil
+		var warnings []string
+		for _, name := range project.UnresolvedConfigVars() {
+			warnings = append(warnings, fmt.Sprintf("sling_build.yml uses ${%s} but %s is not set", name, name))
+		}
+		return Redact(compiledBuild(project)), warnings, nil
 	default:
-		return parseDTO(kind, body)
+		parsed, err := parseDTO(kind, body)
+		return parsed, nil, err
 	}
 }
 

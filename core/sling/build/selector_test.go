@@ -24,21 +24,21 @@ func newTestDAGProject() *BuildProject {
 			},
 			"dim_customers": {
 				Name:          "dim_customers",
-				FullTableName: "marts.core_dim_customers",
+				FullTableName: "marts.dim_customers",
 				RelPath:       "marts/core/dim_customers.sql",
 				DependsOn:     []string{"stg_customers"},
 				Config:        ModelConfig{Tags: []string{"weekly"}},
 			},
 			"fct_orders": {
 				Name:          "fct_orders",
-				FullTableName: "marts.core_fct_orders",
+				FullTableName: "marts.fct_orders",
 				RelPath:       "marts/core/fct_orders.sql",
 				DependsOn:     []string{"stg_orders"},
 				Config:        ModelConfig{Tags: []string{"daily"}},
 			},
 			"revenue": {
 				Name:          "revenue",
-				FullTableName: "marts.finance_revenue",
+				FullTableName: "marts.revenue",
 				RelPath:       "marts/finance/revenue.sql",
 				DependsOn:     []string{"fct_orders"},
 			},
@@ -575,6 +575,86 @@ func TestSelectorGlobGraphNoMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, result)
+}
+
+func TestSelectorStemAndSchemaTable(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+	dag, err := BuildDAG(project)
+	require.NoError(t, err)
+
+	sel := NewSelector([]string{"events"}, nil)
+	sel.Project = project
+	result, err := sel.Apply(dag)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"events"}, result)
+
+	sel = NewSelector([]string{"analytics.events"}, nil)
+	sel.Project = project
+	result, err = sel.Apply(dag)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"events"}, result)
+
+	sel = NewSelector([]string{"analytics/plausible/*"}, nil)
+	sel.Project = project
+	result, err = sel.Apply(dag)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"events"}, result)
+}
+
+func TestSelectorOldPrefixedNameErrors(t *testing.T) {
+	project := loadMartsEventsProject(t, BuildOptions{Prod: true})
+	dag, err := BuildDAG(project)
+	require.NoError(t, err)
+
+	sel := NewSelector([]string{"plausible_events"}, nil)
+	sel.Project = project
+	_, err = sel.Apply(dag)
+	require.Error(t, err)
+
+	var notFound *NameNotFoundError
+	require.ErrorAs(t, err, &notFound)
+	assert.Equal(t, "selector", notFound.Kind)
+	assert.Contains(t, err.Error(), "selector 'plausible_events' not found")
+}
+
+func TestSelectorSubfolderPathGlob(t *testing.T) {
+	project, err := LoadProject(getTestFixturePath("sample_project"), BuildOptions{Prod: true})
+	require.NoError(t, err)
+	dag, err := BuildDAG(project)
+	require.NoError(t, err)
+
+	sel := NewSelector([]string{"marts/core/*"}, nil)
+	sel.Project = project
+	result, err := sel.Apply(dag)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"dim_customers", "fct_orders"}, result)
+}
+
+func TestSelectorGlobThreePart(t *testing.T) {
+	project, err := LoadProject(getTestFixturePath("database_project"), BuildOptions{Prod: true})
+	require.NoError(t, err)
+	dag, err := BuildDAG(project)
+	require.NoError(t, err)
+
+	sel := NewSelector([]string{"marts.*"}, nil)
+	sel.Project = project
+	result, err := sel.Apply(dag)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"dim_customers", "revenue"}, result)
+}
+
+func TestSelectorTypoSuggests(t *testing.T) {
+	project := loadNestedEventsProject(t)
+	dag, err := BuildDAG(project)
+	require.NoError(t, err)
+
+	sel := NewSelector([]string{"plausible_event"}, nil)
+	sel.Project = project
+	_, err = sel.Apply(dag)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "Did you mean")
+	assert.Contains(t, err.Error(), "plausible_events")
 }
 
 // =============================================================================

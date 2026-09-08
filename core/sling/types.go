@@ -1,5 +1,13 @@
 package sling
 
+import (
+	"bytes"
+	"strings"
+
+	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+)
+
 // JobType is an enum type for jobs
 type JobType string
 
@@ -148,4 +156,69 @@ func (s ExecStatus) IsSuccess() bool {
 		return true
 	}
 	return false
+}
+
+// MarkdownLine is one key/value pair for compact MCP text.
+type MarkdownLine struct {
+	Key   string
+	Value string
+}
+
+// MarkdownLines is a list of MarkdownLine values.
+type MarkdownLines []MarkdownLine
+
+// Text joins lines as "Key: Value" separated by blank lines.
+func (mdl MarkdownLines) Text() string {
+	lines := make([]string, len(mdl))
+	for i, mdLine := range mdl {
+		lines[i] = g.F("%s: %s", mdLine.Key, mdLine.Value)
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+// Line joins lines as "Key: Value  |  Key: Value".
+func (mdl MarkdownLines) Line() string {
+	lines := make([]string, len(mdl))
+	for i, mdLine := range mdl {
+		lines[i] = g.F("%s: %s", mdLine.Key, mdLine.Value)
+	}
+	return strings.Join(lines, "  |  ")
+}
+
+// CodeBlock wraps text in a fenced code block.
+func CodeBlock(text string) string {
+	return "\n```\n" + text + "\n```\n"
+}
+
+// DatasetToCompact turns a dataset into Column Types + pipe-delimited CSV.
+func DatasetToCompact(data iop.Dataset) MarkdownLines {
+	if data.Sp == nil {
+		data.Sp = iop.NewStreamProcessor()
+	}
+	var csvOutput bytes.Buffer
+	data.Sp.Config.Delimiter = "|"
+	_, _ = data.WriteCsv(&csvOutput)
+
+	types := make([]string, len(data.Columns))
+	for i, col := range data.Columns {
+		if col.Type != "" {
+			types[i] = string(col.Type)
+		} else {
+			types[i] = "string"
+		}
+	}
+	return MarkdownLines{
+		{"Column Types", strings.Join(types, ", ")},
+		{"Pipe-Delimited Data", CodeBlock(csvOutput.String())},
+	}
+}
+
+// CompactText joins a user summary line with the compact dataset payload.
+func CompactText(user MarkdownLines, data iop.Dataset) string {
+	assistant := DatasetToCompact(data)
+	userLine := user.Line()
+	if userLine == "" {
+		return assistant.Text()
+	}
+	return userLine + "\n\n" + assistant.Text()
 }

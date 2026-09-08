@@ -2,6 +2,7 @@ target: POSTGRES
 
 defaults:
   mode: full-refresh
+  schema: build_pipeline_step # own schema: model stems collide with sample_project
 
 vars:
   run_label: default

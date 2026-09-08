@@ -48,7 +48,7 @@ Plain pip also works: `pip install sling` / `pip install 'sling[arrow]'`. The sl
 
 ## `Sling` — single tasks and streaming
 
-Kwargs mirror CLI flags: `src_conn`, `src_stream`, `src_options`, `tgt_conn`, `tgt_object`, `tgt_options`, `mode`, `primary_key`, `update_key`, `select`, `where`, `limit`, `range`, `env`, `debug`.
+Kwargs mirror CLI flags: `src_conn`, `src_stream`, `src_options`, `tgt_conn`, `tgt_object`, `tgt_options`, `mode`, `primary_key`, `update_key`, `select`, `where`, `limit`, `offset`, `range`, `streams`, `columns`, `transforms`, `cdc_options`, `stdout`, `env`, `debug`, `trace`, `replication`, `pipeline`, `directory`, `job`, `config`, `home_dir`. Python-only: `input=` for pushing data in.
 
 ```python
 from sling import Sling, Mode
@@ -141,7 +141,7 @@ Pipeline(
 ).run()
 ```
 
-Step classes (aliases of `Hook*`): `StepQuery`, `StepHTTP`, `StepCheck`, `StepRead`, `StepWrite`, `StepCopy`, `StepDelete`, `StepLog`, `StepInspect`, `StepList`, `StepReplication`, `StepCommand`, `StepGroup`, `StepStore`. See the `sling-pipelines` skill for each step's parameters.
+Step classes (aliases of `Hook*`): `StepQuery`, `StepHTTP`, `StepCheck`, `StepRead`, `StepWrite`, `StepCopy`, `StepDelete`, `StepLog`, `StepInspect`, `StepList`, `StepReplication`, `StepCommand`, `StepGroup`, `StepSet` (legacy `StepStore`), `StepRoutine`, `StepBuild`. See the `sling-pipelines` skill for each step's parameters.
 
 ## `Connection` — test and query
 

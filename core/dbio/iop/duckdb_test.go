@@ -3,6 +3,7 @@ package iop
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDuckDb(t *testing.T) {
@@ -207,6 +209,50 @@ func TestDuckDbNoDeadlock(t *testing.T) {
 			}
 		})
 	})
+}
+
+// A duckdb process that dies silently (OOM kill, crash) must surface its exit
+// status instead of a bare "exited before query completed:" and must reopen on
+// the next query.
+func TestDuckDbProcessDeathError(t *testing.T) {
+	t.Setenv("SLING_DUCKDB_STALL_TIMEOUT", "0")
+
+	duck := NewDuckDb(context.Background())
+	defer duck.Close()
+
+	_, err := duck.Exec("create table death_repro (id bigint)")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		// a long insert stays silent on stdout until it completes
+		_, err := duck.Exec("insert into death_repro select i from range(1, 50000000000) t(i)")
+		done <- err
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, duck.Proc.Cmd.Process.Kill())
+
+	select {
+	case err = <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("query did not return after the duckdb process died")
+	}
+
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "duckdb process exited before query completed")
+	assert.False(t, strings.HasSuffix(strings.TrimSpace(msg), ":"), msg)
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, msg, "signal: killed", msg)
+		assert.Contains(t, msg, "out-of-memory", msg)
+	}
+
+	// the connection must reopen on the next query
+	data, err := duck.Query("select 9 as n")
+	if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
+		assert.Equal(t, int64(9), data.Rows[0][0])
+	}
 }
 
 func TestDuckDbStreamArrow(t *testing.T) {

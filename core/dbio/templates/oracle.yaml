@@ -1,4 +1,5 @@
 core:
+  explain: explain plan for {sql}
   create_table: |
     BEGIN
       EXECUTE IMMEDIATE 'create table {table} ({col_types})';

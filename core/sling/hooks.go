@@ -50,6 +50,8 @@ type HookBuildRunOptions struct {
 	Range       string
 	Recursive   bool
 	Test        bool
+	Compile     bool
+	List        bool
 }
 
 type Hook interface {

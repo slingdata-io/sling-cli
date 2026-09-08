@@ -29,3 +29,7 @@ func IsReplicationRunMode() bool {
 func IsPipelineRunMode() bool {
 	return os.Getenv("SLING_RUN_MODE") == "pipeline"
 }
+
+func IsBuildRunMode() bool {
+	return os.Getenv("SLING_RUN_MODE") == "build"
+}
