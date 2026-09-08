@@ -1088,49 +1088,63 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 }
 
 func (conn *BaseConn) setTransforms(columns iop.Columns) {
-	colTransforms := map[string][]string{}
-
-	// merge from existing
+	// parse existing in the same staged form it was written as
+	var existing []map[string]string
 	if transforms := conn.GetProp("transforms"); transforms != "" {
-		colTransformsExisting := map[string][]string{}
-		g.Unmarshal(transforms, &colTransformsExisting)
-		for k, v := range colTransformsExisting {
-			if _, ok := colTransforms[k]; !ok {
-				colTransforms[k] = v
+		var payload any
+		if err := g.Unmarshal(transforms, &payload); err != nil {
+			g.Warn("could not unmarshal column transforms for database stream: %s", err.Error())
+			return // keep what the user set, do not drop it
+		}
+
+		parsed, err := iop.ParseStageTransforms(payload)
+		if err != nil {
+			g.Warn("could not parse column transforms for database stream: %s", err.Error())
+			return // keep what the user set, do not drop it
+		}
+		existing = parsed
+	}
+
+	// columns already handled by an existing transform
+	decoded := map[string]bool{}
+	for _, stage := range existing {
+		for key, expr := range stage {
+			expr = strings.TrimSpace(expr)
+			for _, name := range []string{"parse_uuid", "parse_ms_uuid", "binary_to_hex", "binary_to_decimal"} {
+				if strings.HasPrefix(expr, name+"(") {
+					decoded[strings.ToLower(key)] = true
+				}
 			}
 		}
 	}
 
 	// add new
+	auto := map[string]string{}
 	for _, col := range columns {
 		key := strings.ToLower(col.Name)
-		vals := colTransforms[key]
+		if decoded[key] {
+			continue
+		}
 		switch conn.Type {
 		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
-				if !lo.Contains(vals, "parse_uuid") {
-					g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
-					colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
-				}
+				g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
+				auto[key] = "parse_ms_uuid(value)"
 			}
 		case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 			if strings.ToLower(col.DbType) == "bit" {
-				// only add transform parse_bit if binary_to_hex or binary_to_decimal is not specified
-				if !lo.Contains(vals, "binary_to_hex") && !lo.Contains(vals, "binary_to_decimal") {
-					g.Debug(`setting transform "parse_bit" for column "%s"`, col.Name)
-					colTransforms[key] = append([]string{"parse_bit"}, vals...)
-				}
+				g.Debug(`setting transform "parse_bit" for column "%s"`, col.Name)
+				auto[key] = "parse_bit(value)"
 			}
 		}
 	}
 
-	if len(colTransforms) > 0 {
-		transforms, err := iop.ParseStageTransforms(colTransforms)
-		if err != nil {
-			g.Warn("could not parse column transforms for database stream: %s", err.Error())
-		}
-		conn.SetProp("transforms", g.Marshal(transforms))
+	if len(auto) == 0 {
+		return // nothing to add, leave the prop untouched
 	}
+
+	// the automatic decode runs first, so user transforms see the decoded value
+	conn.SetProp("transforms", g.Marshal(append([]map[string]string{auto}, existing...)))
 }
 
 // NewTransaction creates a new transaction

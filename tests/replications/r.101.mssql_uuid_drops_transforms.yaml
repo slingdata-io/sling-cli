@@ -1,0 +1,72 @@
+# Discussion 798: a uniqueidentifier column in the stream makes setTransforms
+# drop the user transforms. options["transforms"] is written as
+# []map[string]string, but setTransforms reads it as map[string][]string.
+source: MSSQL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+  transforms:
+    - name: upper(value)
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.uuid_transform_test', 'U') IS NOT NULL DROP TABLE dbo.uuid_transform_test;
+        CREATE TABLE dbo.uuid_transform_test (
+          id INT PRIMARY KEY,
+          name VARCHAR(100),
+          guid_col UNIQUEIDENTIFIER
+        );
+        INSERT INTO dbo.uuid_transform_test (id, name, guid_col) VALUES
+        (1, 'alice', '6F9619FF-8B86-D011-B42D-00C04FC964FF'),
+        (2, 'bob', 'A0E44FF6-8B86-D011-B42D-00C04FC964FF');
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: select id, name from public.uuid_transform_with_guid order by id
+      into: with_guid
+
+    - type: query
+      connection: '{target.name}'
+      query: select id, name from public.uuid_transform_no_guid order by id
+      into: no_guid
+
+    - type: log
+      message: |
+        with guid column: {store.with_guid}
+        without guid column: {store.no_guid}
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE dbo.uuid_transform_test;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE public.uuid_transform_with_guid;
+        DROP TABLE public.uuid_transform_no_guid;
+
+    - type: check
+      check: store.no_guid[0].name == "ALICE"
+      failure_message: "control: transform must apply when no uniqueidentifier is selected"
+      success_message: "control passed: transform applied without uniqueidentifier"
+
+    - type: check
+      check: store.with_guid[0].name == "ALICE"
+      failure_message: "BUG (discussion 798): transform dropped when uniqueidentifier is in the stream"
+      success_message: "transform applied with uniqueidentifier present"
+
+streams:
+  # selects the uniqueidentifier column -> transform gets dropped
+  with_guid:
+    sql: select id, name, guid_col from dbo.uuid_transform_test
+    object: public.uuid_transform_with_guid
+
+  # control: same transform, no uniqueidentifier column
+  no_guid:
+    sql: select id, name from dbo.uuid_transform_test
+    object: public.uuid_transform_no_guid
