@@ -480,18 +480,29 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 			"provider":             "PROVIDER",
 			"validation":           "VALIDATION",
 		})
-		// If user supplied CHAIN but no PROVIDER, default to credential_chain
-		if _, hasChain := secretProps["CHAIN"]; hasChain {
-			if _, hasProv := secretProps["PROVIDER"]; !hasProv {
+		// PROFILE / CHAIN / ASSUME_ROLE_ARN / VALIDATION are only valid on
+		// the credential_chain provider (default config rejects them).
+		if _, hasProv := secretProps["PROVIDER"]; !hasProv {
+			needsChain := false
+			for _, k := range []string{"CHAIN", "PROFILE", "ASSUME_ROLE_ARN", "VALIDATION"} {
+				if _, ok := secretProps[k]; ok {
+					needsChain = true
+					break
+				}
+			}
+			if needsChain {
 				secretProps["PROVIDER"] = "credential_chain"
+			}
+		}
+		if _, hasArn := secretProps["ASSUME_ROLE_ARN"]; hasArn {
+			if _, hasChain := secretProps["CHAIN"]; !hasChain {
+				secretProps["CHAIN"] = "sts"
 			}
 		}
 	case iop.DuckDbSecretTypeAzure:
 		fillSecretProps(map[string]string{
 			"azure_connection_string": "CONNECTION_STRING",
 			"azure_account_name":      "ACCOUNT_NAME",
-			"azure_account_key":       "ACCOUNT_KEY",
-			"azure_sas_token":         "SAS_TOKEN",
 			"azure_client_secret":     "CLIENT_SECRET",
 			"http_proxy":              "HTTP_PROXY",
 			"proxy_user_name":         "PROXY_USER_NAME",
@@ -501,6 +512,43 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 			"azure_client_id":         "CLIENT_ID",
 			"provider":                "PROVIDER",
 		})
+
+		// DuckDB azure secrets (config provider) only accept CONNECTION_STRING /
+		// ACCOUNT_NAME / ENDPOINT / proxy keys. Account key and SAS must be
+		// embedded in CONNECTION_STRING.
+		if _, has := secretProps["CONNECTION_STRING"]; !has {
+			accountName := conn.GetProp("azure_account_name")
+			if accountKey := conn.GetProp("azure_account_key"); accountKey != "" {
+				secretProps["CONNECTION_STRING"] = g.F(
+					"DefaultEndpointsProtocol=https;AccountName=%s;AccountKey=%s;EndpointSuffix=core.windows.net",
+					accountName, accountKey,
+				)
+				delete(secretProps, "ACCOUNT_NAME")
+			} else if sasToken := conn.GetProp("azure_sas_token"); sasToken != "" {
+				sasToken = strings.TrimPrefix(sasToken, "?")
+				if accountName != "" {
+					secretProps["CONNECTION_STRING"] = g.F(
+						"BlobEndpoint=https://%s.blob.core.windows.net/;SharedAccessSignature=%s",
+						accountName, sasToken,
+					)
+					delete(secretProps, "ACCOUNT_NAME")
+				}
+			}
+		}
+
+		// TENANT_ID / CLIENT_SECRET / CLIENT_CERTIFICATE_PATH / CLIENT_ID are
+		// provider-specific — auto-select the right PROVIDER.
+		if _, hasProv := secretProps["PROVIDER"]; !hasProv {
+			_, hasTenant := secretProps["TENANT_ID"]
+			_, hasSecret := secretProps["CLIENT_SECRET"]
+			_, hasCert := secretProps["CLIENT_CERTIFICATE_PATH"]
+			_, hasClient := secretProps["CLIENT_ID"]
+			if hasTenant || hasSecret || hasCert {
+				secretProps["PROVIDER"] = "service_principal"
+			} else if hasClient {
+				secretProps["PROVIDER"] = "managed_identity"
+			}
+		}
 	case iop.DuckDbSecretTypeGCS:
 		// via HMAC keys (S3 interoperability)
 		// https://console.cloud.google.com/storage/settings;tab=interoperability

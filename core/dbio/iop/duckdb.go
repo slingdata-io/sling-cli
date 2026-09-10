@@ -372,8 +372,6 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		secretKeyMap = map[string]string{
 			"CONN_STR":                "CONNECTION_STRING",
 			"ACCOUNT":                 "ACCOUNT_NAME",
-			"ACCOUNT_KEY":             "ACCOUNT_KEY",
-			"SAS_TOKEN":               "SAS_TOKEN",
 			"CLIENT_SECRET":           "CLIENT_SECRET",
 			"HTTP_PROXY":              "HTTP_PROXY",
 			"PROXY_USER_NAME":         "PROXY_USER_NAME",
@@ -418,6 +416,48 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 					val = scopeScheme + "://" + val
 				}
 				props[duckdbKey] = val
+			}
+		}
+		// DuckDB azure secrets (config provider) reject ACCOUNT_KEY / SAS_TOKEN
+		// and provider-specific keys without the matching PROVIDER.
+		if secretType == DuckDbSecretTypeAzure {
+			if _, has := props["CONNECTION_STRING"]; !has {
+				accountName := fsProps["ACCOUNT"]
+				if accountKey := fsProps["ACCOUNT_KEY"]; accountKey != "" {
+					props["CONNECTION_STRING"] = g.F(
+						"DefaultEndpointsProtocol=https;AccountName=%s;AccountKey=%s;EndpointSuffix=core.windows.net",
+						accountName, accountKey,
+					)
+					delete(props, "ACCOUNT_NAME")
+				} else if sasToken := fsProps["SAS_TOKEN"]; sasToken != "" {
+					sasToken = strings.TrimPrefix(sasToken, "?")
+					if accountName != "" {
+						props["CONNECTION_STRING"] = g.F(
+							"BlobEndpoint=https://%s.blob.core.windows.net/;SharedAccessSignature=%s",
+							accountName, sasToken,
+						)
+						delete(props, "ACCOUNT_NAME")
+					}
+				}
+			}
+			if _, hasProv := props["PROVIDER"]; !hasProv {
+				_, hasTenant := props["TENANT_ID"]
+				_, hasSecret := props["CLIENT_SECRET"]
+				_, hasCert := props["CLIENT_CERTIFICATE_PATH"]
+				_, hasClient := props["CLIENT_ID"]
+				if hasTenant || hasSecret || hasCert {
+					props["PROVIDER"] = "service_principal"
+				} else if hasClient {
+					props["PROVIDER"] = "managed_identity"
+				}
+			}
+		}
+		// S3/R2: PROFILE is only valid on credential_chain (config rejects it).
+		if secretType == DuckDbSecretTypeS3 || secretType == DuckDbSecretTypeR2 {
+			if _, hasProv := props["PROVIDER"]; !hasProv {
+				if _, hasProfile := props["PROFILE"]; hasProfile {
+					props["PROVIDER"] = "credential_chain"
+				}
 			}
 		}
 		if len(props) > 0 {
