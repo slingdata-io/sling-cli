@@ -1,0 +1,119 @@
+# Reproduction for the Postgres CDC UUID Arrow panic
+#
+#   panic: arrow/array: column "external_id" type mismatch:
+#          got=utf8, want=extension<arrow.uuid>
+#
+# Scenario:
+#   1. Stream runs in mode: change-capture. The initial snapshot completes,
+#      because it does not go through the Arrow cache writer.
+#   2. Changes are made on a table that has a UUID column.
+#   3. The next run reads those changes into the Arrow cache and panics.
+#
+# Cause:
+#   ColumnsToArrowSchema maps UUIDType to extensions.NewUUIDType()
+#   (core/dbio/iop/arrow.go:614), but ArrowWriter.createBuilder has no
+#   arrow.EXTENSION case (core/dbio/iop/arrow.go:459), so the column falls to
+#   the default branch and gets a StringBuilder. At flush, NewRecordBatch sees
+#   an utf8 array against a uuid schema field and panics.
+#
+# The target is not involved: the panic happens while reading changes on the
+# source side. Reported by a CLI Pro user running Postgres -> Snowflake.
+#
+# Connections required:
+#   POSTGRES_CDC_UUID : provided by run_docker_test.sh (local container at :55433)
+
+env:
+  SOURCE: POSTGRES_CDC_UUID
+  TARGET: POSTGRES_CDC_UUID
+  TGT_TABLE: target_schema.cdc_uuid_test
+  # SLING_STATE is required for CDC; the runner script exports it before invoking sling.
+
+steps:
+  # ── 1. Seed the source and run the initial snapshot ──────────────────────
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO public.cdc_uuid_test (id, external_id, name) VALUES
+        (1, '6b3a8f1e-6f0e-4c1b-9d3a-2f5c7e8a9b01', 'Alice'),
+        (2, 'c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f', 'Bob');
+
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        primary_key: [id]
+        object: '{env.TGT_TABLE}'
+        change_capture_options:
+          snapshot_start: beginning
+          change_feed: sling_cdc_uuid
+          run_max_events: 100000
+          run_max_duration: 1m
+      streams:
+        public.cdc_uuid_test:
+      env:
+        SLING_THREADS: 1
+    on_failure: abort
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) AS cnt FROM {env.TGT_TABLE}
+    into: snap_cnt
+
+  - type: check
+    check: int_parse(store.snap_cnt[0].cnt) == 2
+    failure_message: 'snapshot count mismatch: expected 2, got {store.snap_cnt[0].cnt}'
+
+  - type: log
+    message: 'STEP 1 OK - snapshot loaded 2 rows (UUID column is fine here)'
+
+  # ── 2. Emit CDC events on the UUID table ─────────────────────────────────
+  # This is the step the Arrow cache writer chokes on.
+  - connection: '{env.SOURCE}'
+    query: |
+      INSERT INTO public.cdc_uuid_test (id, external_id, name)
+        VALUES (3, 'd4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70', 'Diana');
+      UPDATE public.cdc_uuid_test SET name = 'Alice Updated' WHERE id = 1;
+
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        primary_key: [id]
+        object: '{env.TGT_TABLE}'
+        change_capture_options:
+          change_feed: sling_cdc_uuid
+          run_max_events: 100000
+          run_max_duration: 30s
+      streams:
+        public.cdc_uuid_test:
+      env:
+        SLING_THREADS: 1
+    on_failure: abort
+
+  # ── 3. Verify the changes landed ─────────────────────────────────────────
+  # Not reached while the bug is present.
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) AS cnt FROM {env.TGT_TABLE}
+    into: cdc_cnt
+
+  - type: check
+    check: int_parse(store.cdc_cnt[0].cnt) == 3
+    failure_message: 'after cdc round expected 3 rows, got {store.cdc_cnt[0].cnt}'
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT name, external_id FROM {env.TGT_TABLE} WHERE id = 1
+    into: cdc_alice
+
+  - type: check
+    check: store.cdc_alice[0].name == "Alice Updated"
+    failure_message: 'expected name="Alice Updated" for id=1, got {store.cdc_alice[0].name}'
+
+  - type: check
+    check: store.cdc_alice[0].external_id == "6b3a8f1e-6f0e-4c1b-9d3a-2f5c7e8a9b01"
+    failure_message: 'uuid value not preserved: {store.cdc_alice[0].external_id}'
+
+  - type: log
+    message: 'CDC UUID test PASSED'
