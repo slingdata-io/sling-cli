@@ -2914,6 +2914,17 @@
     - 'guid value preserved as text'
     - 'null guid preserved as text'
 
+# SLING_STATE using the same DuckDB connection name as the target. DuckDB permits
+# one writer process per file, and Sling pools DuckDB processes by connection name,
+# so the state store reuses the target's process. Covers write and read-back of the
+# watermark across two incremental runs.
+- id: 600
+  name: 'SLING_STATE on the same DuckDB connection as the target'
+  run: 'sling run -d -p tests/pipelines/p.52.duckdb_state_same_conn.yaml'
+  group: duckdb
+  output_contains:
+    - 'SUCCESS: SLING_STATE on the same DuckDB connection as the target works'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
