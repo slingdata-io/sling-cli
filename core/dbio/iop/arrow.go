@@ -480,6 +480,8 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 		return array.NewStringBuilder(a.mem)
 	case arrow.BINARY:
 		return array.NewBinaryBuilder(a.mem, dtype.(*arrow.BinaryType))
+	case arrow.EXTENSION:
+		return array.NewBuilder(a.mem, dtype)
 	default:
 		return array.NewStringBuilder(a.mem)
 	}

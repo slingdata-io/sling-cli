@@ -201,10 +201,16 @@ Runs a Sling Build project (SQL models). Completes load → transform in one pip
   id: transform
   # optional:
   # target: MY_WAREHOUSE
-  # select: [stg_orders, fct_orders]
-  # full_refresh: true    # run only
+  # select: [stg_orders, fct_orders]   # glob / tag:xxx / +model / model+
+  # exclude: [stg_tmp_*]
+  # vars: { env: prod }
+  # schema: analytics                  # override output schema
+  # full_refresh: true                 # run only
   # fail_fast: true
   # threads: 2
+  # no_seeds: true                     # run only
+  # range: "2024-01-01,2024-06-30"     # incremental backfill (run only)
+  # recursive: true                    # discover child sling_build.yml
   # env:
   #   SLING_DEV_USER: alice
 ```

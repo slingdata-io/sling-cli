@@ -1,0 +1,124 @@
+# SLING_STATE using the SAME DuckDB connection as the target.
+#
+# DuckDB permits one writer process per database file. Sling pools DuckDB
+# processes by connection NAME, so pointing SLING_STATE at the same connection
+# name as the target reuses that one process and works.
+#
+# Note: naming a DIFFERENT connection that resolves to the same .duckdb file
+# opens a second process and fails with "Could not set lock on file". That is
+# expected DuckDB behavior, not a Sling bug -- use the same connection name.
+#
+# Source is Postgres so the target and state share one DuckDB connection.
+
+steps:
+  - connection: postgres
+    on_failure: warn
+    query: DROP TABLE IF EXISTS public.test_duckdb_state
+
+  - connection: postgres
+    query: |
+      CREATE TABLE public.test_duckdb_state (
+        id bigint, name text, updated timestamp
+      );
+      INSERT INTO public.test_duckdb_state VALUES
+        (1, 'alice', '2024-01-01 00:00:00'),
+        (2, 'bob',   '2024-01-02 00:00:00');
+
+  - connection: DUCKDB
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.test_duckdb_state
+
+  - connection: DUCKDB
+    on_failure: warn
+    query: DELETE FROM main._sling_state WHERE source_stream like '%test_duckdb_state%'
+
+  - log: "Created source table (2 rows)"
+
+  # First incremental run. State writes to the same DuckDB connection as the target.
+  - replication:
+      source: postgres
+      target: DUCKDB
+      streams:
+        public.test_duckdb_state:
+          object: main.test_duckdb_state
+          mode: incremental
+          update_key: updated
+      env:
+        SLING_STATE: DUCKDB/main
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKDB
+    query: SELECT count(*) as cnt FROM main.test_duckdb_state
+    into: result
+
+  - log: "row count after first run => {store.result[0].cnt}"
+
+  - check: int_parse(store.result[0].cnt) == 2
+    failure_message: "Expected 2 rows, got {store.result[0].cnt}"
+
+  # The watermark must land in the state table on the same DuckDB file.
+  - connection: DUCKDB
+    query: |
+      SELECT value FROM main._sling_state
+      WHERE source_stream like '%test_duckdb_state%'
+    into: state_result
+
+  - check: length(store.state_result) > 0
+    failure_message: "Expected a state record but found none"
+
+  - log: "state value => {store.state_result[0].value}"
+
+  # Second run must READ the watermark back and load only the new row.
+  - connection: postgres
+    query: INSERT INTO public.test_duckdb_state VALUES (3, 'carol', '2024-03-01 00:00:00')
+
+  - replication:
+      source: postgres
+      target: DUCKDB
+      streams:
+        public.test_duckdb_state:
+          object: main.test_duckdb_state
+          mode: incremental
+          update_key: updated
+      env:
+        SLING_STATE: DUCKDB/main
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKDB
+    query: SELECT count(*) as cnt FROM main.test_duckdb_state
+    into: result2
+
+  - log: "row count after incremental re-run => {store.result2[0].cnt}"
+
+  # A re-pull of the 2 old rows would give 5. Correct resume gives 3.
+  - check: int_parse(store.result2[0].cnt) == 3
+    failure_message: "Expected 3 rows (no re-pull), got {store.result2[0].cnt}"
+
+  # The watermark must have advanced to the new max.
+  - connection: DUCKDB
+    query: |
+      SELECT value FROM main._sling_state
+      WHERE source_stream like '%test_duckdb_state%'
+    into: state_result2
+
+  - log: "state value after re-run => {store.state_result2[0].value}"
+
+  - check: store.state_result2[0].value != store.state_result[0].value
+    failure_message: "Watermark did not advance, still {store.state_result2[0].value}"
+
+  - log: "SUCCESS: SLING_STATE on the same DuckDB connection as the target works"
+
+  # Cleanup
+  - connection: DUCKDB
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.test_duckdb_state
+
+  - connection: DUCKDB
+    on_failure: warn
+    query: DELETE FROM main._sling_state WHERE source_stream like '%test_duckdb_state%'
+
+  - connection: postgres
+    on_failure: warn
+    query: DROP TABLE IF EXISTS public.test_duckdb_state

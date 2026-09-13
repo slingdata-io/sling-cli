@@ -424,6 +424,8 @@ defaults:
       decimal:
         min_precision: 10
         max_precision: 38
+      uuid:
+        as_text: true  # Map UUID columns to varchar(36) (since v1.6.1)
 ```
 
 #### Table Management

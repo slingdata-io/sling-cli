@@ -1,0 +1,28 @@
+# Self-contained Postgres source with wal_level=logical for CDC.
+# The shared test Postgres runs wal_level=replica and cannot serve a
+# replication slot, so this repro brings its own.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sling-cdc-uuid-pg
+    ports:
+      - "55433:5432"
+    environment:
+      POSTGRES_PASSWORD: sling_cdc_test
+      POSTGRES_DB: cdc_uuid_db
+      POSTGRES_USER: postgres
+    command:
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "cdc_uuid_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 30

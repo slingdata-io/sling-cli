@@ -2914,6 +2914,32 @@
     - 'guid value preserved as text'
     - 'null guid preserved as text'
 
+# SLING_STATE using the same DuckDB connection name as the target. DuckDB permits
+# one writer process per file, and Sling pools DuckDB processes by connection name,
+# so the state store reuses the target's process. Covers write and read-back of the
+# watermark across two incremental runs.
+- id: 600
+  name: 'SLING_STATE on the same DuckDB connection as the target'
+  run: 'sling run -d -p tests/pipelines/p.52.duckdb_state_same_conn.yaml'
+  group: duckdb
+  output_contains:
+    - 'SUCCESS: SLING_STATE on the same DuckDB connection as the target works'
+
+# Postgres CDC on a table with a UUID column panics in the Arrow cache writer.
+# ColumnsToArrowSchema maps UUIDType to extensions.NewUUIDType() (arrow.go:614)
+# but ArrowWriter.createBuilder has no arrow.EXTENSION case (arrow.go:459), so
+# the column gets a StringBuilder and NewRecordBatch rejects the batch.
+# The initial snapshot succeeds; the panic hits the read-changes phase.
+# Self-contained: the runner brings its own wal_level=logical Postgres, since
+# the shared test instance runs wal_level=replica.
+- id: 601
+  name: 'Postgres CDC with UUID column panics in Arrow writer'
+  group: cdc_uuid
+  run: 'bash tests/pipelines/cdc_uuid/run_docker_test.sh'
+  output_contains:
+    - 'STEP 1 OK - snapshot loaded 2 rows'
+    - 'CDC UUID test PASSED'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

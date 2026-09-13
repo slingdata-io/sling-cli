@@ -31,7 +31,7 @@ from sling.options import SourceOptions, TargetOptions
 - **Limits**: `limit`, `offset`, `range`
 - **Keys**: `primary_key`, `update_key`
 - **CDC**: `cdc_options`
-- **Config**: `env`, `replication`, `pipeline`, `directory`, `job`, `debug`, `trace`, `home_dir`
+- **Config**: `env`, `replication`, `pipeline`, `directory`, `job`, `debug`, `trace`, `home_dir`, `stdout`
 - **Python-specific**: `input` (data input from Python)
 
 ### 2. Replication Class
