@@ -2940,6 +2940,21 @@
     - 'STEP 1 OK - snapshot loaded 2 rows'
     - 'CDC UUID test PASSED'
 
+# SQL Server BCP rejects `-d` together with a 3-part db.schema.table name.
+# FullName() prefixes the connection database; BCP also always passed `-d`.
+# Same failure as the AEG NCC bulk load (bcp: "The -d database name option
+# is not supported when a 3 part dbtable name is specified").
+- id: 602
+  name: 'SQL Server BCP 3-part name with -d'
+  group: mssql
+  run: 'sling run -d -r tests/replications/r.125.sqlserver_bcp_3part.yaml'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: SQL Server BCP loaded a 3-part target name'
+  output_does_not_contain:
+    - 'The -d database name option is not supported when a 3 part'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -1068,11 +1068,32 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		defer os.Remove(errPath)
 	}
 
+	// bcp rejects `-d` together with a 3-part db.schema.table name
+	// ("The -d database name option is not supported when a 3 part
+	// dbtable name is specified"). FullName() includes the database
+	// for SQL Server; keep `-d` and pass schema.table, matching 1.5.22.
+	// ParseTableName, not strings.Split: a quoted identifier can contain ".".
+	tableArg := strings.ReplaceAll(tableFName, `"`, "")
+	if table, perr := ParseTableName(tableFName, conn.GetType()); perr == nil && !table.IsQuery() && table.Name != "" {
+		if table.Database != "" {
+			if database != "" && strings.EqualFold(table.Database, database) {
+				table.Database = ""
+			} else {
+				database = ""
+			}
+		}
+		tableArg = strings.ReplaceAll(table.FullName(), `"`, "")
+	}
+
 	bcpArgs := []string{
-		strings.ReplaceAll(tableFName, `"`, ""),
+		tableArg,
 		"in", filePath,
 		"-S", hostPort,
-		"-d", database,
+	}
+	if database != "" {
+		bcpArgs = append(bcpArgs, "-d", database)
+	}
+	bcpArgs = append(bcpArgs,
 		"-t", ",",
 		"-m", "1",
 		"-w",
@@ -1080,7 +1101,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		"-b", cast.ToString(batchSize),
 		"-F", "2",
 		"-e", errPath,
-	}
+	)
 
 	if bcpAuthString := conn.GetProp("bcp_auth_string"); bcpAuthString != "" {
 		bcpAuthParts := []string{}
