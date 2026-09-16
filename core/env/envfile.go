@@ -671,6 +671,44 @@ func ParseEnvFileKeys(body string) (connNames, envKeys []string, err error) {
 	return connNames, envKeys, nil
 }
 
+// RemovedKeys lists connections and env vars (prefixed `env.`) present in
+// oldBody but not in newBody. Used to refuse a raw-editor save that would drop
+// credentials the previous body had, unless the client confirms.
+func RemovedKeys(oldBody, newBody string) ([]string, error) {
+	oldConns, oldEnv, err := ParseEnvFileKeys(oldBody)
+	if err != nil {
+		return nil, g.Error(err, "could not parse current env.yaml")
+	}
+	newConns, newEnv, err := ParseEnvFileKeys(newBody)
+	if err != nil {
+		// let the save path produce the parse error
+		return nil, nil
+	}
+
+	inNew := func(list []string, key string) bool {
+		for _, k := range list {
+			if strings.EqualFold(k, key) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var removed []string
+	for _, k := range oldConns {
+		if !inNew(newConns, k) {
+			removed = append(removed, k)
+		}
+	}
+	for _, k := range oldEnv {
+		if !inNew(newEnv, k) {
+			removed = append(removed, "env."+k)
+		}
+	}
+	sort.Strings(removed)
+	return removed, nil
+}
+
 // ConnectionNames returns the connection keys present in the raw file at
 // ef.Path, sorted.
 func (ef *EnvFile) ConnectionNames() ([]string, error) {
