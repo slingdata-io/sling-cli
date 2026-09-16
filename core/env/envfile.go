@@ -2,6 +2,8 @@ package env
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path"
 	"regexp"
@@ -482,24 +484,41 @@ type MissingRef struct {
 // LookupConnection re-parses ef.Path and returns line numbers for
 // connections.<NAME> and each ${VAR} field under it.
 func (ef *EnvFile) LookupConnection(name string) (ConnLocation, error) {
-	loc := ConnLocation{
-		Path:       ef.Path,
-		Connection: strings.ToUpper(name),
-		Missing:    []MissingRef{},
-	}
 	root, err := ef.loadRootNode()
 	if err != nil {
-		return loc, err
+		return ConnLocation{Path: ef.Path, Connection: strings.ToUpper(name), Missing: []MissingRef{}}, err
+	}
+	return lookupConnectionInRoot(root, name, ef.Path)
+}
+
+// LookupConnectionBody is LookupConnection against a body string. path is
+// recorded on the result for display only. No ${VAR} interpolation happens.
+func LookupConnectionBody(body, name, path string) (ConnLocation, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &root); err != nil {
+		return ConnLocation{Path: path, Connection: strings.ToUpper(name), Missing: []MissingRef{}}, g.Error(err, "could not parse env file body")
+	}
+	if root.Kind == 0 {
+		root = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	return lookupConnectionInRoot(&root, name, path)
+}
+
+func lookupConnectionInRoot(root *yaml.Node, name, path string) (ConnLocation, error) {
+	loc := ConnLocation{
+		Path:       path,
+		Connection: strings.ToUpper(name),
+		Missing:    []MissingRef{},
 	}
 
 	conns := mappingChild(root, "connections")
 	if conns == nil {
-		return loc, g.Error("connections block not found in %s", ef.Path)
+		return loc, g.Error("connections block not found in %s", path)
 	}
 
 	keyNode, valNode := mappingChildFold(conns, name)
 	if keyNode == nil {
-		return loc, g.Error("connection %s not found in %s", name, ef.Path)
+		return loc, g.Error("connection %s not found in %s", name, path)
 	}
 	loc.Line = keyNode.Line
 	collectMissingRefs(valNode, "", &loc.Missing)
@@ -559,6 +578,25 @@ func ExpandRef(s string) string {
 	return s
 }
 
+// BodySha returns the sha256 hex digest of an env file body. Clients send it
+// back on save so a stale buffer cannot overwrite a newer file.
+func BodySha(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+// ConnectionEditorEnabled reports whether the GUI connection editor is
+// enabled. SLING_DISABLE_CONNECTION_EDITOR=1 turns it off, which also disables
+// the EnvironmentSet removal guard (a client that does not know about
+// allow_removals cannot act on that refusal).
+func ConnectionEditorEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SLING_DISABLE_CONNECTION_EDITOR"))) {
+	case "1", "true", "yes", "on":
+		return false
+	}
+	return true
+}
+
 // RawConnections parses the file at ef.Path into connection prop maps, without
 // ${VAR} interpolation. Load/ReadConnections expand refs against the process
 // environment; this does not, so callers that hand values to a UI (or write
@@ -599,6 +637,38 @@ func rawConnectionsFromRoot(root *yaml.Node) map[string]map[string]any {
 		out[conns.Content[i].Value] = props
 	}
 	return out
+}
+
+// ParseEnvFileKeys parses a raw env.yaml body and returns its connection names
+// and env keys (legacy `variables:` included). No ${VAR} interpolation.
+func ParseEnvFileKeys(body string) (connNames, envKeys []string, err error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &root); err != nil {
+		return nil, nil, g.Error(err, "could not parse env file body")
+	}
+	if root.Kind == 0 {
+		return nil, nil, nil
+	}
+
+	for name := range rawConnectionsFromRoot(&root) {
+		connNames = append(connNames, name)
+	}
+	seen := map[string]struct{}{}
+	for _, block := range []string{"env", "variables"} {
+		n := mappingChild(&root, block)
+		if n == nil {
+			continue
+		}
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			seen[n.Content[i].Value] = struct{}{}
+		}
+	}
+	for k := range seen {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(connNames)
+	sort.Strings(envKeys)
+	return connNames, envKeys, nil
 }
 
 // ConnectionNames returns the connection keys present in the raw file at

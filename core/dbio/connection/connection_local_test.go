@@ -254,7 +254,7 @@ func TestPromoteLiteralSecrets(t *testing.T) {
 		},
 	}
 	envUpdates := map[string]any{}
-	promoted := PromoteLiteralSecrets("MY_PG", props, envUpdates)
+	promoted := PromoteLiteralSecrets("MY_PG", props, nil, envUpdates)
 
 	if props["password"] != "${MY_PG_PASSWORD}" {
 		t.Errorf("password not promoted: %v", props["password"])
@@ -282,7 +282,7 @@ func TestPromoteLiteralSecrets(t *testing.T) {
 	}
 
 	// nil envUpdates is a no-op
-	if got := PromoteLiteralSecrets("MY_PG", map[string]any{"password": "x"}, nil); got != nil {
+	if got := PromoteLiteralSecrets("MY_PG", map[string]any{"password": "x"}, nil, nil); got != nil {
 		t.Errorf("expected no-op, got %v", got)
 	}
 }
@@ -296,7 +296,7 @@ env:
 `)
 	props := map[string]any{"type": "postgres", "password": "hunter2"}
 	envUpdates := map[string]any{}
-	PromoteLiteralSecrets("MY_PG", props, envUpdates)
+	PromoteLiteralSecrets("MY_PG", props, nil, envUpdates)
 
 	err := ec.SetValidated("MY_PG", props, SetOptions{
 		RejectLiteralSecrets: true,

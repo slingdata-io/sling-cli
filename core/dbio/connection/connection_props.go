@@ -64,8 +64,10 @@ func EnvVarRef(connName, key string) string {
 //
 // Secret fields are: top-level keys in env.SecretKeys, and every leaf under a
 // nested `secrets` map (same rule RejectLiteralSecrets applies when refusing).
-// Values that are already ${VAR} refs are left alone.
-func PromoteLiteralSecrets(connName string, props map[string]any, envUpdates map[string]any) (promoted []string) {
+// Values that are already ${VAR} refs are left alone, and so are values that
+// equal the expansion of the ref already on disk for that field (existing),
+// so retyping an unchanged secret does not add a plaintext copy to env:.
+func PromoteLiteralSecrets(connName string, props, existing map[string]any, envUpdates map[string]any) (promoted []string) {
 	if props == nil || envUpdates == nil {
 		return nil
 	}
@@ -73,6 +75,10 @@ func PromoteLiteralSecrets(connName string, props map[string]any, envUpdates map
 	for _, k := range env.SecretKeys {
 		v, ok := props[k]
 		if !ok || !isLiteralSecret(v) {
+			continue
+		}
+		if ref, ok := existingRefFor(existing[k], cast.ToString(v)); ok {
+			props[k] = ref
 			continue
 		}
 		envUpdates[EnvVarNameOf(connName, k)] = cast.ToString(v)
@@ -84,10 +90,15 @@ func PromoteLiteralSecrets(connName string, props map[string]any, envUpdates map
 	if secrets == nil {
 		return promoted
 	}
+	existingSecrets := asAnyMap(existing["secrets"])
 	keys := lo.Keys(secrets)
 	sort.Strings(keys)
 	for _, k := range keys {
 		if !isLiteralSecret(secrets[k]) {
+			continue
+		}
+		if ref, ok := existingRefFor(existingSecrets[k], cast.ToString(secrets[k])); ok {
+			secrets[k] = ref
 			continue
 		}
 		envKey := EnvVarNameOf(connName, k)
@@ -100,6 +111,19 @@ func PromoteLiteralSecrets(connName string, props map[string]any, envUpdates map
 		promoted = append(promoted, "secrets."+k)
 	}
 	return promoted
+}
+
+// existingRefFor returns the on-disk ref for a field when literal equals that
+// ref's expansion.
+func existingRefFor(existing any, literal string) (string, bool) {
+	ref, ok := existing.(string)
+	if !ok || !env.IsEnvVarRef(ref) {
+		return "", false
+	}
+	if literal == "" || env.ExpandRef(ref) != literal {
+		return "", false
+	}
+	return ref, true
 }
 
 // PreserveRefs keeps an on-disk ${VAR} ref for any incoming literal value that
