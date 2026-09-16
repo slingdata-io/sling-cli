@@ -1,0 +1,149 @@
+# Issue #802 - MongoDB date filters, both bugs fixed in database_mongo.go:
+#   bug 1: incremental checkpoint was sent as the string ISODate("..."), not a Date
+#   bug 2: `where` did not interpret Extended JSON {"$date": "..."}
+#
+# Filters the `date` field, a genuine BSON Date. (`update_dt` in the same
+# collection is a STRING, so it cannot exercise Date comparison.)
+# 448 of the 1000 documents have date >= 2019-06-01.
+#
+# The two controls run first: they pass before and after the fix, so a failure
+# there means a broken fixture rather than a regression.
+
+steps:
+  - connection: mysql
+    on_failure: warn
+    query: drop table if exists mysql.mongo_date_filter_test
+
+  # ---------- control 1: ISODate() via `where` ----------
+  - replication:
+      source: mongo
+      target: mysql
+      defaults:
+        mode: full-refresh
+        source_options:
+          flatten: 1
+      streams:
+        default.test1k_mongodb:
+          object: mysql.mongo_date_filter_test
+          select: [id, date]
+          where: '{"date": {"$gte": ISODate("2019-06-01T00:00:00.000Z")}}'
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: mysql
+    query: select count(*) as cnt from mysql.mongo_date_filter_test
+    into: ctrl1
+
+  - log: 'control 1 - where + ISODate() => {store.ctrl1[0].cnt} rows (expect 448)'
+
+  - check: int_parse(store.ctrl1[0].cnt) == 448
+    failure_message: 'CONTROL FAILED: where + ISODate() gave {store.ctrl1[0].cnt}, expected 448. Fixture or connection is broken, not the bug.'
+
+  # ---------- control 2: plain ISO string via `where` ----------
+  - replication:
+      source: mongo
+      target: mysql
+      defaults:
+        mode: full-refresh
+        source_options:
+          flatten: 1
+      streams:
+        default.test1k_mongodb:
+          object: mysql.mongo_date_filter_test
+          select: [id, date]
+          where: '{"date": {"$gte": "2019-06-01T00:00:00.000Z"}}'
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: mysql
+    query: select count(*) as cnt from mysql.mongo_date_filter_test
+    into: ctrl2
+
+  - log: 'control 2 - where + plain ISO string => {store.ctrl2[0].cnt} rows (expect 448)'
+
+  - check: int_parse(store.ctrl2[0].cnt) == 448
+    failure_message: 'CONTROL FAILED: where + plain ISO string gave {store.ctrl2[0].cnt}, expected 448.'
+
+  # ---------- bug 2: Extended JSON {"$date": ...} via `where` ----------
+  - replication:
+      source: mongo
+      target: mysql
+      defaults:
+        mode: full-refresh
+        source_options:
+          flatten: 1
+      streams:
+        default.test1k_mongodb:
+          object: mysql.mongo_date_filter_test
+          select: [id, date]
+          where: '{"date": {"$gte": {"$date": "2019-06-01T00:00:00.000Z"}}}'
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: mysql
+    query: select count(*) as cnt from mysql.mongo_date_filter_test
+    into: bug2
+
+  - log: 'bug 2 - where + Extended JSON $date => {store.bug2[0].cnt} rows (expect 448)'
+
+  # Same date, operator and field as control 1, which returned 448.
+  - check: int_parse(store.bug2[0].cnt) == 448
+    failure_message: 'ISSUE 802 BUG 2 REGRESSED: Extended JSON $date returned {store.bug2[0].cnt} rows, expected 448.'
+
+  - log: 'OK bug 2 fixed: Extended JSON $date matched all 448 documents'
+
+  # ---------- bug 1: incremental checkpoint ----------
+  # Seed a checkpoint of 2019-06-01. Row id=-1 is excluded from the count below.
+  - connection: mysql
+    query: drop table if exists mysql.mongo_date_filter_test
+
+  - connection: mysql
+    query: |
+      create table mysql.mongo_date_filter_test (
+        id bigint,
+        `date` datetime(6)
+      )
+
+  - connection: mysql
+    query: |
+      insert into mysql.mongo_date_filter_test (id, `date`)
+      values (-1, '2019-06-01 00:00:00.000000')
+
+  - replication:
+      source: mongo
+      target: mysql
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: date
+        source_options:
+          flatten: 1
+      streams:
+        default.test1k_mongodb:
+          object: mysql.mongo_date_filter_test
+          select: [id, date]
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: mysql
+    query: select count(*) as cnt from mysql.mongo_date_filter_test where id > 0
+    into: bug1
+
+  - log: 'bug 1 - incremental checkpoint => {store.bug1[0].cnt} rows (expect 445)'
+
+  # Control 1 used $gte and matched 448. Incremental uses $gt, and exactly 3
+  # documents sit on the 2019-06-01T00:00:00Z boundary, so 445 is correct.
+  - check: int_parse(store.bug1[0].cnt) == 445
+    failure_message: 'ISSUE 802 BUG 1 REGRESSED: incremental loaded {store.bug1[0].cnt} rows, expected 445.'
+
+  - log: 'OK bug 1 fixed: incremental checkpoint matched 445 documents ($gt of 448)'
+
+  - log: 'SUCCESS: both issue 802 MongoDB date filter bugs are fixed'
+
+  - connection: mysql
+    on_failure: warn
+    query: drop table if exists mysql.mongo_date_filter_test
