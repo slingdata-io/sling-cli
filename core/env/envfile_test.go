@@ -529,6 +529,26 @@ custom_section:
 		t.Errorf("old host value survived\n--- got ---\n%s", got)
 	}
 
+	// every original line except the edited field must survive verbatim, in order
+	j := 0
+	outLines := strings.Split(got, "\n")
+	for _, line := range strings.Split(original, "\n") {
+		if strings.TrimSpace(line) == "" || strings.Contains(line, "host: db.example.com") {
+			continue
+		}
+		found := false
+		for ; j < len(outLines); j++ {
+			if outLines[j] == line {
+				found = true
+				j++
+				break
+			}
+		}
+		if !found {
+			t.Errorf("original line did not survive in order: %q\n--- got ---\n%s", line, got)
+		}
+	}
+
 	// a brand-new connection appends under connections:
 	if err := ef.SetConnectionNode("PG_NEW", map[string]any{"type": "postgres", "host": "n"}, nil); err != nil {
 		t.Fatalf("SetConnectionNode: %v", err)

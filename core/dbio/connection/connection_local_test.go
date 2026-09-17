@@ -362,21 +362,36 @@ func TestSetValidatedRefusesInvalidType(t *testing.T) {
 
 func TestSetValidatedKeepsQuotedAndBlockValues(t *testing.T) {
 	path, ec := writeEnvFile(t, `connections:
-  MY_PG:
-    type: postgres
-    password: "${MY_PG_PASSWORD}"
+  MY_SFTP:
+    type: sftp
+    host: one.example.com
+    password: "${MY_SFTP_PASSWORD}"
     sslmode: "require"
+    private_key: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      b3BlbnNzaC1rZXktdjEA
+      -----END OPENSSH PRIVATE KEY-----
 `)
-	if err := ec.SetValidated("MY_PG", map[string]any{
-		"type": "postgres",
-		"host": "localhost",
+	if err := ec.SetValidated("MY_SFTP", map[string]any{
+		"host": "two.example.com",
 	}, SetOptions{AllowOverwrite: true, RejectLiteralSecrets: true}); err != nil {
 		t.Fatalf("SetValidated: %v", err)
 	}
 	got := readFile(t, path)
-	for _, sub := range []string{"password: \"${MY_PG_PASSWORD}\"", "sslmode: \"require\"", "host: localhost"} {
+	for _, sub := range []string{
+		"password: \"${MY_SFTP_PASSWORD}\"",
+		"sslmode: \"require\"",
+		"host: two.example.com",
+		"private_key: |",
+		"-----BEGIN OPENSSH PRIVATE KEY-----",
+		"b3BlbnNzaC1rZXktdjEA",
+		"-----END OPENSSH PRIVATE KEY-----",
+	} {
 		if !strings.Contains(got, sub) {
 			t.Errorf("expected %q\n--- got ---\n%s", sub, got)
 		}
+	}
+	if strings.Contains(got, "host: one.example.com") {
+		t.Errorf("host not updated\n--- got ---\n%s", got)
 	}
 }
