@@ -120,6 +120,22 @@ func (conn *ZerobusConn) Connect(timeOut ...int) error {
 	return nil
 }
 
+// LoadTemplates loads Databricks SQL templates for Zerobus without needing changes to core dbio_types.go
+func (conn *ZerobusConn) LoadTemplates() error {
+	tmpl, err := dbio.TypeDbDatabricks.Template()
+	if err != nil {
+		return err
+	}
+	conn.BaseConn.template = tmpl
+	return nil
+}
+
+// BulkImportStream ingests a datastream into the target table using Arrow batches
+func (conn *ZerobusConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	df := iop.MakeDataFlow(ds)
+	return conn.BulkImportFlow(tableFName, df)
+}
+
 // BulkImportFlow ingests a dataflow into the target table using Arrow batches
 func (conn *ZerobusConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()

@@ -509,13 +509,9 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		}
 	}
 
-	templateName := t.String()
-	if t == TypeDbZerobus {
-		templateName = "databricks"
-	}
-	templateBytes, err := templatesFolder.ReadFile("templates/" + templateName + ".yaml")
+	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
 	if err != nil {
-		return template, g.Error(err, "could not read "+templateName+".yaml")
+		return template, g.Error(err, "could not read "+t.String()+".yaml")
 	}
 
 	err = yaml.Unmarshal([]byte(templateBytes), &connTemplate)

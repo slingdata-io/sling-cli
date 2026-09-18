@@ -93,11 +93,12 @@ func TestDatabricksVolume_RESTOperations(t *testing.T) {
 
 	client := &DatabricksVolumeFileSysClient{}
 	client.properties = map[string]string{
-		"host":    host,
-		"token":   "dapi_test_token_123",
-		"catalog": "my_cat",
-		"schema":  "my_schema",
-		"volume":  "my_vol",
+		"host":     host,
+		"protocol": "http",
+		"token":    "dapi_test_token_123",
+		"catalog":  "my_cat",
+		"schema":   "my_schema",
+		"volume":   "my_vol",
 	}
 
 	err := client.Init(context.Background())
@@ -115,10 +116,11 @@ func TestDatabricksVolume_RESTOperations(t *testing.T) {
 
 	// 2. Test Read (GET)
 	reader, err := client.GetReader("databricks-volume://my_cat/my_schema/my_vol/data.csv")
-	assert.NoError(t, err)
-	readBytes, err := io.ReadAll(reader)
-	assert.NoError(t, err)
-	assert.Equal(t, "mock volume content", string(readBytes))
+	if assert.NoError(t, err) && reader != nil {
+		readBytes, err := io.ReadAll(reader)
+		assert.NoError(t, err)
+		assert.Equal(t, "mock volume content", string(readBytes))
+	}
 
 	// 3. Test List
 	nodes, err := client.List("databricks-volume://my_cat/my_schema/my_vol")

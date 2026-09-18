@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 )
 
@@ -26,6 +27,7 @@ import (
 type DatabricksVolumeFileSysClient struct {
 	BaseFileSysClient
 	client     *http.Client
+	scheme     string
 	host       string
 	token      string
 	catalog    string
@@ -51,15 +53,21 @@ func (fs *DatabricksVolumeFileSysClient) Init(ctx context.Context) (err error) {
 	instance := FileSysClient(fs)
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
+	fs.BaseFileSysClient.fsType = dbio.TypeFileDatabricksVolume
 
 	// Props can come from host, token, catalog, schema, volume
-	fs.host = fs.GetProp("host")
+	rawHost := fs.GetProp("host")
+	if rawHost == "" {
+		rawHost = fs.GetProp("DATABRICKS_HOST")
+	}
 	fs.token = fs.GetProp("token")
 	if fs.token == "" {
 		fs.token = fs.GetProp("DATABRICKS_TOKEN")
 	}
-	if fs.host == "" {
-		fs.host = fs.GetProp("DATABRICKS_HOST")
+
+	fs.scheme = "https"
+	if strings.HasPrefix(rawHost, "http://") || fs.GetProp("protocol") == "http" || fs.GetProp("use_ssl") == "false" || fs.GetProp("ssl") == "false" {
+		fs.scheme = "http"
 	}
 
 	rawURL := fs.GetProp("url", "URL")
@@ -78,7 +86,7 @@ func (fs *DatabricksVolumeFileSysClient) Init(ctx context.Context) (err error) {
 	}
 
 	// Clean host
-	fs.host = strings.TrimPrefix(fs.host, "https://")
+	fs.host = strings.TrimPrefix(rawHost, "https://")
 	fs.host = strings.TrimPrefix(fs.host, "http://")
 	fs.host = strings.TrimRight(fs.host, "/")
 
@@ -87,6 +95,11 @@ func (fs *DatabricksVolumeFileSysClient) Init(ctx context.Context) (err error) {
 	}
 
 	return nil
+}
+
+// FsType returns dbio.TypeFileDatabricksVolume
+func (fs *DatabricksVolumeFileSysClient) FsType() dbio.Type {
+	return dbio.TypeFileDatabricksVolume
 }
 
 func (fs *DatabricksVolumeFileSysClient) parseURL(rawURL string) {
@@ -132,11 +145,15 @@ func (fs *DatabricksVolumeFileSysClient) parseURL(rawURL string) {
 func (fs *DatabricksVolumeFileSysClient) Prefix(suffix ...string) string {
 	var prefix string
 	if fs.catalog != "" && fs.schema != "" && fs.volume != "" {
-		prefix = fmt.Sprintf("databricks-volume://%s/%s/%s/", fs.catalog, fs.schema, fs.volume)
+		prefix = fmt.Sprintf("databricks-volume://%s/%s/%s", fs.catalog, fs.schema, fs.volume)
 	} else {
 		prefix = "databricks-volume://"
 	}
-	return prefix + strings.Join(suffix, "")
+	s := strings.TrimLeft(strings.Join(suffix, ""), "/")
+	if s != "" {
+		return strings.TrimRight(prefix, "/") + "/" + s
+	}
+	return strings.TrimRight(prefix, "/") + "/"
 }
 
 // GetPath converts a uri into the internal volume path starting with /Volumes/...
@@ -151,7 +168,14 @@ func (fs *DatabricksVolumeFileSysClient) GetPath(uri string) (volumePath string,
 		}
 	}
 
-	parts := strings.Split(strings.Trim(clean, "/"), "/")
+	rawParts := strings.Split(strings.Trim(clean, "/"), "/")
+	var parts []string
+	for _, p := range rawParts {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+
 	if len(parts) > 0 && (strings.Contains(parts[0], ".databricks.com") || strings.Contains(parts[0], ".azuredatabricks.net")) {
 		parts = parts[1:]
 	}
@@ -178,9 +202,16 @@ func (fs *DatabricksVolumeFileSysClient) GetPath(uri string) (volumePath string,
 		return "", g.Error("invalid volume URI, catalog/schema/volume must be specified: %s", uri)
 	}
 
+	var cleanSubparts []string
+	for _, sp := range subparts {
+		if sp != "" {
+			cleanSubparts = append(cleanSubparts, sp)
+		}
+	}
+
 	p := fmt.Sprintf("/Volumes/%s/%s/%s", catalog, schema, volume)
-	if len(subparts) > 0 && subparts[0] != "" {
-		p = p + "/" + strings.Join(subparts, "/")
+	if len(cleanSubparts) > 0 {
+		p = p + "/" + strings.Join(cleanSubparts, "/")
 	}
 	return p, nil
 }
@@ -194,7 +225,7 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 		return nil, g.Error("databricks token is required")
 	}
 
-	urlStr := fmt.Sprintf("https://%s%s", fs.host, apiPath)
+	urlStr := fmt.Sprintf("%s://%s%s", fs.scheme, fs.host, apiPath)
 	if len(query) > 0 {
 		urlStr = urlStr + "?" + query.Encode()
 	}
@@ -204,6 +235,13 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
+			if seeker, ok := body.(io.Seeker); ok {
+				if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+					return nil, g.Error(err, "could not rewind request body")
+				}
+			} else if body != nil {
+				return nil, g.Error(lastErr, "request failed (body not seekable) for %s %s", method, urlStr)
+			}
 			sleepDur := time.Duration(1<<attempt) * 500 * time.Millisecond
 			select {
 			case <-ctx.Done():
