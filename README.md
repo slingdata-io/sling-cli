@@ -116,6 +116,30 @@ $ sling conns discover LOCALHOST_DEV
  ...
 ```
 
+---
+
+### Databricks Ingestion (Unity Catalog Volumes & Zerobus)
+
+Sling supports high-throughput ingestion into Databricks environments via two native mechanisms:
+
+- **Unity Catalog Volumes** (`databricks-volume://`):
+  Direct streaming of files (Parquet, CSV, etc.) into Unity Catalog Volumes using the Databricks Files REST API:
+  ```bash
+  # Stream data directly into a Databricks Volume
+  sling run --src-conn PG_DB --src-stream public.users \
+    --tgt-conn DATABRICKS_VOL --tgt-object "my_cat/my_schema/my_vol/users.parquet"
+  ```
+
+- **Zerobus Streaming** (`zerobus://`):
+  High-throughput, real-time ingestion into Delta tables using Arrow Flight / Arrow IPC streaming with configurable batch sizes and compression (`none`, `lz4`, `zstd`):
+  ```bash
+  # Stream records to Delta table via Zerobus Arrow stream
+  sling run --src-conn PG_DB --src-stream public.users \
+    --tgt-conn ZEROBUS_CONN --tgt-object "main.default.users"
+  ```
+
+---
+
 ## Installation
 
 #### One-liner on Mac / Linux
