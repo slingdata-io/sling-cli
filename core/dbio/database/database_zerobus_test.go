@@ -120,3 +120,41 @@ func TestZerobus_IPCSerialization(t *testing.T) {
 	assert.Equal(t, uint64(2), count)
 }
 
+func TestZerobus_TypeMapping(t *testing.T) {
+	cols := iop.Columns{
+		{Name: "col_bool", Type: iop.BoolType},
+		{Name: "col_tiny", Type: iop.SmallIntType, DbType: "tinyint"},
+		{Name: "col_short", Type: iop.SmallIntType, DbType: "smallint"},
+		{Name: "col_int", Type: iop.IntegerType},
+		{Name: "col_bigint", Type: iop.BigIntType},
+		{Name: "col_float", Type: iop.FloatType, DbType: "float"},
+		{Name: "col_double", Type: iop.FloatType, DbType: "double"},
+		{Name: "col_str", Type: iop.StringType},
+		{Name: "col_dec", Type: iop.DecimalType, DbPrecision: 18, DbScale: 4},
+		{Name: "col_bin", Type: iop.BinaryType},
+		{Name: "col_date", Type: iop.DateType},
+		{Name: "col_ts", Type: iop.TimestampzType},
+	}
+
+	schema := ColumnsToZerobusArrowSchema(cols)
+
+	// Verify Databricks Zerobus Arrow Flight type specification
+	assert.Equal(t, "bool", schema.Field(0).Type.Name())
+	assert.Equal(t, "int8", schema.Field(1).Type.Name())
+	assert.Equal(t, "int16", schema.Field(2).Type.Name())
+	assert.Equal(t, "int32", schema.Field(3).Type.Name())
+	assert.Equal(t, "int64", schema.Field(4).Type.Name())
+	assert.Equal(t, "float32", schema.Field(5).Type.Name())
+	assert.Equal(t, "float64", schema.Field(6).Type.Name())
+	// STRING must be large_utf8
+	assert.Equal(t, "large_utf8", schema.Field(7).Type.Name())
+	// DECIMAL must be text-encoded as large_utf8
+	assert.Equal(t, "large_utf8", schema.Field(8).Type.Name())
+	// BINARY must be large_binary
+	assert.Equal(t, "large_binary", schema.Field(9).Type.Name())
+	// DATE must be date32
+	assert.Equal(t, "date32", schema.Field(10).Type.Name())
+	// TIMESTAMP must be timestamp with UTC
+	assert.Equal(t, "timestamp[us, tz=UTC]", schema.Field(11).Type.String())
+}
+

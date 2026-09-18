@@ -155,8 +155,8 @@ func (conn *ZerobusConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (co
 	targetFDQN := targetTable.FDQN()
 	g.Info("ingesting into Databricks via Zerobus Arrow stream: %s", targetFDQN)
 
-	// Build Arrow Schema from Dataflow columns
-	arrowSchema := iop.ColumnsToArrowSchema(df.Columns)
+	// Build Arrow Schema conforming to official Databricks Zerobus SDK specification
+	arrowSchema := ColumnsToZerobusArrowSchema(df.Columns)
 	mem := memory.NewGoAllocator()
 
 	batchSize := conn.BatchSize
@@ -169,12 +169,26 @@ func (conn *ZerobusConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (co
 		switch dtype.ID() {
 		case arrow.BOOL:
 			return array.NewBooleanBuilder(mem)
+		case arrow.INT8:
+			return array.NewInt8Builder(mem)
+		case arrow.INT16:
+			return array.NewInt16Builder(mem)
 		case arrow.INT32:
 			return array.NewInt32Builder(mem)
 		case arrow.INT64:
 			return array.NewInt64Builder(mem)
+		case arrow.FLOAT32:
+			return array.NewFloat32Builder(mem)
 		case arrow.FLOAT64:
 			return array.NewFloat64Builder(mem)
+		case arrow.LARGE_STRING:
+			return array.NewLargeStringBuilder(mem)
+		case arrow.STRING:
+			return array.NewStringBuilder(mem)
+		case arrow.LARGE_BINARY:
+			return array.NewLargeBinaryBuilder(mem, dtype.(*arrow.LargeBinaryType))
+		case arrow.BINARY:
+			return array.NewBinaryBuilder(mem, dtype.(*arrow.BinaryType))
 		case arrow.DECIMAL128:
 			return array.NewDecimal128Builder(mem, dtype.(*arrow.Decimal128Type))
 		case arrow.DATE32:
@@ -185,14 +199,10 @@ func (conn *ZerobusConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (co
 			return array.NewTime32Builder(mem, dtype.(*arrow.Time32Type))
 		case arrow.TIME64:
 			return array.NewTime64Builder(mem, dtype.(*arrow.Time64Type))
-		case arrow.STRING:
-			return array.NewStringBuilder(mem)
-		case arrow.BINARY:
-			return array.NewBinaryBuilder(mem, dtype.(*arrow.BinaryType))
 		case arrow.EXTENSION:
 			return array.NewBuilder(mem, dtype)
 		default:
-			return array.NewStringBuilder(mem)
+			return array.NewLargeStringBuilder(mem)
 		}
 	}
 
@@ -251,7 +261,7 @@ func (conn *ZerobusConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (co
 				if colIdx < len(row) {
 					val = row[colIdx]
 				}
-				iop.AppendToBuilder(builders[colIdx], &col, val)
+				appendToZerobusBuilder(builders[colIdx], &col, val)
 			}
 			rowsInBatch++
 			count++
@@ -359,4 +369,97 @@ func (conn *ZerobusConn) sendRecordBatch(table string, record arrow.Record) erro
 	// batchBytes is passed to stream.IngestBatch(batchBytes)
 	_ = batchBytes
 	return nil
+}
+
+// ColumnsToZerobusArrowSchema maps Sling Dataflow columns to the exact Apache Arrow schema
+// specified by Databricks Zerobus Arrow Flight ingestion:
+// https://github.com/databricks/zerobus-sdk
+//
+// Key Databricks Delta -> Arrow mappings:
+// - STRING -> LargeUtf8 (arrow.BinaryTypes.LargeString)
+// - DECIMAL -> LargeUtf8 (text-encoded per Zerobus specification)
+// - BINARY -> LargeBinary (arrow.BinaryTypes.LargeBinary)
+// - TINYINT -> Int8
+// - SMALLINT -> Int16
+// - INT -> Int32
+// - BIGINT -> Int64
+// - FLOAT -> Float32
+// - DOUBLE -> Float64
+// - BOOLEAN -> Boolean
+// - DATE -> Date32
+// - TIMESTAMP -> Timestamp(Microsecond, "UTC")
+// - TIMESTAMP_NTZ / DATETIME -> Timestamp(Microsecond, "")
+func ColumnsToZerobusArrowSchema(columns iop.Columns) *arrow.Schema {
+	fields := make([]arrow.Field, len(columns))
+
+	for i, col := range columns {
+		var arrowType arrow.DataType
+
+		switch col.Type {
+		case iop.BoolType:
+			arrowType = arrow.FixedWidthTypes.Boolean
+		case iop.SmallIntType:
+			if strings.EqualFold(col.DbType, "tinyint") || strings.EqualFold(col.DbType, "int8") || strings.EqualFold(col.DbType, "byte") {
+				arrowType = arrow.PrimitiveTypes.Int8
+			} else {
+				arrowType = arrow.PrimitiveTypes.Int16
+			}
+		case iop.IntegerType:
+			if strings.EqualFold(col.DbType, "tinyint") || strings.EqualFold(col.DbType, "int8") || strings.EqualFold(col.DbType, "byte") {
+				arrowType = arrow.PrimitiveTypes.Int8
+			} else if strings.EqualFold(col.DbType, "smallint") || strings.EqualFold(col.DbType, "int16") || strings.EqualFold(col.DbType, "short") {
+				arrowType = arrow.PrimitiveTypes.Int16
+			} else {
+				arrowType = arrow.PrimitiveTypes.Int32
+			}
+		case iop.BigIntType:
+			arrowType = arrow.PrimitiveTypes.Int64
+		case iop.FloatType:
+			if strings.EqualFold(col.DbType, "float") || strings.EqualFold(col.DbType, "float32") || strings.EqualFold(col.DbType, "real") {
+				arrowType = arrow.PrimitiveTypes.Float32
+			} else {
+				arrowType = arrow.PrimitiveTypes.Float64
+			}
+		case iop.DecimalType:
+			// Databricks Zerobus SDK specification:
+			// Currently, DECIMAL types are encoded as text (LargeUtf8 / string) on both Arrow and Protobuf paths
+			arrowType = arrow.BinaryTypes.LargeString
+		case iop.DateType:
+			arrowType = arrow.FixedWidthTypes.Date32
+		case iop.TimestampzType:
+			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+		case iop.DatetimeType, iop.TimestampType:
+			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ""}
+		case iop.BinaryType:
+			arrowType = arrow.BinaryTypes.LargeBinary
+		case iop.StringType, iop.TextType, iop.JsonType:
+			arrowType = arrow.BinaryTypes.LargeString
+		default:
+			arrowType = arrow.BinaryTypes.LargeString
+		}
+
+		fields[i] = arrow.Field{
+			Name:     col.Name,
+			Type:     arrowType,
+			Nullable: true,
+		}
+	}
+
+	return arrow.NewSchema(fields, nil)
+}
+
+func appendToZerobusBuilder(builder array.Builder, col *iop.Column, val interface{}) {
+	if val == nil {
+		builder.AppendNull()
+		return
+	}
+	switch b := builder.(type) {
+	case *array.LargeBinaryBuilder:
+		b.Append([]byte(cast.ToString(val)))
+	case *array.LargeStringBuilder:
+		// Text-encoded strings, json, and decimals per Zerobus specification
+		b.Append(cast.ToString(val))
+	default:
+		iop.AppendToBuilder(builder, col, val)
+	}
 }
