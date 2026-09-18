@@ -84,6 +84,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
+	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/slingdata-io/godbc v0.0.9
 	github.com/slingdata-io/golyglot v1.0.20
 	github.com/slingdata-io/sling v0.0.0-20260715135102-01cd9a07a3c8
@@ -339,7 +340,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.1 // indirect
 	github.com/shoenig/go-m1cpu v0.2.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 // indirect
 	github.com/slingdata-io/pocketbase v0.22.136 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
