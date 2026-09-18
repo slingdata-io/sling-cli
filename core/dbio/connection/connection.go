@@ -885,6 +885,10 @@ func (c *Connection) setURL() (err error) {
 		} else {
 			template = "databricks://token:{token}@{host}:{port}/sql/1.0/warehouses/{warehouse_id}"
 		}
+	case dbio.TypeDbZerobus:
+		setIfMissing("token", c.Data["password"])
+		setIfMissing("port", c.Type.DefPort())
+		template = "zerobus://{host}:{port}/{database}"
 	case dbio.TypeDbD1:
 		setIfMissing("account_id", c.Data["host"])
 		setIfMissing("api_token", c.Data["password"])

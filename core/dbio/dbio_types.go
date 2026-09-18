@@ -57,6 +57,7 @@ const (
 	TypeFileFtp         Type = "ftp"
 	TypeFileSftp        Type = "sftp"
 	TypeFileHTTP        Type = "http"
+	TypeFileDatabricksVolume Type = "databricks-volume"
 
 	TypeDbPostgres      Type = "postgres"
 	TypeDbRedshift      Type = "redshift"
@@ -90,6 +91,7 @@ const (
 	TypeDbArrowDBC      Type = "adbc"
 	TypeDbODBC          Type = "odbc"
 	TypeDbScyllaDB      Type = "scylladb"
+	TypeDbZerobus       Type = "zerobus"
 )
 
 var AllType = []struct {
@@ -108,6 +110,7 @@ var AllType = []struct {
 	{TypeFileFtp, "TypeFileFtp"},
 	{TypeFileSftp, "TypeFileSftp"},
 	{TypeFileHTTP, "TypeFileHTTP"},
+	{TypeFileDatabricksVolume, "TypeFileDatabricksVolume"},
 	{TypeDbPostgres, "TypeDbPostgres"},
 	{TypeDbRedshift, "TypeDbRedshift"},
 	{TypeDbStarRocks, "TypeDbStarRocks"},
@@ -140,6 +143,7 @@ var AllType = []struct {
 	{TypeDbArrowDBC, "TypeDbArrowDBC"},
 	{TypeDbODBC, "TypeDbODBC"},
 	{TypeDbScyllaDB, "TypeDbScyllaDB"},
+	{TypeDbZerobus, "TypeDbZerobus"},
 }
 
 // ValidateType returns true is type is valid
@@ -151,6 +155,7 @@ func ValidateType(tStr string) (Type, bool) {
 		"mongodb+srv": TypeDbMongoDB,
 		"file":        TypeFileLocal,
 		"abfss":       TypeFileAzureABFS,
+		"volume":      TypeFileDatabricksVolume,
 	}
 
 	if tMatched, ok := tMap[tStr]; ok {
@@ -160,8 +165,8 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeApi,
-		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
+		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileDatabricksVolume,
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB, TypeDbZerobus:
 		return t, true
 	}
 
@@ -194,6 +199,7 @@ func (t Type) DefPort() int {
 		TypeDbPrometheus:    9090,
 		TypeDbProton:        8463,
 		TypeDbDatabricks:    443,
+		TypeDbZerobus:       443,
 		TypeDbExasol:        8563,
 		TypeFileFtp:         21,
 		TypeFileSftp:        22,
@@ -208,7 +214,7 @@ func (t Type) DefPort() int {
 // or treat `database` as the schema itself (mysql) or a service (oracle).
 func (t Type) SupportsThreePartName() bool {
 	return g.In(t,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbTrino, TypeDbBigQuery,
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbZerobus, TypeDbTrino, TypeDbBigQuery,
 		TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbFabric,
 		TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH,
 	)
@@ -227,9 +233,9 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB, TypeDbZerobus:
 		return KindDatabase
-	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
+	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, TypeFileDatabricksVolume, Type("https"):
 		return KindFile
 	case TypeApi:
 		return KindAPI
@@ -314,6 +320,7 @@ func (t Type) NameLong() string {
 		TypeFileFtp:         "FileSys - Ftp",
 		TypeFileHTTP:        "FileSys - HTTP",
 		Type("https"):       "FileSys - HTTP",
+		TypeFileDatabricksVolume: "FileSys - Databricks Volume",
 		TypeDbPostgres:      "DB - PostgreSQL",
 		TypeDbRedshift:      "DB - Redshift",
 		TypeDbStarRocks:     "DB - StarRocks",
@@ -324,6 +331,7 @@ func (t Type) NameLong() string {
 		TypeDbBigTable:      "DB - BigTable",
 		TypeDbSnowflake:     "DB - Snowflake",
 		TypeDbDatabricks:    "DB - Databricks",
+		TypeDbZerobus:       "DB - Zerobus",
 		TypeDbExasol:        "DB - Exasol",
 		TypeDbD1:            "DB - D1",
 		Type("db2"):         "DB - DB2",
@@ -366,6 +374,7 @@ func (t Type) Name() string {
 		TypeFileFtp:         "Ftp",
 		TypeFileHTTP:        "HTTP",
 		Type("https"):       "HTTP",
+		TypeFileDatabricksVolume: "Databricks Volume",
 		TypeDbPostgres:      "PostgreSQL",
 		TypeDbRedshift:      "Redshift",
 		TypeDbStarRocks:     "StarRocks",
@@ -376,6 +385,7 @@ func (t Type) Name() string {
 		TypeDbBigTable:      "BigTable",
 		TypeDbSnowflake:     "Snowflake",
 		TypeDbDatabricks:    "Databricks",
+		TypeDbZerobus:       "Zerobus",
 		TypeDbExasol:        "Exasol",
 		TypeDbD1:            "D1",
 		Type("db2"):         "DB2",
@@ -499,9 +509,13 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		}
 	}
 
-	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
+	templateName := t.String()
+	if t == TypeDbZerobus {
+		templateName = "databricks"
+	}
+	templateBytes, err := templatesFolder.ReadFile("templates/" + templateName + ".yaml")
 	if err != nil {
-		return template, g.Error(err, "could not read "+t.String()+".yaml")
+		return template, g.Error(err, "could not read "+templateName+".yaml")
 	}
 
 	err = yaml.Unmarshal([]byte(templateBytes), &connTemplate)

@@ -328,6 +328,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ODBCConn{URL: URL}
 	} else if strings.HasPrefix(URL, "scylladb:") {
 		conn = &ScyllaDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "zerobus") {
+		conn = &ZerobusConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -378,7 +380,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:
 		driverName = "snowflake"
-	case dbio.TypeDbDatabricks:
+	case dbio.TypeDbDatabricks, dbio.TypeDbZerobus:
 		driverName = "databricks"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"

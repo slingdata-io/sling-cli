@@ -104,6 +104,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &GoogleDriveFileSysClient{}
 	case dbio.TypeFileHTTP:
 		fsClient = &HTTPFileSysClient{}
+	case dbio.TypeFileDatabricksVolume:
+		fsClient = &DatabricksVolumeFileSysClient{}
 	default:
 		err = g.Error("Unrecognized File System")
 		return
@@ -176,6 +178,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
+	case strings.HasPrefix(url, "databricks-volume://"), strings.HasPrefix(url, "volume://"), strings.HasPrefix(url, "databricks://Volumes/"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileDatabricksVolume, props...)
 	case strings.HasPrefix(url, "file://"):
 		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)

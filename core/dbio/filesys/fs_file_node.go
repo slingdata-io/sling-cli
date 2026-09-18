@@ -315,6 +315,10 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 		return dbio.TypeFileHTTP, host, path, nil
 	} else if scheme == "gdrive" {
 		return dbio.TypeFileGoogleDrive, host, path, nil
+	} else if scheme == "databricks-volume" || scheme == "volume" {
+		return dbio.TypeFileDatabricksVolume, host, path, nil
+	} else if scheme == "databricks" && strings.HasPrefix(u.U.Path, "/Volumes") {
+		return dbio.TypeFileDatabricksVolume, host, path, nil
 	} else if g.In(scheme, "http", "https") {
 		return dbio.TypeFileHTTP, host, path, nil
 	}
