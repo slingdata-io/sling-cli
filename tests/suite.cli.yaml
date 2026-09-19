@@ -2976,6 +2976,66 @@
     - 'OK bug 1 fixed: incremental checkpoint matched 445 documents'
     - 'SUCCESS: both issue 802 MongoDB date filter bugs are fixed'
 
+- id: 604
+  name: Run sling iceberg_r2 incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_r2
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - iceberg merge counts
+    - execution succeeded
+
+- id: 605
+  name: Run sling iceberg_s3 incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_s3
+  after: [604]
+  output_contains:
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 606
+  name: Run sling iceberg_sql incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_sql
+  after: [605]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 607
+  name: Run sling iceberg_glue incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_glue
+  after: [606]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 608
+  name: Run sling iceberg_r2 synthetic CDC merge
+  run: |
+    sling run -d -r tests/replications/r.127.iceberg_cdc.yaml
+  env:
+    TARGET: iceberg_r2
+  after: [604]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - iceberg cdc counts
+    - execution succeeded
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

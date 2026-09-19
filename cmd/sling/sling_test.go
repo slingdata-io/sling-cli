@@ -96,6 +96,9 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_glue"):    {name: "iceberg_glue", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_s3"):      {name: "iceberg_s3", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_sql"):     {name: "iceberg_sql", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
@@ -669,7 +672,7 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
-			if g.In(connType, dbio.TypeDbIceberg) {
+			if tgtType == dbio.TypeDbIceberg {
 				dropViewSQL = "" // iceberg does not support views
 			}
 
@@ -1201,8 +1204,12 @@ func TestSuiteDatabaseAthena(t *testing.T) {
 
 func TestSuiteDatabaseIceberg(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8")
-	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
+	// 5 = truncate (not supported). 9-12 = incremental with views / extra tables.
+	// 26-29 = merge strategies (insert / update / update_insert / delete_insert).
+	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8,26-29")
+	testSuite(t, dbio.Type("iceberg_glue"), "1-4,6-8,26-29")
+	testSuite(t, dbio.Type("iceberg_s3"), "1-4,6-8,26-29")
+	testSuite(t, dbio.Type("iceberg_sql"), "1-4,6-8,26-29")
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {

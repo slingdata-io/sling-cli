@@ -744,11 +744,13 @@ func (cfg *Config) Prepare() (err error) {
 		case TruncateMode, BackfillMode:
 			return g.Error("mode '%s' not yet supported for iceberg target.", cfg.Mode)
 		case IncrementalMode:
-			if !cfg.Source.HasUpdateKey() {
-				return g.Error("for mode '%s' with iceberg target, must provided update-key", cfg.Mode)
-			} else if cfg.Source.HasPrimaryKey() {
-				g.Warn("for mode '%s' with iceberg target, primary-key is ineffective, incremental merge is not yet supported (only appends)", cfg.Mode)
-				cfg.Source.PrimaryKeyI = nil // delete PK
+			if !cfg.Source.HasUpdateKey() && !cfg.Source.HasPrimaryKey() {
+				return g.Error("for mode '%s' with iceberg target, must provide update-key and/or primary-key", cfg.Mode)
+			}
+			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
+		case ChangeCaptureMode:
+			if !cfg.Source.HasPrimaryKey() {
+				return g.Error("for mode '%s' with iceberg target, must provide primary-key", cfg.Mode)
 			}
 		}
 	}
@@ -1571,6 +1573,16 @@ func (cfg *Config) CDCChangeFeed() string {
 		return g.PtrVal(cfg.ReplicationStream.CDCOptions.ChangeFeed)
 	}
 	return ""
+}
+
+func (cfg *Config) icebergNeedsMerge(tgtConn database.Connection) bool {
+	if tgtConn.GetType() != dbio.TypeDbIceberg {
+		return false
+	}
+	if cfg.Mode == ChangeCaptureMode {
+		return true
+	}
+	return cfg.Mode == IncrementalMode && len(cfg.Source.PrimaryKey()) > 0
 }
 
 // CDCSlotLevel returns the effective slot level after applying defaults

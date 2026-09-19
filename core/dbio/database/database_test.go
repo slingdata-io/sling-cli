@@ -2045,3 +2045,216 @@ func TestCopyViaZerobus_MissingEndpoint(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "zerobus_endpoint")
 }
+
+func icebergCdcCols() iop.Columns {
+	return iop.NewColumnsFromFields("id", "val", "_sling_synced_op", "_sling_cdc_seq")
+}
+
+func icebergPkOf(split icebergMergeSplit) (upsertIDs, deleteIDs []any) {
+	for _, row := range split.Upserts {
+		upsertIDs = append(upsertIDs, row[0])
+	}
+	for _, row := range split.Deletes {
+		deleteIDs = append(deleteIDs, row[0])
+	}
+	return
+}
+
+func newTestIcebergConn(t *testing.T) *IcebergConn {
+	t.Helper()
+	conn := &IcebergConn{}
+	conn.setContext(context.Background(), 1)
+	require.NoError(t, conn.Init())
+	return conn
+}
+
+func icebergConnFor(catalog dbio.IcebergCatalogType, storage icebergStorageKind) *IcebergConn {
+	conn := &IcebergConn{CatalogType: catalog}
+	conn.setContext(context.Background(), 1)
+	switch storage {
+	case icebergStorageS3:
+		conn.Warehouse = "s3://bucket/wh"
+	case icebergStorageGCS:
+		conn.Warehouse = "gs://bucket/wh"
+	case icebergStorageAzure:
+		conn.Warehouse = "abfss://c@acct.dfs.core.windows.net/wh"
+	}
+	return conn
+}
+
+func TestIcebergDedupCDCHigherSeqWins(t *testing.T) {
+	st := MergeStrategyChangeCapture
+	cols := icebergCdcCols()
+	rows := [][]any{
+		{1, "a", "U", int64(1)},
+		{1, "b", "U", int64(3)},
+		{1, "c", "U", int64(2)},
+	}
+	split, err := newTestIcebergConn(t).dedupMergeRows(cols, rows, []string{"id"}, &st)
+	require.NoError(t, err)
+	require.Len(t, split.Upserts, 1)
+	assert.Equal(t, "b", split.Upserts[0][1])
+	assert.Equal(t, uint64(3), split.Count)
+}
+
+func TestIcebergDedupCDCUThenD(t *testing.T) {
+	st := MergeStrategyChangeCapture
+	cols := icebergCdcCols()
+	rows := [][]any{
+		{1, "a", "U", int64(1)},
+		{1, "a", "D", int64(2)},
+	}
+	split, err := newTestIcebergConn(t).dedupMergeRows(cols, rows, []string{"id"}, &st)
+	require.NoError(t, err)
+	upsertIDs, deleteIDs := icebergPkOf(split)
+	assert.Empty(t, upsertIDs)
+	assert.Equal(t, []any{1}, deleteIDs)
+}
+
+func TestIcebergDedupCDCDThenU(t *testing.T) {
+	st := MergeStrategyChangeCapture
+	cols := icebergCdcCols()
+	rows := [][]any{
+		{1, "a", "D", int64(1)},
+		{1, "b", "U", int64(2)},
+	}
+	split, err := newTestIcebergConn(t).dedupMergeRows(cols, rows, []string{"id"}, &st)
+	require.NoError(t, err)
+	upsertIDs, deleteIDs := icebergPkOf(split)
+	assert.Equal(t, []any{1}, upsertIDs)
+	assert.Equal(t, []any{1}, deleteIDs)
+	assert.Equal(t, "b", split.Upserts[0][1])
+}
+
+func TestIcebergDedupSoftDelete(t *testing.T) {
+	st := MergeStrategyChangeCaptureSoft
+	cols := icebergCdcCols()
+	rows := [][]any{
+		{1, "a", "D", int64(5)},
+	}
+	split, err := newTestIcebergConn(t).dedupMergeRows(cols, rows, []string{"id"}, &st)
+	require.NoError(t, err)
+	require.Len(t, split.Upserts, 1)
+	require.Len(t, split.Deletes, 1)
+	assert.Equal(t, "D", split.Upserts[0][2])
+}
+
+func TestIcebergDedupIncrementalAllPKsInBothSets(t *testing.T) {
+	cols := iop.NewColumnsFromFields("id", "val")
+	rows := [][]any{
+		{1, "a"},
+		{2, "b"},
+		{1, "a2"}, // last row wins
+	}
+	split, err := newTestIcebergConn(t).dedupMergeRows(cols, rows, []string{"id"}, nil)
+	require.NoError(t, err)
+	require.Len(t, split.Upserts, 2)
+	require.Len(t, split.Deletes, 2)
+
+	got := map[any]any{}
+	for _, row := range split.Upserts {
+		got[row[0]] = row[1]
+	}
+	assert.Equal(t, "a2", got[1])
+	assert.Equal(t, "b", got[2])
+}
+
+func TestIcebergDedupMergeWithoutPK(t *testing.T) {
+	_, err := newTestIcebergConn(t).dedupMergeRows(icebergCdcCols(), [][]any{{1, "a", "I", int64(1)}}, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "primary-key")
+}
+
+func TestIcebergMergeEngineRouter(t *testing.T) {
+	tests := []struct {
+		name        string
+		needMerge   bool
+		catalog     dbio.IcebergCatalogType
+		storage     icebergStorageKind
+		goHas       bool
+		want        icebergMergeEngine
+		wantErr     bool
+		neverDuckDB bool
+	}{
+		{"append no merge", false, dbio.IcebergCatalogTypeREST, icebergStorageS3, true, icebergMergeEngineAppend, false, false},
+		{"sql catalog go", true, dbio.IcebergCatalogTypeSQL, icebergStorageS3, true, icebergMergeEngineGo, false, true},
+		{"sql catalog old fork", true, dbio.IcebergCatalogTypeSQL, icebergStorageS3, false, "", true, true},
+		{"azure go", true, dbio.IcebergCatalogTypeREST, icebergStorageAzure, true, icebergMergeEngineGo, false, true},
+		{"azure old fork", true, dbio.IcebergCatalogTypeREST, icebergStorageAzure, false, "", true, true},
+		{"rest old fork duckdb", true, dbio.IcebergCatalogTypeREST, icebergStorageS3, false, icebergMergeEngineDuckDB, false, false},
+		{"s3tables old fork duckdb", true, dbio.IcebergCatalogTypeS3Tables, icebergStorageS3, false, icebergMergeEngineDuckDB, false, false},
+		{"glue go never duckdb", true, dbio.IcebergCatalogTypeGlue, icebergStorageS3, true, icebergMergeEngineGo, false, true},
+		{"glue old fork error", true, dbio.IcebergCatalogTypeGlue, icebergStorageS3, false, "", true, true},
+		{"gcs rest old fork duckdb", true, dbio.IcebergCatalogTypeREST, icebergStorageGCS, false, icebergMergeEngineDuckDB, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := icebergConnFor(tt.catalog, tt.storage).mergeEngineWith(tt.needMerge, tt.goHas)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "Iceberg merge is not supported")
+				assert.NotEqual(t, icebergMergeEngineDuckDB, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+			if tt.neverDuckDB {
+				assert.NotEqual(t, icebergMergeEngineDuckDB, got)
+			}
+		})
+	}
+}
+
+func TestIcebergStorageKind(t *testing.T) {
+	assert.Equal(t, icebergStorageS3, icebergConnFor("", icebergStorageS3).icebergStorageKind())
+	assert.Equal(t, icebergStorageGCS, icebergConnFor("", icebergStorageGCS).icebergStorageKind())
+	assert.Equal(t, icebergStorageAzure, icebergConnFor("", icebergStorageAzure).icebergStorageKind())
+
+	azure := &IcebergConn{}
+	azure.setContext(context.Background(), 1)
+	azure.SetProp("azure_account_name", "acct")
+	assert.Equal(t, icebergStorageAzure, azure.icebergStorageKind())
+
+	s3 := &IcebergConn{Warehouse: "warehouse1"}
+	s3.setContext(context.Background(), 1)
+	s3.SetProp("s3_region", "us-east-1")
+	assert.Equal(t, icebergStorageS3, s3.icebergStorageKind())
+}
+
+func TestIcebergGoHasRowDelta(t *testing.T) {
+	assert.True(t, icebergGoHasRowDelta(), "apache iceberg-go v0.6+ should expose NewRowDelta")
+}
+
+func TestIcebergDuckMergeSQLFromTemplates(t *testing.T) {
+	conn := newTestIcebergConn(t)
+	tgt := `iceberg_catalog."sling_test"."t"`
+	src := "sling_merge_src"
+	cols := iop.NewColumnsFromFields("id", "val")
+
+	sqls, err := conn.duckMergeSQL(tgt, src, cols, []string{"id"}, MergeStrategyNone)
+	require.NoError(t, err)
+	joined := strings.Join(sqls, "\n")
+	assert.Contains(t, joined, `DELETE FROM iceberg_catalog."sling_test"."t"`)
+	assert.Contains(t, joined, `INSERT INTO iceberg_catalog."sling_test"."t"`)
+	assert.Contains(t, joined, `src."id" = tgt."id"`)
+
+	sqls, err = conn.duckMergeSQL(tgt, src, cols, []string{"id"}, MergeStrategyInsert)
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(sqls, "\n"), "WHERE NOT EXISTS")
+
+	sqls, err = conn.duckMergeSQL(tgt, src, icebergCdcCols(), []string{"id"}, MergeStrategyChangeCapture)
+	require.NoError(t, err)
+	joined = strings.Join(sqls, "\n")
+	assert.Contains(t, joined, "_sling_cdc_seq")
+	assert.Contains(t, joined, "_sling_synced_op != 'D'")
+
+	sqls, err = conn.duckMergeSQL(tgt, src, icebergCdcCols(), []string{"id"}, MergeStrategyChangeCaptureSoft)
+	require.NoError(t, err)
+	joined = strings.Join(sqls, "\n")
+	assert.Contains(t, joined, "_sling_synced_op = 'D'")
+	assert.Contains(t, joined, "CURRENT_TIMESTAMP")
+
+	_, err = conn.duckMergeSQL(tgt, src, cols, nil, MergeStrategyDeleteInsert)
+	require.Error(t, err)
+}

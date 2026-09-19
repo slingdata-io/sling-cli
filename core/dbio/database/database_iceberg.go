@@ -3,9 +3,12 @@ package database
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
+	"iter"
 	"maps"
 	"os"
+	"path"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,11 +20,13 @@ import (
 	"github.com/apache/iceberg-go/catalog/glue"
 	"github.com/apache/iceberg-go/catalog/rest"
 	sqlcat "github.com/apache/iceberg-go/catalog/sql"
+	_ "github.com/apache/iceberg-go/io/gocloud" // S3 / GCS / Azure blob IO for iceberg-go v0.6+
 	"github.com/apache/iceberg-go/table"
 	"github.com/apache/iceberg-go/utils"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
+	awsv2glue "github.com/aws/aws-sdk-go-v2/service/glue"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
@@ -156,33 +161,7 @@ func (conn *IcebergConn) connectREST() error {
 		}
 	}
 
-	// Pass through S3 properties for filesystem access
-	for key, value := range conn.properties {
-		if strings.HasPrefix(key, "s3") {
-			// Map common S3 properties to what iceberg-go expects
-			// FIXME: for now set through env, need to refactor iceberg-go
-			switch key {
-			case "s3_access_key_id":
-				os.Setenv("AWS_ACCESS_KEY_ID", value)
-				props["s3.access-key-id"] = value
-			case "s3_secret_access_key":
-				os.Setenv("AWS_SECRET_ACCESS_KEY", value)
-				props["s3.secret-access-key"] = value
-			case "s3_session_token":
-				os.Setenv("AWS_SESSION_TOKEN", value)
-				props["s3.session-token"] = value
-			case "s3_region":
-				os.Setenv("AWS_REGION", value)
-				props["s3.region"] = value
-			case "s3_endpoint":
-				os.Setenv("AWS_ENDPOINT", value)
-				props["s3.endpoint"] = value
-			case "s3_profile":
-				os.Setenv("AWS_PROFILE", value)
-				props["s3.profile"] = value
-			}
-		}
-	}
+	maps.Copy(props, conn.applyIcebergS3Props())
 
 	if len(props) > 0 {
 		g.Debug("using additional props for iceberg REST: %s", g.Marshal(lo.Keys(props)))
@@ -246,6 +225,9 @@ func (conn *IcebergConn) connectREST() error {
 	}
 
 	conn.Catalog = cat
+	if err := conn.attachIcebergAwsConfig(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -253,63 +235,126 @@ func (conn *IcebergConn) isS3TablesViaREST() bool {
 	return strings.HasPrefix(conn.Warehouse, "arn:aws:s3tables")
 }
 
+// applyIcebergS3Props maps s3_* connection keys to iceberg-go properties and
+// AWS env vars (gocloud IO still reads AWS_REGION / AWS_S3_ENDPOINT).
+func (conn *IcebergConn) applyIcebergS3Props() iceberg.Properties {
+	props := iceberg.Properties{}
+	if v := conn.GetProp("s3_access_key_id"); v != "" {
+		os.Setenv("AWS_ACCESS_KEY_ID", v)
+		props["s3.access-key-id"] = v
+	}
+	if v := conn.GetProp("s3_secret_access_key"); v != "" {
+		os.Setenv("AWS_SECRET_ACCESS_KEY", v)
+		props["s3.secret-access-key"] = v
+	}
+	if v := conn.GetProp("s3_session_token"); v != "" {
+		os.Setenv("AWS_SESSION_TOKEN", v)
+		props["s3.session-token"] = v
+	}
+	if v := conn.GetProp("s3_region"); v != "" {
+		os.Setenv("AWS_REGION", v)
+		os.Setenv("AWS_DEFAULT_REGION", v)
+		props["s3.region"] = v
+	}
+	if v := conn.GetProp("s3_endpoint"); v != "" {
+		os.Setenv("AWS_ENDPOINT", v)
+		os.Setenv("AWS_S3_ENDPOINT", v) // iceberg-go gocloud IO fallback
+		props["s3.endpoint"] = v
+	}
+	if v := conn.GetProp("s3_profile"); v != "" {
+		os.Setenv("AWS_PROFILE", v)
+		props["s3.profile"] = v
+	}
+	return props
+}
+
+func (conn *IcebergConn) icebergAwsConfig() (awsv2.Config, error) {
+	region := conn.GetProp("s3_region")
+	accessKey := conn.GetProp("s3_access_key_id")
+	secret := conn.GetProp("s3_secret_access_key")
+	token := conn.GetProp("s3_session_token")
+	profile := conn.GetProp("s3_profile")
+
+	opts := []func(*awsv2config.LoadOptions) error{}
+	if region != "" {
+		opts = append(opts, awsv2config.WithRegion(region))
+	}
+	switch {
+	case accessKey != "" && secret != "":
+		g.Debug("iceberg: using static credentials (Key ID: %s)", accessKey)
+		opts = append(opts, awsv2config.WithCredentialsProvider(
+			awsv2creds.NewStaticCredentialsProvider(accessKey, secret, token),
+		))
+	case profile != "":
+		g.Debug("iceberg: using AWS profile=%s region=%s", profile, region)
+		opts = append(opts, awsv2config.WithSharedConfigProfile(profile))
+	default:
+		g.Debug("iceberg: using default AWS credential chain")
+	}
+
+	awsCfg, err := awsv2config.LoadDefaultConfig(context.Background(), opts...)
+	if err != nil {
+		return awsv2.Config{}, g.Error(err, "Failed to create AWS config for iceberg")
+	}
+	return awsCfg, nil
+}
+
+func (conn *IcebergConn) attachIcebergAwsConfig() error {
+	if conn.GetProp("s3_region") == "" && conn.GetProp("s3_access_key_id") == "" && conn.GetProp("s3_profile") == "" {
+		return nil
+	}
+	awsCfg, err := conn.icebergAwsConfig()
+	if err != nil {
+		return err
+	}
+	conn.context.Ctx = utils.WithAwsConfig(conn.context.Ctx, &awsCfg)
+	return nil
+}
+
+func icebergNonIcebergCatalogErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not an EXTERNAL_TABLE") || strings.Contains(msg, "not an iceberg table")
+}
+
+func (conn *IcebergConn) dropGlueEntry(identifier table.Identifier) error {
+	if len(identifier) < 2 {
+		return g.Error("invalid Glue table identifier: %v", identifier)
+	}
+	awsCfg, err := conn.icebergAwsConfig()
+	if err != nil {
+		return err
+	}
+	in := &awsv2glue.DeleteTableInput{
+		DatabaseName: awsv2.String(identifier[len(identifier)-2]),
+		Name:         awsv2.String(identifier[len(identifier)-1]),
+	}
+	if accountID := conn.GetProp("glue_account_id"); accountID != "" {
+		in.CatalogId = awsv2.String(accountID)
+	}
+	_, err = awsv2glue.NewFromConfig(awsCfg).DeleteTable(conn.Context().Ctx, in)
+	if err != nil {
+		return g.Error(err, "cannot drop Glue table %s.%s", awsv2.ToString(in.DatabaseName), awsv2.ToString(in.Name))
+	}
+	return nil
+}
+
 func (conn *IcebergConn) connectGlue() error {
-	// Get AWS credentials from connection properties
-	// accountID := conn.GetProp("glue_account_id")
 	warehouse := conn.GetProp("glue_warehouse")
-	awsAccessKeyID := conn.GetProp("s3_access_key_id")
-	awsSecretAccessKey := conn.GetProp("s3_secret_access_key")
-	awsSessionToken := conn.GetProp("s3_session_token")
 	awsRegion := conn.GetProp("s3_region")
-	awsProfile := conn.GetProp("s3_profile")
 
 	if awsRegion == "" {
 		return g.Error("AWS region not specified")
 	}
 
 	props := map[string]string{"warehouse": warehouse}
+	maps.Copy(props, conn.applyIcebergS3Props())
 
-	var awsCfg awsv2.Config
-	var err error
-
-	// Set credentials if provided
-	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
-		g.Debug("iceberg: using static credentials (Key ID: %s)", awsAccessKeyID)
-
-		// Create AWS config with static credentials
-		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
-			awsv2config.WithRegion(awsRegion),
-			awsv2config.WithCredentialsProvider(
-				awsv2creds.NewStaticCredentialsProvider(
-					awsAccessKeyID,
-					awsSecretAccessKey,
-					awsSessionToken,
-				),
-			),
-		)
-		if err != nil {
-			return g.Error(err, "Failed to create AWS config with static credentials")
-		}
-	} else if awsProfile != "" {
-		g.Debug("iceberg: using AWS profile=%s region=%s", awsProfile, awsRegion)
-
-		// Use specified profile from AWS credentials file
-		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
-			awsv2config.WithRegion(awsRegion),
-			awsv2config.WithSharedConfigProfile(awsProfile),
-		)
-		if err != nil {
-			return g.Error(err, "Failed to create AWS config with profile %s", awsProfile)
-		}
-	} else {
-		g.Debug("iceberg: using default AWS credential chain")
-		// Use default credential chain (env vars, IAM role, credential file, etc.)
-		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
-			awsv2config.WithRegion(awsRegion),
-		)
-		if err != nil {
-			return g.Error(err, "Failed to create AWS config with default credentials")
-		}
+	awsCfg, err := conn.icebergAwsConfig()
+	if err != nil {
+		return err
 	}
 
 	if extra := conn.GetProp("glue_extra_props"); extra != "" {
@@ -404,29 +449,7 @@ func (conn *IcebergConn) connectSQL() error {
 		conn.Warehouse = warehouse
 	}
 
-	// Pass through S3 properties for filesystem access
-	for key, value := range conn.properties {
-		if strings.HasPrefix(key, "s3") {
-			// Map common S3 properties to what iceberg-go expects
-			switch key {
-			case "s3_access_key_id":
-				props["s3.access-key-id"] = value
-			case "s3_secret_access_key":
-				props["s3.secret-access-key"] = value
-			case "s3_session_token":
-				props["s3.session-token"] = value
-			case "s3_region":
-				props["s3.region"] = value
-			case "s3_endpoint":
-				props["s3.endpoint"] = value
-			case "s3_profile":
-				props["s3.profile"] = value
-			default:
-				// Pass through any other s3_ properties as-is
-				props[key] = value
-			}
-		}
-	}
+	maps.Copy(props, conn.applyIcebergS3Props())
 
 	// Add any extra properties specified by the user
 	if extra := conn.GetProp("sql_extra_props"); extra != "" {
@@ -444,9 +467,47 @@ func (conn *IcebergConn) connectSQL() error {
 		return g.Error(err, "Failed to create SQL catalog")
 	}
 
+	// iceberg-go v0.6 added iceberg_tables.iceberg_type. Existing catalogs
+	// created by older clients are missing it; CREATE TABLE IF NOT EXISTS
+	// will not add the column.
+	if err = conn.migrateSQLCatalogIcebergType(); err != nil {
+		conn.CatalogSQLConn.Close()
+		return g.Error(err, "Failed to migrate Iceberg SQL catalog schema")
+	}
+
 	conn.Catalog = cat
+	if err = conn.attachIcebergAwsConfig(); err != nil {
+		conn.CatalogSQLConn.Close()
+		return err
+	}
 
 	return nil
+}
+
+func (conn *IcebergConn) migrateSQLCatalogIcebergType() error {
+	if conn.CatalogSQLConn == nil {
+		return nil
+	}
+
+	q := `ALTER TABLE iceberg_tables ADD COLUMN iceberg_type VARCHAR DEFAULT 'TABLE'`
+	switch conn.CatalogSQLConn.GetType() {
+	case dbio.TypeDbPostgres:
+		q = `ALTER TABLE iceberg_tables ADD COLUMN IF NOT EXISTS iceberg_type VARCHAR NOT NULL DEFAULT 'TABLE'`
+	}
+
+	_, err := conn.CatalogSQLConn.Exec(q)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "unknown table") {
+		return nil
+	}
+	return err
 }
 
 // Close closes the connection
@@ -512,7 +573,7 @@ func (conn *IcebergConn) GetDatabases() (data iop.Dataset, err error) {
 
 // GetTables returns tables for given schema
 func (conn *IcebergConn) GetTables(schema string) (data iop.Dataset, err error) {
-	return conn.getTablesOrViews(schema, false)
+	return conn.getTablesOrViews(schema)
 }
 
 // GetViews returns views for given schema
@@ -524,10 +585,10 @@ func (conn *IcebergConn) GetViews(schema string) (data iop.Dataset, err error) {
 
 // GetTablesAndViews returns tables and views for given schema
 func (conn *IcebergConn) GetTablesAndViews(schema string) (data iop.Dataset, err error) {
-	return conn.getTablesOrViews(schema, true)
+	return conn.getTablesOrViews(schema)
 }
 
-func (conn *IcebergConn) getTablesOrViews(schema string, includeViews bool) (data iop.Dataset, err error) {
+func (conn *IcebergConn) getTablesOrViews(schema string) (data iop.Dataset, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		return data, g.Error(err, "Could not reconnect")
@@ -573,7 +634,7 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 	tableID := table.Identifier{t.Schema, t.Name}
 
 	// Load table
-	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID)
 	if err != nil {
 		if strings.Contains(err.Error(), "Table action can_get_metadata forbidden") {
 			return columns, g.Error("%s, check table name", err.Error())
@@ -625,7 +686,7 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 
 	// Parse table identifier
 	tableID := table.Identifier{t.Schema, t.Name}
-	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID)
 	if err != nil {
 		return nil, g.Error(err, "could not load existing table: %s", t.FullName())
 	}
@@ -677,7 +738,7 @@ func (conn *IcebergConn) GetMaxValue(t Table, colName string) (value any, maxCol
 
 	// Parse table identifier
 	tableID := table.Identifier{t.Schema, t.Name}
-	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID)
 	if err != nil {
 		return 0, maxCol, g.Error(err, "could not load existing table: %s", t.FullName())
 	}
@@ -773,7 +834,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	tableID := table.Identifier{tableSchema, tableName}
 
 	// Load table
-	tbl, err := conn.Catalog.LoadTable(queryContext.Ctx, tableID, nil)
+	tbl, err := conn.Catalog.LoadTable(queryContext.Ctx, tableID)
 	if err != nil {
 		return nil, g.Error(err, "Failed to load table %s.%s", tableSchema, tableName)
 	}
@@ -817,64 +878,50 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		// Create the greater than expression using field reference
 		fieldRef := iceberg.Reference(field.Name)
 
-		// Parse the incremental value to the appropriate type based on field type
-		var literal iceberg.Literal
-
-		// Try to parse as different types based on field type
 		var greaterThanExpr iceberg.UnboundPredicate
 		sp := iop.NewStreamProcessor()
 		switch field.Type {
 		case iceberg.PrimitiveTypes.String:
-			literal = iceberg.NewLiteral(incrementalValue)
 			greaterThanExpr = iceberg.GreaterThan(fieldRef, incrementalValue)
 		case iceberg.PrimitiveTypes.Int32:
 			if val, parseErr := cast.ToInt32E(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(val)
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as integer: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.Int64:
 			if val, parseErr := cast.ToInt64E(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(val)
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as long: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.Float32:
 			if val, parseErr := cast.ToFloat32E(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(val)
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as float: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.Float64:
 			if val, parseErr := cast.ToFloat64E(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(val)
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as double: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.Date:
 			if val, parseErr := sp.ParseTime(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(iceberg.Date(val.Unix() / 86400)) // Convert to days since epoch
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Date(val.Unix()/86400))
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as date: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.TimestampTz:
 			if val, parseErr := sp.ParseTime(incrementalValue); parseErr == nil {
-				literal = iceberg.NewLiteral(iceberg.Timestamp(val.UnixMicro()))
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Timestamp(val.UnixMicro()))
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as timestamp: %v", incrementalValue, parseErr)
 			}
 		default:
-			// Default to string
-			literal = iceberg.NewLiteral(incrementalValue)
 			greaterThanExpr = iceberg.GreaterThan(fieldRef, incrementalValue)
 		}
-		_ = literal
 
 		scanOpts = append(scanOpts, table.WithRowFilter(greaterThanExpr))
 	}
@@ -966,7 +1013,6 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 
 type icebergResult struct {
 	TotalRows uint64
-	res       driver.Result
 }
 
 func (r icebergResult) LastInsertId() (int64, error) {
@@ -984,11 +1030,17 @@ func (conn *IcebergConn) ExecContext(ctx context.Context, sql string, args ...in
 		schema := strings.Trim(strings.TrimPrefix(sql, "create schema "), `"`)
 		return icebergResult{}, conn.CreateNamespaceIfNotExists(schema)
 	case strings.HasPrefix(sql, "drop table "):
-		table := strings.Trim(strings.TrimPrefix(sql, "drop table "), `"`)
-		return icebergResult{}, conn.DropTable(table)
+		name := strings.TrimSpace(strings.TrimPrefix(sql, "drop table "))
+		if strings.HasPrefix(strings.ToLower(name), "if exists") {
+			name = strings.TrimSpace(name[len("if exists"):])
+		}
+		return icebergResult{}, conn.DropTable(name)
 	case strings.HasPrefix(sql, "drop view "):
-		table := strings.Trim(strings.TrimPrefix(sql, "drop view "), `"`)
-		return icebergResult{}, conn.DropTable(table)
+		name := strings.TrimSpace(strings.TrimPrefix(sql, "drop view "))
+		if strings.HasPrefix(strings.ToLower(name), "if exists") {
+			name = strings.TrimSpace(name[len("if exists"):])
+		}
+		return icebergResult{}, conn.DropTable(name)
 	case strings.Contains(sql, `"ddl_columns":`) && strings.Contains(sql, `"table":`):
 		m, _ := g.UnmarshalMap(sql)
 		var table Table
@@ -1039,9 +1091,11 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 
 	// Add table properties including format-version: 2
 	props := iceberg.Properties{
-		"format-version":       "2",
-		"write.format.default": "parquet",
-		"created-by":           "sling-cli",
+		"format-version":               "2",
+		"write.format.default":         "parquet",
+		"write.delete.mode":            "merge-on-read",
+		"write.delete.isolation-level": "snapshot",
+		"created-by":                   "sling-cli",
 	}
 
 	// Add any additional properties from connection
@@ -1113,6 +1167,10 @@ func (conn *IcebergConn) TableExists(t Table) (exists bool, err error) {
 	identifier := table.Identifier{t.Schema, t.Name}
 	exists, err = conn.Catalog.CheckTableExists(conn.context.Ctx, identifier)
 	if err != nil {
+		// Glue returns this for leftover non-Iceberg tables in the same namespace.
+		if icebergNonIcebergCatalogErr(err) {
+			return true, nil
+		}
 		return false, g.Error(err, "cannot check table existence: %s", t.FullName())
 	}
 
@@ -1145,6 +1203,9 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 			} else {
 				err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
 			}
+			if err != nil && icebergNonIcebergCatalogErr(err) {
+				err = conn.dropGlueEntry(identifier)
+			}
 			if err != nil {
 				if g.IsDebug() && strings.Contains(err.Error(), "RuntimeIOException") {
 					g.Warn(err.Error())
@@ -1167,10 +1228,6 @@ func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
 		// Some catalogs might not implement namespace checking, log and continue
 		g.Debug("could not check if namespace exists: %w", nsErr)
 	} else if !exists {
-		// Try to create the namespace
-		// nsProps := iceberg.Properties{
-		// 	"created-by": "sling-cli",
-		// }
 		g.Debug("creating namespace: %s", namespace)
 		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nil); err != nil {
 			return g.Error(err, "could not create namespace %s", schema)
@@ -1262,7 +1319,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 
 	// Parse table identifier
 	tableID := table.Identifier{t.Schema, t.Name}
-	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID)
 	if err != nil {
 		return 0, g.Error(err, "could not load existing table: %s", tableFName)
 	}
@@ -1586,15 +1643,49 @@ func (conn *IcebergConn) generateIcebergSchema(columns iop.Columns) (*iceberg.Sc
 			Required: false, // Default to nullable unless we have constraint info
 		}
 
+		// Identifier fields must be required (Iceberg spec). PK columns are
+		// treated as identifiers for equality-delete merge.
+		if icebergColumnIsPK(col) {
+			fields[i].Required = true
+		}
+
 		// Check if column has NOT NULL constraint
 		if col.Constraint != nil && strings.Contains(strings.ToLower(col.Constraint.Expression), "not null") {
 			fields[i].Required = true
 		}
 	}
 
-	// Create schema with ID 0 (initial schema)
-	schema := iceberg.NewSchema(0, fields...)
-	return schema, nil
+	identIDs := icebergIdentifierFieldIDs(columns, fields)
+	if len(identIDs) == 0 {
+		return iceberg.NewSchema(0, fields...), nil
+	}
+	return iceberg.NewSchemaWithIdentifiers(0, identIDs, fields...), nil
+}
+
+func icebergIdentifierFieldIDs(columns iop.Columns, fields []iceberg.NestedField) []int {
+	ids := make([]int, 0, len(columns))
+	for i, col := range columns {
+		if !icebergColumnIsPK(col) {
+			continue
+		}
+		if i < len(fields) {
+			ids = append(ids, fields[i].ID)
+		}
+	}
+	return ids
+}
+
+func icebergColumnIsPK(col iop.Column) bool {
+	if col.IsPrimaryKey() {
+		return true
+	}
+	if col.Metadata == nil {
+		return false
+	}
+	if col.Metadata[iop.ColMetaIsPrimaryKey.String()] != "" {
+		return true
+	}
+	return col.Metadata[iop.PrimaryKey.MetadataKey()] != ""
 }
 
 // icebergArrowSchema builds the arrow schema used to append into an iceberg
@@ -1607,6 +1698,10 @@ func (conn *IcebergConn) icebergArrowSchema(columns iop.Columns) *arrow.Schema {
 	fields := schema.Fields()
 	changed := false
 	for i, field := range fields {
+		if i < len(columns) && icebergColumnIsPK(columns[i]) && field.Nullable {
+			fields[i].Nullable = false
+			changed = true
+		}
 		tsType, ok := field.Type.(*arrow.TimestampType)
 		if !ok || tsType.TimeZone != "" {
 			continue
@@ -1680,21 +1775,30 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 		return nil, g.Error("missing qualifier \"iceberg_catalog\"")
 	}
 
-	if conn.duck != nil {
-		return conn.duck.StreamContext(ctx, sql, opts)
+	if err = conn.ensureDuckCatalog(); err != nil {
+		return nil, err
 	}
 
-	// Create a DuckDB instance
-	conn.duck = iop.NewDuckDb(ctx, "sling_conn_id", conn.GetProp("sling_conn_id"))
+	return conn.duck.StreamContext(ctx, sql, opts)
+}
 
-	// Add iceberg extensions
+// ensureDuckCatalog ATTACHes the Iceberg catalog on conn.duck for reads and DuckDB merge.
+func (conn *IcebergConn) ensureDuckCatalog() (err error) {
+	if conn.duck != nil {
+		return nil
+	}
+
+	if conn.CatalogType == dbio.IcebergCatalogTypeSQL {
+		return g.Error("unsupported catalog for DuckDB Iceberg extension.")
+	}
+
+	conn.duck = iop.NewDuckDb(conn.Context().Ctx, "sling_conn_id", conn.GetProp("sling_conn_id"))
 	conn.duck.AddExtension("iceberg")
 	conn.duck.AddExtension("https")
 
-	// Open DuckDB connection
-	err = conn.duck.Open()
-	if err != nil {
-		return nil, g.Error(err, "could not open DuckDB connection for Iceberg query")
+	if err = conn.duck.Open(); err != nil {
+		conn.duck = nil
+		return g.Error(err, "could not open DuckDB connection for Iceberg query")
 	}
 
 	attachSQL := ""
@@ -1706,79 +1810,776 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 
 	switch catalogType {
 	case dbio.IcebergCatalogTypeREST:
-		// make secret
 		secretProps := MakeDuckDbSecretProps(conn, iop.DuckDbSecretTypeIceberg)
 		secret := iop.NewDuckDbSecret("iceberg_secret", iop.DuckDbSecretTypeIceberg, secretProps)
 		conn.duck.AddSecret(secret)
 
-		// make attach SQL
 		restEndpoint := conn.GetProp("rest_uri")
 		if restEndpoint == "" {
-			return nil, g.Error("rest_uri property is required for REST catalog")
+			conn.duck.Close()
+			conn.duck = nil
+			return g.Error("rest_uri property is required for REST catalog")
 		}
 		attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
 
 	case dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeS3Tables:
-		// Map secret credentials
 		var storageSecretType iop.DuckDbSecretType
 		for key := range conn.properties {
 			if storageSecretType != iop.DuckDbSecretTypeUnknown {
 				break
 			} else if strings.HasPrefix(key, "s3_") {
 				storageSecretType = iop.DuckDbSecretTypeS3
+			} else if strings.HasPrefix(key, "gcs_") {
+				storageSecretType = iop.DuckDbSecretTypeGCS
 			}
 		}
 
 		if storageSecretType == iop.DuckDbSecretTypeUnknown {
-			return nil, g.Error("could not make AWS duckdb Iceberg secret for Iceberg query")
+			conn.duck.Close()
+			conn.duck = nil
+			return g.Error("could not make AWS duckdb Iceberg secret for Iceberg query")
 		}
 
-		// make secret
 		secretProps := MakeDuckDbSecretProps(conn, storageSecretType)
 		secret := iop.NewDuckDbSecret("iceberg_storage_secret", storageSecretType, secretProps)
 		conn.duck.AddSecret(secret)
 
-		// make attach SQL
 		if catalogType == dbio.IcebergCatalogTypeGlue {
-			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
 			accountID := conn.GetProp("glue_account_id")
 			namespace := conn.GetProp("glue_namespace")
 			if accountID == "" || namespace == "" {
-				return nil, g.Error("glue_account_id and glue_namespace properties are required for GLUE catalog")
+				conn.duck.Close()
+				conn.duck = nil
+				return g.Error("glue_account_id and glue_namespace properties are required for GLUE catalog")
 			}
 
 			warehouse := g.F("%s:s3tablescatalog/%s", accountID, namespace)
-
 			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
 		}
 
 		if catalogType == dbio.IcebergCatalogTypeS3Tables {
-			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
 			arn := conn.GetProp("s3tables_arn", "rest_warehouse")
 			if !strings.HasPrefix(arn, "arn:aws:s3tables") {
-				return nil, g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
+				conn.duck.Close()
+				conn.duck = nil
+				return g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
 			}
 
 			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_storage_secret)", arn)
 		}
 
 	default:
-		return nil, g.Error("Unsupported catalog type for DuckDB query: %s", catalogType)
+		conn.duck.Close()
+		conn.duck = nil
+		return g.Error("Unsupported catalog type for DuckDB query: %s", catalogType)
 	}
 
-	// Attach
-	_, err = conn.duck.Exec(attachSQL + env.NoDebugKey)
+	if _, err = conn.duck.Exec(attachSQL + env.NoDebugKey); err != nil {
+		conn.duck.Close()
+		conn.duck = nil
+		return g.Error(err, "could not attach Iceberg catalog")
+	}
+
+	// Do not USE iceberg_catalog — SET schema fails (no catalog+schema named iceberg_catalog).
+	return nil
+}
+
+// icebergMergeEngine is the writer used for Iceberg incremental+PK / CDC.
+type icebergMergeEngine string
+
+const (
+	icebergMergeEngineAppend icebergMergeEngine = "append"
+	icebergMergeEngineGo     icebergMergeEngine = "go"
+	icebergMergeEngineDuckDB icebergMergeEngine = "duckdb"
+)
+
+type icebergStorageKind string
+
+const (
+	icebergStorageS3      icebergStorageKind = "s3"
+	icebergStorageGCS     icebergStorageKind = "gcs"
+	icebergStorageAzure   icebergStorageKind = "azure"
+	icebergStorageLocal   icebergStorageKind = "local"
+	icebergStorageUnknown icebergStorageKind = "unknown"
+)
+
+// icebergGoHasRowDelta reports whether the linked iceberg-go build exposes
+// Transaction.NewRowDelta (apache iceberg-go v0.6+).
+func icebergGoHasRowDelta() bool {
+	t := reflect.TypeOf((*table.Transaction)(nil))
+	_, ok := t.MethodByName("NewRowDelta")
+	return ok
+}
+
+type icebergMergeSplit struct {
+	Columns iop.Columns
+	Upserts [][]any
+	Deletes [][]any // PK rows to equality-delete (may include upsert PKs)
+	Count   uint64
+}
+
+func icebergPKKey(row []any, pkIdx []int) string {
+	parts := make([]string, len(pkIdx))
+	for i, idx := range pkIdx {
+		if idx < len(row) {
+			parts[i] = cast.ToString(row[idx])
+		}
+	}
+	return strings.Join(parts, "\x1f")
+}
+
+// icebergCatalogKind returns REST / glue / sql / s3tables for routing.
+func (conn *IcebergConn) icebergCatalogKind() dbio.IcebergCatalogType {
+	if conn != nil && conn.isS3TablesViaREST() {
+		return dbio.IcebergCatalogTypeS3Tables
+	}
+	if conn == nil {
+		return ""
+	}
+	return conn.CatalogType
+}
+
+func (conn *IcebergConn) icebergStorageKind() icebergStorageKind {
+	if conn == nil {
+		return icebergStorageUnknown
+	}
+	warehouse := conn.Warehouse
+	if warehouse == "" {
+		warehouse = conn.GetProp("rest_warehouse", "sql_warehouse", "glue_warehouse")
+	}
+	w := strings.ToLower(warehouse)
+	get := func(keys ...string) string {
+		for _, k := range keys {
+			if v := conn.GetProp(k); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(w, "gs://"), strings.HasPrefix(w, "gcs://"), get("gcs_access_key_id") != "":
+		return icebergStorageGCS
+	case strings.HasPrefix(w, "abfs"), strings.HasPrefix(w, "abfss"), strings.HasPrefix(w, "wasb"),
+		strings.HasPrefix(w, "wasbs"), get("azure_account_name") != "", get("azure_account_key") != "":
+		return icebergStorageAzure
+	case strings.HasPrefix(w, "s3://"), strings.HasPrefix(w, "s3a://"), strings.HasPrefix(w, "arn:aws:s3tables"),
+		get("s3_access_key_id") != "", get("s3_region") != "", get("s3_endpoint") != "":
+		return icebergStorageS3
+	case strings.HasPrefix(w, "file://"), strings.HasPrefix(w, "/"):
+		return icebergStorageLocal
+	default:
+		return icebergStorageUnknown
+	}
+}
+
+func (conn *IcebergConn) mergeEngine(needMerge bool) (icebergMergeEngine, error) {
+	engine, err := conn.mergeEngineWith(needMerge, icebergGoHasRowDelta())
 	if err != nil {
-		return nil, g.Error(err, "could not attach Iceberg catalog")
+		return "", err
+	}
+	g.Debug("iceberg merge engine=%s catalog=%s storage=%s", engine, conn.icebergCatalogKind(), conn.icebergStorageKind())
+	return engine, nil
+}
+
+// mergeEngineWith chooses append / go / duckdb. DuckDB is never used for
+// Glue, SQL catalog, or Azure.
+func (conn *IcebergConn) mergeEngineWith(needMerge bool, goHasRowDelta bool) (icebergMergeEngine, error) {
+	catalog := conn.icebergCatalogKind()
+	storage := conn.icebergStorageKind()
+	if !needMerge {
+		return icebergMergeEngineAppend, nil
+	}
+	if goHasRowDelta {
+		return icebergMergeEngineGo, nil
 	}
 
-	// Use the catalog
-	// getting => Catalog Error: SET schema: No catalog + schema named "iceberg_catalog" found.
-	// _, err = conn.duck.Exec("USE iceberg_catalog;" + env.NoDebugKey)
-	// if err != nil {
-	// 	return nil, g.Error(err, "could not use Iceberg catalog")
-	// }
+	duckOK := (catalog == dbio.IcebergCatalogTypeREST || catalog == dbio.IcebergCatalogTypeS3Tables) &&
+		(storage == icebergStorageS3 || storage == icebergStorageGCS || storage == icebergStorageUnknown)
+	if duckOK {
+		return icebergMergeEngineDuckDB, nil
+	}
 
-	// Execute the actual query
-	return conn.duck.StreamContext(ctx, sql, opts)
+	return "", g.Error("Iceberg merge is not supported for catalog=%s storage=%s", catalog, storage)
+}
+
+// CheckMergeSupported fails fast when Iceberg incremental+PK / CDC cannot merge
+// for this catalog/storage (no silent append).
+func (conn *IcebergConn) CheckMergeSupported() error {
+	_, err := conn.mergeEngine(true)
+	return err
+}
+
+// MergeStream applies incremental upsert or CDC (insert/update/delete) to an
+// Iceberg table without a temp catalog table. Buffers one batch in memory.
+func (conn *IcebergConn) MergeStream(tableFName string, ds *iop.Datastream, pkFields []string, strategy *MergeStrategy) (count uint64, err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		return 0, g.Error(err, "Could not reconnect")
+	}
+	if len(pkFields) == 0 {
+		return 0, g.Error("Iceberg merge requires a primary-key")
+	}
+
+	data, err := ds.Collect(0)
+	if err != nil {
+		return 0, g.Error(err, "could not collect merge rows")
+	}
+	if len(data.Rows) == 0 {
+		return 0, nil
+	}
+
+	split, err := conn.dedupMergeRows(data.Columns, data.Rows, pkFields, strategy)
+	if err != nil {
+		return 0, err
+	}
+	count = split.Count
+
+	engine, err := conn.mergeEngine(true)
+	if err != nil {
+		return 0, err
+	}
+
+	switch engine {
+	case icebergMergeEngineGo:
+		err = conn.mergeStreamGo(tableFName, split, pkFields)
+	case icebergMergeEngineDuckDB:
+		err = conn.mergeStreamDuckDB(tableFName, split, pkFields, strategy)
+	default:
+		err = g.Error("Iceberg merge is not supported for catalog=%s storage=%s", conn.icebergCatalogKind(), conn.icebergStorageKind())
+	}
+	if err != nil {
+		return count, err
+	}
+	return count, nil
+}
+
+func (conn *IcebergConn) dedupMergeRows(columns iop.Columns, rows [][]any, pkFields []string, strategy *MergeStrategy) (icebergMergeSplit, error) {
+	out := icebergMergeSplit{Columns: columns, Count: uint64(len(rows))}
+	if len(pkFields) == 0 {
+		return out, g.Error("Iceberg merge requires a primary-key")
+	}
+
+	fieldMap := columns.FieldMap(true)
+	pkIdx := make([]int, len(pkFields))
+	for i, pk := range pkFields {
+		idx, ok := fieldMap[strings.ToLower(pk)]
+		if !ok {
+			return out, g.Error("primary-key column %s not found in merge stream", pk)
+		}
+		pkIdx[i] = idx
+	}
+
+	opIdx, seqIdx := -1, -1
+	if i, ok := fieldMap[strings.ToLower(env.ReservedFields.SyncedOp)]; ok {
+		opIdx = i
+	}
+	if i, ok := fieldMap[strings.ToLower(env.ReservedFields.CDCSeq)]; ok {
+		seqIdx = i
+	}
+
+	st := MergeStrategyNone
+	if strategy != nil {
+		st = *strategy
+	}
+	isCDC := st == MergeStrategyChangeCapture || st == MergeStrategyChangeCaptureSoft
+	soft := st == MergeStrategyChangeCaptureSoft
+
+	type kept struct {
+		row []any
+		seq int64
+		idx int
+		op  string
+	}
+	best := map[string]kept{}
+
+	for i, row := range rows {
+		key := icebergPKKey(row, pkIdx)
+		seq := int64(0)
+		if seqIdx >= 0 && seqIdx < len(row) {
+			seq = cast.ToInt64(row[seqIdx])
+		}
+		op := ""
+		if opIdx >= 0 && opIdx < len(row) {
+			op = strings.ToUpper(strings.TrimSpace(cast.ToString(row[opIdx])))
+		}
+		prev, ok := best[key]
+		if !ok || seq > prev.seq || (seq == prev.seq && i >= prev.idx) {
+			best[key] = kept{row: row, seq: seq, idx: i, op: op}
+		}
+	}
+
+	for _, k := range best {
+		op := k.op
+		switch {
+		case isCDC && op == "D" && !soft:
+			out.Deletes = append(out.Deletes, k.row)
+		case isCDC && op == "D" && soft:
+			out.Deletes = append(out.Deletes, k.row)
+			out.Upserts = append(out.Upserts, k.row)
+		case isCDC && (op == "U" || op == "I" || op == "S" || op == ""):
+			if op == "U" {
+				out.Deletes = append(out.Deletes, k.row)
+			}
+			out.Upserts = append(out.Upserts, k.row)
+		default:
+			// incremental merge: equality-delete every PK, then append
+			out.Deletes = append(out.Deletes, k.row)
+			out.Upserts = append(out.Upserts, k.row)
+		}
+	}
+
+	return out, nil
+}
+
+func (conn *IcebergConn) mergeStreamGo(tableFName string, split icebergMergeSplit, pkFields []string) error {
+	t, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return g.Error(err, "could not parse table name: %s", tableFName)
+	}
+	tableID := table.Identifier{t.Schema, t.Name}
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID)
+	if err != nil {
+		return g.Error(err, "could not load table: %s", tableFName)
+	}
+
+	tbl, err = conn.ensureIdentifierFields(tbl, pkFields)
+	if err != nil {
+		return err
+	}
+
+	pkFieldIDs, err := conn.pkFieldIDs(tbl.Schema(), pkFields)
+	if err != nil {
+		return err
+	}
+
+	tx := tbl.NewTransaction()
+	snapshotProps := iceberg.Properties{
+		"source": "sling-cli",
+	}
+
+	var eqFiles []iceberg.DataFile
+	if len(split.Deletes) > 0 {
+		delCols, delRows := conn.projectPKRows(split.Columns, split.Deletes, pkFields)
+		delArrow, err := conn.pkArrowSchema(tbl.Schema(), pkFields)
+		if err != nil {
+			return err
+		}
+		eqRecords, err := conn.rowsToArrowRecords(delCols, delRows, delArrow)
+		if err != nil {
+			return g.Error(err, "could not build equality-delete records")
+		}
+		// WriteEqualityDeletes does not take ownership of batches.
+		defer releaseArrowRecords(eqRecords)
+
+		eqFiles, err = tx.WriteEqualityDeletes(conn.Context().Ctx, pkFieldIDs, icebergRecordIter(eqRecords))
+		if err != nil {
+			return g.Error(err, "could not write Iceberg equality deletes")
+		}
+	}
+
+	var dataFiles []iceberg.DataFile
+	if len(split.Upserts) > 0 {
+		upCols := conn.columnsInSchema(split.Columns, tbl.Schema())
+		upArrow := conn.annotateArrowFieldIDs(conn.icebergArrowSchema(upCols), tbl.Schema())
+		upRecords, err := conn.rowsToArrowRecords(split.Columns, split.Upserts, upArrow)
+		if err != nil {
+			return g.Error(err, "could not build upsert records")
+		}
+		// WriteRecords releases each yielded batch; retain so our defer is safe.
+		defer releaseArrowRecords(upRecords)
+
+		for df, werr := range table.WriteRecords(conn.Context().Ctx, tbl, upArrow, icebergRecordIterRetain(upRecords)) {
+			if werr != nil {
+				return g.Error(werr, "could not write Iceberg upsert data files")
+			}
+			dataFiles = append(dataFiles, df)
+		}
+	}
+
+	if len(eqFiles) == 0 && len(dataFiles) == 0 {
+		return nil
+	}
+
+	delta := tx.NewRowDelta(snapshotProps)
+	if len(eqFiles) > 0 {
+		delta.AddDeletes(eqFiles...)
+	}
+	if len(dataFiles) > 0 {
+		delta.AddRows(dataFiles...)
+	}
+	if err = delta.Commit(conn.Context().Ctx); err != nil {
+		return g.Error(err, "could not commit Iceberg row delta")
+	}
+
+	newTable, err := tx.Commit(conn.Context().Ctx)
+	if err != nil {
+		return g.Error(err, "could not commit Iceberg merge transaction")
+	}
+
+	details := g.M("location", tbl.Location(), "engine", "go", "eq_deletes", len(eqFiles), "data_files", len(dataFiles))
+	if currSnapshot := newTable.CurrentSnapshot(); currSnapshot != nil {
+		details["snapshot_id"] = currSnapshot.SnapshotID
+	}
+	g.Debug("committed iceberg snapshot", details)
+	return nil
+}
+
+func (conn *IcebergConn) ensureIdentifierFields(tbl *table.Table, pkFields []string) (*table.Table, error) {
+	if tbl == nil || len(pkFields) == 0 {
+		return tbl, nil
+	}
+	schema := tbl.Schema()
+	if len(schema.IdentifierFieldIDs) > 0 {
+		return tbl, nil
+	}
+
+	paths := make([][]string, 0, len(pkFields))
+	for _, pk := range pkFields {
+		field, ok := schema.FindFieldByNameCaseInsensitive(pk)
+		if !ok {
+			g.Warn("iceberg identifier field %s not found in schema", pk)
+			continue
+		}
+		paths = append(paths, []string{field.Name})
+	}
+	if len(paths) == 0 {
+		return tbl, nil
+	}
+
+	tx := tbl.NewTransaction()
+	if err := tx.UpdateSchema(false, false).SetIdentifierField(paths).Commit(); err != nil {
+		return nil, g.Error(err, "could not set Iceberg identifier fields %v", pkFields)
+	}
+	newTable, err := tx.Commit(conn.Context().Ctx)
+	if err != nil {
+		return nil, g.Error(err, "could not commit Iceberg identifier fields")
+	}
+	g.Debug("set iceberg identifier fields %v", pkFields)
+	return newTable, nil
+}
+
+func (conn *IcebergConn) pkFieldIDs(schema *iceberg.Schema, pkFields []string) ([]int, error) {
+	ids := make([]int, 0, len(pkFields))
+	for _, pk := range pkFields {
+		field, ok := schema.FindFieldByNameCaseInsensitive(pk)
+		if !ok {
+			return nil, g.Error("primary-key column %s not found in Iceberg schema", pk)
+		}
+		ids = append(ids, field.ID)
+	}
+	return ids, nil
+}
+
+func (conn *IcebergConn) projectPKRows(columns iop.Columns, rows [][]any, pkFields []string) (iop.Columns, [][]any) {
+	fieldMap := columns.FieldMap(true)
+	pkIdx := make([]int, 0, len(pkFields))
+	pkCols := make(iop.Columns, 0, len(pkFields))
+	for _, pk := range pkFields {
+		idx, ok := fieldMap[strings.ToLower(pk)]
+		if !ok {
+			continue
+		}
+		pkIdx = append(pkIdx, idx)
+		pkCols = append(pkCols, columns[idx])
+	}
+	out := make([][]any, len(rows))
+	for i, row := range rows {
+		proj := make([]any, len(pkIdx))
+		for j, idx := range pkIdx {
+			if idx < len(row) {
+				proj[j] = row[idx]
+			}
+		}
+		out[i] = proj
+	}
+	return pkCols, out
+}
+
+func (conn *IcebergConn) pkArrowSchema(iceSchema *iceberg.Schema, pkFields []string) (*arrow.Schema, error) {
+	if iceSchema == nil {
+		return nil, g.Error("Iceberg schema is required for equality deletes")
+	}
+	fields := make([]iceberg.NestedField, 0, len(pkFields))
+	for _, pk := range pkFields {
+		field, ok := iceSchema.FindFieldByNameCaseInsensitive(pk)
+		if !ok {
+			return nil, g.Error("primary-key column %s not found in Iceberg schema", pk)
+		}
+		fields = append(fields, field)
+	}
+	sc := iceberg.NewSchema(0, fields...)
+	arrowSc, err := table.SchemaToArrowSchema(sc, nil, true, false)
+	if err != nil {
+		return nil, g.Error(err, "could not convert equality-delete schema to Arrow")
+	}
+	return arrowSc, nil
+}
+
+// columnsInSchema keeps source columns that exist on the Iceberg table.
+// Extra source fields (e.g. json_data on an upsert CSV) are dropped so
+// WriteRecords schema-compat does not fail.
+func (conn *IcebergConn) columnsInSchema(columns iop.Columns, iceSchema *iceberg.Schema) iop.Columns {
+	if iceSchema == nil {
+		return columns
+	}
+	out := make(iop.Columns, 0, len(columns))
+	for _, col := range columns {
+		if _, ok := iceSchema.FindFieldByNameCaseInsensitive(col.Name); ok {
+			out = append(out, col)
+		}
+	}
+	if len(out) == 0 {
+		return columns
+	}
+	return out
+}
+
+func (conn *IcebergConn) annotateArrowFieldIDs(arrowSchema *arrow.Schema, iceSchema *iceberg.Schema) *arrow.Schema {
+	if arrowSchema == nil || iceSchema == nil {
+		return arrowSchema
+	}
+	fields := arrowSchema.Fields()
+	changed := false
+	for i, f := range fields {
+		iceField, ok := iceSchema.FindFieldByNameCaseInsensitive(f.Name)
+		if !ok {
+			continue
+		}
+		if _, has := f.Metadata.GetValue(table.ArrowParquetFieldIDKey); has {
+			continue
+		}
+		keys := append(append([]string{}, f.Metadata.Keys()...), table.ArrowParquetFieldIDKey)
+		vals := append(append([]string{}, f.Metadata.Values()...), strconv.Itoa(iceField.ID))
+		fields[i].Metadata = arrow.NewMetadata(keys, vals)
+		changed = true
+	}
+	if !changed {
+		return arrowSchema
+	}
+	return arrow.NewSchema(fields, nil)
+}
+
+func (conn *IcebergConn) rowsToArrowRecords(columns iop.Columns, rows [][]any, arrowSchema *arrow.Schema) ([]arrow.Record, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if arrowSchema == nil {
+		arrowSchema = conn.icebergArrowSchema(columns)
+	}
+	alloc := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(alloc, arrowSchema)
+	defer builder.Release()
+
+	fieldMap := columns.FieldMap(true)
+	nFields := len(builder.Fields())
+
+	for _, row := range rows {
+		for i := 0; i < nFields; i++ {
+			name := arrowSchema.Field(i).Name
+			idx, ok := fieldMap[strings.ToLower(name)]
+			var val any
+			col := &iop.Column{Name: name}
+			if ok {
+				col = &columns[idx]
+				if idx < len(row) {
+					val = row[idx]
+				}
+			} else if i < len(columns) {
+				col = &columns[i]
+				if i < len(row) {
+					val = row[i]
+				}
+			}
+			iop.AppendToBuilder(builder.Field(i), col, val)
+		}
+	}
+	rec := builder.NewRecord()
+	return []arrow.Record{rec}, nil
+}
+
+func icebergRecordIter(records []arrow.Record) iter.Seq2[arrow.RecordBatch, error] {
+	return icebergRecordIterMaybeRetain(records, false)
+}
+
+func icebergRecordIterRetain(records []arrow.Record) iter.Seq2[arrow.RecordBatch, error] {
+	return icebergRecordIterMaybeRetain(records, true)
+}
+
+func icebergRecordIterMaybeRetain(records []arrow.Record, retain bool) iter.Seq2[arrow.RecordBatch, error] {
+	return func(yield func(arrow.RecordBatch, error) bool) {
+		for _, rec := range records {
+			if rec == nil {
+				continue
+			}
+			if retain {
+				rec.Retain()
+			}
+			if !yield(rec, nil) {
+				return
+			}
+		}
+	}
+}
+
+func releaseArrowRecords(records []arrow.Record) {
+	for _, rec := range records {
+		if rec != nil {
+			rec.Release()
+		}
+	}
+}
+
+func (conn *IcebergConn) mergeStreamDuckDB(tableFName string, split icebergMergeSplit, pkFields []string, strategy *MergeStrategy) error {
+	if err := conn.ensureDuckCatalog(); err != nil {
+		return err
+	}
+
+	t, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return g.Error(err, "could not parse table name: %s", tableFName)
+	}
+
+	tgt := conn.duckQualified(t.Schema, t.Name)
+	srcName := "sling_merge_src"
+
+	fieldMap := split.Columns.FieldMap(true)
+	pkIdx := make([]int, 0, len(pkFields))
+	for _, pk := range pkFields {
+		if i, ok := fieldMap[strings.ToLower(pk)]; ok {
+			pkIdx = append(pkIdx, i)
+		}
+	}
+	allRows := make([][]any, 0, len(split.Upserts)+len(split.Deletes))
+	seen := map[string]struct{}{}
+	for _, row := range append(append([][]any{}, split.Upserts...), split.Deletes...) {
+		key := icebergPKKey(row, pkIdx)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		allRows = append(allRows, row)
+	}
+
+	if err = conn.duckLoadTempTable(srcName, split.Columns, allRows); err != nil {
+		return err
+	}
+
+	st := MergeStrategyNone
+	if strategy != nil {
+		st = *strategy
+	}
+
+	sqls, err := conn.duckMergeSQL(tgt, srcName, split.Columns, pkFields, st)
+	if err != nil {
+		return err
+	}
+
+	if _, err = conn.duck.ExecMultiContext(conn.Context().Ctx, sqls...); err != nil {
+		return g.Error(err, "DuckDB Iceberg merge failed")
+	}
+
+	g.Debug("committed iceberg snapshot", g.M("engine", "duckdb", "target", tgt, "rows", split.Count))
+	return nil
+}
+
+func (conn *IcebergConn) duckQualified(schema, name string) string {
+	q := conn.Quote
+	if schema == "" {
+		return "iceberg_catalog." + q(name)
+	}
+	return "iceberg_catalog." + q(schema) + "." + q(name)
+}
+
+func (conn *IcebergConn) duckMergeSQL(tgt, src string, columns iop.Columns, pkFields []string, strategy MergeStrategy) ([]string, error) {
+	if len(pkFields) == 0 {
+		return nil, g.Error("Iceberg merge requires a primary-key")
+	}
+
+	if strategy == MergeStrategyNone {
+		strategy = MergeStrategy(conn.GetTemplateValue("variable.default_merge_strategy"))
+	}
+	if strategy == MergeStrategyNone {
+		strategy = MergeStrategyDeleteInsert
+	}
+
+	tmpl := conn.GetTemplateValue(g.F("core.merge_%s", strategy))
+	if tmpl == "" {
+		return nil, g.Error("merge strategy `%s` not supported for iceberg", strategy)
+	}
+
+	pkMap := map[string]struct{}{}
+	pkQuoted := make([]string, len(pkFields))
+	pkEqual := make([]string, len(pkFields))
+	for i, pk := range pkFields {
+		qpk := conn.Quote(pk)
+		pkQuoted[i] = qpk
+		pkEqual[i] = g.F("src.%s = tgt.%s", qpk, qpk)
+		pkMap[strings.ToLower(pk)] = struct{}{}
+	}
+
+	insertFields := make([]string, 0, len(columns))
+	srcFields := make([]string, 0, len(columns))
+	setFields := make([]string, 0, len(columns))
+	setFieldsAll := make([]string, 0, len(columns))
+	for _, col := range columns {
+		qcol := conn.Quote(col.Name)
+		insertFields = append(insertFields, qcol)
+		srcFields = append(srcFields, qcol)
+		setField := g.F("%s = src.%s", qcol, qcol)
+		setFieldsAll = append(setFieldsAll, setField)
+		if _, isPK := pkMap[strings.ToLower(col.Name)]; !isPK {
+			setFields = append(setFields, setField)
+		}
+	}
+	if len(setFields) == 0 {
+		setFields = setFieldsAll
+	}
+
+	sql := g.R(
+		tmpl,
+		"src_table", src,
+		"tgt_table", tgt,
+		"src_tgt_pk_equal", strings.Join(pkEqual, " and "),
+		"pk_fields", strings.Join(pkQuoted, ", "),
+		"insert_fields", strings.Join(insertFields, ", "),
+		"src_fields", strings.Join(srcFields, ", "),
+		"set_fields", strings.Join(setFields, ", "),
+	)
+
+	sqls := ParseSQLMultiStatements(sql, conn.GetType())
+	if len(sqls) == 0 {
+		return nil, g.Error("empty merge SQL for iceberg strategy `%s`", strategy)
+	}
+	return sqls, nil
+}
+
+func (conn *IcebergConn) duckLoadTempTable(srcName string, columns iop.Columns, rows [][]any) error {
+	folder := path.Join(env.GetTempFolder(), "iceberg-merge", g.RandSuffix("src", 6))
+	if err := os.MkdirAll(folder, 0755); err != nil {
+		return g.Error(err, "could not create temp dir for Iceberg merge")
+	}
+	defer env.RemoveAllLocalTempFile(folder)
+
+	csvPath := path.Join(folder, "src.csv")
+	f, err := os.Create(csvPath)
+	if err != nil {
+		return g.Error(err, "could not create temp csv")
+	}
+	data := iop.NewDataset(columns)
+	data.Rows = rows
+	if _, err = data.WriteCsv(f); err != nil {
+		f.Close()
+		return g.Error(err, "could not write merge csv")
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+
+	escaped := strings.ReplaceAll(csvPath, `'`, `''`)
+	sql := g.F("CREATE OR REPLACE TEMP TABLE %s AS SELECT * FROM read_csv_auto('%s', header=true)", srcName, escaped)
+	if _, err = conn.duck.Exec(sql + env.NoDebugKey); err != nil {
+		return g.Error(err, "could not load DuckDB temp merge table")
+	}
+	return nil
 }

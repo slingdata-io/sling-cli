@@ -211,6 +211,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// INSERT is upsert-by-PK for these stores
 	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
 
+	// Iceberg incremental+PK and CDC use MergeStream (row delta), not append and not SQL temp tables.
+	if cfg.icebergNeedsMerge(tgtConn) {
+		return t.writeToIcebergMerge(cfg, df, tgtConn)
+	}
+
 	// set direct insert mode
 	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
 
@@ -660,6 +665,109 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// Finalize progress
+	if err := df.Err(); err != nil {
+		setStage("6 - closing")
+		return cnt, err
+	}
+
+	setStage("6 - closing")
+	return cnt, nil
+}
+
+func (t *TaskExecution) writeToIcebergMerge(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
+	icebergConn, ok := tgtConn.Self().(*database.IcebergConn)
+	if !ok {
+		return 0, g.Error("iceberg merge requires IcebergConn")
+	}
+
+	if len(cfg.Source.PrimaryKey()) == 0 {
+		return 0, g.Error("Iceberg merge requires a primary-key")
+	}
+
+	if err = icebergConn.CheckMergeSupported(); err != nil {
+		return 0, err
+	}
+
+	targetTable, err := initializeTargetTable(cfg, tgtConn)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := ensureSchemaExists(tgtConn, targetTable.Schema); err != nil {
+		return 0, err
+	}
+
+	if paused := df.Pause(); !paused {
+		return 0, g.Error("could not pause streams to infer columns")
+	}
+
+	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
+	if err != nil {
+		return 0, err
+	}
+
+	targetTable.Columns = sampleData.Columns
+	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+		return 0, g.Error(err, "could not set keys for "+targetTable.FullName())
+	}
+
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
+		return 0, err
+	}
+
+	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+		return 0, err
+	}
+
+	df.Columns = sampleData.Columns
+	setStage("5 - load-into-final")
+
+	if err = t.ExecuteHooks(HookStagePreMerge); err != nil {
+		return 0, g.Error(err, "error executing pre-merge hooks")
+	}
+
+	df.Unpause()
+	t.SetProgress("streaming data (iceberg merge)")
+
+	data, err := df.Collect()
+	if err != nil {
+		return 0, g.Error(err, "could not collect Iceberg merge rows")
+	}
+	cnt = uint64(len(data.Rows))
+
+	ds := data.Stream()
+	pk := cfg.Source.PrimaryKey()
+	if casing := cfg.Target.Options.ColumnCasing; casing != nil {
+		for i, col := range pk {
+			pk[i] = casing.Apply(col, tgtConn.GetType())
+		}
+	}
+
+	merged, err := icebergConn.MergeStream(targetTable.FullName(), ds, pk, cfg.Target.Options.MergeStrategy)
+	if err != nil {
+		return 0, g.Error(err, "could not merge into "+targetTable.FullName())
+	}
+	if merged > 0 {
+		cnt = merged
+	}
+
+	df.SyncColumns()
+	df.SyncStats()
+
+	if err = t.ExecuteHooks(HookStagePostMerge); err != nil {
+		return 0, g.Error(err, "error executing post-merge hooks")
+	}
+
+	applySchemaAttributes(cfg, tgtConn, targetTable, df.Columns)
+
+	if cnt == 0 {
+		g.Warn("no data or records found in stream. Nothing to merge.")
+	}
+
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
+		return cnt, err
+	}
+
 	if err := df.Err(); err != nil {
 		setStage("6 - closing")
 		return cnt, err
