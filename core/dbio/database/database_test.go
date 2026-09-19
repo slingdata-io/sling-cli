@@ -7,12 +7,15 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1660,6 +1663,95 @@ func newTestDatabricksConn() *DatabricksConn {
 	conn := &DatabricksConn{}
 	conn.setContext(context.Background(), 1)
 	return conn
+}
+
+func TestVolumeDeleteRetryOn429(t *testing.T) {
+	origRetries, origBase := volumeFilesMaxRetries, volumeFilesRetryBase
+	volumeFilesMaxRetries = 4
+	volumeFilesRetryBase = time.Millisecond
+	defer func() {
+		volumeFilesMaxRetries = origRetries
+		volumeFilesRetryBase = origBase
+	}()
+
+	t.Run("retries then succeeds", func(t *testing.T) {
+		var deletes int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodDelete, r.Method)
+			n := atomic.AddInt32(&deletes, 1)
+			if n < 3 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error_code":"RESOURCE_EXHAUSTED","message":"AWS S3 is throttling requests; try again later."}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		conn := newTestDatabricksConn()
+		conn.SetProp("host", strings.TrimPrefix(server.URL, "http://"))
+		conn.SetProp("protocol", "http")
+		conn.SetProp("token", "tok")
+
+		err := conn.VolumeDelete("/Volumes/workspace/default/sling_volume/sling_temp/file.parquet")
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&deletes), int32(3))
+	})
+
+	t.Run("404 is success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		conn := newTestDatabricksConn()
+		conn.SetProp("host", strings.TrimPrefix(server.URL, "http://"))
+		conn.SetProp("protocol", "http")
+		conn.SetProp("token", "tok")
+
+		err := conn.VolumeDelete("/Volumes/workspace/default/sling_volume/gone.parquet")
+		assert.NoError(t, err)
+	})
+
+	t.Run("403 is not retried", func(t *testing.T) {
+		var deletes int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&deletes, 1)
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error_code":"PERMISSION_DENIED"}`))
+		}))
+		defer server.Close()
+
+		conn := newTestDatabricksConn()
+		conn.SetProp("host", strings.TrimPrefix(server.URL, "http://"))
+		conn.SetProp("protocol", "http")
+		conn.SetProp("token", "tok")
+
+		err := conn.VolumeDelete("/Volumes/workspace/default/sling_volume/denied.parquet")
+		assert.Error(t, err)
+		assert.Equal(t, int32(1), atomic.LoadInt32(&deletes))
+	})
+
+	t.Run("exhausted 429", func(t *testing.T) {
+		var deletes int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&deletes, 1)
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error_code":"RESOURCE_EXHAUSTED"}`))
+		}))
+		defer server.Close()
+
+		conn := newTestDatabricksConn()
+		conn.SetProp("host", strings.TrimPrefix(server.URL, "http://"))
+		conn.SetProp("protocol", "http")
+		conn.SetProp("token", "tok")
+
+		err := conn.VolumeDelete("/Volumes/workspace/default/sling_volume/busy.parquet")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "retries")
+		assert.Equal(t, int32(volumeFilesMaxRetries+1), atomic.LoadInt32(&deletes))
+	})
 }
 
 func TestMapZerobusIPCCompression(t *testing.T) {

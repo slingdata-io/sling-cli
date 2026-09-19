@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -873,29 +875,169 @@ func (conn *DatabricksConn) VolumeList(volumePath string) (data iop.Dataset, err
 	return data, nil
 }
 
+var (
+	volumeFilesMaxRetries = 5
+	volumeFilesRetryBase  = 500 * time.Millisecond
+	volumeFilesMaxWait    = 8 * time.Second
+)
+
+func (conn *DatabricksConn) volumeFilesAPIURL(volumePath string) string {
+	host := conn.GetProp("host")
+	scheme := "https"
+	switch {
+	case strings.HasPrefix(host, "http://"):
+		scheme = "http"
+		host = strings.TrimPrefix(host, "http://")
+	case strings.HasPrefix(host, "https://"):
+		host = strings.TrimPrefix(host, "https://")
+	case conn.GetProp("protocol") == "http", conn.GetProp("use_ssl") == "false", conn.GetProp("ssl") == "false":
+		scheme = "http"
+	}
+	host = strings.TrimRight(host, "/")
+	if !strings.HasPrefix(volumePath, "/") {
+		volumePath = "/" + volumePath
+	}
+	return fmt.Sprintf("%s://%s/api/2.0/fs/files%s", scheme, host, volumePath)
+}
+
+func volumeFilesRetryWait(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		if retryAfter > 30*time.Second {
+			return 30 * time.Second
+		}
+		return retryAfter
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 5 {
+		attempt = 5
+	}
+	base := volumeFilesRetryBase * time.Duration(1<<uint(attempt))
+	if base > volumeFilesMaxWait {
+		base = volumeFilesMaxWait
+	}
+	jitterMax := int64(base / 2)
+	if jitterMax < 1 {
+		jitterMax = 1
+	}
+	return base/2 + time.Duration(rand.Int64N(jitterMax))
+}
+
+func parseRetryAfter(h http.Header) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	secs, err := strconv.Atoi(v)
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
+func isVolumeFilesRetryable(status int, body string) bool {
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return true
+	}
+	upper := strings.ToUpper(body)
+	return strings.Contains(upper, "RESOURCE_EXHAUSTED") ||
+		strings.Contains(upper, "THROTTL") ||
+		strings.Contains(upper, "TOO MANY REQUESTS")
+}
+
+func (conn *DatabricksConn) volumeDeleteFile(ctx context.Context, volumePath string) error {
+	if volumePath == "" {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	url := conn.volumeFilesAPIURL(volumePath)
+	token := conn.GetProp("token")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	var lastErr error
+	var retryAfter time.Duration
+	for attempt := 0; attempt <= volumeFilesMaxRetries; attempt++ {
+		if attempt > 0 {
+			wait := volumeFilesRetryWait(attempt, retryAfter)
+			retryAfter = 0
+			g.Debug("volume delete throttled for %s, retrying in %s (attempt %d/%d)", volumePath, wait, attempt, volumeFilesMaxRetries)
+			select {
+			case <-ctx.Done():
+				if lastErr != nil {
+					return g.Error(lastErr, "could not delete volume file %s: %s", volumePath, ctx.Err())
+				}
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+		if err != nil {
+			return g.Error(err, "could not build volume delete request for %s", volumePath)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return g.Error(err, "could not delete volume file %s", volumePath)
+			}
+			continue
+		}
+
+		respBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		body := string(respBytes)
+
+		if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+			return nil
+		}
+
+		lastErr = g.Error("unexpected response %d deleting volume file %s: %s", resp.StatusCode, volumePath, body)
+		if !isVolumeFilesRetryable(resp.StatusCode, body) {
+			return lastErr
+		}
+		retryAfter = parseRetryAfter(resp.Header)
+	}
+
+	return g.Error(lastErr, "could not delete volume file %s after %d retries", volumePath, volumeFilesMaxRetries)
+}
+
 // VolumeDelete delete files in a Databricks volume path
 func (conn *DatabricksConn) VolumeDelete(volumePaths ...string) (err error) {
+	if len(volumePaths) == 0 {
+		return nil
+	}
 
-	deleteContext := g.NewContext(conn.context.Ctx)
+	parent := context.Background()
+	if conn.Context() != nil && conn.Context().Ctx != nil {
+		parent = conn.Context().Ctx
+	}
+	// Cap parallelism so cleanup does not stampede S3 behind Volumes.
+	deleteContext := g.NewContext(parent, 3)
 
 	for _, volumePath := range volumePaths {
+		if volumePath == "" {
+			continue
+		}
 		deleteContext.Wg.Write.Add()
-
 		go func(volumePath string) {
 			defer deleteContext.Wg.Write.Done()
-
-			url := g.F("https://%s/api/2.0/fs/files%s", conn.GetProp("host"), volumePath)
-			headers := map[string]string{"Authorization": "Bearer " + conn.GetProp("token")}
-			_, respBytes, err := net.ClientDo("DELETE", url, nil, headers)
-			if err != nil {
-				deleteContext.CaptureErr(g.Error(err, "could not delete volume via API with for `%s` %s\nResponse: %s", volumePath, string(respBytes)))
+			// Use parent ctx so one exhausted failure does not cancel sibling backoff.
+			if err := conn.volumeDeleteFile(parent, volumePath); err != nil {
+				deleteContext.CaptureErr(g.Error(err, "could not delete volume file `%s`", volumePath))
 			}
-
 		}(volumePath)
 	}
 
 	deleteContext.Wg.Write.Wait()
-
 	return deleteContext.Err()
 }
 
@@ -1097,9 +1239,8 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 	defer func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			g.Debug("deleting temporary volume: %s", volumeFolderPath)
-			err = conn.VolumeDelete(volumeFilePaths...)
-			if err != nil {
-				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, err.Error())
+			if delErr := conn.VolumeDelete(volumeFilePaths...); delErr != nil {
+				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, delErr.Error())
 			}
 		}
 	}()
