@@ -104,6 +104,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &GoogleDriveFileSysClient{}
 	case dbio.TypeFileHTTP:
 		fsClient = &HTTPFileSysClient{}
+	case dbio.TypeFileDatabricksVolume:
+		fsClient = &DatabricksVolumeFileSysClient{}
 	default:
 		err = g.Error("Unrecognized File System")
 		return
@@ -176,6 +178,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
+	case strings.HasPrefix(url, "databricks-volume://"), strings.HasPrefix(url, "databricks://Volumes/"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileDatabricksVolume, props...)
 	case strings.HasPrefix(url, "file://"):
 		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
@@ -276,6 +281,13 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			return fs.Prefix("/") + path
 		}
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	case dbio.TypeFileDatabricksVolume:
+		for _, p := range []string{"databricks-volume://", "databricks://Volumes/"} {
+			if strings.HasPrefix(uri, p) {
+				return uri
+			}
+		}
+		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	case dbio.TypeFileS3, dbio.TypeFileGoogle:
 		// For S3/GCS, if URI already has the scheme prefix (e.g., s3://bucket/path),
 		// return it as-is to allow accessing different buckets with the same credentials.
@@ -297,7 +309,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	connType, _, path, err := ParseURLType(uri)
+	connType, host, path, err := ParseURLType(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +320,8 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	switch connType {
 	case dbio.TypeFileLocal:
 		path = strings.TrimPrefix(path, "./")
+	case dbio.TypeFileDatabricksVolume:
+		path = stripDatabricksVolumePrefix(host, path)
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
@@ -1062,7 +1076,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		}
 	}
 
-	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
+	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp, dbio.TypeFileDatabricksVolume) {
 		path, err := fsClient.GetPath(url)
 		if err != nil {
 			return 0, g.Error(err, "Error Parsing url: "+url)
@@ -1153,6 +1167,10 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	case dbio.TypeFileFtp:
 		if len(p) == 0 {
 			return g.Error("invalid uri / path for overwriting (root): %s", uri)
+		}
+	case dbio.TypeFileDatabricksVolume:
+		if len(pArr) <= 3 {
+			return g.Error("invalid uri / path for deleting (volume): %s", uri)
 		}
 	}
 

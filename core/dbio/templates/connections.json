@@ -1082,6 +1082,76 @@
           "description": "Table format to use when creating tables",
           "enum": ["delta", "iceberg"],
           "default": "delta"
+        },
+        "copy_method": {
+          "type": "string",
+          "description": "Bulk load method. stage uses Unity Catalog volumes + COPY INTO (default). aws uses S3. zerobus streams Arrow RecordBatches into an existing Delta table (Beta).",
+          "enum": ["stage", "aws", "zerobus"],
+          "default": "stage"
+        },
+        "zerobus_endpoint": {
+          "type": "string",
+          "description": "Zerobus shard URL (not the workspace host), e.g. https://<workspace-id>.zerobus.<region>.cloud.databricks.com. Required when copy_method is zerobus."
+        },
+        "client_id": {
+          "type": "string",
+          "description": "OAuth M2M service principal client ID for Zerobus"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "OAuth M2M service principal client secret for Zerobus"
+        },
+        "batch_size": {
+          "type": "number",
+          "description": "Rows per Arrow RecordBatch when copy_method is zerobus",
+          "default": 10000
+        },
+        "ipc_compression": {
+          "type": "string",
+          "description": "Arrow IPC compression for Zerobus",
+          "enum": ["none", "lz4", "zstd"],
+          "default": "none"
+        },
+        "max_inflight_batches": {
+          "type": "number",
+          "description": "Max in-flight Zerobus batches pending acknowledgment",
+          "default": 1000
+        }
+      }
+    },
+    "databricks-volume": {
+      "name": "Databricks Volume",
+      "description": "Unity Catalog Volume via the Files REST API (file target, not a table loader)",
+      "category": "storage",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Databricks workspace hostname",
+          "required": true,
+          "examples": ["adb-123.cloud.databricks.com"]
+        },
+        "token": {
+          "type": "string",
+          "description": "Personal access token",
+          "required": true
+        },
+        "catalog": {
+          "type": "string",
+          "description": "Unity Catalog name"
+        },
+        "schema": {
+          "type": "string",
+          "description": "Schema name"
+        },
+        "volume": {
+          "type": "string",
+          "description": "Volume name"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "HTTP protocol. Use http only for tests/mock servers.",
+          "enum": ["https", "http"],
+          "default": "https"
         }
       }
     },

@@ -116,6 +116,12 @@ $ sling conns discover LOCALHOST_DEV
  ...
 ```
 
+---
+
+Databricks: Unity Catalog Volumes are a file connection (`type: databricks-volume`). Direct Delta ingest uses `copy_method: zerobus` on `type: databricks`. See https://docs.slingdata.io/connections/database-connections/databricks
+
+---
+
 ## Installation
 
 #### One-liner on Mac / Linux
@@ -158,6 +164,7 @@ Pre-built binaries for macOS, Linux, and Windows are available on the [releases 
 Requirements:
 - Install Go 1.22+ (https://go.dev/doc/install)
 - Install a C compiler ([gcc](https://www.google.com/search?q=install+gcc&oq=install+gcc), [tdm-gcc](https://jmeubank.github.io/tdm-gcc/), [mingw](https://www.google.com/search?q=install+mingw), etc)
+- `CGO_ENABLED=1` (needed for SQLite and Databricks Zerobus; this repo's build scripts already set it)
 
 #### Linux or Mac
 ```bash

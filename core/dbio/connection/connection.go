@@ -1097,7 +1097,7 @@ func (c *Connection) setURL() (err error) {
 			template = template + path
 		}
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure, dbio.TypeFileAzureABFS,
-		dbio.TypeFileLocal:
+		dbio.TypeFileDatabricksVolume, dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
 		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables, sql

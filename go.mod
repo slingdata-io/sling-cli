@@ -33,6 +33,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/clbanning/mxj/v2 v2.7.0
 	github.com/databricks/databricks-sql-go v1.9.0
+	github.com/databricks/zerobus-sdk/go v1.6.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
