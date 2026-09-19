@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/databricks/databricks-sql-go/driverctx"
 	dbsqllog "github.com/databricks/databricks-sql-go/logger"
-	"github.com/databricks/zerobus-sdk/go"
+	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -1540,7 +1540,7 @@ func (conn *DatabricksConn) CopyViaZerobus(table Table, df *iop.Dataflow) (count
 				}
 				return count, g.Error("zerobus SQL warehouse count is %d after streaming %d rows into %s", visible, count, table.FullName())
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(4 * time.Second)
 		}
 	}
 
