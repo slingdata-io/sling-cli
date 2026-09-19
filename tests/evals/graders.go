@@ -1743,7 +1743,7 @@ func tasksToMap(cfg sling.ReplicationConfig) map[string]any {
 		if pk := task.Source.PrimaryKey(); len(pk) > 0 {
 			sm["primary_key"] = pk
 		}
-		if task.Source.UpdateKey != "" {
+		if len(task.Source.UpdateKey) > 0 {
 			sm["update_key"] = task.Source.UpdateKey
 		}
 		if len(task.Source.Select) > 0 {
@@ -1783,7 +1783,7 @@ func streamToMap(s *sling.ReplicationStreamConfig) map[string]any {
 	if pk := s.PrimaryKey(); len(pk) > 0 {
 		sm["primary_key"] = pk
 	}
-	if s.UpdateKey != "" {
+	if len(s.UpdateKey) > 0 {
 		sm["update_key"] = s.UpdateKey
 	}
 	if len(s.Select) > 0 {

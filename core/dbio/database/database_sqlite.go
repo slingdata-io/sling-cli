@@ -3,11 +3,9 @@ package database
 import (
 	"bytes"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -21,9 +19,6 @@ import (
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
-
-	"github.com/psanford/sqlite3vfs"
-	"github.com/psanford/sqlite3vfshttp"
 )
 
 // SQLiteConn is a SQLite connection
@@ -331,48 +326,12 @@ func (conn *SQLiteConn) setHttpURL() (err error) {
 	}
 
 	if httpURL != "" {
-		vfs := sqlite3vfshttp.HttpVFS{
-			URL: httpURL,
-			RoundTripper: &roundTripper{
-				referer:   os.Getenv("DBIO_APP"),
-				userAgent: os.Getenv("DBIO_APP"),
-			},
-		}
-
-		err = sqlite3vfs.RegisterVFS("httpvfs", &vfs)
-		if err != nil {
-			return g.Error(err, "register vfs err")
+		if err := registerHttpVFS(httpURL); err != nil {
+			return err
 		}
 	}
 
 	return nil
-}
-
-type roundTripper struct {
-	referer   string
-	userAgent string
-}
-
-func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if rt.referer != "" {
-		req.Header.Set("Referer", rt.referer)
-	}
-
-	if rt.userAgent != "" {
-		req.Header.Set("User-Agent", rt.userAgent)
-	}
-
-	tr := http.DefaultTransport
-
-	if req.URL.Scheme == "file" {
-		path := req.URL.Path
-		root := filepath.Dir(path)
-		base := filepath.Base(path)
-		tr = http.NewFileTransport(http.Dir(root))
-		req.URL.Path = base
-	}
-
-	return tr.RoundTrip(req)
 }
 
 // EnsureBinSQLite ensures sqlite binary exists

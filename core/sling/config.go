@@ -21,7 +21,7 @@ import (
 	"github.com/flarco/g"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -351,8 +351,12 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcApiProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcApiProvided, srcStreamProvided)
 	g.Trace(summary)
 
+	if err = cfg.Source.UpdateKey.Normalize(); err != nil {
+		return
+	}
+
 	if cfg.Mode == "" {
-		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.UpdateKey != "" {
+		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.HasUpdateKey() {
 			cfg.Mode = IncrementalMode
 		} else {
 			cfg.Mode = FullRefreshMode
@@ -373,19 +377,19 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 				cfg.Source.PrimaryKeyI = []string{"_bigtable_key"}
 			}
 
-			if cfg.Source.UpdateKey == "" {
-				cfg.Source.UpdateKey = "_bigtable_timestamp"
+			if len(cfg.Source.UpdateKey) == 0 {
+				cfg.Source.UpdateKey = UpdateKey{"_bigtable_timestamp"}
 			}
 		} else if cfg.IsFileStreamWithStateAndParts() {
 			// OK, no need for update key
 		} else if srcApiProvided {
 			// OK, no need for update key/pk, API uses SLING_STATE for tracking
-		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.LoadedAt {
+		} else if srcFileProvided && cfg.Source.UpdateKey.First() == env.ReservedFields.LoadedAt {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
-		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.SyncedAt {
+		} else if srcFileProvided && cfg.Source.UpdateKey.First() == env.ReservedFields.SyncedAt {
 			cfg.MetadataSyncedAt = g.Bool(true)
-		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
+		} else if len(cfg.Source.UpdateKey) == 0 && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
 				err = g.Error("must specify value for '--update-key' and/or '--primary-key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
@@ -393,7 +397,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			return
 		}
 	case BackfillMode:
-		if cfg.Source.UpdateKey == "" || len(cfg.Source.PrimaryKey()) == 0 {
+		if len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
 				err = g.Error("must specify value for '--update-key' and '--primary-key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
@@ -1141,8 +1145,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if cfg.StreamName != "" {
 			m["stream_name"] = strings.ToLower(cfg.StreamName)
 		}
-		if cfg.Source.UpdateKey != "" {
-			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
+		if len(cfg.Source.UpdateKey) > 0 {
+			m["update_key"] = strings.Join(cfg.SrcConn.Type.QuoteNames(cfg.Source.UpdateKey...), ", ")
 		}
 	}
 
@@ -1267,8 +1271,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
 				m["stream_scanner"] = g.R(streamScanner, "uri", strings.TrimPrefix(uri, "file://"))
 			}
-			if cfg.Source.UpdateKey != "" {
-				m["update_key"] = dbio.TypeDbDuckDb.Quote(cfg.Source.UpdateKey)
+			if len(cfg.Source.UpdateKey) > 0 {
+				m["update_key"] = strings.Join(dbio.TypeDbDuckDb.QuoteNames(cfg.Source.UpdateKey...), ", ")
 			}
 		}
 	}
@@ -1614,7 +1618,7 @@ type Source struct {
 	Where       string         `json:"where,omitempty" yaml:"where,omitempty"`
 	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	UpdateKey   UpdateKey      `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
 	Data  map[string]any `json:"-" yaml:"-"`
@@ -1640,7 +1644,7 @@ func (s *Source) Offset() int {
 }
 
 func (s *Source) HasUpdateKey() bool {
-	return s.UpdateKey != ""
+	return len(s.UpdateKey) > 0
 }
 
 func (s *Source) HasPrimaryKey() bool {

@@ -194,6 +194,35 @@ func TestParseKVListUnquotedStillSplits(t *testing.T) {
 	}
 }
 
+func overlaySpecConn(entries connection.ConnEntries, connName, specRelPath, baseDir string) (connection.ConnEntries, error) {
+	fullPath := filepath.Join(baseDir, specRelPath)
+	if _, err := os.Stat(fullPath); err != nil {
+		return nil, err
+	}
+	e := entries.Get(connName)
+	if e.Name == "" {
+		return nil, g.Error("connection not found: %s", connName)
+	}
+	out := make(connection.ConnEntries, 0, len(entries))
+	for _, entry := range entries {
+		if strings.EqualFold(entry.Name, connName) {
+			cloneData := g.M()
+			for k, v := range entry.Connection.Data {
+				cloneData[k] = v
+			}
+			cloneData["spec"] = "file://" + fullPath
+			clonedConn, err := connection.NewConnection(entry.Name, entry.Connection.Type, cloneData)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, connection.ConnEntry{Name: entry.Name, Connection: clonedConn})
+		} else {
+			out = append(out, entry)
+		}
+	}
+	return out, nil
+}
+
 func TestOverlaySpecConn(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "draft.yaml")

@@ -148,26 +148,64 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		// get source columns to match update-key
 		// in case column casing needs adjustment
-		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey)
-		if updateCol == nil {
-			return df, g.Error("did not find update_key: %s", cfg.Source.UpdateKey)
-		} else if updateCol.Name != "" {
-			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
+		for i, k := range cfg.Source.UpdateKey {
+			col := sTable.Columns.GetColumn(k)
+			if col == nil {
+				return df, g.Error("did not find update_key: %s", k)
+			} else if col.Name != "" {
+				cfg.Source.UpdateKey[i] = col.Name // overwrite with correct casing
+			}
 		}
+		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey.First())
+		updateKeyQuoted := strings.Join(lo.Map(cfg.Source.UpdateKey, func(k string, _ int) string { return srcConn.Quote(k) }), ", ")
 
 		// select only records that have been modified after last max value
-		if incValStr := cfg.IncrementalValStr; incValStr != "" {
-			if srcConn.GetType().IsNoSQL() {
-				// escape double quote since this uses JSON
-				incValStr = strings.ReplaceAll(incValStr, `"`, `\"`)
-			}
+		if incValStr := cfg.IncrementalValStr; incValStr != "" && incValStr != "null" {
+			gt := lo.Ternary(t.Config.IncrementalGTE, ">=", ">")
+			if len(cfg.Source.UpdateKey) > 1 {
+				var conds []string
+				valMap := extractIncrementalValuesMap(cfg)
+				for i, k := range cfg.Source.UpdateKey {
+					v := getValForColumn(valMap, cfg, k, i)
+					if v == "" || v == "null" {
+						continue
+					}
+					col := sTable.Columns.GetColumn(k)
+					if col != nil && col.IsString() && !strings.HasPrefix(v, "'") {
+						v = g.F("'%s'", v)
+					}
+					if srcConn.GetType().IsNoSQL() {
+						v = strings.ReplaceAll(v, `"`, `\"`)
+					}
+					singleCond := g.R(
+						srcConn.GetTemplateValue("core.incremental_where"),
+						"update_key", srcConn.Quote(k),
+						"value", v,
+						"gt", gt,
+					)
+					conds = append(conds, singleCond)
+				}
+				if len(conds) > 1 {
+					incrementalWhereCond = "(" + strings.Join(conds, " or ") + ")"
+				} else if len(conds) == 1 {
+					incrementalWhereCond = conds[0]
+				}
+			} else {
+				if srcConn.GetType().IsNoSQL() {
+					// escape double quote since this uses JSON
+					incValStr = strings.ReplaceAll(incValStr, `"`, `\"`)
+				}
+				if updateCol != nil && updateCol.IsString() && !strings.HasPrefix(incValStr, "'") {
+					incValStr = g.F("'%s'", incValStr)
+				}
 
-			incrementalWhereCond = g.R(
-				srcConn.GetTemplateValue("core.incremental_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
-				"value", incValStr,
-				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
-			)
+				incrementalWhereCond = g.R(
+					srcConn.GetTemplateValue("core.incremental_where"),
+					"update_key", srcConn.Quote(cfg.Source.UpdateKey.First()),
+					"value", incValStr,
+					"gt", gt,
+				)
+			}
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}
 			// this will be null when target table does not exists
@@ -179,32 +217,33 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]
 
-			// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
-			isOracleDate := updateCol.DbType == "DATE" && srcConn.GetType() == dbio.TypeDbOracle
-
-			if updateCol.IsDate() || isOracleDate {
-				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
-				startValue = g.R(timestampTemplate, "value", startValue)
-				endValue = g.R(timestampTemplate, "value", endValue)
-			} else if updateCol.Type == iop.TimestampzType {
-				timestampTemplate := srcConn.GetTemplateValue("variable.timestampz_layout_str")
-				startValue = g.R(timestampTemplate, "value", startValue)
-				endValue = g.R(timestampTemplate, "value", endValue)
-			} else if updateCol.IsDatetime() {
-				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
-				startValue = g.R(timestampTemplate, "value", startValue)
-				endValue = g.R(timestampTemplate, "value", endValue)
-			} else if updateCol.IsString() {
-				startValue = `'` + startValue + `'`
-				endValue = `'` + endValue + `'`
+			if len(cfg.Source.UpdateKey) > 1 {
+				var backfillConds []string
+				for _, k := range cfg.Source.UpdateKey {
+					col := sTable.Columns.GetColumn(k)
+					sVal, eVal := formatBackfillRangeValues(col, startValue, endValue, srcConn)
+					c := g.R(
+						srcConn.GetTemplateValue("core.backfill_where"),
+						"update_key", srcConn.Quote(k),
+						"start_value", sVal,
+						"end_value", eVal,
+					)
+					backfillConds = append(backfillConds, c)
+				}
+				if len(backfillConds) > 1 {
+					incrementalWhereCond = "(" + strings.Join(backfillConds, " or ") + ")"
+				} else if len(backfillConds) == 1 {
+					incrementalWhereCond = backfillConds[0]
+				}
+			} else {
+				sVal, eVal := formatBackfillRangeValues(updateCol, startValue, endValue, srcConn)
+				incrementalWhereCond = g.R(
+					srcConn.GetTemplateValue("core.backfill_where"),
+					"update_key", srcConn.Quote(cfg.Source.UpdateKey.First()),
+					"start_value", sVal,
+					"end_value", eVal,
+				)
 			}
-
-			incrementalWhereCond = g.R(
-				srcConn.GetTemplateValue("core.backfill_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
-				"start_value", startValue,
-				"end_value", endValue,
-			)
 		}
 
 		if sTable.SQL == "" {
@@ -235,7 +274,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"fields", strings.Join(sFields, ", "),
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", updateKeyQuoted,
 				"incremental_value", cfg.IncrementalValStr,
 				"table_name", sTable.Name,
 				"table_schema", sTable.Schema,
@@ -250,7 +289,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", updateKeyQuoted,
 				"incremental_value", cfg.IncrementalValStr,
 			)
 		}
@@ -259,7 +298,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		cfg.Source.Where = g.R(
 			cfg.Source.Where,
 			"incremental_where_cond", incrementalWhereCond,
-			"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+			"update_key", updateKeyQuoted,
 			"incremental_value", cfg.IncrementalValStr,
 		)
 	}
@@ -350,13 +389,13 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 
 	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 		// file stream incremental mode
-		if g.In(t.Config.Source.UpdateKey, env.ReservedFields.LoadedAt, env.ReservedFields.SyncedAt) {
+		if g.In(t.Config.Source.UpdateKey.First(), env.ReservedFields.LoadedAt, env.ReservedFields.SyncedAt) {
 			options["SLING_FS_TIMESTAMP"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalValStr, "'"), "'") // remove quotes
-			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
+			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey.First())
 		} else {
-			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey
+			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey.First()
 			options["SLING_INCREMENTAL_VAL"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalValStr, "'"), "'") // remove quotes
-			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
+			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey.First())
 		}
 	}
 
@@ -378,7 +417,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			Limit:            cfg.Source.Limit(),
 			SQL:              cfg.Source.Query,
 			FileSelect:       cfg.Source.Files,
-			IncrementalKey:   cfg.Source.UpdateKey,
+			IncrementalKey:   cfg.Source.UpdateKey.First(),
 			IncrementalValue: cfg.IncrementalValStr,
 		}
 
@@ -405,7 +444,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 					return df, g.Error(err, "invalid end timestamp value: %s", rangeArr[1])
 				}
 
-				rangeURIs, err := iop.GeneratePartURIsFromRange(mask, cfg.Source.UpdateKey, start, end)
+				rangeURIs, err := iop.GeneratePartURIsFromRange(mask, cfg.Source.UpdateKey.First(), start, end)
 				if err != nil {
 					return df, g.Error(err, "could not generate uris from range")
 				}
@@ -422,7 +461,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 				}
 
 				uri = g.Rm(uri, iop.GetISO8601DateMap(valueTime))
-				uri = g.Rm(uri, iop.GetPartitionDateMap(cfg.Source.UpdateKey, valueTime))
+				uri = g.Rm(uri, iop.GetPartitionDateMap(cfg.Source.UpdateKey.First(), valueTime))
 			} else {
 				uri, err = filesys.GetFirstDatePartURI(fs, mask)
 				if err != nil {
@@ -530,7 +569,7 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	}
 
 	if t.Config.Source.HasUpdateKey() {
-		eG.Capture(df.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", t.Config.Source.UpdateKey))
+		eG.Capture(df.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", t.Config.Source.UpdateKey...))
 	}
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
@@ -542,4 +581,86 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	}
 
 	return eG.Err()
+}
+
+func extractIncrementalValuesMap(cfg *Config) map[string]string {
+	res := make(map[string]string)
+	if cfg == nil {
+		return res
+	}
+
+	if m, ok := cfg.IncrementalVal.(map[string]any); ok {
+		for k, v := range m {
+			res[strings.ToLower(k)] = cast.ToString(v)
+		}
+		return res
+	}
+	if m, ok := cfg.IncrementalVal.(map[string]string); ok {
+		for k, v := range m {
+			res[strings.ToLower(k)] = v
+		}
+		return res
+	}
+
+	trimmed := strings.TrimSpace(cfg.IncrementalValStr)
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		var jsonMap map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &jsonMap); err == nil {
+			for k, v := range jsonMap {
+				res[strings.ToLower(k)] = cast.ToString(v)
+			}
+			return res
+		}
+	}
+
+	return res
+}
+
+func getValForColumn(valMap map[string]string, cfg *Config, col string, idx int) string {
+	if len(valMap) > 0 {
+		if v, ok := valMap[strings.ToLower(col)]; ok {
+			return v
+		}
+	}
+
+	if slice, ok := cfg.IncrementalVal.([]any); ok && idx < len(slice) {
+		return cast.ToString(slice[idx])
+	}
+	if slice, ok := cfg.IncrementalVal.([]string); ok && idx < len(slice) {
+		return slice[idx]
+	}
+
+	trimmed := strings.TrimSpace(cfg.IncrementalValStr)
+	if strings.Contains(trimmed, ",") {
+		parts := strings.Split(trimmed, ",")
+		if len(parts) == len(cfg.Source.UpdateKey) {
+			return strings.TrimSpace(parts[idx])
+		}
+	}
+
+	return trimmed
+}
+
+func formatBackfillRangeValues(col *iop.Column, startValue, endValue string, srcConn database.Connection) (string, string) {
+	if col == nil {
+		return startValue, endValue
+	}
+	isOracleDate := col.DbType == "DATE" && srcConn.GetType() == dbio.TypeDbOracle
+	if col.IsDate() || isOracleDate {
+		timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
+		startValue = g.R(timestampTemplate, "value", startValue)
+		endValue = g.R(timestampTemplate, "value", endValue)
+	} else if col.Type == iop.TimestampzType {
+		timestampTemplate := srcConn.GetTemplateValue("variable.timestampz_layout_str")
+		startValue = g.R(timestampTemplate, "value", startValue)
+		endValue = g.R(timestampTemplate, "value", endValue)
+	} else if col.IsDatetime() {
+		timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
+		startValue = g.R(timestampTemplate, "value", startValue)
+		endValue = g.R(timestampTemplate, "value", endValue)
+	} else if col.IsString() {
+		startValue = `'` + startValue + `'`
+		endValue = `'` + endValue + `'`
+	}
+	return startValue, endValue
 }

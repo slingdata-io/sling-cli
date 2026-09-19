@@ -266,7 +266,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 		// Set columns and keys on target table
 		targetTable.Columns = sampleData.Columns
-		if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+		if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 			err = g.Error(err, "could not set keys for "+targetTable.FullName())
 			return 0, err
 		}
@@ -293,7 +293,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Set table keys
 	tableTmp.Columns = sampleData.Columns
-	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 		err = g.Error(err, "could not set keys for "+tableTmp.FullName())
 		return 0, err
 	}
@@ -529,7 +529,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 
 	// Set table keys
 	targetTable.Columns = sampleData.Columns
-	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 		err = g.Error(err, "could not set keys for "+targetTable.FullName())
 		return 0, err
 	}
@@ -732,7 +732,7 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 		return database.Table{}, g.Error(err, "could not render target table DDL")
 	}
 
-	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys)
 
 	// check table ddl
 	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
@@ -795,7 +795,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.DDL = strings.ReplaceAll(tableTmp.DDL, targetTable.FullName(), tableTmp.FullName())
 	tableTmp.Raw = tableTmp.FullName()
-	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 		return database.Table{}, g.Error(err, "could not set keys for "+tableTmp.FullName())
 	}
 
@@ -840,7 +840,7 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 			}
 
 			// preserve keys
-			if err := table.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+			if err := table.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 				return g.Error(err, "could not set keys for "+table.FullName())
 			}
 
@@ -967,7 +967,7 @@ func prepareFinal(
 			}
 
 			// Preserve keys after fetching columns
-			if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+			if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey.First(), cfg.Target.Options.TableKeys); err != nil {
 				return g.Error(err, "could not set keys for "+targetTable.FullName())
 			}
 
@@ -1086,7 +1086,7 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		Format:             t.Config.Target.ObjectFileFormat(),
 		Compression:        g.PtrVal(t.Config.Target.Options.Compression),
 		PartitionFields:    iop.ExtractPartitionFields(uri),
-		PartitionKey:       t.Config.Source.UpdateKey,
+		PartitionKey:       t.Config.Source.UpdateKey.First(),
 		WritePartitionCols: true,
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
 		GeometryCRS:        fs.GetProp("geometry_crs"),
