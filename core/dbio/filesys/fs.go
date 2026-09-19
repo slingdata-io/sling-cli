@@ -178,7 +178,7 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
-	case strings.HasPrefix(url, "databricks-volume://"), strings.HasPrefix(url, "volume://"), strings.HasPrefix(url, "databricks://Volumes/"):
+	case strings.HasPrefix(url, "databricks-volume://"), strings.HasPrefix(url, "databricks://Volumes/"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileDatabricksVolume, props...)
 	case strings.HasPrefix(url, "file://"):
@@ -282,7 +282,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 		}
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	case dbio.TypeFileDatabricksVolume:
-		for _, p := range []string{"databricks-volume://", "databricks://", "volume://"} {
+		for _, p := range []string{"databricks-volume://", "databricks://Volumes/"} {
 			if strings.HasPrefix(uri, p) {
 				return uri
 			}
@@ -309,7 +309,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	connType, _, path, err := ParseURLType(uri)
+	connType, host, path, err := ParseURLType(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +320,8 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	switch connType {
 	case dbio.TypeFileLocal:
 		path = strings.TrimPrefix(path, "./")
+	case dbio.TypeFileDatabricksVolume:
+		path = stripDatabricksVolumePrefix(host, path)
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
@@ -1074,7 +1076,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		}
 	}
 
-	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
+	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp, dbio.TypeFileDatabricksVolume) {
 		path, err := fsClient.GetPath(url)
 		if err != nil {
 			return 0, g.Error(err, "Error Parsing url: "+url)

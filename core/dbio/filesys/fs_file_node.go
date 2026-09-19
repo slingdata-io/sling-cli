@@ -76,12 +76,14 @@ func (fn *FileNode) Path() string {
 		return fn.path
 	}
 
-	fType, _, path, err := ParseURLType(fn.URI)
+	fType, host, path, err := ParseURLType(fn.URI)
 	if g.LogError(err) {
 		return ""
 	}
 
 	switch fType {
+	case dbio.TypeFileDatabricksVolume:
+		path = stripDatabricksVolumePrefix(host, path)
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 
@@ -315,10 +317,14 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 		return dbio.TypeFileHTTP, host, path, nil
 	} else if scheme == "gdrive" {
 		return dbio.TypeFileGoogleDrive, host, path, nil
-	} else if scheme == "databricks-volume" || scheme == "volume" {
+	} else if scheme == "databricks-volume" {
 		return dbio.TypeFileDatabricksVolume, host, path, nil
-	} else if scheme == "databricks" && strings.HasPrefix(u.U.Path, "/Volumes") {
-		return dbio.TypeFileDatabricksVolume, host, path, nil
+	} else if scheme == "databricks" && (strings.EqualFold(host, "Volumes") || strings.HasPrefix(u.U.Path, "/Volumes")) {
+		// Alias databricks://Volumes/<cat>/<sch>/<vol>/... — never steal SQL URLs
+		// like databricks://token:<pat>@host/sql/1.0/warehouses/...
+		if u.Username() != "token" {
+			return dbio.TypeFileDatabricksVolume, host, path, nil
+		}
 	} else if g.In(scheme, "http", "https") {
 		return dbio.TypeFileHTTP, host, path, nil
 	}

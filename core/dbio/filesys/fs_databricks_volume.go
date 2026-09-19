@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,14 +17,16 @@ import (
 	"github.com/spf13/cast"
 )
 
+// Files API single PUT is capped at 5 GiB.
+// https://docs.databricks.com/api/workspace/files
+const databricksVolumeMaxPutBytes int64 = 5 * 1024 * 1024 * 1024
+
+const databricksVolumeRetryBuffer = 8 * 1024 * 1024
+
 // DatabricksVolumeFileSysClient handles Databricks Unity Catalog Volumes via Files REST API
 // API Reference: https://docs.databricks.com/api/workspace/files
-// Endpoints:
-// - PUT /api/2.0/fs/files/Volumes/{catalog}/{schema}/{volume}/{path}?overwrite=true
-// - GET /api/2.0/fs/files/Volumes/{catalog}/{schema}/{volume}/{path}
-// - DELETE /api/2.0/fs/files/Volumes/{catalog}/{schema}/{volume}/{path}
-// - GET /api/2.0/fs/directories/Volumes/{catalog}/{schema}/{volume}/{path}
-// - PUT /api/2.0/fs/directories/Volumes/{catalog}/{schema}/{volume}/{path}
+// Canonical URI: databricks-volume://<catalog>/<schema>/<volume>/<path>
+// Alias:         databricks://Volumes/<catalog>/<schema>/<volume>/<path>
 type DatabricksVolumeFileSysClient struct {
 	BaseFileSysClient
 	client     *http.Client
@@ -37,8 +40,8 @@ type DatabricksVolumeFileSysClient struct {
 }
 
 type databricksDirListResp struct {
-	Contents []databricksFileInfo `json:"contents"`
-	NextPageToken string          `json:"next_page_token"`
+	Contents      []databricksFileInfo `json:"contents"`
+	NextPageToken string               `json:"next_page_token"`
 }
 
 type databricksFileInfo struct {
@@ -55,14 +58,19 @@ func (fs *DatabricksVolumeFileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 	fs.BaseFileSysClient.fsType = dbio.TypeFileDatabricksVolume
 
-	// Props can come from host, token, catalog, schema, volume
 	rawHost := fs.GetProp("host")
 	if rawHost == "" {
 		rawHost = fs.GetProp("DATABRICKS_HOST")
 	}
+	if rawHost == "" {
+		rawHost = os.Getenv("DATABRICKS_HOST")
+	}
 	fs.token = fs.GetProp("token")
 	if fs.token == "" {
 		fs.token = fs.GetProp("DATABRICKS_TOKEN")
+	}
+	if fs.token == "" {
+		fs.token = os.Getenv("DATABRICKS_TOKEN")
 	}
 
 	fs.scheme = "https"
@@ -85,13 +93,26 @@ func (fs *DatabricksVolumeFileSysClient) Init(ctx context.Context) (err error) {
 		fs.volume = vol
 	}
 
-	// Clean host
+	if rawHost == "" {
+		rawHost = fs.host
+	}
 	fs.host = strings.TrimPrefix(rawHost, "https://")
 	fs.host = strings.TrimPrefix(fs.host, "http://")
 	fs.host = strings.TrimRight(fs.host, "/")
 
+	if fs.host == "" {
+		return g.Error("databricks host is required")
+	}
+	if fs.token == "" {
+		return g.Error("databricks token is required")
+	}
+
 	fs.client = &http.Client{
-		Timeout: 30 * time.Minute, // Allow long streams for big files
+		Timeout: 30 * time.Minute,
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 60 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
 	}
 
 	return nil
@@ -102,25 +123,33 @@ func (fs *DatabricksVolumeFileSysClient) FsType() dbio.Type {
 	return dbio.TypeFileDatabricksVolume
 }
 
-func (fs *DatabricksVolumeFileSysClient) parseURL(rawURL string) {
-	// e.g. databricks-volume://catalog/schema/volume/path
-	// or databricks-volume://host/Volumes/catalog/schema/volume/path
-	// or databricks://Volumes/catalog/schema/volume/path
+func looksLikeHost(s string) bool {
+	return strings.Contains(s, ".")
+}
+
+func stripScheme(rawURL string) string {
 	cleaned := rawURL
-	for _, prefix := range []string{"databricks-volume://", "databricks://", "volume://"} {
+	for _, prefix := range []string{"databricks-volume://", "databricks://"} {
 		if strings.HasPrefix(cleaned, prefix) {
 			cleaned = strings.TrimPrefix(cleaned, prefix)
 			break
 		}
 	}
+	return cleaned
+}
+
+func (fs *DatabricksVolumeFileSysClient) parseURL(rawURL string) {
+	// e.g. databricks-volume://catalog/schema/volume/path
+	// or databricks-volume://host/Volumes/catalog/schema/volume/path
+	// or databricks://Volumes/catalog/schema/volume/path
+	cleaned := stripScheme(rawURL)
 
 	parts := strings.Split(strings.Trim(cleaned, "/"), "/")
 	if len(parts) > 0 && parts[0] == "Volumes" {
 		parts = parts[1:]
 	}
 
-	// Check if the first part looks like a domain (e.g. adb-123.azuredatabricks.net)
-	if len(parts) > 0 && (strings.Contains(parts[0], ".databricks.com") || strings.Contains(parts[0], ".azuredatabricks.net")) {
+	if len(parts) > 0 && looksLikeHost(parts[0]) {
 		if fs.host == "" {
 			fs.host = parts[0]
 		}
@@ -156,17 +185,38 @@ func (fs *DatabricksVolumeFileSysClient) Prefix(suffix ...string) string {
 	return strings.TrimRight(prefix, "/") + "/"
 }
 
+// stripDatabricksVolumePrefix returns the path inside the volume (after catalog/schema/volume).
+func stripDatabricksVolumePrefix(host, path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	var cleaned []string
+	for _, p := range parts {
+		if p != "" {
+			cleaned = append(cleaned, p)
+		}
+	}
+	if strings.EqualFold(host, "Volumes") {
+		if len(cleaned) >= 3 {
+			return strings.Join(cleaned[3:], "/")
+		}
+		return ""
+	}
+	if len(cleaned) >= 2 {
+		return strings.Join(cleaned[2:], "/")
+	}
+	return strings.Join(cleaned, "/")
+}
+
+func volumeURIFromAPIPath(apiPath string) string {
+	p := strings.TrimPrefix(apiPath, "/")
+	p = strings.TrimPrefix(p, "Volumes/")
+	return "databricks-volume://" + p
+}
+
 // GetPath converts a uri into the internal volume path starting with /Volumes/...
 func (fs *DatabricksVolumeFileSysClient) GetPath(uri string) (volumePath string, err error) {
 	uri = NormalizeURI(fs, uri)
 
-	clean := uri
-	for _, prefix := range []string{"databricks-volume://", "databricks://", "volume://"} {
-		if strings.HasPrefix(clean, prefix) {
-			clean = strings.TrimPrefix(clean, prefix)
-			break
-		}
-	}
+	clean := stripScheme(uri)
 
 	rawParts := strings.Split(strings.Trim(clean, "/"), "/")
 	var parts []string
@@ -176,7 +226,7 @@ func (fs *DatabricksVolumeFileSysClient) GetPath(uri string) (volumePath string,
 		}
 	}
 
-	if len(parts) > 0 && (strings.Contains(parts[0], ".databricks.com") || strings.Contains(parts[0], ".azuredatabricks.net")) {
+	if len(parts) > 0 && looksLikeHost(parts[0]) {
 		parts = parts[1:]
 	}
 	if len(parts) > 0 && parts[0] == "Volumes" {
@@ -202,18 +252,40 @@ func (fs *DatabricksVolumeFileSysClient) GetPath(uri string) (volumePath string,
 		return "", g.Error("invalid volume URI, catalog/schema/volume must be specified: %s", uri)
 	}
 
-	var cleanSubparts []string
-	for _, sp := range subparts {
-		if sp != "" {
-			cleanSubparts = append(cleanSubparts, sp)
-		}
-	}
-
 	p := fmt.Sprintf("/Volumes/%s/%s/%s", catalog, schema, volume)
-	if len(cleanSubparts) > 0 {
-		p = p + "/" + strings.Join(cleanSubparts, "/")
+	if len(subparts) > 0 {
+		p = p + "/" + strings.Join(subparts, "/")
 	}
 	return p, nil
+}
+
+type retryableBody struct {
+	reader    io.Reader
+	retryable bool
+}
+
+func prepareRequestBody(body io.Reader) retryableBody {
+	if body == nil {
+		return retryableBody{retryable: true}
+	}
+	if cr, ok := body.(*countingReader); ok {
+		if _, seekable := cr.reader.(io.Seeker); seekable {
+			return retryableBody{reader: cr, retryable: true}
+		}
+		return retryableBody{reader: cr, retryable: false}
+	}
+	if _, ok := body.(io.Seeker); ok {
+		return retryableBody{reader: body, retryable: true}
+	}
+
+	buf, err := io.ReadAll(io.LimitReader(body, databricksVolumeRetryBuffer+1))
+	if err != nil {
+		return retryableBody{reader: io.MultiReader(bytes.NewReader(buf), body), retryable: false}
+	}
+	if int64(len(buf)) <= databricksVolumeRetryBuffer {
+		return retryableBody{reader: bytes.NewReader(buf), retryable: true}
+	}
+	return retryableBody{reader: io.MultiReader(bytes.NewReader(buf), body), retryable: false}
 }
 
 // doRequest executes an HTTP request against Databricks Files REST API with retries
@@ -230,17 +302,20 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 		urlStr = urlStr + "?" + query.Encode()
 	}
 
+	prepared := prepareRequestBody(body)
+
 	var lastErr error
 	maxRetries := 3
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			if seeker, ok := body.(io.Seeker); ok {
+			if !prepared.retryable {
+				return nil, g.Error(lastErr, "request failed for %s %s", method, urlStr)
+			}
+			if seeker, ok := prepared.reader.(io.Seeker); ok {
 				if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 					return nil, g.Error(err, "could not rewind request body")
 				}
-			} else if body != nil {
-				return nil, g.Error(lastErr, "request failed (body not seekable) for %s %s", method, urlStr)
 			}
 			sleepDur := time.Duration(1<<attempt) * 500 * time.Millisecond
 			select {
@@ -250,7 +325,7 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
+		req, err := http.NewRequestWithContext(ctx, method, urlStr, prepared.reader)
 		if err != nil {
 			return nil, g.Error(err, "could not build request")
 		}
@@ -263,12 +338,18 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 		resp, err := fs.client.Do(req)
 		if err != nil {
 			lastErr = err
+			if !prepared.retryable {
+				return nil, g.Error(err, "request failed for %s %s", method, urlStr)
+			}
 			continue
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			resp.Body.Close()
 			lastErr = fmt.Errorf("server error %s (%d)", resp.Status, resp.StatusCode)
+			if !prepared.retryable {
+				return nil, g.Error(lastErr, "request failed for %s %s", method, urlStr)
+			}
 			continue
 		}
 
@@ -281,11 +362,27 @@ func (fs *DatabricksVolumeFileSysClient) doRequest(ctx context.Context, method, 
 type countingReader struct {
 	reader io.Reader
 	count  int64
+	limit  int64
 }
 
 func (cr *countingReader) Read(p []byte) (n int, err error) {
 	n, err = cr.reader.Read(p)
 	cr.count += int64(n)
+	if cr.limit > 0 && cr.count > cr.limit {
+		return n, g.Error("Databricks Volume PUT exceeds the 5 GiB single-request limit (%d bytes). Split the file (file_max_bytes) or use a smaller payload", cr.count)
+	}
+	return n, err
+}
+
+func (cr *countingReader) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := cr.reader.(io.Seeker)
+	if !ok {
+		return 0, fmt.Errorf("body is not seekable")
+	}
+	n, err := seeker.Seek(offset, whence)
+	if err == nil && whence == io.SeekStart && offset == 0 {
+		cr.count = 0
+	}
 	return n, err
 }
 
@@ -300,21 +397,40 @@ func (fs *DatabricksVolumeFileSysClient) Write(uri string, reader io.Reader) (bw
 	query := url.Values{}
 	query.Set("overwrite", "true")
 
-	// Track bytes written
-	cr := &countingReader{reader: reader}
+	cr := &countingReader{reader: reader, limit: databricksVolumeMaxPutBytes}
 
 	resp, err := fs.doRequest(fs.Context().Ctx, http.MethodPut, apiPath, cr, query)
 	if err != nil {
-		return cr.count, g.Error(err, "failed to PUT file to Databricks Volume: %s", volumePath)
+		return 0, g.Error(err, "failed to PUT file to Databricks Volume: %s", volumePath)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBytes, _ := io.ReadAll(resp.Body)
-		return cr.count, g.Error("error writing to Databricks Volume %s (status %d): %s", volumePath, resp.StatusCode, string(respBytes))
+		return 0, g.Error("error writing to Databricks Volume %s (status %d): %s", volumePath, resp.StatusCode, string(respBytes))
 	}
 
 	return cr.count, nil
+}
+
+// GetWriter pipes into Write.
+func (fs *DatabricksVolumeFileSysClient) GetWriter(uri string) (writer io.Writer, err error) {
+	pipeR, pipeW := io.Pipe()
+	fs.Context().Wg.Write.Add()
+	go func() {
+		defer fs.Context().Wg.Write.Done()
+		_, werr := fs.Write(uri, pipeR)
+		pipeR.CloseWithError(werr)
+	}()
+	return pipeW, nil
+}
+
+// Buckets returns the configured volume as the single "bucket".
+func (fs *DatabricksVolumeFileSysClient) Buckets() (paths []string, err error) {
+	if fs.catalog != "" && fs.schema != "" && fs.volume != "" {
+		return []string{fmt.Sprintf("%s/%s/%s", fs.catalog, fs.schema, fs.volume)}, nil
+	}
+	return
 }
 
 // GetReader returns a reader for reading a file from Databricks volume
@@ -342,13 +458,17 @@ func (fs *DatabricksVolumeFileSysClient) GetReader(uri string) (reader io.Reader
 	return resp.Body, nil
 }
 
-// delete deletes a file or directory in a Databricks volume
-func (fs *DatabricksVolumeFileSysClient) delete(uri string) (err error) {
-	volumePath, err := fs.GetPath(uri)
+func (fs *DatabricksVolumeFileSysClient) isDirectory(volumePath string) bool {
+	apiPath := "/api/2.0/fs/directories" + strings.TrimRight(volumePath, "/")
+	resp, err := fs.doRequest(fs.Context().Ctx, http.MethodGet, apiPath, nil, nil)
 	if err != nil {
-		return err
+		return false
 	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
 
+func (fs *DatabricksVolumeFileSysClient) deleteFile(volumePath string) error {
 	apiPath := "/api/2.0/fs/files" + volumePath
 	resp, err := fs.doRequest(fs.Context().Ctx, http.MethodDelete, apiPath, nil, nil)
 	if err != nil {
@@ -362,8 +482,71 @@ func (fs *DatabricksVolumeFileSysClient) delete(uri string) (err error) {
 		respBytes, _ := io.ReadAll(resp.Body)
 		return g.Error("error deleting Databricks Volume file %s (status %d): %s", volumePath, resp.StatusCode, string(respBytes))
 	}
-
 	return nil
+}
+
+func (fs *DatabricksVolumeFileSysClient) deleteEmptyDir(volumePath string) error {
+	apiPath := "/api/2.0/fs/directories" + strings.TrimRight(volumePath, "/")
+	resp, err := fs.doRequest(fs.Context().Ctx, http.MethodDelete, apiPath, nil, nil)
+	if err != nil {
+		return g.Error(err, "failed to DELETE directory in Databricks Volume: %s", volumePath)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBytes, _ := io.ReadAll(resp.Body)
+		return g.Error("error deleting Databricks Volume directory %s (status %d): %s", volumePath, resp.StatusCode, string(respBytes))
+	}
+	return nil
+}
+
+func (fs *DatabricksVolumeFileSysClient) deleteRecursive(volumePath string) error {
+	nodes, err := fs.listDirRecursive(volumePath, false)
+	if err != nil {
+		return err
+	}
+
+	// files first, then directories (API requires empty dirs)
+	for _, n := range nodes {
+		if n.IsDir {
+			continue
+		}
+		childPath, err := fs.GetPath(n.URI)
+		if err != nil {
+			return err
+		}
+		if err := fs.deleteFile(childPath); err != nil {
+			return err
+		}
+	}
+	for _, n := range nodes {
+		if !n.IsDir {
+			continue
+		}
+		childPath, err := fs.GetPath(n.URI)
+		if err != nil {
+			return err
+		}
+		if err := fs.deleteRecursive(childPath); err != nil {
+			return err
+		}
+	}
+	return fs.deleteEmptyDir(volumePath)
+}
+
+// delete deletes a file or directory in a Databricks volume
+func (fs *DatabricksVolumeFileSysClient) delete(uri string) (err error) {
+	volumePath, err := fs.GetPath(uri)
+	if err != nil {
+		return err
+	}
+
+	if strings.HasSuffix(uri, "/") || fs.isDirectory(volumePath) {
+		return fs.deleteRecursive(volumePath)
+	}
+	return fs.deleteFile(volumePath)
 }
 
 // MkdirAll creates a directory in a Databricks volume
@@ -409,30 +592,22 @@ func (fs *DatabricksVolumeFileSysClient) doList(uri string, recursive bool) (nod
 		return nil, g.Error(err, "error parsing glob pattern: %s", uri)
 	}
 
-	nodes, err = fs.listDirRecursive(volumePath, recursive)
+	listed, err := fs.listDirRecursive(volumePath, recursive)
 	if err != nil {
 		return nil, err
 	}
 
-	if pattern != nil {
-		filtered := FileNodes{}
-		for _, n := range nodes {
-			if (*pattern).Match(n.URI) {
-				filtered = append(filtered, n)
-			}
-		}
-		return filtered, nil
-	}
-
+	ts := fs.GetRefTs().Unix()
+	nodes.AddWhere(pattern, ts, listed...)
 	return nodes, nil
 }
 
 func (fs *DatabricksVolumeFileSysClient) listDirRecursive(volumePath string, recursive bool) (nodes FileNodes, err error) {
 	apiPath := "/api/2.0/fs/directories" + strings.TrimRight(volumePath, "/")
-	query := url.Values{}
 
 	pageToken := ""
 	for {
+		query := url.Values{}
 		if pageToken != "" {
 			query.Set("page_token", pageToken)
 		}
@@ -459,12 +634,11 @@ func (fs *DatabricksVolumeFileSysClient) listDirRecursive(volumePath string, rec
 		}
 
 		for _, item := range dirResp.Contents {
-			nodeURI := fmt.Sprintf("databricks-volume://%s", strings.TrimPrefix(item.Path, "/"))
 			node := FileNode{
-				URI:     nodeURI,
+				URI:     volumeURIFromAPIPath(item.Path),
 				IsDir:   item.IsDirectory,
 				Size:    cast.ToUint64(item.FileSize),
-				Updated: item.LastModified / 1000,
+				Updated: item.LastModified / 1000, // Files API last_modified is epoch ms
 			}
 			nodes = append(nodes, node)
 

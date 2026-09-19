@@ -2940,6 +2940,13 @@
     - 'STEP 1 OK - snapshot loaded 2 rows'
     - 'CDC UUID test PASSED'
 
+# Databricks Unity Catalog Volume file target. Needs DATABRICKS_VOLUME conn.
+# - id: 602
+#   name: 'Postgres to Databricks Volume parquet'
+#   run: 'sling run -d -r tests/replications/r.125.databricks_volume.yaml'
+#   output_contains:
+#     - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

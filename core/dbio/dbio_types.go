@@ -46,17 +46,17 @@ const (
 
 	TypeApi Type = "api"
 
-	TypeFileLocal       Type = "file"
-	TypeFileHDFS        Type = "hdfs"
-	TypeFileS3          Type = "s3"
-	TypeFileR2          Type = "r2"
-	TypeFileAzure       Type = "azure"
-	TypeFileAzureABFS   Type = "abfs"
-	TypeFileGoogle      Type = "gs"
-	TypeFileGoogleDrive Type = "gdrive"
-	TypeFileFtp         Type = "ftp"
-	TypeFileSftp        Type = "sftp"
-	TypeFileHTTP        Type = "http"
+	TypeFileLocal            Type = "file"
+	TypeFileHDFS             Type = "hdfs"
+	TypeFileS3               Type = "s3"
+	TypeFileR2               Type = "r2"
+	TypeFileAzure            Type = "azure"
+	TypeFileAzureABFS        Type = "abfs"
+	TypeFileGoogle           Type = "gs"
+	TypeFileGoogleDrive      Type = "gdrive"
+	TypeFileFtp              Type = "ftp"
+	TypeFileSftp             Type = "sftp"
+	TypeFileHTTP             Type = "http"
 	TypeFileDatabricksVolume Type = "databricks-volume"
 
 	TypeDbPostgres      Type = "postgres"
@@ -91,7 +91,6 @@ const (
 	TypeDbArrowDBC      Type = "adbc"
 	TypeDbODBC          Type = "odbc"
 	TypeDbScyllaDB      Type = "scylladb"
-	TypeDbZerobus       Type = "zerobus"
 )
 
 var AllType = []struct {
@@ -143,7 +142,6 @@ var AllType = []struct {
 	{TypeDbArrowDBC, "TypeDbArrowDBC"},
 	{TypeDbODBC, "TypeDbODBC"},
 	{TypeDbScyllaDB, "TypeDbScyllaDB"},
-	{TypeDbZerobus, "TypeDbZerobus"},
 }
 
 // ValidateType returns true is type is valid
@@ -155,7 +153,6 @@ func ValidateType(tStr string) (Type, bool) {
 		"mongodb+srv": TypeDbMongoDB,
 		"file":        TypeFileLocal,
 		"abfss":       TypeFileAzureABFS,
-		"volume":      TypeFileDatabricksVolume,
 	}
 
 	if tMatched, ok := tMap[tStr]; ok {
@@ -166,7 +163,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileDatabricksVolume,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB, TypeDbZerobus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return t, true
 	}
 
@@ -199,7 +196,6 @@ func (t Type) DefPort() int {
 		TypeDbPrometheus:    9090,
 		TypeDbProton:        8463,
 		TypeDbDatabricks:    443,
-		TypeDbZerobus:       443,
 		TypeDbExasol:        8563,
 		TypeFileFtp:         21,
 		TypeFileSftp:        22,
@@ -214,7 +210,7 @@ func (t Type) DefPort() int {
 // or treat `database` as the schema itself (mysql) or a service (oracle).
 func (t Type) SupportsThreePartName() bool {
 	return g.In(t,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbZerobus, TypeDbTrino, TypeDbBigQuery,
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbTrino, TypeDbBigQuery,
 		TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbFabric,
 		TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH,
 	)
@@ -233,7 +229,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB, TypeDbZerobus:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, TypeFileDatabricksVolume, Type("https"):
 		return KindFile
@@ -308,52 +304,51 @@ func (t Type) IsSingleWriterDB() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
-		TypeApi:             "API - Spec",
-		TypeFileLocal:       "FileSys - Local",
-		TypeFileHDFS:        "FileSys - HDFS",
-		TypeFileS3:          "FileSys - S3",
-		TypeFileAzure:       "FileSys - Azure",
-		TypeFileAzureABFS:   "FileSys - Azure ABFS",
-		TypeFileGoogle:      "FileSys - Google Cloud Storage",
-		TypeFileGoogleDrive: "FileSys - Google Drive",
-		TypeFileSftp:        "FileSys - Sftp",
-		TypeFileFtp:         "FileSys - Ftp",
-		TypeFileHTTP:        "FileSys - HTTP",
-		Type("https"):       "FileSys - HTTP",
+		TypeApi:                  "API - Spec",
+		TypeFileLocal:            "FileSys - Local",
+		TypeFileHDFS:             "FileSys - HDFS",
+		TypeFileS3:               "FileSys - S3",
+		TypeFileAzure:            "FileSys - Azure",
+		TypeFileAzureABFS:        "FileSys - Azure ABFS",
+		TypeFileGoogle:           "FileSys - Google Cloud Storage",
+		TypeFileGoogleDrive:      "FileSys - Google Drive",
+		TypeFileSftp:             "FileSys - Sftp",
+		TypeFileFtp:              "FileSys - Ftp",
+		TypeFileHTTP:             "FileSys - HTTP",
+		Type("https"):            "FileSys - HTTP",
 		TypeFileDatabricksVolume: "FileSys - Databricks Volume",
-		TypeDbPostgres:      "DB - PostgreSQL",
-		TypeDbRedshift:      "DB - Redshift",
-		TypeDbStarRocks:     "DB - StarRocks",
-		TypeDbMySQL:         "DB - MySQL",
-		TypeDbMariaDB:       "DB - MariaDB",
-		TypeDbOracle:        "DB - Oracle",
-		TypeDbBigQuery:      "DB - BigQuery",
-		TypeDbBigTable:      "DB - BigTable",
-		TypeDbSnowflake:     "DB - Snowflake",
-		TypeDbDatabricks:    "DB - Databricks",
-		TypeDbZerobus:       "DB - Zerobus",
-		TypeDbExasol:        "DB - Exasol",
-		TypeDbD1:            "DB - D1",
-		Type("db2"):         "DB - DB2",
-		TypeDbSQLite:        "DB - SQLite",
-		TypeDbDuckDb:        "DB - DuckDB",
-		TypeDbDuckLake:      "DB - DuckLake",
-		TypeDbMotherDuck:    "DB - MotherDuck",
-		TypeDbSQLServer:     "DB - SQLServer",
-		TypeDbAzure:         "DB - Azure",
-		TypeDbFabric:        "DB - Fabric",
-		TypeDbTrino:         "DB - Trino",
-		TypeDbAthena:        "DB - Athena",
-		TypeDbIceberg:       "DB - Iceberg",
-		TypeDbClickhouse:    "DB - Clickhouse",
-		TypeDbPrometheus:    "DB - Prometheus",
-		TypeDbElasticsearch: "DB - Elasticsearch",
-		TypeDbMongoDB:       "DB - MongoDB",
-		TypeDbProton:        "DB - Proton",
-		TypeDbAzureTable:    "DB - Azure Table",
-		TypeDbArrowDBC:      "DB - Arrow DBC",
-		TypeDbODBC:          "DB - ODBC",
-		TypeDbScyllaDB:      "DB - ScyllaDB",
+		TypeDbPostgres:           "DB - PostgreSQL",
+		TypeDbRedshift:           "DB - Redshift",
+		TypeDbStarRocks:          "DB - StarRocks",
+		TypeDbMySQL:              "DB - MySQL",
+		TypeDbMariaDB:            "DB - MariaDB",
+		TypeDbOracle:             "DB - Oracle",
+		TypeDbBigQuery:           "DB - BigQuery",
+		TypeDbBigTable:           "DB - BigTable",
+		TypeDbSnowflake:          "DB - Snowflake",
+		TypeDbDatabricks:         "DB - Databricks",
+		TypeDbExasol:             "DB - Exasol",
+		TypeDbD1:                 "DB - D1",
+		Type("db2"):              "DB - DB2",
+		TypeDbSQLite:             "DB - SQLite",
+		TypeDbDuckDb:             "DB - DuckDB",
+		TypeDbDuckLake:           "DB - DuckLake",
+		TypeDbMotherDuck:         "DB - MotherDuck",
+		TypeDbSQLServer:          "DB - SQLServer",
+		TypeDbAzure:              "DB - Azure",
+		TypeDbFabric:             "DB - Fabric",
+		TypeDbTrino:              "DB - Trino",
+		TypeDbAthena:             "DB - Athena",
+		TypeDbIceberg:            "DB - Iceberg",
+		TypeDbClickhouse:         "DB - Clickhouse",
+		TypeDbPrometheus:         "DB - Prometheus",
+		TypeDbElasticsearch:      "DB - Elasticsearch",
+		TypeDbMongoDB:            "DB - MongoDB",
+		TypeDbProton:             "DB - Proton",
+		TypeDbAzureTable:         "DB - Azure Table",
+		TypeDbArrowDBC:           "DB - Arrow DBC",
+		TypeDbODBC:               "DB - ODBC",
+		TypeDbScyllaDB:           "DB - ScyllaDB",
 	}
 
 	return mapping[t]
@@ -362,51 +357,50 @@ func (t Type) NameLong() string {
 // Name return the type name
 func (t Type) Name() string {
 	mapping := map[Type]string{
-		TypeApi:             "API",
-		TypeFileLocal:       "Local",
-		TypeFileHDFS:        "HDFS",
-		TypeFileS3:          "S3",
-		TypeFileAzure:       "Azure",
-		TypeFileAzureABFS:   "Azure ABFS",
-		TypeFileGoogle:      "Google Cloud Storage",
-		TypeFileGoogleDrive: "Google Drive",
-		TypeFileSftp:        "Sftp",
-		TypeFileFtp:         "Ftp",
-		TypeFileHTTP:        "HTTP",
-		Type("https"):       "HTTP",
+		TypeApi:                  "API",
+		TypeFileLocal:            "Local",
+		TypeFileHDFS:             "HDFS",
+		TypeFileS3:               "S3",
+		TypeFileAzure:            "Azure",
+		TypeFileAzureABFS:        "Azure ABFS",
+		TypeFileGoogle:           "Google Cloud Storage",
+		TypeFileGoogleDrive:      "Google Drive",
+		TypeFileSftp:             "Sftp",
+		TypeFileFtp:              "Ftp",
+		TypeFileHTTP:             "HTTP",
+		Type("https"):            "HTTP",
 		TypeFileDatabricksVolume: "Databricks Volume",
-		TypeDbPostgres:      "PostgreSQL",
-		TypeDbRedshift:      "Redshift",
-		TypeDbStarRocks:     "StarRocks",
-		TypeDbMySQL:         "MySQL",
-		TypeDbMariaDB:       "MariaDB",
-		TypeDbOracle:        "Oracle",
-		TypeDbBigQuery:      "BigQuery",
-		TypeDbBigTable:      "BigTable",
-		TypeDbSnowflake:     "Snowflake",
-		TypeDbDatabricks:    "Databricks",
-		TypeDbZerobus:       "Zerobus",
-		TypeDbExasol:        "Exasol",
-		TypeDbD1:            "D1",
-		Type("db2"):         "DB2",
-		TypeDbSQLite:        "SQLite",
-		TypeDbDuckDb:        "DuckDB",
-		TypeDbDuckLake:      "DuckLake",
-		TypeDbMotherDuck:    "MotherDuck",
-		TypeDbSQLServer:     "SQLServer",
-		TypeDbTrino:         "Trino",
-		TypeDbAthena:        "Athena",
-		TypeDbIceberg:       "Iceberg",
-		TypeDbClickhouse:    "Clickhouse",
-		TypeDbPrometheus:    "Prometheus",
-		TypeDbElasticsearch: "Elasticsearch",
-		TypeDbMongoDB:       "MongoDB",
-		TypeDbFabric:        "Fabric",
-		TypeDbAzure:         "Azure",
-		TypeDbProton:        "Proton",
-		TypeDbAzureTable:    "Azure Table",
-		TypeDbArrowDBC:      "Arrow DBC",
-		TypeDbODBC:          "ODBC",
+		TypeDbPostgres:           "PostgreSQL",
+		TypeDbRedshift:           "Redshift",
+		TypeDbStarRocks:          "StarRocks",
+		TypeDbMySQL:              "MySQL",
+		TypeDbMariaDB:            "MariaDB",
+		TypeDbOracle:             "Oracle",
+		TypeDbBigQuery:           "BigQuery",
+		TypeDbBigTable:           "BigTable",
+		TypeDbSnowflake:          "Snowflake",
+		TypeDbDatabricks:         "Databricks",
+		TypeDbExasol:             "Exasol",
+		TypeDbD1:                 "D1",
+		Type("db2"):              "DB2",
+		TypeDbSQLite:             "SQLite",
+		TypeDbDuckDb:             "DuckDB",
+		TypeDbDuckLake:           "DuckLake",
+		TypeDbMotherDuck:         "MotherDuck",
+		TypeDbSQLServer:          "SQLServer",
+		TypeDbTrino:              "Trino",
+		TypeDbAthena:             "Athena",
+		TypeDbIceberg:            "Iceberg",
+		TypeDbClickhouse:         "Clickhouse",
+		TypeDbPrometheus:         "Prometheus",
+		TypeDbElasticsearch:      "Elasticsearch",
+		TypeDbMongoDB:            "MongoDB",
+		TypeDbFabric:             "Fabric",
+		TypeDbAzure:              "Azure",
+		TypeDbProton:             "Proton",
+		TypeDbAzureTable:         "Azure Table",
+		TypeDbArrowDBC:           "Arrow DBC",
+		TypeDbODBC:               "ODBC",
 	}
 
 	return mapping[t]

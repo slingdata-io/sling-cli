@@ -118,43 +118,7 @@ $ sling conns discover LOCALHOST_DEV
 
 ---
 
-### Databricks Ingestion (Unity Catalog Volumes & Zerobus)
-
-Sling supports high-throughput ingestion into Databricks environments via two native mechanisms:
-
-- **Unity Catalog Volumes** (`databricks-volume://`):
-  Direct streaming of files (Parquet, CSV, etc.) into Unity Catalog Volumes using the Databricks Files REST API.
-  Supports both HTTPS and HTTP (via `protocol: http` or `use_ssl: false`, useful for local testing, mock servers, or internal proxies):
-  ```bash
-  # Stream data directly into a Databricks Volume
-  sling run --src-conn PG_DB --src-stream public.users \
-    --tgt-conn DATABRICKS_VOL --tgt-object "my_cat/my_schema/my_vol/users.parquet"
-
-  # Connection properties (sling env YAML):
-  # type: databricks-volume
-  # host: adb-123.cloud.databricks.com
-  # token: dapi...
-  # protocol: https       # or 'http' for local/mock testing (use_ssl: false)
-  # catalog: my_catalog
-  # schema: my_schema
-  # volume: my_volume
-  ```
-  Supported URI formats: `databricks-volume://cat/sch/vol/path`, `volume://cat/sch/vol/path`, and `databricks://Volumes/cat/sch/vol/path`.
-
-- **Zerobus Streaming** (`zerobus://`):
-  High-throughput, real-time ingestion into Delta tables using Arrow Flight / Arrow IPC streaming with configurable batch sizes and compression (`none`, `lz4`, `zstd`):
-  ```bash
-  # Stream records to Delta table via Zerobus Arrow stream
-  sling run --src-conn PG_DB --src-stream public.users \
-    --tgt-conn ZEROBUS_CONN --tgt-object "main.default.users"
-
-  # Connection properties (sling env YAML):
-  # type: zerobus
-  # host: adb-123.cloud.databricks.com
-  # token: dapi...        # or client_id + client_secret
-  # batch_size: 10000     # default: 10000
-  # compression: zstd     # none, lz4, zstd
-  ```
+Databricks: Unity Catalog Volumes are a file connection (`type: databricks-volume`). Direct Delta ingest uses `copy_method: zerobus` on `type: databricks`. See https://docs.slingdata.io/connections/database-connections/databricks
 
 ---
 
@@ -200,6 +164,7 @@ Pre-built binaries for macOS, Linux, and Windows are available on the [releases 
 Requirements:
 - Install Go 1.22+ (https://go.dev/doc/install)
 - Install a C compiler ([gcc](https://www.google.com/search?q=install+gcc&oq=install+gcc), [tdm-gcc](https://jmeubank.github.io/tdm-gcc/), [mingw](https://www.google.com/search?q=install+mingw), etc)
+- `CGO_ENABLED=1` (needed for SQLite and Databricks Zerobus; this repo's build scripts already set it)
 
 #### Linux or Mac
 ```bash
