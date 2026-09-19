@@ -36,7 +36,7 @@ defaults:
   primary_key: [id]
   object: public.{stream_table}
   change_capture_options:
-    run_max_events: 10000
+    run_max_events: 100000
     run_max_duration: 10m
 
 streams:
@@ -50,11 +50,11 @@ streams:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `run_max_events` | `10000` | Max change events per run, then save position and exit. One event = one log statement, so it can hold many rows. |
+| `run_max_events` | `100000` | Max change events per run, then save position and exit. One event = one log statement, so it can hold many rows. |
 | `run_max_duration` | `10m` | Max wall-clock time per run. |
 | `soft_delete` | `false` | Mark deletes with `_sling_synced_op='D'` instead of row removal. |
 | `snapshot_start` | `now` | First-run log start: `now` or `beginning`. |
-| `snapshot_chunk_size` | `100000` | Rows per chunk in the initial snapshot (needs integer-like PK; else single-shot read). |
+| `snapshot_chunk_size` | `100000` | Rows per chunk in the initial snapshot. Integer PKs use ranges; string/UUID PKs use keyset. No PK, chunk size 0, or MongoDB → single-shot. |
 | `snapshot_run_duration` | none | Time budget for the snapshot per run; resumes next run. |
 | `replay_from` | — | Rewind position (timestamp, binlog position, GTID). Applied once per unique value. |
 | `slot_level` | `shared`* | `shared` = one log reader for all streams (Postgres, MySQL); `stream` = one per table (all others). |

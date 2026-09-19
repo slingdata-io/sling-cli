@@ -2947,6 +2947,35 @@
 #   output_contains:
 #     - 'execution succeeded'
 
+# SQL Server BCP rejects `-d` together with a 3-part db.schema.table name.
+# FullName() prefixes the connection database; BCP also always passed `-d`.
+# Same failure as the AEG NCC bulk load (bcp: "The -d database name option
+# is not supported when a 3 part dbtable name is specified").
+- id: 602
+  name: 'SQL Server BCP 3-part name with -d'
+  group: mssql
+  run: 'sling run -d -r tests/replications/r.125.sqlserver_bcp_3part.yaml'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: SQL Server BCP loaded a 3-part target name'
+  output_does_not_contain:
+    - 'The -d database name option is not supported when a 3 part'
+
+# MongoDB date filters, issue #802: the incremental checkpoint was sent as the
+# string ISODate("...") rather than a Date, and `where` ignored Extended JSON
+# {"$date": "..."}. Both fixed in database_mongo.go.
+- id: 603
+  name: 'MongoDB date filters: incremental ISODate() and where $date (issue 802)'
+  group: mongodb
+  run: 'sling run -p tests/pipelines/p.53.mongo_date_filters.yaml'
+  output_contains:
+    - 'control 1 - where + ISODate() => 448 rows'
+    - 'control 2 - where + plain ISO string => 448 rows'
+    - 'OK bug 2 fixed: Extended JSON $date matched all 448 documents'
+    - 'OK bug 1 fixed: incremental checkpoint matched 445 documents'
+    - 'SUCCESS: both issue 802 MongoDB date filter bugs are fixed'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
