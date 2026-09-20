@@ -1957,6 +1957,13 @@ func (conn *IcebergConn) icebergStorageKind() icebergStorageKind {
 		return ""
 	}
 
+	// Cloudflare R2 vends S3-compatible credentials through the REST catalog, so
+	// the connection carries no s3_* props and the warehouse is an opaque id.
+	// Detect it from the catalog endpoint instead, before the generic checks.
+	if strings.Contains(strings.ToLower(conn.GetProp("rest_uri")), "cloudflarestorage.com") {
+		return icebergStorageS3
+	}
+
 	switch {
 	case strings.HasPrefix(w, "gs://"), strings.HasPrefix(w, "gcs://"), get("gcs_access_key_id") != "":
 		return icebergStorageGCS
