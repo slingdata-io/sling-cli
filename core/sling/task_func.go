@@ -235,16 +235,7 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 	}
 
 	if len(cfg.Source.UpdateKey) <= 1 {
-		tgtUpdateKey := cfg.Source.UpdateKey.First()
-		if cc := cfg.Target.Options.ColumnCasing; cc != nil {
-			tgtUpdateKey = cc.Apply(tgtUpdateKey, tgtConn.GetType())
-		}
-
-		// get target columns to match update-key
-		// in case column casing needs adjustment
-		if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
-			tgtUpdateKey = updateCol.Name // overwrite with correct casing
-		}
+		tgtUpdateKey := resolveUpdateKeyColumn(cfg.Source.UpdateKey.First(), targetCols, tgtConn, cfg)
 
 		var maxCol iop.Column
 		cfg.IncrementalVal, maxCol, err = tgtConn.GetMaxValue(table, tgtUpdateKey)
@@ -261,18 +252,16 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 		return
 	}
 
+	// NOTE: Multiple GetMaxValue calls are sequential and non-atomic — rows inserted between
+	// queries may cause a slightly inconsistent snapshot. This is best-effort for the multi-key
+	// case; a batched SELECT MAX(k1), MAX(k2) FROM t would be strictly correct but requires
+	// a new API method on the Connection interface.
 	valMap := make(map[string]any)
 	valStrMap := make(map[string]string)
 	hasAnyVal := false
 
 	for _, k := range cfg.Source.UpdateKey {
-		tgtKey := k
-		if cc := cfg.Target.Options.ColumnCasing; cc != nil {
-			tgtKey = cc.Apply(tgtKey, tgtConn.GetType())
-		}
-		if updateCol := targetCols.GetColumn(tgtKey); updateCol != nil && updateCol.Name != "" {
-			tgtKey = updateCol.Name
-		}
+		tgtKey := resolveUpdateKeyColumn(k, targetCols, tgtConn, cfg)
 
 		val, maxCol, err := tgtConn.GetMaxValue(table, tgtKey)
 		if err != nil {
@@ -292,11 +281,27 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 
 	if hasAnyVal {
 		cfg.IncrementalVal = valMap
-		valBytes, _ := json.Marshal(valStrMap)
+		valBytes, err := json.Marshal(valStrMap)
+		if err != nil {
+			return g.Error(err, "could not marshal incremental values map")
+		}
 		cfg.IncrementalValStr = string(valBytes)
 	}
 
 	return
+}
+
+// resolveUpdateKeyColumn applies column-casing and resolves the correct column name
+// from the target table for a given update key. Used to handle case-insensitive DB connectors.
+func resolveUpdateKeyColumn(key string, targetCols iop.Columns, tgtConn database.Connection, cfg *Config) string {
+	tgtKey := key
+	if cc := cfg.Target.Options.ColumnCasing; cc != nil {
+		tgtKey = cc.Apply(tgtKey, tgtConn.GetType())
+	}
+	if col := targetCols.GetColumn(tgtKey); col != nil && col.Name != "" {
+		tgtKey = col.Name // overwrite with correct casing from target
+	}
+	return tgtKey
 }
 
 func getRate(cnt uint64) string {

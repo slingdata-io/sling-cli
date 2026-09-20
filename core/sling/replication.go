@@ -693,6 +693,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		config ReplicationStreamConfig
 		chunks []Stream
 	}
+	if len(rd.streamsOrdered) == 0 && len(rd.Streams) > 0 {
+		for name := range rd.Streams {
+			rd.streamsOrdered = append(rd.streamsOrdered, name)
+		}
+	}
 	streamsToChunk := []Stream{}
 	for _, name := range rd.streamsOrdered {
 		stream := rd.Streams[name]
@@ -719,6 +724,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 		if !g.In(s.Mode, FullRefreshMode, TruncateMode, BackfillMode, IncrementalMode) || !chunkSpecified {
 			continue
+		}
+
+		if len(s.UpdateKey) > 1 && (g.PtrVal(s.SourceOptions).ChunkSize != nil || (g.PtrVal(s.SourceOptions).ChunkCount != nil && *g.PtrVal(s.SourceOptions).ChunkCount > 0)) {
+			return g.Error("stream chunking is not supported with composite update_key: %s", name)
 		}
 
 		// process stream
@@ -793,6 +802,8 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			// no update_key needed for chunking by expression
 		} else if len(stream.config.UpdateKey) == 0 {
 			return g.Error("did not provide update_key for stream chunking: %s", stream.name)
+		} else if len(stream.config.UpdateKey) > 1 {
+			return g.Error("stream chunking is not supported with composite update_key: %s", stream.name)
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config

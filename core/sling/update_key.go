@@ -21,12 +21,11 @@ func (u *UpdateKey) UnmarshalYAML(value *yaml.Node) error {
 		if err := value.Decode(&single); err != nil {
 			return err
 		}
-		single = strings.TrimSpace(single)
-		if single != "" {
-			*u = []string{single}
-		} else {
-			*u = []string{}
+		parsed, err := ParseUpdateKey(single)
+		if err != nil {
+			return err
 		}
+		*u = parsed
 		return nil
 
 	case yaml.SequenceNode:
@@ -63,12 +62,11 @@ func (u *UpdateKey) UnmarshalJSON(data []byte) error {
 		if err := stdjson.Unmarshal(trimmed, &single); err != nil {
 			return err
 		}
-		single = strings.TrimSpace(single)
-		if single != "" {
-			*u = []string{single}
-		} else {
-			*u = []string{}
+		parsed, err := ParseUpdateKey(single)
+		if err != nil {
+			return err
 		}
+		*u = parsed
 		return nil
 	}
 
@@ -122,8 +120,9 @@ func (u *UpdateKey) Normalize() error {
 	return nil
 }
 
-// Validate runs Normalize and returns any error
-func (u *UpdateKey) Validate() error {
+// NormalizeAndValidate runs Normalize (trims whitespace, removes empty entries, deduplicates)
+// and returns any validation error. Note: this mutates the receiver.
+func (u *UpdateKey) NormalizeAndValidate() error {
 	return u.Normalize()
 }
 
@@ -170,7 +169,7 @@ func ParseUpdateKey(val any) (UpdateKey, error) {
 			parts := strings.Split(v, ",")
 			key = make(UpdateKey, 0, len(parts))
 			for _, p := range parts {
-				key = append(key, p)
+				key = append(key, strings.TrimSpace(p)) // trim each part explicitly
 			}
 		} else if strings.TrimSpace(v) != "" {
 			key = UpdateKey{v}
@@ -196,3 +195,4 @@ func ParseUpdateKey(val any) (UpdateKey, error) {
 	}
 	return key, nil
 }
+

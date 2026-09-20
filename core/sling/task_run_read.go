@@ -18,6 +18,9 @@ import (
 
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
+	if srcConn.GetType().IsNoSQL() && len(cfg.Source.UpdateKey) > 1 {
+		return df, g.Error("composite update_key is not supported for NoSQL sources: %s", srcConn.GetType())
+	}
 
 	setStage("3 - prepare-dataflow")
 
@@ -157,6 +160,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 		}
 		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey.First())
+		// build quoted representation once — used in SQL templates below
 		updateKeyQuoted := strings.Join(lo.Map(cfg.Source.UpdateKey, func(k string, _ int) string { return srcConn.Quote(k) }), ", ")
 
 		// select only records that have been modified after last max value
@@ -171,11 +175,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 						continue
 					}
 					col := sTable.Columns.GetColumn(k)
-					if col != nil && col.IsString() && !strings.HasPrefix(v, "'") {
+					if col != nil && (col.IsString() || col.IsDate() || col.IsDatetime()) && !strings.HasPrefix(v, "'") {
 						v = g.F("'%s'", v)
-					}
-					if srcConn.GetType().IsNoSQL() {
-						v = strings.ReplaceAll(v, `"`, `\"`)
 					}
 					singleCond := g.R(
 						srcConn.GetTemplateValue("core.incremental_where"),
@@ -185,10 +186,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 					)
 					conds = append(conds, singleCond)
 				}
-				if len(conds) > 1 {
+				if len(conds) > 0 {
 					incrementalWhereCond = "(" + strings.Join(conds, " or ") + ")"
-				} else if len(conds) == 1 {
-					incrementalWhereCond = conds[0]
 				}
 			} else {
 				if srcConn.GetType().IsNoSQL() {
@@ -230,10 +229,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 					)
 					backfillConds = append(backfillConds, c)
 				}
-				if len(backfillConds) > 1 {
+				if len(backfillConds) > 0 {
 					incrementalWhereCond = "(" + strings.Join(backfillConds, " or ") + ")"
-				} else if len(backfillConds) == 1 {
-					incrementalWhereCond = backfillConds[0]
 				}
 			} else {
 				sVal, eVal := formatBackfillRangeValues(updateCol, startValue, endValue, srcConn)
@@ -283,6 +280,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		} else {
 			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
 				err = g.Error("Since using %s mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
+				return t.df, err
+			}
+			if len(cfg.Source.UpdateKey) > 1 && strings.Contains(sTable.SQL, "{incremental_value}") && !strings.Contains(sTable.SQL, "{incremental_where_cond}") {
+				err = g.Error("Custom SQL with composite update_key must use the {incremental_where_cond} placeholder instead of {incremental_value}")
 				return t.df, err
 			}
 
@@ -589,19 +590,8 @@ func extractIncrementalValuesMap(cfg *Config) map[string]string {
 		return res
 	}
 
-	if m, ok := cfg.IncrementalVal.(map[string]any); ok {
-		for k, v := range m {
-			res[strings.ToLower(k)] = cast.ToString(v)
-		}
-		return res
-	}
-	if m, ok := cfg.IncrementalVal.(map[string]string); ok {
-		for k, v := range m {
-			res[strings.ToLower(k)] = v
-		}
-		return res
-	}
-
+	// 1. Prefer JSON-encoded IncrementalValStr (produced by getIncrementalValueViaDB),
+	// which contains the dialect-formatted and quoted values (from iop.FormatValue).
 	trimmed := strings.TrimSpace(cfg.IncrementalValStr)
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		var jsonMap map[string]any
@@ -611,6 +601,20 @@ func extractIncrementalValuesMap(cfg *Config) map[string]string {
 			}
 			return res
 		}
+	}
+
+	// 2. Fallback to IncrementalVal map (e.g. if set directly in code or tests)
+	if m, ok := cfg.IncrementalVal.(map[string]string); ok {
+		for k, v := range m {
+			res[strings.ToLower(k)] = v
+		}
+		return res
+	}
+	if m, ok := cfg.IncrementalVal.(map[string]any); ok {
+		for k, v := range m {
+			res[strings.ToLower(k)] = cast.ToString(v)
+		}
+		return res
 	}
 
 	return res
@@ -630,12 +634,23 @@ func getValForColumn(valMap map[string]string, cfg *Config, col string, idx int)
 		return slice[idx]
 	}
 
+	// Comma-separated fallback: only safe when part count exactly matches key count.
+	// For multi-key scenarios, prefer the JSON-map format produced by getIncrementalValueViaDB.
+	// If counts don't match in multi-key mode, return "" to avoid returning a wrong composite value.
 	trimmed := strings.TrimSpace(cfg.IncrementalValStr)
 	if strings.Contains(trimmed, ",") {
 		parts := strings.Split(trimmed, ",")
 		if len(parts) == len(cfg.Source.UpdateKey) {
 			return strings.TrimSpace(parts[idx])
 		}
+		if len(cfg.Source.UpdateKey) > 1 {
+			// Count mismatch in multi-key mode: don't return the full string as a per-column value.
+			return ""
+		}
+	}
+
+	if len(cfg.Source.UpdateKey) > 1 {
+		return ""
 	}
 
 	return trimmed

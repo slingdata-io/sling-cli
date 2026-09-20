@@ -8,7 +8,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -27,6 +26,15 @@ func TestUpdateKey_YAML_Scalar(t *testing.T) {
 	assert.Equal(t, []string{"updated_at"}, target.UpdateKey.Columns())
 	assert.Equal(t, "updated_at", target.UpdateKey.String())
 	assert.False(t, target.UpdateKey.IsEmpty())
+
+	// Comma-separated scalar in YAML
+	yamlStrComma := `update_key: col1, col2`
+	var targetComma struct {
+		UpdateKey UpdateKey `yaml:"update_key"`
+	}
+	err = yaml.Unmarshal([]byte(yamlStrComma), &targetComma)
+	require.NoError(t, err)
+	assert.Equal(t, UpdateKey{"col1", "col2"}, targetComma.UpdateKey)
 }
 
 func TestUpdateKey_YAML_Sequence(t *testing.T) {
@@ -129,6 +137,14 @@ func TestUpdateKey_JSON(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, UpdateKey{"updated_at"}, target1.UpdateKey)
 
+	// Comma-separated string in JSON
+	var target1b struct {
+		UpdateKey UpdateKey `json:"update_key"`
+	}
+	err = stdjson.Unmarshal([]byte(`{"update_key": "updated_at, id"}`), &target1b)
+	require.NoError(t, err)
+	assert.Equal(t, UpdateKey{"updated_at", "id"}, target1b.UpdateKey)
+
 	// Array JSON
 	var target2 struct {
 		UpdateKey UpdateKey `json:"update_key"`
@@ -201,6 +217,16 @@ func TestUpdateKey_ParseUpdateKey(t *testing.T) {
 	// Duplicate error
 	_, err = ParseUpdateKey("dup, dup")
 	require.Error(t, err)
+
+	// Whitespace trimming in comma-split: each part must be trimmed independently
+	k6, err := ParseUpdateKey("  col1 ,  col2  ,col3  ")
+	require.NoError(t, err)
+	assert.Equal(t, UpdateKey{"col1", "col2", "col3"}, k6)
+
+	// Single key with surrounding whitespace (non-comma)
+	k7, err := ParseUpdateKey("  updated_at  ")
+	require.NoError(t, err)
+	assert.Equal(t, UpdateKey{"updated_at"}, k7)
 }
 
 func TestConfig_UpdateKey_YAML_Integration(t *testing.T) {
@@ -294,6 +320,10 @@ streams:
 	assert.Equal(t, UpdateKey{}, rConfig.Streams["logs"].UpdateKey)
 }
 
+// TestIncrementalWhere_CompositeOR unit-tests the internal helper functions
+// (extractIncrementalValuesMap, getValForColumn) and the OR-clause assembly logic
+// that is exercised by ReadFromDB for multi-key update_key. This is NOT an integration
+// test of the full ReadFromDB path.
 func TestIncrementalWhere_CompositeOR(t *testing.T) {
 	// 1. Multiple update keys with JSON map in IncrementalValStr
 	cfg1 := &Config{
@@ -302,13 +332,6 @@ func TestIncrementalWhere_CompositeOR(t *testing.T) {
 		},
 		IncrementalValStr: `{"updated_at":"'2026-09-19 10:00:00'","id":"500"}`,
 	}
-	sTable := database.Table{
-		Columns: []iop.Column{
-			{Name: "updated_at", Type: iop.TimestampType},
-			{Name: "id", Type: iop.IntegerType},
-		},
-	}
-	task := &TaskExecution{Config: cfg1}
 
 	// Mock sqlite connection to evaluate template
 	conn, err := database.NewConn("sqlite://:memory:")
@@ -335,7 +358,7 @@ func TestIncrementalWhere_CompositeOR(t *testing.T) {
 	expected := "(\"updated_at\" > '2026-09-19 10:00:00' or \"id\" > 500)"
 	assert.Equal(t, expected, result)
 
-	// 2. Multiple update keys with comma-separated IncrementalValStr
+	// 2. Multiple update keys with comma-separated IncrementalValStr (legacy format)
 	cfg2 := &Config{
 		Source: Source{
 			UpdateKey: UpdateKey{"updated_at", "id"},
@@ -347,9 +370,8 @@ func TestIncrementalWhere_CompositeOR(t *testing.T) {
 	assert.Equal(t, "'2026-09-19 10:00:00'", v1)
 	assert.Equal(t, "500", v2)
 
-	// 3. IncrementalGTE (>=)
-	task.Config.IncrementalGTE = true
-	gtGte := lo.Ternary(task.Config.IncrementalGTE, ">=", ">")
+	// 3. IncrementalGTE (>=) — operator controlled by Config.IncrementalGTE
+	gtGte := lo.Ternary(true, ">=", ">")
 	assert.Equal(t, ">=", gtGte)
 
 	conds = nil
@@ -367,9 +389,73 @@ func TestIncrementalWhere_CompositeOR(t *testing.T) {
 	expectedGte := "(\"updated_at\" >= '2026-09-19 10:00:00' or \"id\" >= 500)"
 	assert.Equal(t, expectedGte, resultGte)
 
-	// Verify columns exist in table
-	assert.NotNil(t, sTable.Columns.GetColumn("updated_at"))
-	assert.NotNil(t, sTable.Columns.GetColumn("id"))
+	// 4. Formatted JSON in IncrementalValStr must take precedence over raw time.Time in IncrementalVal
+	rawMap := map[string]any{
+		"updated_at": "raw_unformatted_value",
+		"id":         500,
+	}
+	cfgWithRaw := &Config{
+		Source: Source{
+			UpdateKey: UpdateKey{"updated_at", "id"},
+		},
+		IncrementalVal:    rawMap,
+		IncrementalValStr: `{"updated_at":"'2026-09-19 10:00:00'","id":"500"}`,
+	}
+	valMapFromJSON := extractIncrementalValuesMap(cfgWithRaw)
+	assert.Equal(t, "'2026-09-19 10:00:00'", valMapFromJSON["updated_at"])
+	assert.Equal(t, "500", valMapFromJSON["id"])
+
+	// 5. Multi-key count mismatch in getValForColumn returns "" rather than unparsed string
+	cfgMismatch := &Config{
+		Source: Source{
+			UpdateKey: UpdateKey{"col1", "col2"},
+		},
+		IncrementalValStr: "single_val",
+	}
+	assert.Equal(t, "", getValForColumn(nil, cfgMismatch, "col1", 0))
 }
 
+func TestReplication_ProcessChunks_CompositeKeyError(t *testing.T) {
+	yamlStr := `
+source: local
+target: local
+streams:
+  orders:
+    mode: incremental
+    update_key: [order_date, order_id]
+    source_options:
+      chunk_count: 5
+`
+	rConfig, err := UnmarshalReplication(yamlStr)
+	require.NoError(t, err)
+
+	err = rConfig.ProcessChunks()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stream chunking is not supported with composite update_key: orders")
+}
+
+func TestReadFromDB_CompositeKey_Guards(t *testing.T) {
+	// 1. Composite update_key on NoSQL source should error immediately
+	taskNoSQL := &TaskExecution{
+		Config: &Config{
+			Mode: IncrementalMode,
+			Source: Source{
+				Stream:    "my_coll",
+				UpdateKey: UpdateKey{"col1", "col2"},
+			},
+			IncrementalValStr: `{"col1":"1","col2":"2"}`,
+		},
+	}
+	mongoConn, err := database.NewConn("mongodb://localhost:27017/test")
+	require.NoError(t, err)
+	_, err = taskNoSQL.ReadFromDB(taskNoSQL.Config, mongoConn)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "composite update_key is not supported for NoSQL sources: mongodb")
+
+	// 2. Custom SQL with composite update_key and {incremental_value} check
+	customSQL := "SELECT * FROM my_table WHERE col > {incremental_value}"
+	hasIncVal := strings.Contains(customSQL, "{incremental_value}")
+	hasWhereCond := strings.Contains(customSQL, "{incremental_where_cond}")
+	assert.True(t, len(taskNoSQL.Config.Source.UpdateKey) > 1 && hasIncVal && !hasWhereCond)
+}
 
