@@ -1174,11 +1174,10 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 	testSuite(t, dbio.TypeDbMotherDuck)
 
 	// DUCKLAKE
-	tests := "1-17,19+" // soft-delete is not supported
-	testSuite(t, dbio.TypeDbDuckLake, tests)
-	// testSuite(t, dbio.Type("ducklake_az"), tests)
-	testSuite(t, dbio.Type("ducklake_r2"), tests)
-	testSuite(t, dbio.Type("ducklake_s3"), tests)
+	testSuite(t, dbio.TypeDbDuckLake)
+	testSuite(t, dbio.Type("ducklake_az"))
+	testSuite(t, dbio.Type("ducklake_r2"))
+	testSuite(t, dbio.Type("ducklake_s3"))
 }
 
 func TestSuiteDatabaseExasol(t *testing.T) {
@@ -1205,11 +1204,16 @@ func TestSuiteDatabaseAthena(t *testing.T) {
 func TestSuiteDatabaseIceberg(t *testing.T) {
 	t.Parallel()
 	// 5 = truncate (not supported). 9-12 = incremental with views / extra tables.
-	// 26-29 = merge strategies (insert / update / update_insert / delete_insert).
-	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8,26-29")
-	testSuite(t, dbio.Type("iceberg_glue"), "1-4,6-8,26-29")
-	testSuite(t, dbio.Type("iceberg_s3"), "1-4,6-8,26-29")
-	testSuite(t, dbio.Type("iceberg_sql"), "1-4,6-8,26-29")
+	// 18 = delete_missing, needs a SQL UPDATE; IcebergConn.NewTransaction is nil.
+	// 26-29 = merge strategies (insert / update / update_insert / delete_insert),
+	// which now route through MergeStream (equality deletes + row delta).
+	// Incremental-merge and change-capture coverage lives in the CLI suite
+	// (suite.cli.yaml 604-608, r.126 / r.127), not in the numbered db template.
+	tests := "1-4,6-8,26-29"
+	testSuite(t, dbio.TypeDbIceberg, tests)
+	testSuite(t, dbio.Type("iceberg_glue"), tests)
+	testSuite(t, dbio.Type("iceberg_s3"), tests)
+	testSuite(t, dbio.Type("iceberg_sql"), tests)
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {
