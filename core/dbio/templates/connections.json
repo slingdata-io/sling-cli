@@ -1486,6 +1486,18 @@
         }
       }
     },
+    "lancedb": {
+      "name": "LanceDB",
+      "description": "LanceDB vector / lakehouse format, served through DuckDB's lance extension",
+      "category": "datalake",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "LanceDB namespace root: directory holding the .lance datasets (local path, or an s3://, gs:// or az:// URI)",
+          "required": true
+        }
+      }
+    },
     "iceberg": {
       "name": "Apache Iceberg",
       "description": "Apache Iceberg table format",

@@ -599,7 +599,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("user", U.Username())
 				setIfMissing("username", U.Username())
@@ -623,6 +623,9 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("instance", pathValue)
 			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
 				setIfMissing("instance", U.Path())
+				setIfMissing("schema", "main")
+			case dbio.TypeDbLanceDB:
+				setIfMissing("path", lanceDBPathFromURL(c.URL()))
 				setIfMissing("schema", "main")
 			case dbio.TypeDbMotherDuck:
 				setIfMissing("schema", "main")
@@ -956,6 +959,13 @@ func (c *Connection) setURL() (err error) {
 		// Build the ducklake URL based on catalog configuration
 		// Default to simple ducklake:// if no specific catalog URL is provided
 		template = "ducklake://"
+	case dbio.TypeDbLanceDB:
+		// the namespace root is a directory path or an object store URI
+		if val, ok := c.Data["path"]; ok {
+			c.Data["path"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+		}
+		setIfMissing("schema", "main")
+		template = "lancedb://{path}"
 	case dbio.TypeDbMotherDuck:
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)
@@ -1429,6 +1439,18 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 
 func (i *Info) IsURL() bool {
 	return strings.Contains(i.Name, "://")
+}
+
+// lanceDBPathFromURL extracts the namespace root from a `lancedb://` URL.
+// The root is everything after the scheme, so that it can itself be an object
+// store URI (`lancedb://s3://bucket/prefix`) as well as a local directory
+// (`lancedb:///data/lancedb`). Query params are not part of the path.
+func lanceDBPathFromURL(connURL string) string {
+	connPath := strings.TrimPrefix(connURL, "lancedb://")
+	if i := strings.Index(connPath, "?"); i >= 0 {
+		connPath = connPath[:i]
+	}
+	return connPath
 }
 
 // SchemeType returns the correct scheme of the url

@@ -3036,6 +3036,26 @@
     - iceberg cdc counts
     - execution succeeded
 
+# LanceDB: fully local (path-backed namespace), so the test sets up its own
+# connection in a temp home dir and needs no external credentials.
+- id: 617
+  name: 'Run sling lancedb full refresh, merge and CDC'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    NAMESPACE_DIR=$(mktemp -d)/nested/lancedb
+    sling conns set --home-dir "$HOME_DIR" LANCEDB_TEST --type lancedb path="$NAMESPACE_DIR"
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.128.lancedb_full_refresh.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.129.lancedb_merge.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.130.lancedb_cdc_seed.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.131.lancedb_cdc.yaml
+    sling run --home-dir "$HOME_DIR" --src-conn LANCEDB_TEST --src-stream "select 'cdc_counts' as marker, count(*) as cnt, count(distinct id) as did from main.lancedb_cdc_test" --stdout
+    sling run --home-dir "$HOME_DIR" --src-conn LANCEDB_TEST --src-stream "select id, name from main.lancedb_cdc_test order by id" --stdout
+  output_contains:
+    - 'cdc_counts,3,3'
+    - '1,Alice Final'
+    - '5,Eve'
+    - execution succeeded
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

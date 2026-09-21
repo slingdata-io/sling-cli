@@ -106,7 +106,7 @@ For database operations (queries, schema exploration) and file system operations
 
 ## 3. Connection Types Overview
 
-Sling supports 41+ different connection types across four categories:
+Sling supports 42+ different connection types across four categories:
 
 ### Database Connections (24 types)
 - **Relational**: PostgreSQL, MySQL, MariaDB, SQLServer, Oracle, SQLite
@@ -122,9 +122,9 @@ Sling supports 41+ different connection types across four categories:
 - **Cloud Drives**: Google Drive
 - **Local**: Local file system
 
-### Datalake Connections (4 types)
+### Datalake Connections (5 types)
 - **Query Engines**: Athena, DuckLake
-- **Table Formats**: Iceberg
+- **Table Formats**: Iceberg, LanceDB
 
 ### API Connections
 - **Custom APIs**: User-defined API specifications in YAML format
@@ -222,6 +222,8 @@ Navigate or fetch the content of the connector from the below respective URL to 
 **Apache Iceberg (`iceberg`) & AWS S3 Tables (`s3tables`)** -> https://docs.slingdata.io/connections/datalake-connections/iceberg
 
 **DuckLake (`ducklake`)** -> https://docs.slingdata.io/connections/datalake-connections/ducklake
+
+**LanceDB (`lancedb`)** -> https://docs.slingdata.io/connections/datalake-connections/lancedb
 
 ---
 

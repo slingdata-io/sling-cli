@@ -17,7 +17,7 @@ Resolve each row before you write YAML, in this order: the user's request, exist
 | Type | Examples | Kind |
 |------|----------|------|
 | Database | postgres, mysql, snowflake, bigquery | `database` |
-| Datalake | iceberg, ducklake, athena, s3 tables | `database` |
+| Datalake | iceberg, ducklake, lancedb, athena, s3 tables | `database` |
 | File System | s3, gcs, azure, sftp, local | `file` |
 | API | Custom REST APIs via specs | `api` |
 

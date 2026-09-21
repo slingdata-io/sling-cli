@@ -616,6 +616,7 @@ var indexCapabilities = map[dbio.Type]indexCapability{
 	dbio.TypeDbDuckDb:     {supportsUnique: true},
 	dbio.TypeDbMotherDuck: {supportsUnique: true},
 	dbio.TypeDbDuckLake:   {noIndexes: true}, // DuckLake does not support indexes
+	dbio.TypeDbLanceDB:    {noIndexes: true}, // Lance datasets have no secondary indexes
 	dbio.TypeDbOracle:     {supportsUnique: true, supportsType: true, typeClosedSet: []string{"bitmap"}},
 	dbio.TypeDbSQLite:     {supportsWhere: true, supportsUnique: true},
 }

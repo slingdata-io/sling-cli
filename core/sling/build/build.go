@@ -779,7 +779,7 @@ func mapDialect(dbType dbio.Type) string {
 		return "bigquery"
 	case dbio.TypeDbSnowflake:
 		return "snowflake"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB:
 		return "duckdb"
 	case dbio.TypeDbDatabricks:
 		return "databricks"

@@ -21,12 +21,14 @@ func (e *Executor) quoteFullTableName(fullName string) (string, error) {
 func supportsDropCascade(t dbio.Type) bool {
 	return g.In(t,
 		dbio.TypeDbPostgres, dbio.TypeDbRedshift,
-		dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake,
+		dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB,
 		dbio.TypeDbSnowflake, // accepted (no-op-ish) but harmless
 	)
 }
 
 // supportsCreateOrReplaceTable reports dialects with atomic CREATE OR REPLACE TABLE.
+// LanceDB is excluded: the lance extension serves a stale projection after a
+// replace that changes the schema, so the table must be dropped first.
 func supportsCreateOrReplaceTable(t dbio.Type) bool {
 	return g.In(t,
 		dbio.TypeDbSnowflake,
