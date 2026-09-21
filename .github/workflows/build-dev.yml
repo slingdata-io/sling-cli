@@ -12,8 +12,20 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-        
+
+      - name: Check Version Branch
+        id: check_version_branch
+        run: |
+          # Only version branches (v<digit>...) are pushed to slingdata-io/sling
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping trigger: '${GITHUB_REF_NAME}' is not a version branch"
+          fi
+
       - name: Trigger Dev Build on Specific Branch
+        if: steps.check_version_branch.outputs.eligible == 'true'
         uses: benc-uk/workflow-dispatch@v1
         with:
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
