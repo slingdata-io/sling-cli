@@ -160,7 +160,11 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			c.Vals[k] = strings.Split(cast.ToString(v), ",")
 
 		case "update-key":
-			cfg.Source.UpdateKey = cast.ToString(v)
+			parsed, err := sling.ParseUpdateKey(v)
+			if err != nil {
+				return ok, g.Error(err, "invalid update-key: %v", v)
+			}
+			cfg.Source.UpdateKey = parsed
 
 		case "limit":
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))

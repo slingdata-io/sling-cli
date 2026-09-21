@@ -474,10 +474,10 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
-		if t.Config.Source.UpdateKey == "." {
-			t.Config.Source.UpdateKey = env.ReservedFields.LoadedAt
+		if t.Config.Source.UpdateKey.First() == "." {
+			t.Config.Source.UpdateKey = UpdateKey{env.ReservedFields.LoadedAt}
 		}
-		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey)
+		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey.String())
 
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
@@ -565,8 +565,8 @@ func (t *TaskExecution) runApiToDb() (err error) {
 			if err != nil {
 				return g.Error(err, "cannot get sync/update key for incremental run")
 			} else if syncKey != "" && updateKey != "" {
-				if t.Config.Source.UpdateKey == "" {
-					t.Config.Source.UpdateKey = updateKey
+				if len(t.Config.Source.UpdateKey) == 0 {
+					t.Config.Source.UpdateKey = UpdateKey{updateKey}
 				}
 				if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 					err = g.Error(err, "Could not get incremental value")
@@ -851,7 +851,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
-		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey)
+		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey.String())
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err

@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -692,6 +693,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		config ReplicationStreamConfig
 		chunks []Stream
 	}
+	if len(rd.streamsOrdered) == 0 && len(rd.Streams) > 0 {
+		for name := range rd.Streams {
+			rd.streamsOrdered = append(rd.streamsOrdered, name)
+		}
+	}
 	streamsToChunk := []Stream{}
 	for _, name := range rd.streamsOrdered {
 		stream := rd.Streams[name]
@@ -718,6 +724,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 		if !g.In(s.Mode, FullRefreshMode, TruncateMode, BackfillMode, IncrementalMode) || !chunkSpecified {
 			continue
+		}
+
+		if len(s.UpdateKey) > 1 && (g.PtrVal(s.SourceOptions).ChunkSize != nil || (g.PtrVal(s.SourceOptions).ChunkCount != nil && *g.PtrVal(s.SourceOptions).ChunkCount > 0)) {
+			return g.Error("stream chunking is not supported with composite update_key: %s", name)
 		}
 
 		// process stream
@@ -790,8 +800,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 		if chunkExpr != "" {
 			// no update_key needed for chunking by expression
-		} else if stream.config.UpdateKey == "" {
+		} else if len(stream.config.UpdateKey) == 0 {
 			return g.Error("did not provide update_key for stream chunking: %s", stream.name)
+		} else if len(stream.config.UpdateKey) > 1 {
+			return g.Error("stream chunking is not supported with composite update_key: %s", stream.name)
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
@@ -831,7 +843,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 		var chunks []database.Chunk
 		if chunkSize != "" {
-			chunks, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
+			chunks, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey.First(), chunkSize, min, max)
 		} else if chunkCount > 0 {
 			if chunkExpr != "" {
 				if stream.config.Mode == BackfillMode && max == "" {
@@ -839,7 +851,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 				}
 				chunks, err = database.ChunkByExpression(sourceConnDB, table, chunkExpr, chunkCount)
 			} else {
-				chunks, chunkSize, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
+				chunks, chunkSize, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey.First(), chunkCount, min, max)
 			}
 		} else {
 			err = g.Error("must specify chunk_count or chunk_size")
@@ -1252,9 +1264,9 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 				stream.SourceOptions.Offset = cfgOverwrite.Source.Options.Offset
 			}
 
-			if cfgOverwrite.Source.UpdateKey != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
-				if stream.UpdateKey != "" {
-					g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+			if len(cfgOverwrite.Source.UpdateKey) > 0 && !reflect.DeepEqual(stream.UpdateKey, cfgOverwrite.Source.UpdateKey) {
+				if len(stream.UpdateKey) > 0 {
+					g.Debug("stream update_key overwritten for `%s`: %v => %v", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
 				}
 				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
 			}
@@ -1407,7 +1419,7 @@ type ReplicationStreamConfig struct {
 	Files         []string       `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
 	Where         string         `json:"where,omitempty" yaml:"where,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
-	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	UpdateKey     UpdateKey      `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
 	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
@@ -1513,7 +1525,7 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		if overrides.PrimaryKeyI != nil {
 			stream.PrimaryKeyI = overrides.PrimaryKeyI
 		}
-		if overrides.UpdateKey != "" {
+		if len(overrides.UpdateKey) > 0 {
 			stream.UpdateKey = overrides.UpdateKey
 		}
 		if overrides.SQL != "" {

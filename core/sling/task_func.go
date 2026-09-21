@@ -229,36 +229,79 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 		return
 	}
 
-	tgtUpdateKey := cfg.Source.UpdateKey
-	if cc := cfg.Target.Options.ColumnCasing; cc != nil {
-		tgtUpdateKey = cc.Apply(tgtUpdateKey, tgtConn.GetType())
-	}
-
-	// get target columns to match update-key
-	// in case column casing needs adjustment
 	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
-	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
-		tgtUpdateKey = updateCol.Name // overwrite with correct casing
-	} else if len(targetCols) == 0 {
+	if len(targetCols) == 0 {
 		return // target columns does not exist
 	}
 
-	// get target columns to match update-key
-	// in case column casing needs adjustment
-	var maxCol iop.Column
-	cfg.IncrementalVal, maxCol, err = tgtConn.GetMaxValue(table, tgtUpdateKey)
-	if err != nil {
-		return g.Error(err, "could not get incremental value")
+	if len(cfg.Source.UpdateKey) <= 1 {
+		tgtUpdateKey := resolveUpdateKeyColumn(cfg.Source.UpdateKey.First(), targetCols, tgtConn, cfg)
+
+		var maxCol iop.Column
+		cfg.IncrementalVal, maxCol, err = tgtConn.GetMaxValue(table, tgtUpdateKey)
+		if err != nil {
+			return g.Error(err, "could not get incremental value")
+		}
+
+		// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
+		if maxCol.DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
+			maxCol.Type = iop.DateType // force date type
+		}
+
+		cfg.IncrementalValStr = iop.FormatValue(cfg.IncrementalVal, maxCol.Type, srcConnType)
+		return
 	}
 
-	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
-	if maxCol.DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
-		maxCol.Type = iop.DateType // force date type
+	// NOTE: Multiple GetMaxValue calls are sequential and non-atomic — rows inserted between
+	// queries may cause a slightly inconsistent snapshot. This is best-effort for the multi-key
+	// case; a batched SELECT MAX(k1), MAX(k2) FROM t would be strictly correct but requires
+	// a new API method on the Connection interface.
+	valMap := make(map[string]any)
+	valStrMap := make(map[string]string)
+	hasAnyVal := false
+
+	for _, k := range cfg.Source.UpdateKey {
+		tgtKey := resolveUpdateKeyColumn(k, targetCols, tgtConn, cfg)
+
+		val, maxCol, err := tgtConn.GetMaxValue(table, tgtKey)
+		if err != nil {
+			return g.Error(err, "could not get incremental value for %s", tgtKey)
+		}
+		if maxCol.DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
+			maxCol.Type = iop.DateType
+		}
+
+		valMap[k] = val
+		formattedVal := iop.FormatValue(val, maxCol.Type, srcConnType)
+		if formattedVal != "" && formattedVal != "null" {
+			hasAnyVal = true
+		}
+		valStrMap[k] = formattedVal
 	}
 
-	cfg.IncrementalValStr = iop.FormatValue(cfg.IncrementalVal, maxCol.Type, srcConnType)
+	if hasAnyVal {
+		cfg.IncrementalVal = valMap
+		valBytes, err := json.Marshal(valStrMap)
+		if err != nil {
+			return g.Error(err, "could not marshal incremental values map")
+		}
+		cfg.IncrementalValStr = string(valBytes)
+	}
 
 	return
+}
+
+// resolveUpdateKeyColumn applies column-casing and resolves the correct column name
+// from the target table for a given update key. Used to handle case-insensitive DB connectors.
+func resolveUpdateKeyColumn(key string, targetCols iop.Columns, tgtConn database.Connection, cfg *Config) string {
+	tgtKey := key
+	if cc := cfg.Target.Options.ColumnCasing; cc != nil {
+		tgtKey = cc.Apply(tgtKey, tgtConn.GetType())
+	}
+	if col := targetCols.GetColumn(tgtKey); col != nil && col.Name != "" {
+		tgtKey = col.Name // overwrite with correct casing from target
+	}
+	return tgtKey
 }
 
 func getRate(cnt uint64) string {
