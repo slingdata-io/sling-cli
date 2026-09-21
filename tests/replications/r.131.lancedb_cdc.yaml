@@ -1,0 +1,20 @@
+# LanceDB synthetic CDC: events in _sling_synced_op / _sling_cdc_seq applied
+# with the change_capture merge strategy (MERGE INTO). Expected result:
+# id=1 updated (Alice Final), id=2 deleted, id=3 unchanged, id=5 inserted.
+source: LANCEDB_TEST
+target: LANCEDB_TEST
+
+defaults:
+  mode: incremental
+  primary_key: id
+
+streams:
+  cdc_events:
+    sql: |
+      SELECT 1 as id, 'Alice Final' as name, 175 as amount, '2022-01-01 00:00:00'::timestamp as updated_at, 'U' as _sling_synced_op, 4::bigint as _sling_cdc_seq
+      UNION ALL SELECT 1, 'Alice Updated', 150, '2022-01-01 00:00:00'::timestamp, 'U', 1
+      UNION ALL SELECT 2, 'Bob', 200, '2022-01-01 00:00:00'::timestamp, 'D', 2
+      UNION ALL SELECT 5, 'Eve', 500, '2022-01-01 00:00:00'::timestamp, 'I', 3
+    object: main.lancedb_cdc_test
+    target_options:
+      merge_strategy: change_capture

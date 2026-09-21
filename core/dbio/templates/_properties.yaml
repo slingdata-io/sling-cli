@@ -1183,6 +1183,23 @@ ducklake:
       description: 'Data format'
       examples: ['parquet', 'delta', 'iceberg']
 
+lancedb:
+  title: 'LanceDB'
+  kind: database
+  required: ["path"]
+  url_template: 'lancedb://{path}'
+  docs: https://docs.slingdata.io/connections/datalake-connections/lancedb
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: LANCEDB_MAIN'
+      examples: ['LANCEDB_MAIN', 'LANCEDB_LOCAL', 'LANCE_ANALYTICS']
+    path:
+      type: text
+      description: 'LanceDB namespace root: the directory holding the .lance datasets (a local path, or an `s3://`, `gs://` or `az://` URI)'
+      examples: ['./data/lancedb', '/data/lancedb', 's3://my-bucket/lancedb', 'gs://my-bucket/lancedb']
+
 iceberg:
   title: 'Apache Iceberg'
   kind: database

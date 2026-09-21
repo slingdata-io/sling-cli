@@ -632,7 +632,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		// which accepts the `copy_method` property
 		usesDuckDb := false
 		for _, connType := range connTypes {
-			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake) {
+			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
 				usesDuckDb = true
 			}
 		}

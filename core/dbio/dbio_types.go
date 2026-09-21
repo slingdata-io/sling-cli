@@ -86,6 +86,7 @@ const (
 	TypeDbProton        Type = "proton"
 	TypeDbAthena        Type = "athena"
 	TypeDbIceberg       Type = "iceberg"
+	TypeDbLanceDB       Type = "lancedb"
 	TypeDbAzureTable    Type = "azuretable"
 	TypeDbExasol        Type = "exasol"
 	TypeDbArrowDBC      Type = "adbc"
@@ -132,6 +133,7 @@ var AllType = []struct {
 	{TypeDbTrino, "TypeDbTrino"},
 	{TypeDbAthena, "TypeDbAthena"},
 	{TypeDbIceberg, "TypeDbIceberg"},
+	{TypeDbLanceDB, "TypeDbLanceDB"},
 	{TypeDbClickhouse, "TypeDbClickhouse"},
 	{TypeDbElasticsearch, "TypeDbElasticsearch"},
 	{TypeDbMongoDB, "TypeDbMongoDB"},
@@ -163,7 +165,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileDatabricksVolume,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbLanceDB, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return t, true
 	}
 
@@ -229,7 +231,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbLanceDB, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC, TypeDbODBC, TypeDbScyllaDB:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, TypeFileDatabricksVolume, Type("https"):
 		return KindFile
@@ -291,7 +293,7 @@ func (t Type) IsColumnStore() bool {
 		TypeDbSnowflake, TypeDbBigQuery,
 		TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck,
 		TypeDbRedshift, TypeDbDatabricks, TypeDbStarRocks,
-		TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbExasol,
+		TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbLanceDB, TypeDbExasol,
 		TypeDbAzureDWH, TypeDbFabric,
 	)
 }
@@ -340,6 +342,7 @@ func (t Type) NameLong() string {
 		TypeDbTrino:              "DB - Trino",
 		TypeDbAthena:             "DB - Athena",
 		TypeDbIceberg:            "DB - Iceberg",
+		TypeDbLanceDB:            "DB - LanceDB",
 		TypeDbClickhouse:         "DB - Clickhouse",
 		TypeDbPrometheus:         "DB - Prometheus",
 		TypeDbElasticsearch:      "DB - Elasticsearch",
@@ -391,6 +394,7 @@ func (t Type) Name() string {
 		TypeDbTrino:              "Trino",
 		TypeDbAthena:             "Athena",
 		TypeDbIceberg:            "Iceberg",
+		TypeDbLanceDB:            "LanceDB",
 		TypeDbClickhouse:         "Clickhouse",
 		TypeDbPrometheus:         "Prometheus",
 		TypeDbElasticsearch:      "Elasticsearch",

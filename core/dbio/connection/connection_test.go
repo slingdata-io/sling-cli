@@ -487,3 +487,34 @@ func TestSQLServerNamedInstance(t *testing.T) {
 		})
 	}
 }
+
+// A LanceDB namespace root can itself be an object store URI, so everything
+// after the `lancedb://` scheme is the path.
+func TestLanceDBConnectionURL(t *testing.T) {
+	cases := []struct{ url, path string }{
+		{"lancedb:///data/lancedb", "/data/lancedb"},
+		{"lancedb://./data/lancedb", "./data/lancedb"},
+		{"lancedb://relative/dir", "relative/dir"},
+		{"lancedb://s3://my-bucket/prefix", "s3://my-bucket/prefix"},
+		{"lancedb:///data/lancedb?schema=main", "/data/lancedb"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.url, func(t *testing.T) {
+			c, err := NewConnectionFromURL("LANCEDB_TEST", tc.url)
+			require.NoError(t, err)
+			assert.Equal(t, dbio.TypeDbLanceDB, c.Type)
+			assert.Equal(t, tc.path, c.DataS(true)["path"])
+		})
+	}
+
+	// the `path` property round-trips through the connection URL
+	c, err := NewConnection("LANCEDB_TEST", dbio.TypeDbLanceDB, map[string]any{"path": "s3://my-bucket/prefix"})
+	require.NoError(t, err)
+	assert.Equal(t, "lancedb://s3://my-bucket/prefix", c.URL())
+
+	reparsed, err := NewConnectionFromURL("LANCEDB_TEST", c.URL())
+	require.NoError(t, err)
+	assert.Equal(t, dbio.TypeDbLanceDB, reparsed.Type)
+	assert.Equal(t, "s3://my-bucket/prefix", reparsed.DataS(true)["path"])
+}

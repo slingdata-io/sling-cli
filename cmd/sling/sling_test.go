@@ -96,6 +96,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
+	dbio.TypeDbLanceDB:           {name: "lancedb", schema: "main", adjustCol: g.Bool(false)},
 	dbio.Type("iceberg_glue"):    {name: "iceberg_glue", adjustCol: g.Bool(false)},
 	dbio.Type("iceberg_s3"):      {name: "iceberg_s3", adjustCol: g.Bool(false)},
 	dbio.Type("iceberg_sql"):     {name: "iceberg_sql", adjustCol: g.Bool(false)},
@@ -945,6 +946,14 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
 				}
+			case tgtType == dbio.TypeDbLanceDB:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // lance stores json as varchar
+				}
+			case srcType == dbio.TypeDbLanceDB && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // lance stores json as varchar
+				}
 			case tgtType == dbio.TypeDbRedshift:
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // redshift uses text for json
@@ -1214,6 +1223,17 @@ func TestSuiteDatabaseIceberg(t *testing.T) {
 	testSuite(t, dbio.Type("iceberg_glue"), tests)
 	testSuite(t, dbio.Type("iceberg_s3"), tests)
 	testSuite(t, dbio.Type("iceberg_sql"), tests)
+}
+
+// TestSuiteDatabaseLanceDb runs the shared DB suite against a LanceDB
+// namespace. Every excluded case depends on the `[table]_vw` view that test 9
+// creates: 10 and 11 discover it, 13 reads it, 19 reads the postgres copy of it
+// (`[table]_pg_vw`), and 22 drops `[table]_vw_pg`. The lance extension keeps
+// views in the session only (CREATE VIEW succeeds but the view is not written
+// into the namespace), so those five cannot pass for any LanceDB target.
+func TestSuiteDatabaseLanceDb(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbLanceDB, "1-9,12,14-18,20-21,23-29")
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {

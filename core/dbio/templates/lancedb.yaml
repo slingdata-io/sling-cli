@@ -1,0 +1,395 @@
+# LanceDB template. LanceDB datasets are served by the DuckDB `lance`
+# extension: the namespace root is ATTACHed as a DuckDB catalog, so the SQL
+# dialect, type mapping and merge strategies are DuckDB's. Metadata queries are
+# scoped to `current_database()` (the attached namespace) so that the in-memory
+# catalog holding sling's temp tables is not reported as part of the database.
+# Note: the extension keeps `create view` in the session only (nothing is written
+# into the namespace, and the Lance namespace spec has no view operations), so a
+# view does not survive the connection that created it.
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
+  create_table: create table if not exists {table} ({col_types})
+  create_temporary_table: create temp table if not exists {table} ({col_types})
+  replace: replace into {table} ({names}) values({values})
+  truncate_table: delete from {table}
+  insert_option: ""
+  modify_column: 'alter {column} type {type}'
+  select_stream_scanner: select {fields} from {stream_scanner} {where}
+  export_to_local: |
+    COPY (
+      select {select_expr}
+      from {table}
+    ) TO '{local_path}'
+    (
+      format '{format}', overwrite true, {file_size_bytes_expr} {file_extension_expr}
+      compression '{compression}'
+    )
+  export_to_local_partitions: |
+    COPY (
+      select
+        {select_expr},
+        {partition_expressions}
+      from {table}
+    ) TO '{local_path}'
+    (
+      format '{format}', {file_size_bytes_expr} {file_extension_expr}
+      compression '{compression}',
+      overwrite true,
+      write_partition_columns {write_partition_columns},
+      partition_by ( {partition_columns} )
+    )
+
+  # The lance extension cannot plan DELETE or UPDATE statements that read a
+  # second table (`unsupported DELETE plan: expected 1 child, got 2`), so every
+  # strategy is expressed as a single MERGE INTO, which it does support.
+  merge_insert: |
+    MERGE INTO {tgt_table} AS tgt
+    USING {src_table} AS src
+    ON {src_tgt_pk_equal}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_update: |
+    MERGE INTO {tgt_table} AS tgt
+    USING {src_table} AS src
+    ON {src_tgt_pk_equal}
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} AS tgt
+    USING {src_table} AS src
+    ON {src_tgt_pk_equal}
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  # matched rows are updated in place rather than deleted and re-inserted: the
+  # DELETE ... WHERE EXISTS form cannot be planned by the lance extension, and
+  # the end state is the same (every non-PK column is overwritten from source).
+  merge_delete_insert: |
+    MERGE INTO {tgt_table} AS tgt
+    USING {src_table} AS src
+    ON {src_tgt_pk_equal}
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_change_capture: |
+    MERGE INTO {tgt_table} AS tgt
+    USING (
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) WHERE _rn = 1
+    ) AS src
+    ON {src_tgt_pk_equal}
+    WHEN MATCHED AND src._sling_synced_op = 'D' THEN DELETE
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_change_capture_soft: |
+    MERGE INTO {tgt_table} AS tgt
+    USING (
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) WHERE _rn = 1
+    ) AS src
+    ON {src_tgt_pk_equal}
+    WHEN MATCHED AND src._sling_synced_op = 'D' AND COALESCE(tgt._sling_synced_op, '') != 'D'
+      THEN UPDATE SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
+    WHEN MATCHED AND src._sling_synced_op != 'D' THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED AND src._sling_synced_op != 'D' THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  # the lance extension does not support ALTER TABLE ADD CONSTRAINT
+  add_foreign_key: null
+
+  # Column comment/description template
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+
+  # Table comment/description template
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
+metadata:
+  databases: PRAGMA database_list
+  
+  current_database: PRAGMA database_list
+
+  schemas: |
+    select distinct schema_name
+    from information_schema.schemata
+    order by schema_name
+
+  tables: |
+    select table_schema as schema_name, table_name, 'false' as is_view
+    from information_schema.tables
+    where table_type = 'BASE TABLE'
+      and table_catalog = current_database()
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
+
+
+  views: |
+    select table_schema as schema_name, table_name, 'true' as is_view
+    from information_schema.tables
+    where table_type in ('VIEW')
+      and table_catalog = current_database()
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
+
+  columns: |
+    select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
+    from information_schema.columns
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+    order by ordinal_position
+
+  primary_keys: |
+    select '{table}.key' as pk_name,
+           constraint_index as position,
+           replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
+    from duckdb_constraints()
+    where schema_name = '{schema}'
+      and table_name = '{table}'
+      and constraint_type = 'PRIMARY KEY'
+  
+  # Use expressions column cast to array and unnest to extract column names
+  indexes: |
+    SELECT
+      index_name,
+      unnest(expressions::VARCHAR[]) AS column_name,
+      CASE WHEN is_unique THEN 'true' ELSE 'false' END AS is_unique
+    FROM duckdb_indexes()
+    WHERE schema_name = '{schema}'
+      AND table_name = '{table}'
+
+  columns_full: |
+    with tables_cte as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then true
+          when 'FOREIGN' then true
+          else false
+        end as is_view
+      from information_schema.tables
+      where table_schema = '{schema}'
+        and table_name = '{table}'
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables_cte
+      on tables_cte.table_schema = cols.table_schema
+      and tables_cte.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+  
+  schemata: |
+    with tables_cte as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then true
+          else false
+        end as is_view
+      from information_schema.tables
+      where table_catalog = current_database()
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      tables_cte.is_view as is_view,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables_cte
+      on tables_cte.table_schema = cols.table_schema
+      and tables_cte.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+  
+  ddl_table: |
+    PRAGMA table_info('{schema}.{table}')
+  
+  ddl_view: |
+    PRAGMA table_info('{schema}.{table}')
+
+  # Extended column attributes for schema migration
+  columns_extended: |
+    SELECT
+      c.column_name,
+      CASE WHEN c.is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable,
+      c.column_default AS default_value,
+      'false' AS is_auto_increment,
+      '1' AS identity_seed,
+      '1' AS identity_increment,
+      CASE WHEN pk.column_name IS NOT NULL THEN 'true' ELSE 'false' END AS is_primary_key,
+      CAST(NULL AS VARCHAR) AS description
+    FROM information_schema.columns c
+    LEFT JOIN (
+      SELECT replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') AS column_name
+      FROM duckdb_constraints()
+      WHERE schema_name = '{schema}'
+        AND table_name = '{table}'
+        AND constraint_type = 'PRIMARY KEY'
+    ) pk ON lower(pk.column_name) = lower(c.column_name)
+    WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
+    ORDER BY c.ordinal_position
+
+  # Foreign key relationships (DuckDB enforces these!)
+  # Uses native constraint columns instead of regex parsing for reliability
+  foreign_keys: |
+    SELECT
+      dc.constraint_name,
+      unnest(dc.constraint_column_names) AS column_name,
+      split_part(dc.constraint_text, 'REFERENCES ', 2)::VARCHAR AS ref_part,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON DELETE ([A-Z ]+)', 1), 'NO ACTION') AS on_delete,
+      COALESCE(regexp_extract(dc.constraint_text, 'ON UPDATE ([A-Z ]+)', 1), 'NO ACTION') AS on_update,
+      unnest(dc.constraint_column_names) AS fk_column,
+      split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 1) AS referenced_schema,
+      split_part(split_part(split_part(dc.constraint_text, 'REFERENCES ', 2), '.', 2), '(', 1) AS referenced_table,
+      unnest(regexp_extract_all(dc.constraint_text, 'REFERENCES [^(]+\(([^)]+)\)')) AS referenced_column
+    FROM duckdb_constraints() dc
+    WHERE dc.schema_name = '{schema}'
+      AND dc.table_name = '{table}'
+      AND dc.constraint_type = 'FOREIGN KEY'
+
+  # Extended table attributes for schema migration
+  # Note: DuckDB comments are retrieved from duckdb_tables()
+  table_extended: |
+    SELECT CAST(NULL AS VARCHAR) AS description
+
+analysis:
+  chars: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field, sum(case when {field}::text ~ '\n' then 1 else 0 end) as cnt_nline, 
+      sum(case when {field}::text ~ '\t' then 1 else 0 end) as cnt_tab, 
+      sum(case when {field}::text ~ ',' then 1 else 0 end) as cnt_comma, 
+      sum(case when {field}::text ~ '"' then 1 else 0 end) as cnt_dquote, 
+      min(length({field}::text)) as f_min_len, 
+      max(length({field}::text)) as f_max_len
+    from "{schema}"."{table}"
+
+  fields: |
+  fields_deep: |
+  fields_distro: |
+  fields_distro_group: |
+  fields_date_distro: |
+  fields_date_distro_wide: |
+  fields_group: |
+
+function:
+  sleep: select sqlite3_sleep({seconds}*1000)
+  checksum_datetime: CAST((epoch({field}) || substr(strftime({field}, '%f'),4) ) as bigint)
+  checksum_decimal: 'abs(cast({field} as bigint))'
+  checksum_boolean: 'length({field}::string)'
+  cast_to_text: 'cast({field} as text)'
+
+  iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
+  delta_scanner: delta_scan('{uri}')
+  parquet_scanner: read_parquet([{uris}]{filename_expr})
+  # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
+  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
+
+variable:
+  # DuckDB default is delete_insert as it's more reliable
+  default_merge_strategy: delete_insert
+  bool_as: integer
+  bind_string: ${c}
+  batch_rows: 50
+  batch_values: 1000
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000-07:00'
+  max_string_type: text
+  max_string_length: 2147483647
+
+native_type_map:
+  bigint: bigint
+  binary: binary
+  blob: binary
+  boolean: bool
+  char: string
+  date: date
+  datetime: datetime
+  decimal: decimal
+  double: float
+  enum: string
+  float: float
+  geometry: geometry
+  hugeint: bigint
+  integer: integer
+  interval: string
+  json: json
+  list: text
+  map: json
+  smallint: smallint
+  struct: json
+  text: text
+  time: time
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  tinyblob: text
+  tinyint: smallint
+  ubigint: bigint
+  uinteger: bigint
+  usmallint: integer
+  utinyint: integer
+  uuid: uuid
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: binary
+  bool: bool
+  date: date
+  datetime: datetime
+  decimal: "decimal(,)"
+  float: double
+  geometry: geometry
+  integer: integer
+  json: json
+  smallint: smallint
+  string: "varchar()"
+  text: text
+  time: time
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: time
+  uuid: uuid
+
+# Schema migration: default value translation between native and generalized forms
+default_value_map:
+  to_general:
+    "current_timestamp": "current_timestamp"
+    "CURRENT_TIMESTAMP": "current_timestamp"
+    "now()": "current_timestamp"
+    "current_date": "current_date"
+    "CURRENT_DATE": "current_date"
+    "current_time": "current_time"
+    "CURRENT_TIME": "current_time"
+    "gen_random_uuid()": "uuid()"
+    "uuid()": "uuid()"
+    "true": "true"
+    "false": "false"
+  from_general:
+    "current_timestamp": "current_timestamp"
+    "current_timestamp_utc": "current_timestamp"
+    "current_date": "current_date"
+    "current_time": "current_time"
+    "uuid()": "gen_random_uuid()"
+    "true": "true"
+    "false": "false"
+    "null": "NULL"

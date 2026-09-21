@@ -320,6 +320,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "iceberg:") {
 		conn = &IcebergConn{URL: URL}
+	} else if strings.HasPrefix(URL, "lancedb:") {
+		conn = &LanceDBConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
@@ -382,7 +384,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "databricks"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB:
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer:
 		driverName = "sqlserver"
