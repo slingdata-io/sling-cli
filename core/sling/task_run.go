@@ -392,7 +392,17 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		t.AddCleanupTaskLast(func() { srcConn.Close() })
 	}
 
-	if t.isIncrementalStateWithUpdateKey() {
+	if t.isIncrementalChangeTracking() {
+		if os.Getenv("SLING_STATE") != "" {
+			if err = getIncrementalValueViaState(t); err != nil {
+				err = g.Error(err, "Could not get incremental value")
+				return err
+			}
+			t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+		} else {
+			return g.Error("Please use the SLING_STATE environment variable for writing change tracking delta to files incrementally")
+		}
+	} else if t.isIncrementalStateWithUpdateKey() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
@@ -428,13 +438,20 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
 
-	if err = t.df.Err(); err != nil {
-		err = g.Error(err, "Error running runDbToFile")
+	if t.df.Err() != nil {
+		err = g.Error(t.df.Err(), "Error running runDbToFile")
+		return
 	}
 
-	if cnt > 0 && t.hasStateWithUpdateKey() {
-		if err = setIncrementalValueViaState(t); err != nil {
-			err = g.Error(err, "Could not set incremental value")
+	if t.pendingCTVersion > 0 {
+		t.Config.IncrementalVal = t.pendingCTVersion
+		t.Config.IncrementalValStr = cast.ToString(t.pendingCTVersion)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+	}
+
+	if (cnt > 0 && t.hasStateWithUpdateKey()) || (t.isIncrementalChangeTracking() && os.Getenv("SLING_STATE") != "") {
+		if serr := setIncrementalValueViaState(t); serr != nil {
+			err = g.Error(serr, "Could not set incremental value")
 			return err
 		}
 	}
@@ -844,7 +861,25 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// get watermark
-	if t.isIncrementalStateWithUpdateKey() {
+	if t.isIncrementalChangeTracking() {
+		if os.Getenv("SLING_STATE") != "" {
+			if err = getIncrementalValueViaState(t); err != nil {
+				err = g.Error(err, "Could not get incremental value")
+				return err
+			}
+			t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+		} else {
+			if t.Config.Target.Options == nil || t.Config.Target.Options.MergeStrategy == nil || *t.Config.Target.Options.MergeStrategy != database.MergeStrategyChangeCaptureSoft {
+				return g.Error("change tracking without SLING_STATE requires target merge_strategy 'change_capture_soft' so deleted records preserve the watermark sequence in the target table; please configure SLING_STATE or set target option 'merge_strategy: change_capture_soft'")
+			}
+			t.SetProgress("getting checkpoint value (change tracking)")
+			if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
+				err = g.Error(err, "Could not get incremental value")
+				return err
+			}
+			t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+		}
+	} else if t.isIncrementalStateWithUpdateKey() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
@@ -893,11 +928,18 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error running runDbToDb")
+		return
 	}
 
-	if cnt > 0 && t.hasStateWithUpdateKey() {
-		if err = setIncrementalValueViaState(t); err != nil {
-			err = g.Error(err, "Could not set incremental value")
+	if t.pendingCTVersion > 0 {
+		t.Config.IncrementalVal = t.pendingCTVersion
+		t.Config.IncrementalValStr = cast.ToString(t.pendingCTVersion)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+	}
+
+	if (cnt > 0 && t.hasStateWithUpdateKey()) || (t.isIncrementalChangeTracking() && os.Getenv("SLING_STATE") != "") {
+		if serr := setIncrementalValueViaState(t); serr != nil {
+			err = g.Error(serr, "Could not set incremental value")
 			return err
 		}
 	}

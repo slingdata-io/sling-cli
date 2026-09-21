@@ -352,7 +352,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.UpdateKey != "" {
+		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.UpdateKey != "" || cfg.Source.IsChangeTracking() {
 			cfg.Mode = IncrementalMode
 		} else {
 			cfg.Mode = FullRefreshMode
@@ -362,6 +362,11 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode, DefinitionOnlyMode, ChangeCaptureMode)
 	if !validMode {
 		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot, truncate, definition-only, or change-capture")
+		return
+	}
+
+	if cfg.Source.IsChangeTracking() && cfg.Mode != IncrementalMode {
+		err = g.Error("change tracking is only supported with mode 'incremental', got: %s", cfg.Mode)
 		return
 	}
 
@@ -380,6 +385,16 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			// OK, no need for update key
 		} else if srcApiProvided {
 			// OK, no need for update key/pk, API uses SLING_STATE for tracking
+		} else if cfg.Source.IsChangeTracking() {
+			srcType := cfg.SrcConn.Info().Type
+			if srcType == "" {
+				srcType = cfg.SrcConn.Type
+			}
+			if !srcType.IsSQLServer() {
+				err = g.Error("change tracking is only supported for SQL Server sources, got: %s", srcType)
+				return
+			}
+			// OK, SQL Server change tracking uses versions, no update key required
 		} else if srcFileProvided && cfg.Source.UpdateKey == env.ReservedFields.LoadedAt {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
@@ -1596,6 +1611,14 @@ func (cfg *Config) CDCSlotLevel() database.CDCSlotLevel {
 	return level
 }
 
+func (cfg *Config) IsChangeTracking() bool {
+	return cfg != nil && cfg.Source.IsChangeTracking()
+}
+
+func (cfg *Config) AutoFullRefresh() bool {
+	return cfg != nil && cfg.Source.AutoFullRefresh()
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug   bool `json:"debug,omitempty" yaml:"debug,omitempty"`
@@ -1679,6 +1702,14 @@ func (s *Source) MD5() string {
 	return g.MD5(payload)
 }
 
+func (s *Source) IsChangeTracking() bool {
+	return s != nil && s.Options != nil && s.Options.IsChangeTracking()
+}
+
+func (s *Source) AutoFullRefresh() bool {
+	return s != nil && s.Options != nil && s.Options.IsAutoFullRefresh()
+}
+
 // Target is a target of data
 type Target struct {
 	Conn    string         `json:"conn,omitempty" yaml:"conn,omitempty"`
@@ -1741,10 +1772,59 @@ type SourceOptions struct {
 	ChunkExpr      *string             `json:"chunk_expr,omitempty" yaml:"chunk_expr,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
+	ChangeTracking  any `json:"change_tracking,omitempty" yaml:"change_tracking,omitempty"`
+	AutoFullRefresh any `json:"auto_full_refresh,omitempty" yaml:"auto_full_refresh,omitempty"`
+
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
 	Columns    any `json:"columns,omitempty" yaml:"columns,omitempty"`       // legacy
 	Transforms any `json:"transforms,omitempty" yaml:"transforms,omitempty"` // legacy
+}
+
+func (so *SourceOptions) IsChangeTracking() bool {
+	if so == nil || so.ChangeTracking == nil {
+		return false
+	}
+	switch v := so.ChangeTracking.(type) {
+	case bool:
+		return v
+	case string:
+		return cast.ToBool(v)
+	case map[string]any:
+		if enabledVal, ok := v["enabled"]; ok {
+			return cast.ToBool(enabledVal)
+		}
+		return len(v) > 0
+	case map[any]any:
+		for k, val := range v {
+			if cast.ToString(k) == "enabled" {
+				return cast.ToBool(val)
+			}
+		}
+		return len(v) > 0
+	default:
+		return cast.ToBool(v)
+	}
+}
+
+func (so *SourceOptions) IsAutoFullRefresh() bool {
+	if so == nil {
+		return false
+	}
+	if so.AutoFullRefresh != nil && cast.ToBool(so.AutoFullRefresh) {
+		return true
+	}
+	if so.ChangeTracking == nil {
+		return false
+	}
+	switch v := so.ChangeTracking.(type) {
+	case map[string]any:
+		return cast.ToBool(v["auto_full_refresh"])
+	case map[any]any:
+		return cast.ToBool(v["auto_full_refresh"])
+	default:
+		return false
+	}
 }
 
 func (so *SourceOptions) RangeStartEnd() (start, end string) {
@@ -2077,6 +2157,12 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.Transforms == nil {
 		o.Transforms = sourceOptions.Transforms // legacy
+	}
+	if o.ChangeTracking == nil {
+		o.ChangeTracking = sourceOptions.ChangeTracking
+	}
+	if o.AutoFullRefresh == nil {
+		o.AutoFullRefresh = sourceOptions.AutoFullRefresh
 	}
 
 }

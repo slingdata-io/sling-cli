@@ -1485,3 +1485,251 @@ func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.C
 
 	return selectStr
 }
+
+// CheckChangeTracking checks if Change Tracking is enabled on the database and table.
+func (conn *MsSQLServerConn) CheckChangeTracking(table Table) error {
+	_, _, err := conn.GetChangeTrackingVersions(table)
+	return err
+}
+
+// GetChangeTrackingVersions returns current database version and minimum valid version for the table.
+func (conn *MsSQLServerConn) GetChangeTrackingVersions(table Table) (currentVersion, minValidVersion int64, err error) {
+	escapedFDQN := strings.ReplaceAll(table.FDQN(), "'", "''")
+	q := fmt.Sprintf("SELECT DB_NAME(), CHANGE_TRACKING_CURRENT_VERSION(), CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID('%s'))", escapedFDQN)
+	ds, err := conn.Query(q)
+	if err != nil {
+		return 0, 0, g.Error(err, "could not query change tracking versions for %s", table.FDQN())
+	}
+	if len(ds.Rows) == 0 {
+		return 0, 0, g.Error("could not get change tracking versions for %s", table.FDQN())
+	}
+
+	dbName := cast.ToString(ds.Rows[0][0])
+	safeDbName := strings.ReplaceAll(dbName, "]", "]]")
+	if ds.Rows[0][1] == nil {
+		return 0, 0, g.Error("Change Tracking is not enabled on database '%s'. Enable with: ALTER DATABASE [%s] SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 2 DAYS, AUTO_CLEANUP = ON);", dbName, safeDbName)
+	}
+	if ds.Rows[0][2] == nil {
+		return 0, 0, g.Error("Change Tracking is not enabled on table '%s' (or caller lacks VIEW CHANGE TRACKING permission). Enable with: ALTER TABLE %s ENABLE CHANGE_TRACKING;", table.FDQN(), table.FDQN())
+	}
+
+	currentVersion = cast.ToInt64(ds.Rows[0][1])
+	minValidVersion = cast.ToInt64(ds.Rows[0][2])
+	return currentVersion, minValidVersion, nil
+}
+
+// GetTablePKColumns returns the list of primary key columns for a table.
+func (conn *MsSQLServerConn) GetTablePKColumns(table Table) ([]string, error) {
+	if table.Schema == "" {
+		if ds, err := conn.Query("SELECT SCHEMA_NAME()"); err == nil && len(ds.Rows) > 0 && len(ds.Rows[0]) > 0 {
+			table.Schema = cast.ToString(ds.Rows[0][0])
+		}
+		if table.Schema == "" {
+			table.Schema = "dbo"
+		}
+	}
+	ds, err := conn.GetPrimaryKeys(table.FDQN())
+	if err != nil {
+		return nil, g.Error(err, "could not get primary keys for %s", table.FDQN())
+	}
+	colIdx, ok := ds.Columns.FieldMap(true)["column_name"]
+	if !ok {
+		return nil, g.Error("column_name not found in primary keys result for %s", table.FDQN())
+	}
+	var pks []string
+	for _, row := range ds.Rows {
+		if colIdx < len(row) {
+			colName := cast.ToString(row[colIdx])
+			if colName != "" {
+				pks = append(pks, colName)
+			}
+		}
+	}
+	return pks, nil
+}
+
+// BuildChangeTrackingSnapshotSQL builds the initial snapshot query for SQL Server Change Tracking.
+// Note: When userWhere is provided, column predicates should be qualified with table alias 't'
+// (e.g. 't.status = 1') for consistency.
+func (conn *MsSQLServerConn) BuildChangeTrackingSnapshotSQL(table Table, pks []string, selectFields []string, currentVersion int64, userWhere string) string {
+	pkMap := make(map[string]bool)
+	for _, pk := range pks {
+		pkMap[strings.ToLower(conn.Unquote(pk))] = true
+	}
+
+	var selectedCols []string
+	addedPKs := make(map[string]bool)
+
+	if len(selectFields) == 0 || (len(selectFields) == 1 && selectFields[0] == "*") {
+		if len(table.Columns) == 0 && conn.db != nil {
+			if cols, err := conn.GetColumns(table.FDQN()); err == nil && len(cols) > 0 {
+				table.Columns = cols
+			}
+		}
+
+		if len(table.Columns) > 0 {
+			for _, col := range table.Columns {
+				colQ := conn.Quote(col.Name)
+				selectedCols = append(selectedCols, fmt.Sprintf("t.%s AS %s", colQ, colQ))
+				if pkMap[strings.ToLower(col.Name)] {
+					addedPKs[strings.ToLower(col.Name)] = true
+				}
+			}
+		} else {
+			selectedCols = append(selectedCols, "t.*")
+			for _, pk := range pks {
+				addedPKs[strings.ToLower(conn.Unquote(pk))] = true
+			}
+		}
+	} else {
+		for _, sf := range selectFields {
+			original, alias, _, _ := iop.ParseSelectExpr(sf)
+			origClean := conn.Unquote(original)
+			origQ := conn.Quote(origClean)
+			aliasQ := origQ
+			if alias != "" {
+				aliasQ = conn.Quote(conn.Unquote(alias))
+			}
+			selectedCols = append(selectedCols, fmt.Sprintf("t.%s AS %s", origQ, aliasQ))
+			if pkMap[strings.ToLower(origClean)] && (alias == "" || strings.EqualFold(conn.Unquote(alias), origClean)) {
+				addedPKs[strings.ToLower(origClean)] = true
+			}
+		}
+	}
+
+	// Always ensure all PK columns are present in select list
+	for _, pk := range pks {
+		cleanPK := conn.Unquote(pk)
+		if !addedPKs[strings.ToLower(cleanPK)] {
+			pkQ := conn.Quote(cleanPK)
+			selectedCols = append([]string{fmt.Sprintf("t.%s AS %s", pkQ, pkQ)}, selectedCols...)
+			addedPKs[strings.ToLower(cleanPK)] = true
+		}
+	}
+
+	// Metadata columns
+	selectedCols = append(selectedCols,
+		fmt.Sprintf("'I' AS [%s]", env.ReservedFields.SyncedOp),
+		fmt.Sprintf("CAST(%d AS BIGINT) AS [%s]", currentVersion, env.ReservedFields.CDCSeq),
+		fmt.Sprintf("SYSUTCDATETIME() AS [%s]", env.ReservedFields.SyncedAt),
+	)
+
+	whereClause := ""
+	if userWhere != "" {
+		whereClause = fmt.Sprintf(" WHERE %s", userWhere)
+	}
+
+	return fmt.Sprintf("SELECT %s\nFROM %s AS t%s",
+		strings.Join(selectedCols, ", "),
+		table.FDQN(),
+		whereClause,
+	)
+}
+
+// BuildChangeTrackingSelectSQL builds the query to fetch delta changes from SQL Server Change Tracking.
+// Note: When userWhere is provided, column predicates should be qualified with table alias 't'
+// (e.g. 't.status = 1') to prevent ambiguous column reference errors between base table 't' and CHANGETABLE 'ct'.
+func (conn *MsSQLServerConn) BuildChangeTrackingSelectSQL(table Table, pks []string, selectFields []string, lastVersion, currentVersion int64, userWhere string) string {
+	pkMap := make(map[string]bool)
+	for _, pk := range pks {
+		pkMap[strings.ToLower(conn.Unquote(pk))] = true
+	}
+
+	var selectedCols []string
+	addedPKs := make(map[string]bool)
+
+	if len(selectFields) == 0 || (len(selectFields) == 1 && selectFields[0] == "*") {
+		// Include all columns from table.
+		// Primary keys must come from ct (guaranteed present on deletes).
+		// Non-primary keys come from t (base table).
+		if len(table.Columns) == 0 && conn.db != nil {
+			if cols, err := conn.GetColumns(table.FDQN()); err == nil && len(cols) > 0 {
+				table.Columns = cols
+			}
+		}
+
+		if len(table.Columns) > 0 {
+			for _, col := range table.Columns {
+				colName := col.Name
+				colQ := conn.Quote(colName)
+				if pkMap[strings.ToLower(colName)] {
+					selectedCols = append(selectedCols, fmt.Sprintf("ct.%s AS %s", colQ, colQ))
+					addedPKs[strings.ToLower(colName)] = true
+				} else {
+					selectedCols = append(selectedCols, fmt.Sprintf("t.%s AS %s", colQ, colQ))
+				}
+			}
+		} else {
+			for _, pk := range pks {
+				pkQ := conn.Quote(conn.Unquote(pk))
+				selectedCols = append(selectedCols, fmt.Sprintf("ct.%s AS %s", pkQ, pkQ))
+				addedPKs[strings.ToLower(conn.Unquote(pk))] = true
+			}
+			selectedCols = append(selectedCols, "t.*")
+		}
+	} else {
+		for _, sf := range selectFields {
+			original, alias, _, _ := iop.ParseSelectExpr(sf)
+			origClean := conn.Unquote(original)
+			origQ := conn.Quote(origClean)
+			aliasQ := origQ
+			if alias != "" {
+				aliasQ = conn.Quote(conn.Unquote(alias))
+			}
+
+			if pkMap[strings.ToLower(origClean)] {
+				selectedCols = append(selectedCols, fmt.Sprintf("ct.%s AS %s", origQ, aliasQ))
+				if alias == "" || strings.EqualFold(conn.Unquote(alias), origClean) {
+					addedPKs[strings.ToLower(origClean)] = true
+				}
+			} else {
+				selectedCols = append(selectedCols, fmt.Sprintf("t.%s AS %s", origQ, aliasQ))
+			}
+		}
+	}
+
+	// Always ensure all PK columns are present in select list
+	for _, pk := range pks {
+		cleanPK := conn.Unquote(pk)
+		if !addedPKs[strings.ToLower(cleanPK)] {
+			pkQ := conn.Quote(cleanPK)
+			selectedCols = append([]string{fmt.Sprintf("ct.%s AS %s", pkQ, pkQ)}, selectedCols...)
+			addedPKs[strings.ToLower(cleanPK)] = true
+		}
+	}
+
+	firstPK := "id"
+	if len(pks) > 0 {
+		firstPK = conn.Quote(conn.Unquote(pks[0]))
+	}
+
+	// Metadata columns: treat row as delete if base table row is NULL (concurrent delete race condition)
+	selectedCols = append(selectedCols,
+		fmt.Sprintf("CASE WHEN t.%s IS NULL THEN 'D' ELSE ct.SYS_CHANGE_OPERATION END AS [%s]", firstPK, env.ReservedFields.SyncedOp),
+		fmt.Sprintf("ct.SYS_CHANGE_VERSION AS [%s]", env.ReservedFields.CDCSeq),
+		fmt.Sprintf("SYSUTCDATETIME() AS [%s]", env.ReservedFields.SyncedAt),
+	)
+
+	// Join condition
+	var joinConds []string
+	for _, pk := range pks {
+		pkQ := conn.Quote(conn.Unquote(pk))
+		joinConds = append(joinConds, fmt.Sprintf("ct.%s = t.%s", pkQ, pkQ))
+	}
+	joinStr := strings.Join(joinConds, " AND ")
+
+	// Where clause
+	whereClause := fmt.Sprintf("WHERE ct.SYS_CHANGE_VERSION <= %d", currentVersion)
+	if userWhere != "" {
+		whereClause += fmt.Sprintf(" AND (ct.SYS_CHANGE_OPERATION = 'D' OR (%s))", userWhere)
+	}
+
+	return fmt.Sprintf("SELECT %s\nFROM CHANGETABLE(CHANGES %s, %d) AS ct\nLEFT OUTER JOIN %s AS t ON %s\n%s\nORDER BY ct.SYS_CHANGE_VERSION",
+		strings.Join(selectedCols, ", "),
+		table.FDQN(),
+		lastVersion,
+		table.FDQN(),
+		joinStr,
+		whereClause,
+	)
+}
