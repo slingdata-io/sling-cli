@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1000,6 +1001,31 @@ func TestFileSysAzure(t *testing.T) {
 		assert.Greater(t, len(data2.Rows), 0)
 	}
 	// Delete(fs, writeFolderPath)
+}
+
+// TestFileSysGoogleADC reproduces https://github.com/slingdata-io/sling-cli/issues/808
+// A BigQuery connection with `gc_bucket` set creates a GCS client without any explicit
+// credential props, so it must fall back to Application Default Credentials.
+// Regression for "dialing: multiple credential options provided": storage.NewClient
+// appends WithAuthCredentials internally, which google.golang.org/api v0.258.0 counts
+// as a second credential option when sling also passes one.
+func TestFileSysGoogleADC(t *testing.T) {
+	// fake Application Default Credentials (no token is ever fetched)
+	adc := `{"type":"authorized_user","client_id":"fake.apps.googleusercontent.com","client_secret":"fake","refresh_token":"fake"}`
+	adcDir := t.TempDir()
+	adcFile := filepath.Join(adcDir, "application_default_credentials.json")
+	if !assert.NoError(t, os.WriteFile(adcFile, []byte(adc), 0600)) {
+		return
+	}
+	t.Setenv("CLOUDSDK_CONFIG", adcDir)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+	fs, err := NewFileSysClient(dbio.TypeFileGoogle, "BUCKET=some_bucket")
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer fs.Close()
+	assert.NotNil(t, fs.Client())
 }
 
 func TestFileSysGoogle(t *testing.T) {
