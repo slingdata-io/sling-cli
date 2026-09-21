@@ -940,6 +940,54 @@ azuretable:
       description: 'Specific table name for table-specific SAS tokens'
       examples: ['MyTable', 'LogData', 'UserData']
 
+firebolt:
+  title: 'Firebolt'
+  kind: database
+  required: ["host", "port", "database"]
+  url_template: 'firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}'
+  docs: https://docs.slingdata.io/connections/database-connections/firebolt
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: FIREBOLT_MAIN'
+      examples: ['FIREBOLT_MAIN', 'FIREBOLT_DEV', 'FB_ANALYTICS']
+    database:
+      type: text
+      description: 'The database name to run queries against'
+      examples: ['firebolt', 'mydb', 'analytics']
+      default: firebolt
+    host:
+      type: text
+      description: 'The hostname / ip of the engine, e.g.: my.engine.firebolt.io or 127.0.0.1 for a local Firebolt Core'
+      examples: ['127.0.0.1', 'my.engine.firebolt.io', 'firebolt.example.com']
+    username:
+      type: text
+      description: 'The username to access the instance. Not needed for Firebolt Core (no authentication)'
+      examples: ['myuser', 'admin']
+    password:
+      type: text
+      description: 'The password to access the instance. Not needed for Firebolt Core (no authentication)'
+      examples: ['mypassword123']
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      examples: ['3473']
+      default: 3473
+    secure:
+      type: dropdown
+      options: ['true', 'false']
+      title: Use HTTPS / TLS
+      examples: ['true', 'false']
+      default: 'false'
+    skip_verify:
+      type: dropdown
+      options: ['true', 'false']
+      title: Skip TLS certificate verification
+      examples: ['true', 'false']
+      default: 'false'
+
 ftp:
   title: 'FTP'
   kind: file

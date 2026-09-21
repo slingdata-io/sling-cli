@@ -122,6 +122,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbScyllaDB:          {name: "scylladb", schema: "sling"},
+	dbio.TypeDbFirebolt:          {name: "firebolt", schema: "sling_test"},
 
 	dbio.TypeFileLocal:       {name: "local"},
 	dbio.TypeFileSftp:        {name: "sftp"},
@@ -1310,6 +1311,11 @@ func TestSuiteDatabaseScylladb(t *testing.T) {
 	t.Parallel()
 	// skip SQL views/joins/range/delete_missing/merge update-delete (not CQL-compatible)
 	testSuite(t, dbio.TypeDbScyllaDB, "1,3-9,17,20,23-26")
+}
+
+func TestSuiteDatabaseFirebolt(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbFirebolt)
 }
 
 // rewriteScyllaDropSQL: add IF EXISTS and quote identifiers
