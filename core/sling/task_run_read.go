@@ -3,6 +3,7 @@ package sling
 import (
 	"bufio"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/flarco/g"
@@ -142,7 +143,133 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// make them return hex WKB so duckdb can parse them at export
 	selectFields = sTable.GeometryWKBFields(selectFields)
 
-	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
+	if t.isIncrementalChangeTracking() {
+		sqlServerConn, ok := srcConn.(*database.MsSQLServerConn)
+		if !ok {
+			return t.df, g.Error("change tracking is currently only supported for SQL Server sources, got: %s", srcConn.GetType())
+		}
+
+		// Change tracking requires a physical SQL Server table
+		if sTable.Name == "" || sTable.IsQuery() {
+			return t.df, g.Error("change tracking requires a physical SQL Server table, got: %s", t.Config.Source.Stream)
+		}
+
+		// Source limit is not supported with change tracking to prevent partial syncs and watermark loss
+		if cfg.Source.Limit() > 0 {
+			return t.df, g.Error("source limit is not supported with change tracking as it causes partial syncs and watermark loss")
+		}
+
+		// 1. Resolve & verify Primary Key from SQL Server
+		detectedPKs, err := sqlServerConn.GetTablePKColumns(sTable)
+		if err != nil {
+			return t.df, g.Error(err, "failed to discover primary key for table %s", sTable.FDQN())
+		}
+		if len(detectedPKs) == 0 {
+			return t.df, g.Error("SQL Server Change Tracking requires a primary key, but none was found for table %s", sTable.FDQN())
+		}
+
+		configuredPKs := cfg.Source.PrimaryKey()
+		if len(configuredPKs) > 0 {
+			detectedMap := make(map[string]bool)
+			for _, k := range detectedPKs {
+				detectedMap[strings.ToLower(k)] = true
+			}
+			for _, k := range configuredPKs {
+				if !detectedMap[strings.ToLower(k)] {
+					return t.df, g.Error("configured primary key %v does not match SQL Server primary key %v for table %s", configuredPKs, detectedPKs, sTable.FDQN())
+				}
+			}
+			if len(configuredPKs) != len(detectedPKs) {
+				return t.df, g.Error("configured primary key %v does not match SQL Server primary key %v for table %s", configuredPKs, detectedPKs, sTable.FDQN())
+			}
+		}
+		pks := detectedPKs
+		cfg.Source.PrimaryKeyI = pks
+
+		// Resolve table columns if not yet populated
+		if len(sTable.Columns) == 0 {
+			cols, err := sqlServerConn.GetColumns(sTable.FDQN())
+			if err != nil {
+				return t.df, g.Error(err, "failed to get columns for table %s", sTable.FDQN())
+			}
+			if len(cols) == 0 {
+				return t.df, g.Error("table %s has no columns", sTable.FDQN())
+			}
+			sTable.Columns = cols
+		}
+
+		// Spatial columns (geometry, geography) are not supported with Change Tracking
+		for _, col := range sTable.Columns {
+			if col.Type.IsGeometry() || strings.EqualFold(col.Type.String(), "geometry") || strings.EqualFold(col.Type.String(), "geography") {
+				return t.df, g.Error("SQL Server Change Tracking does not currently support spatial column '%s' in table %s", col.Name, sTable.FDQN())
+			}
+		}
+
+		// 2. Get change tracking versions from SQL Server (validates CT enabled on DB and table)
+		currVer, minValidVer, err := sqlServerConn.GetChangeTrackingVersions(sTable)
+		if err != nil {
+			return t.df, err
+		}
+
+		// 3. Determine last sync version
+		hasLastVer := cfg.IncrementalValStr != "" && cfg.IncrementalValStr != "null"
+		var lastVer int64 = 0
+		if hasLastVer {
+			trimmed := strings.Trim(cfg.IncrementalValStr, "\"' \t\r\n")
+			parsed, parseErr := strconv.ParseInt(trimmed, 10, 64)
+			if parseErr != nil || parsed < 0 {
+				return t.df, g.Error("invalid change tracking watermark value %q: must be a valid non-negative integer", cfg.IncrementalValStr)
+			}
+			lastVer = parsed
+		}
+
+		isSnapshot := false
+		if !hasLastVer {
+			isSnapshot = true
+		} else if lastVer > currVer {
+			if cfg.Source.AutoFullRefresh() {
+				g.Warn("change tracking version %d for table %s is newer than current database version %d (database may have been restored or reset); performing auto full refresh snapshot", lastVer, sTable.FDQN(), currVer)
+				g.Warn("change tracking auto full refresh performs an insert/upsert snapshot; deleted rows from source during retention expiration/reset are not automatically deleted from target. A manual full refresh or truncate is recommended if source deletes occurred.")
+				isSnapshot = true
+			} else {
+				return t.df, g.Error("change tracking version %d for table %s is newer than current database version %d (database may have been restored or change tracking was reset). A full refresh is required", lastVer, sTable.FDQN(), currVer)
+			}
+		} else if lastVer < minValidVer {
+			if cfg.Source.AutoFullRefresh() {
+				g.Warn("change tracking version %d for table %s is older than minimum valid version %d; performing auto full refresh snapshot", lastVer, sTable.FDQN(), minValidVer)
+				g.Warn("change tracking auto full refresh performs an insert/upsert snapshot; deleted rows from source during retention expiration/reset are not automatically deleted from target. A manual full refresh or truncate is recommended if source deletes occurred.")
+				isSnapshot = true
+			} else {
+				return t.df, g.Error("change tracking version %d for table %s is older than minimum valid version %d (retention expired). A full refresh is required", lastVer, sTable.FDQN(), minValidVer)
+			}
+		}
+
+		if isSnapshot {
+			t.SetProgress("reading snapshot for change tracking (version: %d)", currVer)
+			sTable.SQL = sqlServerConn.BuildChangeTrackingSnapshotSQL(sTable, pks, selectFields, currVer, cfg.Source.Where)
+		} else {
+			t.SetProgress("reading change tracking delta (versions %d -> %d)", lastVer, currVer)
+			sTable.SQL = sqlServerConn.BuildChangeTrackingSelectSQL(sTable, pks, selectFields, lastVer, currVer, cfg.Source.Where)
+		}
+
+		// Clear Where and reset selectFields since sTable.SQL already handled them
+		cfg.Source.Where = ""
+		selectFields = []string{"*"}
+
+		// Stage pending watermark version (promoted only upon successful write)
+		t.pendingCTVersion = currVer
+
+		// Target merge strategy validation and defaulting
+		if cfg.Target.Options == nil {
+			cfg.Target.Options = &TargetOptions{}
+		}
+		if cfg.Target.Options.MergeStrategy == nil {
+			strategy := database.MergeStrategyChangeCapture
+			cfg.Target.Options.MergeStrategy = &strategy
+		} else if *cfg.Target.Options.MergeStrategy != database.MergeStrategyChangeCapture && *cfg.Target.Options.MergeStrategy != database.MergeStrategyChangeCaptureSoft {
+			return t.df, g.Error("change tracking requires target merge_strategy 'change_capture' or 'change_capture_soft', got: %s", *cfg.Target.Options.MergeStrategy)
+		}
+	} else if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -295,7 +422,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// construct select statement for selected fields or where condition
-	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
+	if !t.isIncrementalChangeTracking() && (len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0) {
 		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() && !strings.Contains(sTable.SQL, "{fields}") {
 			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
 			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.

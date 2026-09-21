@@ -39,12 +39,13 @@ type TaskExecution struct {
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
 	OutputLines   chan *g.LogLine
 
-	Replication    *ReplicationConfig `json:"replication"`
-	ProgressHist   []string           `json:"progress_hist"`
-	PBar           *ProgressBar       `json:"-"`
-	ProcStatsStart g.ProcStats        `json:"-"` // process stats at beginning
-	cleanupFuncs   []func()
-	cleanedUp      bool
+	Replication      *ReplicationConfig `json:"replication"`
+	ProgressHist     []string           `json:"progress_hist"`
+	PBar             *ProgressBar       `json:"-"`
+	ProcStatsStart   g.ProcStats        `json:"-"` // process stats at beginning
+	cleanupFuncs     []func()
+	cleanedUp        bool
+	pendingCTVersion int64
 }
 
 // ExecutionStatus is an execution status object
@@ -477,6 +478,11 @@ func IsStateConfigured() bool {
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode
 func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
+}
+
+// isIncrementalChangeTracking means it is change tracking and incremental mode
+func (t *TaskExecution) isIncrementalChangeTracking() bool {
+	return t.Config.IsChangeTracking() && t.Config.Mode == IncrementalMode
 }
 
 // isFullRefreshWithState means with provided sling state and is full-refresh mode

@@ -230,8 +230,11 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 	}
 
 	tgtUpdateKey := cfg.Source.UpdateKey
-	if cc := cfg.Target.Options.ColumnCasing; cc != nil {
-		tgtUpdateKey = cc.Apply(tgtUpdateKey, tgtConn.GetType())
+	if cfg.Source.IsChangeTracking() {
+		tgtUpdateKey = env.ReservedFields.CDCSeq
+	}
+	if cfg.Target.Options != nil && cfg.Target.Options.ColumnCasing != nil {
+		tgtUpdateKey = cfg.Target.Options.ColumnCasing.Apply(tgtUpdateKey, tgtConn.GetType())
 	}
 
 	// get target columns to match update-key
@@ -241,6 +244,9 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
 		return // target columns does not exist
+	} else if cfg.Source.IsChangeTracking() {
+		// target table exists but has no _sling_cdc_seq yet (initial load)
+		return nil
 	}
 
 	// get target columns to match update-key
@@ -249,6 +255,13 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 	cfg.IncrementalVal, maxCol, err = tgtConn.GetMaxValue(table, tgtUpdateKey)
 	if err != nil {
 		return g.Error(err, "could not get incremental value")
+	}
+
+	if cfg.Source.IsChangeTracking() {
+		if cfg.IncrementalVal != nil {
+			cfg.IncrementalValStr = cast.ToString(cfg.IncrementalVal)
+		}
+		return nil
 	}
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
