@@ -612,13 +612,16 @@ var indexCapabilities = map[dbio.Type]indexCapability{
 	dbio.TypeDbBigQuery: {noIndexes: true},
 	// StarRocks indexes (BITMAP/inverted) only apply to specific column/table
 	// models and don't fit the generic CREATE INDEX form; no-op for now.
-	dbio.TypeDbStarRocks: {noIndexes: true},
+	dbio.TypeDbStarRocks:  {noIndexes: true},
 	dbio.TypeDbDuckDb:     {supportsUnique: true},
 	dbio.TypeDbMotherDuck: {supportsUnique: true},
 	dbio.TypeDbDuckLake:   {noIndexes: true}, // DuckLake does not support indexes
 	dbio.TypeDbLanceDB:    {noIndexes: true}, // Lance datasets have no secondary indexes
 	dbio.TypeDbOracle:     {supportsUnique: true, supportsType: true, typeClosedSet: []string{"bitmap"}},
 	dbio.TypeDbSQLite:     {supportsWhere: true, supportsUnique: true},
+	// Firebolt has no plain secondary index: only specialized FULL_TEXT /
+	// INVERTED_INDEX / HNSW / SKIP_INDEX, which don't fit the generic form.
+	dbio.TypeDbFirebolt: {noIndexes: true},
 }
 
 var indexCapDefault = indexCapability{supportsUnique: true}

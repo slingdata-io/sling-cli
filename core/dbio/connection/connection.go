@@ -1099,6 +1099,16 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("keyspace", "")
 		template = "scylladb://{username}:{password}@{host}:{port}/{keyspace}"
+	case dbio.TypeDbFirebolt:
+		// Firebolt Core has no authentication; username/password stay optional
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("database", "firebolt")
+		setIfMissing("schema", "public")
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
+		template = "firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
