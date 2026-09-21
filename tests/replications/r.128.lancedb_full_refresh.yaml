@@ -1,0 +1,12 @@
+# LanceDB full refresh from a local CSV. CLI test 617 creates the LANCEDB_TEST
+# connection (a temp namespace directory) before running this file.
+source: LOCAL
+target: LANCEDB_TEST
+
+defaults:
+  mode: full-refresh
+
+streams:
+  file://tests/files/test1.csv:
+    object: main.lancedb_cli_test
+    primary_key: [id]

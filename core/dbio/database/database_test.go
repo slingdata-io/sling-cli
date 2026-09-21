@@ -2258,3 +2258,163 @@ func TestIcebergDuckMergeSQLFromTemplates(t *testing.T) {
 	_, err = conn.duckMergeSQL(tgt, src, cols, nil, MergeStrategyDeleteInsert)
 	require.Error(t, err)
 }
+
+func newTestLanceDBConn(t *testing.T, props map[string]string) *LanceDBConn {
+	t.Helper()
+	conn := &LanceDBConn{}
+	conn.setContext(context.Background(), 1)
+	for k, v := range props {
+		conn.SetProp(k, v)
+	}
+	return conn
+}
+
+// The namespace root comes from `path`, with `instance` as an alias. It must
+// never reach DuckDB as the process's database file.
+func TestLanceDBConnNamespaceRoot(t *testing.T) {
+	err := newTestLanceDBConn(t, nil).Init()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "'path'")
+
+	conn := newTestLanceDBConn(t, map[string]string{"instance": "/data/lancedb"})
+	require.NoError(t, conn.Init())
+	assert.Equal(t, "/data/lancedb", conn.Path)
+	assert.Empty(t, conn.GetProp("instance"))
+	assert.Equal(t, "ATTACH IF NOT EXISTS '/data/lancedb' AS lancedb (TYPE lance)", conn.buildAttachSQL())
+}
+
+// The DuckDB CLI cannot open an in-memory database read-only, and the lance
+// extension rejects a READ_ONLY attach, so the property is refused up front.
+func TestLanceDBConnReadOnlyRefused(t *testing.T) {
+	conn := newTestLanceDBConn(t, map[string]string{"path": "/data/lancedb", "read_only": "true"})
+	err := conn.Init()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read_only")
+}
+
+func TestLanceDBConnAttachSQLQuoting(t *testing.T) {
+	conn := newTestLanceDBConn(t, map[string]string{"path": "/data/my'db"})
+	require.NoError(t, conn.Init())
+	assert.Equal(t, "ATTACH IF NOT EXISTS '/data/my''db' AS lancedb (TYPE lance)", conn.buildAttachSQL())
+}
+
+// Only the schemes the lance extension serves are mapped to a secret family;
+// everything else is passed through so the extension reports it.
+func TestLanceDBConnObjectStore(t *testing.T) {
+	tests := []struct {
+		path        string
+		scheme      string
+		scope       string
+		objectStore bool
+	}{
+		{path: "/data/lancedb", scheme: "", scope: "/data/lancedb"},
+		{path: "./data/lancedb", scheme: "", scope: "./data/lancedb"},
+		{path: "file:///data/lancedb", scheme: "file", scope: "file:///"},
+		{path: "s3://my-bucket/lancedb", scheme: "s3", scope: "s3://my-bucket/", objectStore: true},
+		{path: "s3a://my-bucket/nested/lancedb", scheme: "s3", scope: "s3a://my-bucket/", objectStore: true},
+		{path: "gs://my-bucket/lancedb", scheme: "gs", scope: "gs://my-bucket/", objectStore: true},
+		{
+			path:        "abfss://container@acct.dfs.core.windows.net/lancedb",
+			scheme:      "az",
+			scope:       "abfss://container@acct.dfs.core.windows.net/",
+			objectStore: true,
+		},
+		{path: "r2://my-bucket/lancedb", scheme: "r2", scope: "r2://my-bucket/", objectStore: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			conn := newTestLanceDBConn(t, map[string]string{"path": tt.path})
+			require.NoError(t, conn.Init())
+			assert.Equal(t, tt.scheme, conn.objectStoreScheme())
+			assert.Equal(t, tt.objectStore, conn.isObjectStore())
+			assert.Equal(t, tt.scope, conn.lanceScope())
+		})
+	}
+}
+
+// A secret is built for the object stores whose credentials sling can supply.
+// The keys are the ones the lance extension's secret provider accepts, and the
+// scope covers the bucket so that every dataset below it matches.
+func TestLanceDBConnSecrets(t *testing.T) {
+	conn := newTestLanceDBConn(t, map[string]string{
+		"path":                 "s3://my-bucket/lancedb",
+		"s3_access_key_id":     "AKIAEXAMPLE",
+		"s3_secret_access_key": "secret",
+		"s3_session_token":     "token",
+		"s3_region":            "us-east-1",
+		"s3_endpoint":          "http://localhost:9000",
+	})
+	require.NoError(t, conn.Init())
+
+	secret, ok := conn.makeSecret()
+	require.True(t, ok)
+	assert.Equal(t, "lance_secret", secret.Name)
+	assert.Equal(t, iop.DuckDbSecretType("lance"), secret.Type)
+	assert.Equal(t, "s3://my-bucket/", secret.Props["scope"])
+	assert.Equal(t, "config", secret.Props["provider"])
+	assert.Equal(t, "AKIAEXAMPLE", secret.Props["access_key_id"])
+	assert.Equal(t, "secret", secret.Props["secret_access_key"])
+	assert.Equal(t, "token", secret.Props["session_token"])
+	assert.Equal(t, "us-east-1", secret.Props["region"])
+	assert.Equal(t, "http://localhost:9000", secret.Props["endpoint"])
+	assert.Equal(t, "true", secret.Props["allow_http"])
+
+	// without explicit keys, the upstream credential chain is used
+	fallback := newTestLanceDBConn(t, map[string]string{"path": "s3://my-bucket/lancedb"})
+	require.NoError(t, fallback.Init())
+	secret, ok = fallback.makeSecret()
+	require.True(t, ok)
+	assert.Equal(t, "credential_chain", secret.Props["provider"])
+	assert.NotContains(t, secret.Props, "access_key_id")
+
+	azure := newTestLanceDBConn(t, map[string]string{
+		"path":                "az://my-container/lancedb",
+		"azure_account_name":  "acct",
+		"azure_account_key":   "a2V5",
+		"azure_sas_token":     "?sv=2024",
+		"azure_tenant_id":     "tenant",
+		"azure_client_id":     "client",
+		"azure_client_secret": "client-secret",
+	})
+	require.NoError(t, azure.Init())
+	secret, ok = azure.makeSecret()
+	require.True(t, ok)
+	assert.Equal(t, "az://my-container/", secret.Props["scope"])
+	assert.Equal(t, "acct", secret.Props["account_name"])
+	assert.Equal(t, "a2V5", secret.Props["account_key"])
+
+	// SAS is only used when there is no account key
+	sas := newTestLanceDBConn(t, map[string]string{
+		"path":               "abfss://container@acct.dfs.core.windows.net/lancedb",
+		"azure_account_name": "acct",
+		"azure_sas_token":    "?sv=2024",
+	})
+	require.NoError(t, sas.Init())
+	secret, ok = sas.makeSecret()
+	require.True(t, ok)
+	assert.Equal(t, "abfss://container@acct.dfs.core.windows.net/", secret.Props["scope"])
+	assert.Equal(t, "sv=2024", secret.Props["sas_token"])
+	assert.NotContains(t, secret.Props, "account_key")
+
+	gcs := newTestLanceDBConn(t, map[string]string{
+		"path":         "gs://my-bucket/lancedb",
+		"gcs_key_file": "/tmp/gcs.json",
+	})
+	require.NoError(t, gcs.Init())
+	secret, ok = gcs.makeSecret()
+	require.True(t, ok)
+	assert.Equal(t, "config", secret.Props["provider"])
+	assert.Equal(t, "/tmp/gcs.json", secret.Props["google_application_credentials"])
+}
+
+// Object stores outside the s3 / gs / az families resolve their own
+// credentials, so no secret is registered for them.
+func TestLanceDBConnSecretSkippedForOtherStores(t *testing.T) {
+	for _, path := range []string{"oss://my-bucket/lancedb", "hf://datasets/org/repo", "r2://my-bucket/lancedb"} {
+		conn := newTestLanceDBConn(t, map[string]string{"path": path})
+		require.NoError(t, conn.Init())
+		_, ok := conn.makeSecret()
+		assert.False(t, ok, path)
+	}
+}
