@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
@@ -2772,4 +2773,536 @@ func TestDbaseTrimSpacesProp(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, data.Rows, 1)
 	assert.Equal(t, "TEST PRODUCT        ", data.Rows[0][0])
+}
+
+// ---------------------------------------------------------------------------
+// DynamoDB
+// ---------------------------------------------------------------------------
+
+// sling renders a select into a JSON scan descriptor, but a table name or a
+// `select ... from <table>` can reach the connector as well.
+func TestDynamoDBScanRef(t *testing.T) {
+	cases := []struct {
+		name     string
+		ref      string
+		table    string
+		descr    map[string]any
+		errMatch string
+	}{
+		{
+			name:  "table name",
+			ref:   "my_table",
+			table: "my_table",
+		},
+		{
+			name:  "schema qualified table name",
+			ref:   "default.my_table",
+			table: "default.my_table",
+		},
+		{
+			name:  "scan descriptor",
+			ref:   `{"table": "my_table", "filter": {"code": {"$gt": 5}}, "fields": ["id"], "limit": 10}`,
+			table: "my_table",
+			descr: map[string]any{
+				"table":  "my_table",
+				"filter": map[string]any{"code": map[string]any{"$gt": float64(5)}},
+				"fields": []any{"id"},
+				"limit":  float64(10),
+			},
+		},
+		{
+			name:  "scan descriptor with sql markers",
+			ref:   `{"table": "my_table", "limit": 1} /* GetSQLColumns */  /* nD */`,
+			table: "my_table",
+			descr: map[string]any{"table": "my_table", "limit": float64(1)},
+		},
+		{
+			name:     "scan descriptor without table",
+			ref:      `{"limit": 10}`,
+			errMatch: "missing the table",
+		},
+		{
+			name:  "select with fields and limit",
+			ref:   "select id, name from my_table limit 5",
+			table: "my_table",
+			descr: map[string]any{
+				"table":  "my_table",
+				"fields": []string{"id", "name"},
+				"limit":  5,
+			},
+		},
+		{
+			name:  "select star",
+			ref:   "SELECT * FROM `my_table`;",
+			table: "my_table",
+			descr: map[string]any{"table": "my_table"},
+		},
+		{
+			name:     "select with where",
+			ref:      "select id from my_table where rating > 5",
+			errMatch: "`WHERE` cannot be applied",
+		},
+		{
+			name:     "select with order by",
+			ref:      "select id from my_table order by id",
+			errMatch: "`ORDER BY` cannot be applied",
+		},
+		{
+			name:     "empty reference",
+			ref:      "  ",
+			errMatch: "no table specified",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table, descr, err := dynamoDBScanRef(tc.ref)
+			if tc.errMatch != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMatch)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.table, table)
+			assert.Equal(t, tc.descr, descr)
+		})
+	}
+}
+
+func TestDynamoDBIsTableName(t *testing.T) {
+	for _, name := range []string{"my_table", "My.Table-1", `"my_table"`} {
+		assert.True(t, dynamoDBIsTableName(name), name)
+	}
+	for _, name := range []string{"", "1=1", "select 1", "my table", "{}"} {
+		assert.False(t, dynamoDBIsTableName(name), name)
+	}
+}
+
+// The DDL sling generates is the only carrier of the key definition, so parsing
+// it back out must handle single and composite keys.
+func TestDynamoDBParseDDL(t *testing.T) {
+	ddl := "create table \"default\".\"my_table\" (\n  \"id\" numeric,\n  \"code\" bigint,\n  \"name\" text,\n  primary key (\"id\", \"code\")\n)"
+
+	def, err := parseDynamoDBDDL(ddl)
+	require.NoError(t, err)
+	assert.Equal(t, "my_table", def.Name)
+	assert.Equal(t, []string{"id", "code"}, def.KeyColumns)
+	assert.Equal(t, ddbtypes.ScalarAttributeTypeN, def.KeyTypes["id"])
+	assert.Equal(t, ddbtypes.ScalarAttributeTypeN, def.KeyTypes["code"])
+
+	// single key, and the key type follows the column type
+	def, err = parseDynamoDBDDL("create table my_table (id text, primary key (id))")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id"}, def.KeyColumns)
+	assert.Equal(t, ddbtypes.ScalarAttributeTypeS, def.KeyTypes["id"])
+
+	// no primary key at all
+	_, err = parseDynamoDBDDL("create table my_table (id numeric)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a primary key")
+
+	// more than two key columns cannot be a DynamoDB key
+	_, err = parseDynamoDBDDL("create table my_table (a text, b text, c text, primary key (a, b, c))")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most 2 key columns")
+
+	// a key column that is not part of the column list
+	_, err = parseDynamoDBDDL("create table my_table (a text, primary key (b))")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not part of the table definition")
+}
+
+// `primary_key` reaches the connector as column metadata (sling does not set the
+// key type on target columns), and DynamoDB tables cannot exist without a key.
+func TestDynamoDBKeyColumns(t *testing.T) {
+	columns := iop.Columns{
+		{Name: "id", Position: 1, Type: iop.BigIntType},
+		{Name: "code", Position: 2, Type: iop.BigIntType},
+		{Name: "email", Position: 3, Type: iop.StringType},
+	}
+
+	conn := &DynamoDBConn{}
+
+	// explicit target keys win
+	table := Table{Name: "t", Dialect: dbio.TypeDbDynamoDB, Keys: TableKeys{iop.PrimaryKey: []string{"email"}}}
+	assert.Equal(t, []string{"email"}, conn.dynamoDBKeyColumns(table, columns))
+
+	// then the source primary key, as recorded by sling
+	sourced := columns.Clone()
+	require.NoError(t, sourced.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", "id", "code"))
+	assert.Equal(t, []string{"id", "code"}, conn.dynamoDBKeyColumns(Table{Name: "t", Dialect: dbio.TypeDbDynamoDB}, sourced))
+
+	// then a key type set on the columns themselves
+	keyed := columns.Clone()
+	require.NoError(t, keyed.SetKeys(iop.PrimaryKey, "email"))
+	assert.Equal(t, []string{"email"}, conn.dynamoDBKeyColumns(Table{Name: "t", Dialect: dbio.TypeDbDynamoDB}, keyed))
+
+	// and nothing when no key is declared
+	assert.Empty(t, conn.dynamoDBKeyColumns(Table{Name: "t", Dialect: dbio.TypeDbDynamoDB}, columns))
+}
+
+// Values are stored with the type of their column: numbers as N (never as S),
+// booleans as BOOL, and timestamps as ISO strings.
+func TestDynamoDBFilterValueTypes(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     any
+		col     *iop.Column
+		want    ddbtypes.AttributeValue
+		errText string
+	}{
+		{name: "json number", raw: float64(5), col: &iop.Column{Name: "code", Type: iop.BigIntType},
+			want: &ddbtypes.AttributeValueMemberN{Value: "5"}},
+		{name: "integer column", raw: "42", col: &iop.Column{Name: "code", Type: iop.BigIntType},
+			want: &ddbtypes.AttributeValueMemberN{Value: "42"}},
+		{name: "float column", raw: "89.983", col: &iop.Column{Name: "rating", Type: iop.FloatType},
+			want: &ddbtypes.AttributeValueMemberN{Value: "89.983"}},
+		{name: "quoted sql literal", raw: "'abc'", col: &iop.Column{Name: "name", Type: iop.StringType},
+			want: &ddbtypes.AttributeValueMemberS{Value: "abc"}},
+		{name: "boolean column", raw: "true", col: &iop.Column{Name: "target", Type: iop.BoolType},
+			want: &ddbtypes.AttributeValueMemberBOOL{Value: true}},
+		{name: "timestamp column", raw: "2019-08-19T17:02:09.000Z", col: &iop.Column{Name: "create_dt", Type: iop.TimestampType},
+			want: &ddbtypes.AttributeValueMemberS{Value: "2019-08-19T17:02:09.000Z"}},
+		{name: "not a number", raw: "abc", col: &iop.Column{Name: "code", Type: iop.BigIntType},
+			errText: "is not a number"},
+		{name: "null value", raw: nil, col: &iop.Column{Name: "code", Type: iop.BigIntType}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			av, err := dynamoDBFilterValue(tc.raw, tc.col)
+			if tc.errText != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errText)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, av)
+		})
+	}
+}
+
+func TestDynamoDBFilterExpression(t *testing.T) {
+	columns := iop.Columns{
+		{Name: "id", Position: 1, Type: iop.BigIntType},
+		{Name: "name", Position: 2, Type: iop.StringType},
+		{Name: "code", Position: 3, Type: iop.BigIntType},
+	}
+
+	// one condition per column: expressions are built in map order, so each
+	// assertion stays on a single column
+	filter := newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"code": map[string]any{"$gt": float64(5)}}, columns))
+	assert.Equal(t, "#n0 > :v0", filter.expression())
+	assert.Equal(t, "5", filter.values[":v0"].(*ddbtypes.AttributeValueMemberN).Value)
+
+	// conditions on the same column share one attribute name alias
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"code": map[string]any{"$gt": float64(5), "$lte": float64(10)}}, columns))
+	assert.Equal(t, map[string]string{"#n0": "code"}, filter.names)
+	assert.Len(t, filter.values, 2)
+	assert.Contains(t, filter.expression(), "#n0 > ")
+	assert.Contains(t, filter.expression(), "#n0 <= ")
+
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"name": map[string]any{"$begins_with": "ab"}}, columns))
+	assert.Equal(t, "begins_with(#n0, :v0)", filter.expression())
+	assert.Equal(t, "ab", filter.values[":v0"].(*ddbtypes.AttributeValueMemberS).Value)
+
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"id": float64(3)}, columns))
+	assert.Equal(t, "#n0 = :v0", filter.expression())
+
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"code": map[string]any{"$in": []any{float64(1), float64(2)}}}, columns))
+	assert.Equal(t, "#n0 IN (:v0, :v1)", filter.expression())
+
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"code": map[string]any{"$between": []any{float64(1), float64(9)}}}, columns))
+	assert.Equal(t, "#n0 BETWEEN :v0 AND :v1", filter.expression())
+
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{"code": map[string]any{"$exists": true}}, columns))
+	assert.Equal(t, "attribute_exists(#n0)", filter.expression())
+
+	// multiple columns are ANDed
+	filter = newDynamoDBFilter()
+	require.NoError(t, filter.add(map[string]any{
+		"id":   float64(3),
+		"code": map[string]any{"$gt": float64(1)},
+	}, columns))
+	assert.Len(t, filter.names, 2)
+	assert.Contains(t, filter.expression(), " AND ")
+
+	// unsupported operators are rejected instead of silently ignored
+	filter = newDynamoDBFilter()
+	err := filter.add(map[string]any{"code": map[string]any{"gt": float64(1)}}, columns)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported filter operator gt")
+}
+
+// Writing then reading an item must preserve the value and its type, since
+// DynamoDB stores only the attribute types.
+func TestDynamoDBRowRoundTrip(t *testing.T) {
+	columns := iop.Columns{
+		{Name: "id", Position: 1, Type: iop.BigIntType},
+		{Name: "rating", Position: 2, Type: iop.FloatType},
+		{Name: "email", Position: 3, Type: iop.StringType},
+		{Name: "target", Position: 4, Type: iop.BoolType},
+		{Name: "create_dt", Position: 5, Type: iop.TimestampType},
+		{Name: "tags", Position: 6, Type: iop.JsonType},
+		{Name: "missing", Position: 7, Type: iop.StringType},
+	}
+
+	createDt := time.Date(2019, 8, 19, 17, 2, 9, 0, time.UTC)
+	row := []any{int64(2), 89.983, "tmee1@example.com", true, createDt, `{"a": [1, 2], "b": "c"}`, nil}
+
+	conn := &DynamoDBConn{}
+	item, err := conn.rowToItem(columns, row, []string{"id"})
+	require.NoError(t, err)
+
+	assert.Equal(t, &ddbtypes.AttributeValueMemberN{Value: "2"}, item["id"])
+	assert.Equal(t, &ddbtypes.AttributeValueMemberN{Value: "89.983"}, item["rating"])
+	assert.Equal(t, &ddbtypes.AttributeValueMemberS{Value: "tmee1@example.com"}, item["email"])
+	assert.Equal(t, &ddbtypes.AttributeValueMemberBOOL{Value: true}, item["target"])
+	assert.Equal(t, &ddbtypes.AttributeValueMemberS{Value: "2019-08-19T17:02:09Z"}, item["create_dt"])
+	// nulls are omitted, not written as NULL attributes
+	_, ok := item["missing"]
+	assert.False(t, ok)
+	// json is stored natively, not as a string
+	_, ok = item["tags"].(*ddbtypes.AttributeValueMemberM)
+	assert.True(t, ok, "expected a map attribute for json, got %T", item["tags"])
+
+	back, err := conn.itemToRow(item, columns)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), back[0])
+	assert.Equal(t, 89.983, back[1])
+	assert.Equal(t, "tmee1@example.com", back[2])
+	assert.Equal(t, true, back[3])
+	assert.Equal(t, createDt, back[4])
+	assert.JSONEq(t, `{"a": [1, 2], "b": "c"}`, back[5].(string))
+	assert.Nil(t, back[6])
+
+	// the key must be present on every item
+	_, err = conn.rowToItem(columns, []any{nil, 1.5, "x", false, createDt, nil, nil}, []string{"id"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "key attribute id is missing")
+}
+
+// A table cannot exist without a key, and keying on a data column would collapse
+// rows whose values repeat (writes are upserts), so sling adds one when the
+// stream declares none.
+func TestDynamoDBSyntheticKey(t *testing.T) {
+	conn, err := NewConn("dynamodb://us-east-1")
+	require.NoError(t, err)
+	dynamo := conn.(*DynamoDBConn)
+
+	columns := iop.Columns{
+		{Name: "id", Position: 1, Type: iop.BigIntType},
+		{Name: "name", Position: 2, Type: iop.StringType},
+	}
+
+	// no key declared: a key column is added and becomes the primary key
+	data := columns.Dataset()
+	ddl, err := dynamo.GenerateDDL(Table{Name: "t", Dialect: dbio.TypeDbDynamoDB}, data, false)
+	require.NoError(t, err)
+	assert.Contains(t, ddl, `primary key (_sling_id)`)
+	assert.Contains(t, ddl, "_sling_id string")
+
+	def, err := parseDynamoDBDDL(ddl)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"_sling_id"}, def.KeyColumns)
+
+	// a declared primary key is used as-is
+	declared := columns.Dataset()
+	require.NoError(t, declared.Columns.SetKeys(iop.PrimaryKey, "id"))
+	ddl, err = dynamo.GenerateDDL(Table{Name: "t", Dialect: dbio.TypeDbDynamoDB}, declared, false)
+	require.NoError(t, err)
+	assert.Contains(t, ddl, `primary key (id)`)
+	assert.NotContains(t, ddl, "_sling_id")
+
+	// a declared unique key is the upsert identity of a key-value store
+	unique := columns.Dataset()
+	table := Table{Name: "t", Dialect: dbio.TypeDbDynamoDB, Keys: TableKeys{iop.UniqueKey: []string{"id"}}}
+	ddl, err = dynamo.GenerateDDL(table, unique, false)
+	require.NoError(t, err)
+	assert.Contains(t, ddl, `primary key (id)`)
+
+	// the added column avoids the data's own column names
+	assert.Equal(t, "_sling_id", dynamoDBSyntheticKeyName(columns))
+	assert.Equal(t, "_sling_id2", dynamoDBSyntheticKeyName(iop.Columns{{Name: "_sling_id"}}))
+
+	// every row of a table keyed by the added column gets its own key value
+	row := []any{int64(1), "a"}
+	item, err := dynamo.rowToItem(columns, row, []string{"_sling_id"})
+	require.NoError(t, err)
+	other, err := dynamo.rowToItem(columns, row, []string{"_sling_id"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, item["_sling_id"])
+	assert.NotEqual(t, item["_sling_id"], other["_sling_id"])
+}
+
+// sling soft-deletes the rows missing from a stream with an update carrying a
+// `not exists` subquery over the stream's keys.
+func TestDynamoDBParseNotExistsJoin(t *testing.T) {
+	// as rendered by the `core.delete_where_not_exist` / `update_where_not_exist`
+	// templates: the `not exists` clause sits on its own indented lines
+	text := `where _sling_deleted_at is null
+  and not exists (
+      select 1 from "default"."test1k_dynamodb_pg_temp_ids" 
+      where "default"."test1k_dynamodb_pg".id = "default"."test1k_dynamodb_pg_temp_ids".id and "default"."test1k_dynamodb_pg".email = "default"."test1k_dynamodb_pg_temp_ids".email
+  )`
+
+	join, err := parseDynamoDBNotExistsJoin(text)
+	require.NoError(t, err)
+	assert.Equal(t, "test1k_dynamodb_pg_temp_ids", join.Table)
+	assert.Equal(t, []string{"id", "email"}, join.Columns)
+
+	keyJoin := join
+
+	// a statement without the clause carries no join
+	join, err = parseDynamoDBNotExistsJoin("where _sling_deleted_at is null")
+	require.NoError(t, err)
+	assert.Empty(t, join.Table)
+
+	// the remaining conditions stay parseable
+	filter, err := parseDynamoDBWhere(stripDynamoDBNotExistsJoin(text))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"_sling_deleted_at": map[string]any{"$exists": false}}, filter)
+
+	// the key signature of an item compares the joined columns only
+	item := map[string]ddbtypes.AttributeValue{
+		"id":    &ddbtypes.AttributeValueMemberN{Value: "1"},
+		"email": &ddbtypes.AttributeValueMemberS{Value: "a@example.com"},
+		"other": &ddbtypes.AttributeValueMemberS{Value: "ignored"},
+	}
+	sameKey := map[string]ddbtypes.AttributeValue{
+		"id":    &ddbtypes.AttributeValueMemberN{Value: "1"},
+		"email": &ddbtypes.AttributeValueMemberS{Value: "a@example.com"},
+	}
+	other := map[string]ddbtypes.AttributeValue{
+		"id":    &ddbtypes.AttributeValueMemberN{Value: "2"},
+		"email": &ddbtypes.AttributeValueMemberS{Value: "a@example.com"},
+	}
+	assert.Equal(t, dynamoDBItemKey(item, keyJoin.Columns), dynamoDBItemKey(sameKey, keyJoin.Columns))
+	assert.NotEqual(t, dynamoDBItemKey(item, keyJoin.Columns), dynamoDBItemKey(other, keyJoin.Columns))
+}
+
+func TestDynamoDBParseWhere(t *testing.T) {
+	cases := []struct {
+		name    string
+		where   string
+		want    map[string]any
+		errText string
+	}{
+		{name: "is null", where: `where "flag" is null`,
+			want: map[string]any{"flag": map[string]any{"$exists": false}}},
+		{name: "is not null", where: "where flag is not null",
+			want: map[string]any{"flag": map[string]any{"$exists": true}}},
+		{name: "equality", where: "where id = 5", want: map[string]any{"id": map[string]any{"$eq": float64(5)}}},
+		{name: "quoted string", where: `where name = 'a b'`, want: map[string]any{"name": map[string]any{"$eq": "a b"}}},
+		{name: "comparison", where: "where code >= 2.5", want: map[string]any{"code": map[string]any{"$gte": 2.5}}},
+		{name: "not equal", where: `where op <> 'D'`, want: map[string]any{"op": map[string]any{"$ne": "D"}}},
+		{name: "qualified column and parenthesis", where: `where ("t"."id" > 1)`, want: map[string]any{"id": map[string]any{"$gt": float64(1)}}},
+		{name: "joined conditions", where: "where id > 1 and name = 'x'",
+			want: map[string]any{"id": map[string]any{"$gt": float64(1)}, "name": map[string]any{"$eq": "x"}}},
+		{name: "empty", where: "", want: map[string]any{}},
+		{name: "attribute name with dash", where: `where "first-name" is null`,
+			want: map[string]any{"first-name": map[string]any{"$exists": false}}},
+		{name: "negative literal", where: "where code > -5", want: map[string]any{"code": map[string]any{"$gt": float64(-5)}}},
+		{name: "tautology", where: "where 1=1", want: map[string]any{}},
+		{name: "tautology with spaces", where: "where 1 = 1 and code > 2",
+			want: map[string]any{"code": map[string]any{"$gt": float64(2)}}},
+		{name: "unsupported", where: "where lower(name) = 'x'", errText: "could not parse condition"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filter, err := parseDynamoDBWhere(tc.where)
+			if tc.errText != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errText)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, filter)
+		})
+	}
+}
+
+func TestDynamoDBParseAssignments(t *testing.T) {
+	cases := []struct {
+		name    string
+		set     string
+		col     string
+		want    ddbtypes.AttributeValue
+		remove  bool
+		isTime  bool
+		errText string
+	}{
+		{name: "now", set: "set _sling_deleted_at = current_timestamp", col: "_sling_deleted_at", isTime: true},
+		{name: "quoted literal", set: "set op = 'D'", col: "op", want: &ddbtypes.AttributeValueMemberS{Value: "D"}},
+		{name: "number literal", set: "set code = 5", col: "code", want: &ddbtypes.AttributeValueMemberN{Value: "5"}},
+		{name: "bool literal", set: "set target = false", col: "target", want: &ddbtypes.AttributeValueMemberBOOL{Value: false}},
+		{name: "null removes the attribute", set: "set deleted_at = null", col: "deleted_at", remove: true},
+		{name: "unsupported expression", set: "set code = code + 1", errText: "unsupported value"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assignments, err := parseDynamoDBAssignments(tc.set[len("set "):])
+			if tc.errText != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errText)
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, assignments, tc.col)
+
+			assignment := assignments[tc.col]
+			assert.Equal(t, tc.remove, assignment.remove)
+			if tc.remove {
+				return
+			}
+			if tc.isTime {
+				member, ok := assignment.value.(*ddbtypes.AttributeValueMemberS)
+				require.True(t, ok)
+				_, err := time.Parse(time.RFC3339Nano, member.Value)
+				require.NoError(t, err)
+				return
+			}
+			assert.Equal(t, tc.want, assignment.value)
+		})
+	}
+}
+
+// discover passes table patterns, not just names: `default.*` arrives as a
+// wildcard while a bare schema arrives as an empty name.
+func TestDynamoDBMatchTableNames(t *testing.T) {
+	assert.True(t, dynamoDBMatchTableNames("test1k_dynamodb", []string{"test1k_dynamodb"}))
+	assert.False(t, dynamoDBMatchTableNames("test1k_dynamodb", []string{"test1k_dynamodb_wide"}))
+	assert.True(t, dynamoDBMatchTableNames("test1k_dynamodb", []string{"*"}))
+	assert.True(t, dynamoDBMatchTableNames("test1k_dynamodb_wide", []string{"test1k_dynamodb_*"}))
+	assert.False(t, dynamoDBMatchTableNames("test1k_dynamodb_wide", []string{"test1k_dynamodb_v*"}))
+	assert.True(t, dynamoDBMatchTableNames("t1", []string{"other", "t?"}))
+}
+
+// sling runs lifecycle statements through the read path too (a query hook
+// cannot tell a statement from a select without a SQL engine), so they must be
+// told apart from table names and scan descriptors.
+func TestDynamoDBIsStatement(t *testing.T) {
+	assert.True(t, isDynamoDBStatement("drop table if exists my_table"))
+	assert.True(t, isDynamoDBStatement("  DROP TABLE my_table  "))
+	assert.True(t, isDynamoDBStatement("truncate table my_table"))
+	assert.True(t, isDynamoDBStatement(`create table "t" (id number, primary key (id))`))
+	assert.True(t, isDynamoDBStatement("delete from t where 1=1"))
+	assert.True(t, isDynamoDBStatement("update t set a = 1"))
+
+	assert.False(t, isDynamoDBStatement("my_table"))
+	assert.False(t, isDynamoDBStatement("default.my_table"))
+	assert.False(t, isDynamoDBStatement(`{"table": "my_table", "limit": 3}`))
+	assert.False(t, isDynamoDBStatement("select * from my_table"))
+	assert.False(t, isDynamoDBStatement("select id, code from my_table limit 3"))
+	assert.False(t, isDynamoDBStatement(""))
 }

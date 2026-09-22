@@ -518,3 +518,41 @@ func TestLanceDBConnectionURL(t *testing.T) {
 	assert.Equal(t, dbio.TypeDbLanceDB, reparsed.Type)
 	assert.Equal(t, "s3://my-bucket/prefix", reparsed.DataS(true)["path"])
 }
+
+// DynamoDB connections carry the region in the URL host (`dynamodb://us-east-1`)
+// and take credentials from the AWS credential chain when they are not set.
+func TestDynamoDBConnectionURL(t *testing.T) {
+	c, err := NewConnectionFromURL("DDB", "dynamodb://eu-west-1")
+	require.NoError(t, err)
+	assert.Equal(t, dbio.TypeDbDynamoDB, c.Type)
+	assert.Equal(t, "eu-west-1", c.DataS(true)["aws_region"])
+	assert.Equal(t, "default", c.DataS(true)["schema"]) // DynamoDB has no schemas
+
+	// properties map onto the AWS SDK options and round-trip through the URL
+	c, err = NewConnection("DDB", dbio.TypeDbDynamoDB, map[string]any{
+		"region":            "us-east-2",
+		"access_key_id":     "AKIA_TEST",
+		"secret_access_key": "SECRET_TEST",
+		"session_token":     "TOKEN_TEST",
+		"endpoint":          "http://localhost:8000",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "us-east-2", c.DataS(true)["aws_region"])
+	assert.Equal(t, "AKIA_TEST", c.DataS(true)["aws_access_key_id"])
+	assert.Equal(t, "SECRET_TEST", c.DataS(true)["aws_secret_access_key"])
+	assert.Equal(t, "TOKEN_TEST", c.DataS(true)["aws_session_token"])
+	assert.Equal(t, "http://localhost:8000", c.DataS(true)["endpoint"])
+	assert.Equal(t, "dynamodb://us-east-2", c.URL())
+
+	reparsed, err := NewConnectionFromURL("DDB", c.URL())
+	require.NoError(t, err)
+	assert.Equal(t, dbio.TypeDbDynamoDB, reparsed.Type)
+	assert.Equal(t, "us-east-2", reparsed.DataS(true)["aws_region"])
+
+	// a region from the environment is used when the URL and props have none
+	t.Setenv("AWS_REGION", "ap-southeast-1")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	c, err = NewConnection("DDB", dbio.TypeDbDynamoDB, map[string]any{})
+	require.NoError(t, err)
+	assert.Equal(t, "ap-southeast-1", c.DataS(true)["aws_region"])
+}

@@ -599,7 +599,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbDBase, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbDBase, dbio.TypeDbD1, dbio.TypeDbBigQuery, dbio.TypeDbDynamoDB) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("user", U.Username())
 				setIfMissing("username", U.Username())
@@ -630,6 +630,9 @@ func (c *Connection) setURL() (err error) {
 			case dbio.TypeDbLanceDB:
 				setIfMissing("path", lanceDBPathFromURL(c.URL()))
 				setIfMissing("schema", "main")
+			case dbio.TypeDbDynamoDB:
+				// `dynamodb://us-east-1` carries the region in the host
+				setIfMissing("aws_region", U.Hostname())
 			case dbio.TypeDbMotherDuck:
 				setIfMissing("schema", "main")
 			case dbio.TypeDbD1:
@@ -820,6 +823,22 @@ func (c *Connection) setURL() (err error) {
 		} else {
 			template = "elasticsearch://{username}:{password}@{host}:{port}"
 		}
+	case dbio.TypeDbOpenSearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		template = "opensearch://{username}:{password}@{host}:{port}"
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())
@@ -1108,6 +1127,39 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("keyspace", "")
 		template = "scylladb://{username}:{password}@{host}:{port}/{keyspace}"
+	case dbio.TypeDbDynamoDB:
+		// AWS SDK based: credentials come from the AWS credential chain when absent
+		region := cast.ToString(c.Data["region"])
+		if region == "" {
+			region = os.Getenv("AWS_REGION")
+		}
+		if region == "" {
+			region = os.Getenv("AWS_DEFAULT_REGION")
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+		setIfMissing("aws_region", region)
+
+		setIfMissing("aws_access_key_id", cast.ToString(c.Data["user"]))
+		setIfMissing("aws_access_key_id", cast.ToString(c.Data["access_key_id"]))
+		setIfMissing("aws_secret_access_key", cast.ToString(c.Data["password"]))
+		setIfMissing("aws_secret_access_key", cast.ToString(c.Data["secret_access_key"]))
+		setIfMissing("aws_session_token", cast.ToString(c.Data["session_token"]))
+		setIfMissing("aws_profile", cast.ToString(c.Data["profile"]))
+		// DynamoDB tables have no schema: `default` keeps object names simple
+		setIfMissing("schema", "default")
+		template = "dynamodb://{aws_region}"
+	case dbio.TypeDbFirebolt:
+		// Firebolt Core has no authentication; username/password stay optional
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("database", "firebolt")
+		setIfMissing("schema", "public")
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
+		template = "firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

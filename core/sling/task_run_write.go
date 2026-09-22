@@ -207,9 +207,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// write directly for iceberg / NoSQL (no SQL temp-table merge)
-	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB)
+	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbDynamoDB)
 	// INSERT is upsert-by-PK for these stores
-	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbDynamoDB)
 
 	// Iceberg incremental+PK and CDC use MergeStream (row delta), not append and not SQL temp tables.
 	if cfg.icebergNeedsMerge(tgtConn) {
@@ -504,7 +504,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	// incremental+PK needs merge unless INSERT is upsert-by-PK
-	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable)
+	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbDynamoDB)
 	if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 && !upsertByInsert {
 		return 0, g.Error("mode '%s' with a primary-key is not supported for direct write.", cfg.Mode)
 	}

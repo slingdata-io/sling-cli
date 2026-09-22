@@ -883,6 +883,36 @@ elasticsearch:
       description: 'Default index name'
       examples: ['logs', 'documents', 'analytics']
 
+opensearch:
+  title: 'OpenSearch'
+  kind: database
+  required: ["url"]
+  url_template: 'opensearch://{user}:{password}@{url}'
+  docs: https://docs.slingdata.io/connections/database-connections/opensearch
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: OS_MAIN'
+      examples: ['OS_MAIN', 'OPENSEARCH_PROD', 'OS_LOGS']
+    url:
+      type: text
+      description: 'OpenSearch URL'
+      examples: ['http://localhost:9200', 'https://opensearch.example.com:9200', 'https://my-domain.us-east-1.es.amazonaws.com']
+    user:
+      type: text
+      description: 'Username for authentication'
+      examples: ['admin', 'opensearch', 'os_user']
+    password:
+      type: text
+      description: 'Password for authentication'
+      examples: ['mypassword123']
+      secret: true
+    index:
+      type: text
+      description: 'Default index name'
+      examples: ['logs', 'documents', 'analytics']
+
 d1:
   title: 'Cloudflare D1'
   kind: database
@@ -939,6 +969,92 @@ azuretable:
       type: text
       description: 'Specific table name for table-specific SAS tokens'
       examples: ['MyTable', 'LogData', 'UserData']
+
+dynamodb:
+  title: 'DynamoDB'
+  kind: database
+  required: ["region"]
+  url_template: 'dynamodb://{region}'
+  docs: https://docs.slingdata.io/connections/database-connections/dynamodb
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DYNAMODB_MAIN'
+      examples: ['DYNAMODB_MAIN', 'DDB_PROD', 'DYNAMO_ANALYTICS']
+    region:
+      type: text
+      description: 'AWS region of the tables'
+      examples: ['us-east-1', 'us-west-2', 'eu-west-1']
+    access_key_id:
+      type: text
+      description: 'AWS access key ID (uses the AWS credential chain when omitted)'
+      examples: ['AKIAIOSFODNN7EXAMPLE']
+    secret_access_key:
+      type: text
+      description: 'AWS secret access key'
+      examples: ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY']
+      secret: true
+    session_token:
+      type: text
+      description: 'AWS session token (for temporary credentials)'
+      examples: ['FwoGZXIvYXdzEBEaEXAMPLE']
+      secret: true
+    profile:
+      type: text
+      description: 'AWS profile name from ~/.aws/credentials'
+      examples: ['default', 'prod']
+    endpoint:
+      type: text
+      description: 'Custom endpoint, for example DynamoDB Local (`http://localhost:8000`)'
+      examples: ['http://localhost:8000']
+firebolt:
+  title: 'Firebolt'
+  kind: database
+  required: ["host", "port", "database"]
+  url_template: 'firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}'
+  docs: https://docs.slingdata.io/connections/database-connections/firebolt
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: FIREBOLT_MAIN'
+      examples: ['FIREBOLT_MAIN', 'FIREBOLT_DEV', 'FB_ANALYTICS']
+    database:
+      type: text
+      description: 'The database name to run queries against'
+      examples: ['firebolt', 'mydb', 'analytics']
+      default: firebolt
+    host:
+      type: text
+      description: 'The hostname / ip of the engine, e.g.: my.engine.firebolt.io or 127.0.0.1 for a local Firebolt Core'
+      examples: ['127.0.0.1', 'my.engine.firebolt.io', 'firebolt.example.com']
+    username:
+      type: text
+      description: 'The username to access the instance. Not needed for Firebolt Core (no authentication)'
+      examples: ['myuser', 'admin']
+    password:
+      type: text
+      description: 'The password to access the instance. Not needed for Firebolt Core (no authentication)'
+      examples: ['mypassword123']
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      examples: ['3473']
+      default: 3473
+    secure:
+      type: dropdown
+      options: ['true', 'false']
+      title: Use HTTPS / TLS
+      examples: ['true', 'false']
+      default: 'false'
+    skip_verify:
+      type: dropdown
+      options: ['true', 'false']
+      title: Skip TLS certificate verification
+      examples: ['true', 'false']
+      default: 'false'
 
 ftp:
   title: 'FTP'
