@@ -2420,6 +2420,361 @@ func TestLanceDBConnSecretSkippedForOtherStores(t *testing.T) {
 	}
 }
 
+// dBase fixtures under test/dbf:
+//
+//	TEST.DBF + TEST.FPT
+//	  FoxPro (0x32) with every field type, a memo field and one deleted record.
+//	  https://github.com/Valentin-Kaiser/go-dbase (BSD-3-Clause)
+//	expense categories.dbf
+//	  FoxPro, table name containing a space.
+//	  https://github.com/Valentin-Kaiser/go-dbase (BSD-3-Clause)
+//	dbase_03.dbf
+//	  dBase III (0x03): 14 records, blank numeric / date fields.
+//	dbase_8b.dbf + dbase_8b.dbt
+//	  dBase IV (0x8B) with a `.dbt` memo, which the reader cannot open.
+//	  https://github.com/infused/dbf (MIT), dbase_03.dbf and dbase_8b.dbf
+//	nullable.dbf
+//	  written with the reader library, holding nullable and variable length
+//	  varchar / varbinary fields, with a null record.
+const dbfTestDir = "test/dbf"
+
+func dbfConn(t *testing.T, path string) Connection {
+	t.Helper()
+
+	conn, err := NewConn("dbase://" + path)
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	return conn
+}
+
+func TestDbaseConnectionURL(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/TEST.DBF")
+
+	assert.Equal(t, dbio.TypeDbDBase, conn.GetType())
+	assert.Equal(t, "main", conn.GetProp("schema"))
+	assert.Equal(t, dbfTestDir+"/TEST.DBF", conn.GetProp("path"))
+}
+
+func TestDbasePathFromURL(t *testing.T) {
+	for url, expected := range map[string]string{
+		"dbase:///data/tables":             "/data/tables",
+		"dbase://./tables":                 "./tables",
+		"dbase://tables":                   "tables",
+		"dbase://relative/tables":          "relative/tables",
+		"dbase:///data/my%20tables/x.dbf":  "/data/my tables/x.dbf",
+		"DBF:///data/tables":               "/data/tables",
+		"/data/tables":                     "/data/tables",
+		"dbase:///data/100%25%20tables":    "/data/100% tables",
+		"dbase:///data/tables?x=1&y=2":     "/data/tables?x=1&y=2",
+		"dbase:///data/back%2Fslash/x.dbf": "/data/back/slash/x.dbf",
+		"dbase://":                         "",
+	} {
+		assert.Equal(t, expected, DbasePathFromURL(url), url)
+	}
+}
+
+func TestDbaseColumns(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/dbase_03.dbf")
+
+	columns, err := conn.GetColumns(`"dbase_03"`)
+	require.NoError(t, err)
+	require.Len(t, columns, 31)
+
+	for _, tc := range []struct {
+		position int // Point_ID is defined twice, so columns are checked by position
+		name     string
+		colType  iop.ColumnType
+		dbType   string
+		prec     int
+		scale    int
+	}{
+		{1, "Point_ID", iop.TextType, "character(12)", 0, 0},
+		{8, "Comments", iop.TextType, "character(60)", 0, 0},
+		{9, "Date_Visit", iop.DateType, "date", 0, 0},
+		{11, "Max_PDOP", iop.DecimalType, "numeric(5,1)", 5, 1},
+		{20, "Unfilt_Pos", iop.BigIntType, "numeric", 10, 0},
+		{24, "GPS_Second", iop.DecimalType, "numeric(12,3)", 12, 3},
+		{28, "Std_Dev", iop.DecimalType, "numeric(16,6)", 16, 6},
+		{31, "Point_ID1", iop.BigIntType, "numeric", 9, 0}, // the repeated name is suffixed
+	} {
+		col := columns[tc.position-1]
+		assert.Equal(t, tc.name, col.Name)
+		assert.Equal(t, tc.position, col.Position)
+		assert.Equal(t, tc.colType, col.Type, tc.name)
+		assert.Equal(t, tc.dbType, col.DbType, tc.name)
+		assert.Equal(t, tc.prec, col.DbPrecision, tc.name)
+		assert.Equal(t, tc.scale, col.DbScale, tc.name)
+		assert.Equal(t, "dbase_03", col.Table, tc.name)
+	}
+
+	// sling cannot tell repeated column names apart, so the second one is
+	// suffixed as the file readers do with repeated headers
+	assert.Nil(t, columns.GetColumn("Point_ID2"))
+	data, err := conn.Query(`select "Point_ID", "Point_ID1" from "dbase_03" limit 2`)
+	require.NoError(t, err)
+	assert.Equal(t, []any{"0507121", int64(401)}, data.Rows[0])
+	assert.Equal(t, []any{"0507122", int64(402)}, data.Rows[1])
+}
+
+func TestDbaseRows(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/dbase_03.dbf")
+
+	data, err := conn.Query(`select * from "dbase_03"`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 14)
+
+	// decimal values are kept as strings, as sling does for every connection
+	row := data.Rows[0]
+	assert.Equal(t, "0507121", row[0])
+	assert.Equal(t, "CMP", row[1])
+	assert.Equal(t, time.Date(2005, 7, 12, 0, 0, 0, 0, time.UTC), row[8])
+	assert.Equal(t, "5.2", row[10])
+	assert.Equal(t, int64(2), row[19])
+	assert.Equal(t, "226625", row[23])
+	assert.Equal(t, "1131.323", row[24])
+	assert.Equal(t, "0.897088", row[27])
+
+	// a blank number is stored as spaces and is not a zero
+	assert.Nil(t, data.Rows[1][27])
+	assert.Nil(t, data.Rows[13][27])
+	// a blank character field is an empty string
+	assert.Equal(t, "", data.Rows[0][4])
+}
+
+func TestDbaseFoxProFieldTypes(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/TEST.DBF")
+
+	columns, err := conn.GetColumns(`"TEST"`)
+	require.NoError(t, err)
+	require.Len(t, columns, 16)
+
+	for _, tc := range []struct {
+		name    string
+		colType iop.ColumnType
+		dbType  string
+	}{
+		{"PRODUCTID", iop.IntegerType, "integer"},
+		{"PRODNAME", iop.TextType, "character(20)"},
+		{"PRICE", iop.DecimalType, "currency"},
+		{"DOUBLE", iop.DecimalType, "double"},
+		{"DATE", iop.DateType, "date"},
+		{"DATETIME", iop.DatetimeType, "datetime"},
+		{"INTEGER", iop.DecimalType, "float(4,2)"},
+		{"FLOAT", iop.IntegerType, "integer"},
+		{"ACTIVE", iop.BoolType, "logical"},
+		{"DESC", iop.TextType, "memo(4)"},
+		{"TAX", iop.DecimalType, "numeric(8,2)"},
+		{"INSTOCK", iop.BigIntType, "numeric"},
+		{"BLOB", iop.BinaryType, "blob(4)"},
+		{"VARBIN_NIL", iop.BinaryType, "varbinary(10)"},
+		{"VAR_NIL", iop.TextType, "varchar(254)"},
+		{"VAR", iop.TextType, "varchar(10)"},
+	} {
+		col := columns.GetColumn(tc.name)
+		require.NotNil(t, col, tc.name)
+		assert.Equal(t, tc.colType, col.Type, tc.name)
+		assert.Equal(t, tc.dbType, col.DbType, tc.name)
+	}
+
+	// the table holds 3 records, one of which is deleted
+	count, err := conn.GetCount(`"TEST"`)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	data, err := conn.Query(`select * from "TEST"`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 2)
+
+	row := data.Rows[0]
+	assert.Equal(t, int64(1), row[0])
+	assert.Equal(t, "TEST PRODUCT", row[1])
+	assert.Equal(t, "12.3456", row[2])
+	assert.Equal(t, "78.9", row[3])
+	assert.Equal(t, time.Date(2022, 4, 10, 0, 0, 0, 0, time.UTC), row[4])
+	assert.Equal(t, "true", row[8])                // booleans are kept as strings, as sling does
+	assert.Equal(t, "PRODUCT DESCRIPTION", row[9]) // memo, read from the .fpt file
+	assert.Equal(t, "19.99", row[10])
+	assert.Equal(t, int64(1), row[11])
+	assert.Nil(t, row[12]) // blank blob
+	assert.Equal(t, []byte{17, 34, 51, 68, 85, 102, 119, 136, 153, 170}, row[13])
+	assert.Equal(t, "Test value with variable length", row[14])
+	assert.Equal(t, "", row[15])
+
+	// the second record has a shorter varbinary
+	assert.Equal(t, []byte{170, 187, 204}, data.Rows[1][13])
+}
+
+func TestDbaseTablesInFolder(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir)
+
+	tables, err := conn.GetTables("main")
+	require.NoError(t, err)
+	assert.ElementsMatch(t,
+		[]string{"TEST", "dbase_03", "dbase_8b", "expense categories", "nullable", "test1k_dbase"},
+		tables.ColValuesStr(1),
+	)
+
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, "main")
+	require.NoError(t, err)
+	assert.Len(t, schemata.Tables(), 6)
+	assert.Equal(t, "expense categories", schemata.Tables()["main.main.expense categories"].Name)
+	assert.Len(t, schemata.Tables()["main.main.expense categories"].Columns, 3)
+
+	// the file extension is not part of the table name, and names are matched
+	// without case
+	exists, err := conn.TableExists(Table{Name: "test.dbf", Dialect: conn.GetType()})
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	exists, err = conn.TableExists(Table{Name: "Test", Dialect: conn.GetType()})
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	count, err := conn.GetCount(`"expense categories"`)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count)
+
+	data, err := conn.Query(`select * from "expense categories"`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 5)
+	assert.Equal(t, []any{int64(1), "Meals", int64(500)}, data.Rows[0])
+}
+
+func TestDbaseSingleFileRoot(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/TEST.DBF")
+
+	tables, err := conn.GetTables("main")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"TEST"}, tables.ColValuesStr(1))
+
+	data, err := conn.Query(`select "PRODNAME" from "TEST"`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 2)
+	assert.Equal(t, "TEST PRODUCT", data.Rows[0][0])
+}
+
+func TestDbaseStatements(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir)
+
+	for _, tc := range []struct {
+		sql   string
+		rows  int
+		cols  int
+		first string // first column of the first row
+	}{
+		{`select * from "dbase_03" limit 2`, 2, 31, "0507121"},
+		{`select * from "dbase_03" limit 3 offset 12`, 2, 31, "05071232"},
+		{`select "Point_ID", "Max_PDOP" from "dbase_03"`, 14, 2, "0507121"},
+		{`select "Point_ID" as "pid" from "dbase_03"`, 14, 1, "0507121"},
+		{`select * from "dbase_03" where 1=0`, 0, 31, ""},
+		{`select * from "main"."main"."dbase_03" limit 1`, 1, 31, "0507121"},
+		// a derived table, as generated when a limit is applied to a query
+		{"select * from (\n  select \"Point_ID\" from \"dbase_03\" limit 4\n) as t limit 2 offset 1", 2, 1, "0507122"},
+	} {
+		data, err := conn.Query(tc.sql)
+		require.NoError(t, err, tc.sql)
+		assert.Len(t, data.Rows, tc.rows, tc.sql)
+		assert.Len(t, data.Columns, tc.cols, tc.sql)
+		if tc.rows > 0 {
+			assert.Equal(t, tc.first, data.Rows[0][0], tc.sql)
+		}
+	}
+
+	// the statement sling generates for a table read with a limit and offset
+	table := Table{Name: "dbase_03", Schema: "main", Database: "main", Dialect: conn.GetType()}
+	data, err := conn.Query(table.Select(SelectOptions{
+		Fields: []string{"Point_ID"},
+		Limit:  g.Ptr(3),
+		Offset: 2,
+	}))
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 3)
+	assert.Equal(t, []string{"Point_ID"}, data.Columns.Names())
+	assert.Equal(t, "0507123", data.Rows[0][0])
+
+	// a projection over a derived table
+	data, err = conn.Query("select \"Max_PDOP\" from (select * from \"dbase_03\") t")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 14)
+	assert.Equal(t, "Max_PDOP", data.Columns[0].Name)
+
+	// dBase has no query engine: anything else is rejected
+	for _, sql := range []string{
+		`select * from "dbase_03" where "Max_PDOP" > 5`,
+		`select count(*) from "dbase_03"`,
+		`select * from "dbase_03" order by "Point_ID"`,
+		`select * from "dbase_03" join "TEST" on 1=1`,
+		`select "Point_ID" * 2 from "dbase_03"`,
+		`select * from "nope"`,
+		`insert into "dbase_03" values (1)`,
+		`select 1`,
+		`select * from "dbase_03" limit abc`,
+	} {
+		_, err := conn.Query(sql)
+		assert.Error(t, err, sql)
+	}
+
+	// the missing table is reported with the available ones
+	_, err = conn.Query(`select * from "nope"`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dbase_03")
+
+	// writing is not supported
+	_, err = conn.ExecContext(context.Background(), `insert into "dbase_03" values (1)`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read-only")
+}
+
+func TestDbaseUnsupportedMemoFile(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir)
+
+	// the columns are readable, the records are not
+	columns, err := conn.GetColumns(`"dbase_8b"`)
+	require.NoError(t, err)
+	require.Len(t, columns, 6)
+	assert.Equal(t, iop.TextType, columns.GetColumn("MEMO").Type)
+
+	_, err = conn.Query(`select * from "dbase_8b"`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dbase_8b.dbt")
+}
+
+func TestDbaseVariableLengthFields(t *testing.T) {
+	conn := dbfConn(t, dbfTestDir+"/nullable.dbf")
+
+	columns, err := conn.GetColumns(`"nullable"`)
+	require.NoError(t, err)
+	require.Len(t, columns, 5)
+
+	data, err := conn.Query(`select * from "NULLABLE"`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 3)
+
+	// a value shorter than the field is stored with its length in the last
+	// byte of the field, flagged in the record's null flag field
+	assert.Equal(t, []any{int64(1), "alpha", "notes one", []byte{1, 2, 3}, "12.34"}, data.Rows[0])
+	// a value marked as null, and one that fills its field entirely
+	assert.Equal(t, []any{int64(2), nil, "second", nil, "0"}, data.Rows[1])
+	assert.Equal(t, []any{int64(3), "full length name 123", "third", []byte{1, 2, 3, 4, 5, 6, 7, 8}, "7"}, data.Rows[2])
+}
+
+func TestDbaseTrimSpacesProp(t *testing.T) {
+	path, err := filepath.Abs(dbfTestDir + "/TEST.DBF")
+	require.NoError(t, err)
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+
+	conn, err := NewConn("dbase://" + path)
+	require.NoError(t, err)
+	conn.SetProp("trim_spaces", "false")
+	require.NoError(t, conn.Connect())
+
+	data, err := conn.Query(`select "PRODNAME" from "TEST" limit 1`)
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 1)
+	assert.Equal(t, "TEST PRODUCT        ", data.Rows[0][0])
+}
+
 // ---------------------------------------------------------------------------
 // DynamoDB
 // ---------------------------------------------------------------------------

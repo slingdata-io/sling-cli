@@ -108,8 +108,8 @@ For database operations (queries, schema exploration) and file system operations
 
 Sling supports 42+ different connection types across four categories:
 
-### Database Connections (24 types)
-- **Relational**: PostgreSQL, MySQL, MariaDB, SQLServer, Oracle, SQLite
+### Database Connections (25 types)
+- **Relational**: PostgreSQL, MySQL, MariaDB, SQLServer, Oracle, SQLite, dBase
 - **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks
 - **Analytics**: ClickHouse, DuckDB, MotherDuck, StarRocks, Trino, Proton
 - **NoSQL**: MongoDB, ElasticSearch, Prometheus
@@ -160,6 +160,8 @@ Navigate or fetch the content of the connector from the below respective URL to 
 **MariaDB (`mariadb`)** -> https://docs.slingdata.io/connections/database-connections/mariadb
 
 **SQLite (`sqlite`)** -> https://docs.slingdata.io/connections/database-connections/sqlite
+
+**dBase (`dbase`)** -> https://docs.slingdata.io/connections/database-connections/dbase
 
 **MotherDuck (`motherduck`)** -> https://docs.slingdata.io/connections/database-connections/motherduck
 

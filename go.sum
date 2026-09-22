@@ -1132,6 +1132,8 @@ github.com/uptrace/bun/driver/sqliteshim v1.2.18 h1:fDCXp4L46A23OuUikDbL14SRmm3y
 github.com/uptrace/bun/driver/sqliteshim v1.2.18/go.mod h1:MqvqMCAAKNn6M0HF9YK/Z6xrnCP6sih5OZ37AxdAlHw=
 github.com/uptrace/bun/extra/bundebug v1.2.18 h1:5cgkqdvhpSHIEONazSytm4RWYFneNtcznaWLt6r8m4M=
 github.com/uptrace/bun/extra/bundebug v1.2.18/go.mod h1:M+U9YJVJcmk0RrszCb2Q1oskJiJ0LuC44FxDhZLP1ws=
+github.com/valentin-kaiser/go-dbase v1.14.4 h1:iKEtNR3SPuYFskJ13JsLk9mdO/tG4CuInlkGiCcJhM0=
+github.com/valentin-kaiser/go-dbase v1.14.4/go.mod h1:m0ML8tZxKIGJFThk24541aBB0vct/bS1Q2RpX1gEFeI=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/valyala/fasttemplate v1.2.1/go.mod h1:KHLXt3tVN2HBp8eijSv/kGJopbvo7S+qRAEEKiv+SiQ=
