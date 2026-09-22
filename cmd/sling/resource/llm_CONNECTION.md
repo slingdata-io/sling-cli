@@ -165,6 +165,8 @@ Navigate or fetch the content of the connector from the below respective URL to 
 
 **ElasticSearch (`elasticsearch`)** -> https://docs.slingdata.io/connections/database-connections/elasticsearch
 
+**OpenSearch (`opensearch`)** -> https://docs.slingdata.io/connections/database-connections/opensearch
+
 **Prometheus (`prometheus`)** -> https://docs.slingdata.io/connections/database-connections/prometheus
 
 **StarRocks (`starrocks`)** -> https://docs.slingdata.io/connections/database-connections/starrocks

@@ -119,6 +119,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
 	dbio.TypeDbAzureTable:        {name: "azure_table", schema: "default"},
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
+	dbio.TypeDbOpenSearch:        {name: "opensearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbScyllaDB:          {name: "scylladb", schema: "sling"},
@@ -879,7 +880,7 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB) ||
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch) ||
 				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
 				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
 				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
@@ -1295,6 +1296,90 @@ func TestSuiteDatabaseTrino(t *testing.T) {
 func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+func TestSuiteDatabaseOpenSearch(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbOpenSearch, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+func TestSuiteDatabaseElasticsearch(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbElasticsearch, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+// testSearchConnectorCaps exercises the read capabilities of the ES-family
+// (Elasticsearch / OpenSearch) connectors directly against a live instance:
+// full scroll read (regression guard for multi-page scrolling), limit,
+// incremental (update_key gt), backfill (update_key gte/lte range), and
+// schema/column discovery via the index mapping. The index is expected to hold
+// 1000 docs with a numeric `id` field 1..1000 (seeded from tests/files/test1.csv).
+func testSearchConnectorCaps(t *testing.T, connType dbio.Type, connName, index string) {
+	c := connection.GetLocalConns().Get(connName)
+	if c.Name == "" {
+		t.Skipf("no connection found for %s", connName)
+		return
+	}
+
+	conn, err := c.Connection.AsDatabase()
+	if !g.AssertNoError(t, err) {
+		return
+	}
+	if err = conn.Connect(); !g.AssertNoError(t, err) {
+		return
+	}
+	defer conn.Close()
+
+	streamCount := func(opts map[string]interface{}) int {
+		ds, err := conn.StreamRows(index, opts)
+		if !g.AssertNoError(t, err) {
+			return -1
+		}
+		data, err := ds.Collect(0)
+		if !g.AssertNoError(t, err) {
+			return -1
+		}
+		return len(data.Rows)
+	}
+
+	// full read: must return every doc across all scroll pages (guards the
+	// scroll-pagination bug where only ~1 doc per page was yielded)
+	assert.Equal(t, 1000, streamCount(map[string]interface{}{}), "full scroll read (%s)", connType)
+
+	// limit: caps the number of returned rows
+	assert.Equal(t, 50, streamCount(map[string]interface{}{"limit": 50}), "limited read (%s)", connType)
+
+	// incremental: update_key range gt -> ids 501..1000
+	assert.Equal(t, 500, streamCount(map[string]interface{}{"update_key": "id", "value": "500"}), "incremental read (%s)", connType)
+
+	// backfill: update_key range gte/lte -> ids 200..400 inclusive
+	assert.Equal(t, 201, streamCount(map[string]interface{}{"update_key": "id", "start_value": "200", "end_value": "400"}), "backfill read (%s)", connType)
+
+	// schema discovery: the index shows up as a schema/table
+	schemas, err := conn.GetSchemas()
+	if g.AssertNoError(t, err) {
+		assert.Contains(t, schemas.ColValuesStr(0), index, "GetSchemas should contain index (%s)", connType)
+	}
+
+	// column discovery: the index mapping is parsed into typed columns
+	schemata, err := conn.GetSchemata(database.SchemataLevelColumn, index)
+	if g.AssertNoError(t, err) {
+		cols := iop.Columns(lo.Values(schemata.Columns()))
+		assert.Greater(t, len(cols), 5, "column discovery from mapping (%s)", connType)
+		names := strings.Join(cols.Names(), ",")
+		assert.Contains(t, strings.ToLower(names), "id", "columns should include id (%s)", connType)
+		assert.Contains(t, strings.ToLower(names), "email", "columns should include email (%s)", connType)
+	}
+}
+
+func TestOpenSearchConnectorCaps(t *testing.T) {
+	t.Parallel()
+	testSearchConnectorCaps(t, dbio.TypeDbOpenSearch, "opensearch", "test1k_opensearch")
+}
+
+func TestElasticsearchConnectorCaps(t *testing.T) {
+	t.Parallel()
+	testSearchConnectorCaps(t, dbio.TypeDbElasticsearch, "elasticsearch", "test1k_elasticsearch")
 }
 
 func TestSuiteDatabaseAzureTable(t *testing.T) {
