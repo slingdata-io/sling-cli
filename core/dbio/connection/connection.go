@@ -817,6 +817,22 @@ func (c *Connection) setURL() (err error) {
 		} else {
 			template = "elasticsearch://{username}:{password}@{host}:{port}"
 		}
+	case dbio.TypeDbOpenSearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		template = "opensearch://{username}:{password}@{host}:{port}"
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())

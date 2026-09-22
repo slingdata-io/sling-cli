@@ -10,60 +10,47 @@ import (
 	"strings"
 	"time"
 
-	elasticsearch "github.com/elastic/go-elasticsearch/v8"
 	"github.com/flarco/g"
+	opensearch "github.com/opensearch-project/opensearch-go/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
-// ElasticsearchConn is a elasticsearch connection
-type ElasticsearchConn struct {
+// OpenSearchConn is an opensearch connection
+type OpenSearchConn struct {
 	BaseConn
 	URL    string
-	Client *elasticsearch.Client
+	Client *opensearch.Client
 }
 
 // Init initiates the object
-func (conn *ElasticsearchConn) Init() error {
+func (conn *OpenSearchConn) Init() error {
 	conn.BaseConn.URL = conn.URL
-	conn.BaseConn.Type = dbio.TypeDbElasticsearch
+	conn.BaseConn.Type = dbio.TypeDbOpenSearch
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
 }
 
-// Init initiates the object
-func (conn *ElasticsearchConn) getNewClient(timeOut ...int) (client *elasticsearch.Client, err error) {
-	cfg := elasticsearch.Config{}
+// getNewClient creates a new opensearch client
+func (conn *OpenSearchConn) getNewClient(timeOut ...int) (client *opensearch.Client, err error) {
+	cfg := opensearch.Config{}
 
-	// Handle Cloud ID + API Key auth
-	if cloudID := conn.GetProp("cloud_id"); cloudID != "" {
-		cfg.CloudID = cloudID
-		if apiKey := conn.GetProp("api_key"); apiKey != "" {
-			cfg.APIKey = apiKey
-		}
+	// Handle HTTP URLs or default localhost
+	if httpURLs := conn.GetProp("http_url"); httpURLs != "" {
+		cfg.Addresses = strings.Split(httpURLs, ",")
 	} else {
-		// Handle HTTP URLs or default localhost
-		if httpURLs := conn.GetProp("http_url"); httpURLs != "" {
-			cfg.Addresses = strings.Split(httpURLs, ",")
-		} else {
-			host := conn.GetProp("host")
-			port := conn.GetProp("port")
-			cfg.Addresses = []string{g.F("http://%s:%s", host, port)}
-		}
+		host := conn.GetProp("host")
+		port := conn.GetProp("port")
+		cfg.Addresses = []string{g.F("http://%s:%s", host, port)}
+	}
 
-		// Handle Basic Auth
-		if user := conn.GetProp("user", "username"); user != "" {
-			cfg.Username = user
-			cfg.Password = conn.GetProp("password")
-		}
-
-		// Handle Bearer Token
-		if token := conn.GetProp("service_token"); token != "" {
-			cfg.ServiceToken = token
-		}
+	// Handle Basic Auth
+	if user := conn.GetProp("user", "username"); user != "" {
+		cfg.Username = user
+		cfg.Password = conn.GetProp("password")
 	}
 
 	// Handle TLS config
@@ -81,9 +68,9 @@ func (conn *ElasticsearchConn) getNewClient(timeOut ...int) (client *elasticsear
 		}
 	}
 
-	client, err = elasticsearch.NewClient(cfg)
+	client, err = opensearch.NewClient(cfg)
 	if err != nil {
-		return nil, g.Error(err, "could not connect to Elasticsearch server")
+		return nil, g.Error(err, "could not connect to OpenSearch server")
 	}
 
 	// Test connection with timeout
@@ -98,7 +85,7 @@ func (conn *ElasticsearchConn) getNewClient(timeOut ...int) (client *elasticsear
 		client.Info.WithContext(ctx),
 	)
 	if err != nil {
-		return nil, g.Error(err, "could not connect to Elasticsearch server")
+		return nil, g.Error(err, "could not connect to OpenSearch server")
 	}
 	defer info.Body.Close()
 
@@ -106,7 +93,7 @@ func (conn *ElasticsearchConn) getNewClient(timeOut ...int) (client *elasticsear
 }
 
 // Connect connects to the database
-func (conn *ElasticsearchConn) Connect(timeOut ...int) error {
+func (conn *OpenSearchConn) Connect(timeOut ...int) error {
 	var err error
 	conn.Client, err = conn.getNewClient(timeOut...)
 	if err != nil {
@@ -123,19 +110,19 @@ func (conn *ElasticsearchConn) Connect(timeOut ...int) error {
 	return nil
 }
 
-func (conn *ElasticsearchConn) Close() error {
+func (conn *OpenSearchConn) Close() error {
 	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 	return nil
 }
 
 // NewTransaction creates a new transaction
-func (conn *ElasticsearchConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
-	// Elasticsearch does not support transactions
-	return nil, g.Error("transactions not supported in Elasticsearch")
+func (conn *OpenSearchConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
+	// OpenSearch does not support transactions
+	return nil, g.Error("transactions not supported in OpenSearch")
 }
 
 // GetTableColumns returns columns for a table
-func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+func (conn *OpenSearchConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
 	// Get mapping for the index
 	mapping, err := conn.Client.Indices.GetMapping(
 		conn.Client.Indices.GetMapping.WithIndex(table.Name),
@@ -163,7 +150,7 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 
 	properties, ok := mappings["properties"].(map[string]any)
 	if !ok {
-		// Try ES7+ structure where type is implicit
+		// Try structure where type is implicit
 		if props, ok := mappings["_doc"].(map[string]any); ok {
 			properties = props["properties"].(map[string]any)
 		} else {
@@ -204,7 +191,7 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 				continue
 			}
 
-			// Map ES types to general types
+			// Map OpenSearch types to general types
 			var colType iop.ColumnType
 			switch fieldType {
 			case "text", "keyword", "string":
@@ -259,11 +246,11 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 	return columns, nil
 }
 
-func (conn *ElasticsearchConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	return nil, g.Error("ExecContext not implemented on ElasticSearch")
+func (conn *OpenSearchConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+	return nil, g.Error("ExecContext not implemented on OpenSearch")
 }
 
-func (conn *ElasticsearchConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+func (conn *OpenSearchConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	options, _ := g.UnmarshalMap(table.SQL)
 
 	// add columns if present
@@ -284,7 +271,7 @@ func (conn *ElasticsearchConn) BulkExportFlow(table Table) (df *iop.Dataflow, er
 	return df, nil
 }
 
-func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName string, Opts ...map[string]any) (ds *iop.Datastream, err error) {
+func (conn *OpenSearchConn) StreamRowsContext(ctx context.Context, tableName string, Opts ...map[string]any) (ds *iop.Datastream, err error) {
 	opts := getQueryOptions(Opts)
 	Limit := int64(0) // infinite
 	if val := cast.ToInt64(opts["limit"]); val > 0 {
@@ -355,7 +342,7 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 		return nil, g.Error(err, "could not execute search")
 	} else if res.StatusCode >= 400 {
 		bytes, _ := io.ReadAll(res.Body)
-		return nil, g.Error("could not execute search (status %s) => %s", res.StatusCode, string(bytes))
+		return nil, g.Error("could not execute search (status %d) => %s", res.StatusCode, string(bytes))
 	}
 
 	var searchResponse map[string]any
@@ -380,8 +367,8 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 		flatten = cast.ToInt(val)
 	}
 
-	// Create a custom decoder for Elasticsearch scrolling
-	decoder := &elasticDecoder{
+	// Create a custom decoder for OpenSearch scrolling
+	decoder := &openSearchDecoder{
 		conn:           conn,
 		ctx:            ctx,
 		scrollID:       scrollID,
@@ -414,9 +401,9 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 	return ds, nil
 }
 
-// elasticDecoder implements the decoderLike interface for Elasticsearch scrolling
-type elasticDecoder struct {
-	conn           *ElasticsearchConn
+// openSearchDecoder implements the decoderLike interface for OpenSearch scrolling
+type openSearchDecoder struct {
+	conn           *OpenSearchConn
 	ctx            context.Context
 	scrollID       string
 	searchResponse map[string]any
@@ -427,7 +414,7 @@ type elasticDecoder struct {
 }
 
 // Decode implements the decoderLike interface
-func (d *elasticDecoder) Decode(obj interface{}) error {
+func (d *openSearchDecoder) Decode(obj interface{}) error {
 	// Check context and limits
 	if d.ctx.Err() != nil {
 		return d.ctx.Err()
@@ -436,6 +423,7 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 		return io.EOF
 	}
 
+	// Get next batch if needed
 	// Fetch a new page only when the current batch is exhausted.
 	// The initial search response is page 1; subsequent pages come from scroll.
 	if d.hits == nil || d.currentHit >= len(d.hits) {
@@ -511,8 +499,8 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 }
 
 // GetSchemas returns schemas
-func (conn *ElasticsearchConn) GetSchemas() (data iop.Dataset, err error) {
-	// In Elasticsearch, indices are similar to schemas/databases
+func (conn *OpenSearchConn) GetSchemas() (data iop.Dataset, err error) {
+	// In OpenSearch, indices are similar to schemas/databases
 	// We'll list all indices
 	indices, err := conn.Client.Cat.Indices(
 		conn.Client.Cat.Indices.WithFormat("json"),
@@ -538,8 +526,8 @@ func (conn *ElasticsearchConn) GetSchemas() (data iop.Dataset, err error) {
 }
 
 // GetTables returns tables
-func (conn *ElasticsearchConn) GetTables(schema string) (data iop.Dataset, err error) {
-	// In Elasticsearch, we can consider mappings as tables
+func (conn *OpenSearchConn) GetTables(schema string) (data iop.Dataset, err error) {
+	// In OpenSearch, we can consider mappings as tables
 	// For a given index (schema), get its mapping
 	mapping, err := conn.Client.Indices.GetMapping(
 		conn.Client.Indices.GetMapping.WithIndex(schema),
@@ -555,14 +543,14 @@ func (conn *ElasticsearchConn) GetTables(schema string) (data iop.Dataset, err e
 	}
 
 	data = iop.NewDataset(iop.NewColumnsFromFields("table_name"))
-	// Each index has one mapping type in ES7+
+	// Each index has one mapping type
 	data.Append([]interface{}{"_doc"})
 
 	return data, nil
 }
 
 // GetSchemata returns the database schemata
-func (conn *ElasticsearchConn) GetSchemata(level SchemataLevel, schema string, tables ...string) (schemata Schemata, err error) {
+func (conn *OpenSearchConn) GetSchemata(level SchemataLevel, schema string, tables ...string) (schemata Schemata, err error) {
 	schemata = Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,
@@ -616,12 +604,12 @@ func (conn *ElasticsearchConn) GetSchemata(level SchemataLevel, schema string, t
 			Tables:   map[string]Table{},
 		}
 
-		// Create table entry (in ES, index is both schema and table)
+		// Create table entry (in OpenSearch, index is both schema and table)
 		table := Table{
 			Name:     idx.Index,
 			Schema:   idx.Index,
 			Database: database.Name,
-			Dialect:  dbio.TypeDbElasticsearch,
+			Dialect:  dbio.TypeDbOpenSearch,
 		}
 
 		// Get columns if requested

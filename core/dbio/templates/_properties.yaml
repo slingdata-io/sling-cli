@@ -883,6 +883,36 @@ elasticsearch:
       description: 'Default index name'
       examples: ['logs', 'documents', 'analytics']
 
+opensearch:
+  title: 'OpenSearch'
+  kind: database
+  required: ["url"]
+  url_template: 'opensearch://{user}:{password}@{url}'
+  docs: https://docs.slingdata.io/connections/database-connections/opensearch
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: OS_MAIN'
+      examples: ['OS_MAIN', 'OPENSEARCH_PROD', 'OS_LOGS']
+    url:
+      type: text
+      description: 'OpenSearch URL'
+      examples: ['http://localhost:9200', 'https://opensearch.example.com:9200', 'https://my-domain.us-east-1.es.amazonaws.com']
+    user:
+      type: text
+      description: 'Username for authentication'
+      examples: ['admin', 'opensearch', 'os_user']
+    password:
+      type: text
+      description: 'Password for authentication'
+      examples: ['mypassword123']
+      secret: true
+    index:
+      type: text
+      description: 'Default index name'
+      examples: ['logs', 'documents', 'analytics']
+
 d1:
   title: 'Cloudflare D1'
   kind: database
