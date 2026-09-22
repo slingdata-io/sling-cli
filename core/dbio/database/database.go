@@ -330,6 +330,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ODBCConn{URL: URL}
 	} else if strings.HasPrefix(URL, "scylladb:") {
 		conn = &ScyllaDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "dynamodb:") {
+		conn = &DynamoDBConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}

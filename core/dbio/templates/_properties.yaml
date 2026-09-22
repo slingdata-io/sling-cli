@@ -940,6 +940,45 @@ azuretable:
       description: 'Specific table name for table-specific SAS tokens'
       examples: ['MyTable', 'LogData', 'UserData']
 
+dynamodb:
+  title: 'DynamoDB'
+  kind: database
+  required: ["region"]
+  url_template: 'dynamodb://{region}'
+  docs: https://docs.slingdata.io/connections/database-connections/dynamodb
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DYNAMODB_MAIN'
+      examples: ['DYNAMODB_MAIN', 'DDB_PROD', 'DYNAMO_ANALYTICS']
+    region:
+      type: text
+      description: 'AWS region of the tables'
+      examples: ['us-east-1', 'us-west-2', 'eu-west-1']
+    access_key_id:
+      type: text
+      description: 'AWS access key ID (uses the AWS credential chain when omitted)'
+      examples: ['AKIAIOSFODNN7EXAMPLE']
+    secret_access_key:
+      type: text
+      description: 'AWS secret access key'
+      examples: ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY']
+      secret: true
+    session_token:
+      type: text
+      description: 'AWS session token (for temporary credentials)'
+      examples: ['FwoGZXIvYXdzEBEaEXAMPLE']
+      secret: true
+    profile:
+      type: text
+      description: 'AWS profile name from ~/.aws/credentials'
+      examples: ['default', 'prod']
+    endpoint:
+      type: text
+      description: 'Custom endpoint, for example DynamoDB Local (`http://localhost:8000`)'
+      examples: ['http://localhost:8000']
+
 ftp:
   title: 'FTP'
   kind: file

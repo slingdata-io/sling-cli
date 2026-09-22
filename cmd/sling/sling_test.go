@@ -117,6 +117,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbDynamoDB:          {name: "dynamodb", schema: "default"},
 	dbio.TypeDbAzureTable:        {name: "azure_table", schema: "default"},
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
@@ -877,9 +878,11 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 		failed := false
 
 		for colName, correctType := range correctTypeMap {
-			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB) ||
-				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+			// skip those: schemaless stores infer column types from sampled
+			// values, so logical types (decimal/bigint, date/timestamp, tz) are
+			// not preserved end to end
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbDynamoDB) ||
+				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbDynamoDB) ||
 				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
 				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
 				taskCfg.SrcConn.Type == dbio.TypeDbODBC {
@@ -1310,6 +1313,22 @@ func TestSuiteDatabaseScylladb(t *testing.T) {
 	t.Parallel()
 	// skip SQL views/joins/range/delete_missing/merge update-delete (not CQL-compatible)
 	testSuite(t, dbio.TypeDbScyllaDB, "1,3-9,17,20,23-26")
+}
+
+// TestSuiteDatabaseDynamoDB runs the shared DB suite against DynamoDB
+// (DynamoDB Local works: `docker run -p 8000:8000 amazon/dynamodb-local`).
+//
+// DynamoDB has no SQL engine and no views, so the cases that create or read the
+// `[table]_vw` view are out: 9 creates it, 10 and 11 discover it, 13 reads it
+// into postgres and 19 reads the postgres copy of it. Tests 12, 14, 15, 18 and
+// 21 validate against test1.result.csv, which only holds after test 9's upsert,
+// so they depend on that view chain too (18 and 21 also need the rows that test
+// 12 then writes into postgres). Test 22 backfills the range 2020-01-01 to
+// 2021-01-01 while the suite's rows hold `create_dt` values from 2019, so it can
+// never read a row.
+func TestSuiteDatabaseDynamoDB(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbDynamoDB, "1-8,16-17,20,23-29")
 }
 
 // rewriteScyllaDropSQL: add IF EXISTS and quote identifiers
