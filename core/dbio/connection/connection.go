@@ -820,6 +820,22 @@ func (c *Connection) setURL() (err error) {
 		} else {
 			template = "elasticsearch://{username}:{password}@{host}:{port}"
 		}
+	case dbio.TypeDbOpenSearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		template = "opensearch://{username}:{password}@{host}:{port}"
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())
@@ -1125,6 +1141,16 @@ func (c *Connection) setURL() (err error) {
 		// DynamoDB tables have no schema: `default` keeps object names simple
 		setIfMissing("schema", "default")
 		template = "dynamodb://{aws_region}"
+	case dbio.TypeDbFirebolt:
+		// Firebolt Core has no authentication; username/password stay optional
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("database", "firebolt")
+		setIfMissing("schema", "public")
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
+		template = "firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

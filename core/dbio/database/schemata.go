@@ -333,7 +333,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			return g.Marshal(m)
 		}
 		return t.SQL
-	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable:
+	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {
 			m = g.M()

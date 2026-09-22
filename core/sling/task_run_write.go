@@ -207,7 +207,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// write directly for iceberg / NoSQL (no SQL temp-table merge)
-	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbDynamoDB)
+	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbDynamoDB)
 	// INSERT is upsert-by-PK for these stores
 	upsertByInsert := g.In(tgtConn.GetType(), dbio.TypeDbScyllaDB, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbDynamoDB)
 

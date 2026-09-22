@@ -620,6 +620,9 @@ var indexCapabilities = map[dbio.Type]indexCapability{
 	dbio.TypeDbDynamoDB:   {noIndexes: true}, // DynamoDB keys are declared at table creation
 	dbio.TypeDbOracle:     {supportsUnique: true, supportsType: true, typeClosedSet: []string{"bitmap"}},
 	dbio.TypeDbSQLite:     {supportsWhere: true, supportsUnique: true},
+	// Firebolt has no plain secondary index: only specialized FULL_TEXT /
+	// INVERTED_INDEX / HNSW / SKIP_INDEX, which don't fit the generic form.
+	dbio.TypeDbFirebolt: {noIndexes: true},
 }
 
 var indexCapDefault = indexCapability{supportsUnique: true}

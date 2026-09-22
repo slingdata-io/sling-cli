@@ -289,6 +289,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &MongoDBConn{URL: URL}
 	} else if strings.HasPrefix(URL, "elasticsearch") {
 		conn = &ElasticsearchConn{URL: URL}
+	} else if strings.HasPrefix(URL, "opensearch") {
+		conn = &OpenSearchConn{URL: URL}
 	} else if strings.HasPrefix(URL, "prometheus") {
 		conn = &PrometheusConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {
@@ -332,6 +334,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ScyllaDBConn{URL: URL}
 	} else if strings.HasPrefix(URL, "dynamodb:") {
 		conn = &DynamoDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "firebolt:") {
+		conn = &FireboltConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}

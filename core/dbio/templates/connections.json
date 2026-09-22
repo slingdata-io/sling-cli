@@ -1242,6 +1242,30 @@
         }
       }
     },
+    "opensearch": {
+      "name": "OpenSearch",
+      "description": "OpenSearch search and analytics engine",
+      "category": "database",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "OpenSearch URL",
+          "required": true
+        },
+        "user": {
+          "type": "string",
+          "description": "Username for authentication"
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for authentication"
+        },
+        "index": {
+          "type": "string",
+          "description": "Default index name"
+        }
+      }
+    },
     "prometheus": {
       "name": "Prometheus",
       "description": "Prometheus monitoring system",
