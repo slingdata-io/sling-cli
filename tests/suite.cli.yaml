@@ -3056,6 +3056,25 @@
     - '5,Eve'
     - execution succeeded
 
+# dBase (.dbf): read-only tables backed by plain files, so the test sets up its
+# own connection in a temp home dir and needs no external credentials.
+- id: 618
+  name: 'Read dBase (.dbf) tables'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    sling conns set --home-dir "$HOME_DIR" DBF_TEST --type dbase path=core/dbio/database/test/dbf
+    SLING_ROW_CNT= sling conns exec --home-dir "$HOME_DIR" DBF_TEST 'select "Point_ID", "Max_PDOP" from "dbase_03" limit 3'
+    SLING_ROW_CNT= sling conns exec --home-dir "$HOME_DIR" DBF_TEST 'select "EXPENSECAT", "EXPENSECA2" from "expense categories" limit 2'
+    sling run --home-dir "$HOME_DIR" --src-conn DBF_TEST --src-stream dbase_03 --tgt-conn LOCAL --tgt-object "file://$(mktemp -d)/dbase_03.csv" --mode full-refresh
+    SLING_ROW_CNT= sling run --home-dir "$HOME_DIR" --src-conn DBF_TEST --src-stream 'select "PRODNAME", "DESC" from "TEST"' --stdout
+  rows: 14
+  streams: 1
+  output_contains:
+    - '0507121'
+    - 'Meals'
+    - 'PRODUCT DESCRIPTION'
+    - execution succeeded
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

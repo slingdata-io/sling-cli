@@ -314,6 +314,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &D1Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
 		conn = &SQLiteConn{URL: URL}
+	} else if strings.HasPrefix(URL, "dbase:") || strings.HasPrefix(URL, "dbf:") {
+		conn = &DbaseConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
 		conn = &DuckDbConn{URL: URL}
 	} else if strings.HasPrefix(URL, "ducklake:") {

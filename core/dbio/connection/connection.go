@@ -314,7 +314,7 @@ func (c *Connection) URL() string {
 	}
 
 	switch c.Type {
-	case dbio.TypeDbDuckDb:
+	case dbio.TypeDbDuckDb, dbio.TypeDbDBase:
 		// fix windows path
 		url = strings.ReplaceAll(url, `\`, `/`)
 	}
@@ -599,7 +599,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbDBase, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("user", U.Username())
 				setIfMissing("username", U.Username())
@@ -623,6 +623,9 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("instance", pathValue)
 			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
 				setIfMissing("instance", U.Path())
+				setIfMissing("schema", "main")
+			case dbio.TypeDbDBase:
+				setIfMissing("path", database.DbasePathFromURL(c.URL()))
 				setIfMissing("schema", "main")
 			case dbio.TypeDbLanceDB:
 				setIfMissing("path", lanceDBPathFromURL(c.URL()))
@@ -903,6 +906,12 @@ func (c *Connection) setURL() (err error) {
 			}
 		}
 		template = "sqlite://{instance}?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL"
+	case dbio.TypeDbDBase:
+		if val, ok := c.Data["path"]; ok {
+			c.Data["path"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+		}
+		setIfMissing("schema", "main")
+		template = "dbase://{path}"
 	case dbio.TypeDbDuckDb:
 		if val, ok := c.Data["instance"]; ok {
 			dbURL, err := net.NewURL(cast.ToString(val))
