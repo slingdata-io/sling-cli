@@ -102,6 +102,7 @@ func TestExplainTemplatePresentForSQLDatabases(t *testing.T) {
 		TypeDbAzureTable:    true,
 		TypeDbBigTable:      true,
 		TypeDbPrometheus:    true,
+		TypeDbDynamoDB:      true,
 	}
 	for _, td := range AllType {
 		if !td.Value.IsDb() {

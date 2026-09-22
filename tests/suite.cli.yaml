@@ -3056,6 +3056,24 @@
     - '5,Eve'
     - execution succeeded
 
+# DynamoDB: needs a DynamoDB Local endpoint. The CI step starts one and sets the
+# DYNAMODB connection (type dynamodb, endpoint, region and dummy credentials).
+# The pipeline seeds its own sources and asserts every scenario with checks:
+# full refresh, upsert, composite key, limited read, incremental, and
+# delete_missing soft/hard.
+- id: 618
+  name: 'Run sling dynamodb pipeline'
+  group: dynamodb
+  run: sling run -p tests/pipelines/p.54.dynamodb.yaml
+  output_contains:
+    - 'upsert: 18 rows, 18 distinct ids (expect 18, 18)'
+    - 'composite key slice: 3 rows (expect 3)'
+    - 'incremental: 20 rows, 20 distinct ids, max code 20 (expect 20, 20, 20)'
+    - 'soft delete: 3 rows, 1 flagged, row 3 flagged 1'
+    - 'hard delete: 2 rows, row 3 present 0'
+    - 'SUCCESS: DynamoDB full refresh, upsert, composite key, incremental and delete_missing all verified'
+    - execution succeeded
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

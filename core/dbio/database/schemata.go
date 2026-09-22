@@ -286,6 +286,53 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			t.SQL = g.F("%s\n--iceberg-json=%s", t.SQL, g.Marshal(m))
 		}
 		return t.SQL
+	case dbio.TypeDbDynamoDB:
+		// DynamoDB has no SQL engine: the select is a JSON scan descriptor the
+		// connector executes. It always carries the table, so a bare table name
+		// and a `select ... from <table>` both resolve to a scan.
+		m, _ := g.UnmarshalMap(t.SQL)
+		if m == nil {
+			m = g.M()
+		}
+
+		if t.Name != "" {
+			m["table"] = t.Name
+		} else if refName, refOpts, refErr := dynamoDBScanRef(t.SQL); refErr == nil && dynamoDBIsTableName(refName) {
+			m["table"] = refName
+			for key, val := range refOpts {
+				if _, ok := m[key]; !ok {
+					m[key] = val
+				}
+			}
+		} else if refErr != nil {
+			// hand the statement through untouched so the connector reports why
+			// it cannot be applied
+			return t.SQL
+		}
+
+		if opts.Where != "" {
+			var where any
+			g.Unmarshal(opts.Where, &where)
+			m["filter"] = where // json object
+		}
+
+		if len(fields) > 0 && fields[0] != "*" {
+			m["fields"] = lo.Map(fields, func(v string, i int) string {
+				return strings.TrimSpace(v)
+			})
+		}
+
+		// an explicit limit wins unless the statement carries its own
+		if opts.Limit != nil {
+			if _, ok := m["limit"]; !ok {
+				m["limit"] = opts.Limit
+			}
+		}
+
+		if len(m) > 0 {
+			return g.Marshal(m)
+		}
+		return t.SQL
 	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {

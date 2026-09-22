@@ -617,6 +617,7 @@ var indexCapabilities = map[dbio.Type]indexCapability{
 	dbio.TypeDbMotherDuck: {supportsUnique: true},
 	dbio.TypeDbDuckLake:   {noIndexes: true}, // DuckLake does not support indexes
 	dbio.TypeDbLanceDB:    {noIndexes: true}, // Lance datasets have no secondary indexes
+	dbio.TypeDbDynamoDB:   {noIndexes: true}, // DynamoDB keys are declared at table creation
 	dbio.TypeDbOracle:     {supportsUnique: true, supportsType: true, typeClosedSet: []string{"bitmap"}},
 	dbio.TypeDbSQLite:     {supportsWhere: true, supportsUnique: true},
 	// Firebolt has no plain secondary index: only specialized FULL_TEXT /

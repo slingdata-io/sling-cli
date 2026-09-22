@@ -1,0 +1,354 @@
+# DynamoDB end to end, self-contained: it seeds every source it needs.
+#
+#  1. local CSV -> DynamoDB full refresh, then the same file as an upsert
+#  2. composite primary key, read back with a limit
+#  3. DynamoDB -> postgres incremental on `code` (only the appended rows load)
+#  4. delete_missing soft: the row missing from the stream stays, flagged
+#  5. delete_missing hard: the row missing from the stream is deleted
+#
+# Needs a `DYNAMODB` connection (DynamoDB Local works: endpoint + region, no
+# credentials) and a `POSTGRES` connection. DynamoDB tables are dropped at the
+# end, so re-runs start clean.
+
+steps:
+  - log: "DynamoDB pipeline: full refresh, upsert, composite key, incremental, delete_missing"
+
+  # drop leftovers from an interrupted run (the same tables the pipeline creates)
+  - type: group
+    loop: [dynamodb_pipe_test, dynamodb_pipe_composite, dynamodb_pipe_inc, dynamodb_pipe_delmiss_soft, dynamodb_pipe_delmiss_hard]
+    steps:
+      - connection: DYNAMODB
+        on_failure: warn
+        query: drop table if exists {loop.value}
+
+  - type: group
+    loop: [public.dynamodb_pipe_test_pg, public.dynamodb_pipe_test_pg_tmp, public.dynamodb_pipe_composite_pg, public.dynamodb_pipe_composite_pg_tmp, public.dynamodb_pipe_inc_pg, public.dynamodb_pipe_inc_pg_tmp, public.dynamodb_pipe_delmiss_soft_pg, public.dynamodb_pipe_delmiss_soft_pg_tmp, public.dynamodb_pipe_delmiss_hard_pg, public.dynamodb_pipe_delmiss_hard_pg_tmp, public.dynamodb_pipe_delmiss_soft_src, public.dynamodb_pipe_delmiss_hard_src]
+    steps:
+      - connection: POSTGRES
+        on_failure: warn
+        query: drop table if exists {loop.value}
+
+  # ---------- 1. full refresh, then upsert of the same file ----------
+  - id: ddb_full_refresh
+    replication:
+      source: LOCAL
+      target: DYNAMODB
+      defaults:
+        mode: full-refresh
+      streams:
+        file://tests/files/test1.1.csv:
+          object: dynamodb_pipe_test
+          primary_key: [id]
+    on_failure: abort
+
+  # INSERT is upsert-by-key for DynamoDB, so the same 18 rows must not duplicate
+  - replication:
+      source: LOCAL
+      target: DYNAMODB
+      defaults:
+        mode: incremental
+      streams:
+        file://tests/files/test1.1.csv:
+          object: dynamodb_pipe_test
+          primary_key: [id]
+    on_failure: abort
+
+  - replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        default.dynamodb_pipe_test:
+          object: public.dynamodb_pipe_test_pg
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: select count(*) as cnt, count(distinct id) as ids from public.dynamodb_pipe_test_pg
+    into: upsert_counts
+
+  - log: "upsert: {store.upsert_counts[0].cnt} rows, {store.upsert_counts[0].ids} distinct ids (expect 18, 18)"
+
+  - check: 'int_parse(store.upsert_counts[0].cnt) == 18 && int_parse(store.upsert_counts[0].ids) == 18'
+    failure_message: "Expected 18 rows with 18 distinct ids after the upsert, got {store.upsert_counts[0].cnt}/{store.upsert_counts[0].ids}"
+    on_failure: abort
+
+  # ---------- 2. composite primary key, read back with a limit ----------
+  - replication:
+      source: LOCAL
+      target: DYNAMODB
+      defaults:
+        mode: full-refresh
+      streams:
+        file://tests/files/test1.1.csv:
+          object: dynamodb_pipe_composite
+          primary_key: [id, code]
+    on_failure: abort
+
+  - replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        "select id, code from dynamodb_pipe_composite limit 3":
+          object: public.dynamodb_pipe_composite_pg
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: select count(*) as cnt from public.dynamodb_pipe_composite_pg
+    into: composite_counts
+
+  - log: "composite key slice: {store.composite_counts[0].cnt} rows (expect 3)"
+
+  - check: int_parse(store.composite_counts[0].cnt) == 3
+    failure_message: "Expected 3 rows from the limited composite read, got {store.composite_counts[0].cnt}"
+    on_failure: abort
+
+  # ---------- 3. incremental read, update_key on a numeric column ----------
+  - replication:
+      source: LOCAL
+      target: DYNAMODB
+      defaults:
+        mode: full-refresh
+        primary_key: [id]
+      streams:
+        file://tests/files/test1.1.csv:
+          object: dynamodb_pipe_inc
+    on_failure: abort
+
+  - id: inc_full
+    replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+        primary_key: [id]
+        update_key: code
+      streams:
+        default.dynamodb_pipe_inc:
+          object: public.dynamodb_pipe_inc_pg
+          select: [id, code, email, rating]
+    on_failure: abort
+
+  # two rows with code > 18 (the max of test1.1.csv)
+  - type: write
+    to: local//tmp/dynamodb_pipe_new_rows.csv
+    content: |
+      id,code,email,rating
+      19,19,nineteen@example.com,50.5
+      20,20,twenty@example.com,60.5
+
+  - replication:
+      source: LOCAL
+      target: DYNAMODB
+      defaults:
+        mode: incremental
+        primary_key: [id]
+      streams:
+        file:///tmp/dynamodb_pipe_new_rows.csv:
+          object: dynamodb_pipe_inc
+    on_failure: abort
+
+  - id: inc_reload
+    replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: code
+      streams:
+        default.dynamodb_pipe_inc:
+          object: public.dynamodb_pipe_inc_pg
+          select: [id, code, email, rating]
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: |
+      select count(*) as cnt,
+             count(distinct id) as ids,
+             max(code) as max_code
+      from public.dynamodb_pipe_inc_pg
+    into: inc_counts
+
+  - log: "incremental: {store.inc_counts[0].cnt} rows, {store.inc_counts[0].ids} distinct ids, max code {store.inc_counts[0].max_code} (expect 20, 20, 20)"
+
+  - check: 'int_parse(store.inc_counts[0].cnt) == 20 && int_parse(store.inc_counts[0].ids) == 20'
+    failure_message: "Expected 20 rows with 20 distinct ids after the incremental load, got {store.inc_counts[0].cnt}/{store.inc_counts[0].ids}"
+    on_failure: abort
+
+  # the reload must read only the appended rows, not re-pull all 18
+  - check: int_parse(state.inc_reload.rows) == 2
+    failure_message: "The incremental reload must read only the 2 appended rows, got {state.inc_reload.rows}"
+    on_failure: abort
+
+  # ---------- 4. delete_missing soft ----------
+  - connection: POSTGRES
+    on_failure: warn
+    query: drop table if exists public.dynamodb_pipe_delmiss_soft_src
+
+  - connection: POSTGRES
+    query: |
+      create table public.dynamodb_pipe_delmiss_soft_src (
+        id bigint, create_dt timestamp, name text
+      );
+      insert into public.dynamodb_pipe_delmiss_soft_src values
+        (1, '2019-01-01 00:00:00', 'alice'),
+        (2, '2019-01-01 00:00:00', 'bob'),
+        (3, '2019-01-01 00:00:00', 'carol');
+
+  - replication:
+      source: POSTGRES
+      target: DYNAMODB
+      defaults:
+        mode: full-refresh
+        primary_key: [id]
+        update_key: create_dt
+      streams:
+        public.dynamodb_pipe_delmiss_soft_src:
+          object: dynamodb_pipe_delmiss_soft
+    on_failure: abort
+
+  # the source loses row 3; the survivors move to a newer create_dt
+  - connection: POSTGRES
+    query: |
+      truncate public.dynamodb_pipe_delmiss_soft_src;
+      insert into public.dynamodb_pipe_delmiss_soft_src values
+        (1, '2020-01-01 00:00:00', 'alice'),
+        (2, '2020-01-01 00:00:00', 'bob');
+
+  - replication:
+      source: POSTGRES
+      target: DYNAMODB
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: create_dt
+        target_options:
+          delete_missing: soft
+      streams:
+        public.dynamodb_pipe_delmiss_soft_src:
+          object: dynamodb_pipe_delmiss_soft
+    on_failure: abort
+
+  - replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        default.dynamodb_pipe_delmiss_soft:
+          object: public.dynamodb_pipe_delmiss_soft_pg
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: |
+      select count(*) as total,
+             count(_sling_deleted_at) as flagged,
+             count(case when id = 3 and _sling_deleted_at is not null then 1 end) as flagged_row,
+             count(case when id = 1 and _sling_deleted_at is null then 1 end) as kept_row
+      from public.dynamodb_pipe_delmiss_soft_pg
+    into: soft_counts
+
+  - log: "soft delete: {store.soft_counts[0].total} rows, {store.soft_counts[0].flagged} flagged, row 3 flagged {store.soft_counts[0].flagged_row}"
+
+  - check: int_parse(store.soft_counts[0].total) == 3
+    failure_message: "Soft delete must keep all 3 rows, got {store.soft_counts[0].total}"
+    on_failure: abort
+
+  - check: 'int_parse(store.soft_counts[0].flagged) == 1 && int_parse(store.soft_counts[0].flagged_row) == 1'
+    failure_message: "Only row 3 (missing from the stream) must be flagged, got {store.soft_counts[0].flagged} flagged rows"
+    on_failure: abort
+
+  - check: int_parse(store.soft_counts[0].kept_row) == 1
+    failure_message: "Row 1 must stay unflagged after a soft delete"
+    on_failure: abort
+
+  # ---------- 5. delete_missing hard ----------
+  - connection: POSTGRES
+    on_failure: warn
+    query: drop table if exists public.dynamodb_pipe_delmiss_hard_src
+
+  - connection: POSTGRES
+    query: |
+      create table public.dynamodb_pipe_delmiss_hard_src (
+        id bigint, create_dt timestamp, name text
+      );
+      insert into public.dynamodb_pipe_delmiss_hard_src values
+        (1, '2019-01-01 00:00:00', 'alice'),
+        (2, '2019-01-01 00:00:00', 'bob'),
+        (3, '2019-01-01 00:00:00', 'carol');
+
+  - replication:
+      source: POSTGRES
+      target: DYNAMODB
+      defaults:
+        mode: full-refresh
+        primary_key: [id]
+        update_key: create_dt
+      streams:
+        public.dynamodb_pipe_delmiss_hard_src:
+          object: dynamodb_pipe_delmiss_hard
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: |
+      truncate public.dynamodb_pipe_delmiss_hard_src;
+      insert into public.dynamodb_pipe_delmiss_hard_src values
+        (1, '2020-01-01 00:00:00', 'alice'),
+        (2, '2020-01-01 00:00:00', 'bob');
+
+  - replication:
+      source: POSTGRES
+      target: DYNAMODB
+      defaults:
+        mode: incremental
+        primary_key: [id]
+        update_key: create_dt
+        target_options:
+          delete_missing: hard
+      streams:
+        public.dynamodb_pipe_delmiss_hard_src:
+          object: dynamodb_pipe_delmiss_hard
+    on_failure: abort
+
+  - replication:
+      source: DYNAMODB
+      target: POSTGRES
+      defaults:
+        mode: full-refresh
+      streams:
+        default.dynamodb_pipe_delmiss_hard:
+          object: public.dynamodb_pipe_delmiss_hard_pg
+    on_failure: abort
+
+  - connection: POSTGRES
+    query: |
+      select count(*) as total,
+             count(case when id = 3 then 1 end) as stale
+      from public.dynamodb_pipe_delmiss_hard_pg
+    into: hard_counts
+
+  - log: "hard delete: {store.hard_counts[0].total} rows, row 3 present {store.hard_counts[0].stale}"
+
+  - check: 'int_parse(store.hard_counts[0].total) == 2 && int_parse(store.hard_counts[0].stale) == 0'
+    failure_message: "Hard delete must leave 2 rows without row 3, got {store.hard_counts[0].total} rows with {store.hard_counts[0].stale} stale"
+    on_failure: abort
+
+  - log: "SUCCESS: DynamoDB full refresh, upsert, composite key, incremental and delete_missing all verified"
+
+  # ---------- cleanup ----------
+  - type: group
+    loop: [dynamodb_pipe_test, dynamodb_pipe_composite, dynamodb_pipe_inc, dynamodb_pipe_delmiss_soft, dynamodb_pipe_delmiss_hard]
+    steps:
+      - connection: DYNAMODB
+        on_failure: warn
+        query: drop table if exists {loop.value}
+
+  - type: group
+    loop: [public.dynamodb_pipe_test_pg, public.dynamodb_pipe_test_pg_tmp, public.dynamodb_pipe_composite_pg, public.dynamodb_pipe_composite_pg_tmp, public.dynamodb_pipe_inc_pg, public.dynamodb_pipe_inc_pg_tmp, public.dynamodb_pipe_delmiss_soft_pg, public.dynamodb_pipe_delmiss_soft_pg_tmp, public.dynamodb_pipe_delmiss_hard_pg, public.dynamodb_pipe_delmiss_hard_pg_tmp, public.dynamodb_pipe_delmiss_soft_src, public.dynamodb_pipe_delmiss_hard_src]
+    steps:
+      - connection: POSTGRES
+        on_failure: warn
+        query: drop table if exists {loop.value}
