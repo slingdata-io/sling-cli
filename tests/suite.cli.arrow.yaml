@@ -1,0 +1,1254 @@
+# Arrow lane CLI suite: tests/suite.cli.arrow.yaml
+#
+# Nested suite for the Arrow-native dataflow lane (SLING_ARROW_LANE). Included
+# from tests/suite.cli.yaml as `- suite: suite.cli.arrow.yaml`.
+#
+# Run it with:
+#   cd cmd/sling && go build . && SLING_BIN=sling go test -v -run TestCLI -- --debug "700+"
+#
+# Groups:
+#   arrow-on     701-733, 734, 735       the stream must engage the lane:
+#                `arrow lane: enabled`, no `falling back to row-based`, rows.
+#   arrow-off    729, 740-760, 775        the stream must fall back at info:
+#                `falling back to row-based` plus the reason, no `enabled`.
+#   arrow-quiet  726, 770-774             the stream must fall back at debug:
+#                no info line; `arrow lane: not used` with -d.
+#   arrow-force  780-783                  SLING_ARROW_LANE=force turns the
+#                decline into an error (`forced but not eligible` + reason).
+#   row-guard    784-791                  the row path and the column types
+#                stay the same as before the lane. 789/790 run on the lane:
+#                it reads the driver's numeric and jsonb labels.
+#
+# Every entry seeds its own source table (tests/pipelines/arrow/seed.yaml) so a
+# partial range such as "770-783" is self-sufficient, and every entry shares
+# `group: arrow` so the seed and the target tables never race.
+#
+# Environment:
+#   SOURCE/TARGET/SCHEMA  per entry. Simple cases run `sling run` with flags
+#     and drop their target table at the end of the entry.
+#   KEEP_TARGET  set it on every entry that runs a file in
+#     tests/replications/arrow. An `if` comparison against a missing env var
+#     is truthy in this pipeline evaluator, so the files compare
+#     `env.KEEP_TARGET == "false"`.
+#   SLING_OPEN_BIN  open-build binary (no core/dbio/iop/arrow_lane..go) for
+#     entries 774 and 782. Build it with the plan's phase-exit procedure and
+#     point this at it; it defaults to /tmp/sling_open.
+#   VERIFY_MODE  "except" | "concat" | "mssql" for tests/pipelines/arrow/verify.yaml.
+#
+# The arrow-off entries target a local Parquet file: they run the row path, and
+# the ADBC bulk ingest on Postgres rejects the type matrix (smallint and jsonb
+# COPY binary), which would fail a DB target on that adjacent defect instead of
+# on the lane. Cases 743/755 expect the plan's stage-2 `cannot cast`, but this
+# revision declines on any `columns:` spec, so they assert `columns is set`.
+#
+# The lane -> file targets (723-725) are wrapped in `timeout 300`: the lane's file
+# write path currently hangs after `arrow lane: enabled (postgres -> file/file)`
+# on this build, so the entry fails fast instead of blocking the whole suite.
+#
+# Connections: entries that need SNOWFLAKE, DATABRICKS, REDSHIFT, AWS_S3 or
+# MSSQL_ADBC run only where those connections exist (same as the existing ADBC
+# entries in tests/suite.cli.yaml; the harness has no skip mechanism).
+
+- id: 701
+  name: 'arrow lane: default full-refresh engages'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 702
+  name: 'arrow lane: select includes'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_702" --mode full-refresh --select 'c_int8,c_str,c_ts'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_702"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 703
+  name: 'arrow lane: select excludes'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_703" --mode full-refresh --select '-c_bin,-c_json'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_703"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 704
+  name: 'arrow lane: select alias rename'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_704" --mode full-refresh --select 'c_int8 as id,c_str as name'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_704"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 705
+  name: 'arrow lane: column_casing upper'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_705" --mode full-refresh --tgt-options '{column_casing: upper}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_705"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 706
+  name: 'arrow lane: column_casing snake'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_706" --mode full-refresh --tgt-options '{column_casing: snake}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_706"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 707
+  name: 'arrow lane: where filter'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  # 5000, not 4999: the seed sets c_int8 to the max int64 on row 1, so the
+  # filter c_int8 > 5000 matches 5001..9999 (4999 rows) plus that one row.
+  # Measured on the source table: select count(*) from arrow_src where c_int8 > 5000 -> 5000
+  rows: 5000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_707" --mode full-refresh --where 'c_int8 > 5000'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_707"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 708
+  name: 'arrow lane: source limit'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 100
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_708" --mode full-refresh --limit 100
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_708"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 709
+  name: 'arrow lane: incremental incremental_target'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 0
+  run: |
+    sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_709"
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_709" --mode incremental --update-key c_ts
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_709" --mode incremental --update-key c_ts
+    sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_709"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 710
+  name: 'arrow lane: incremental incremental_state_int'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_STATE: 'LOCAL//tmp/arrow_state_710'
+  rows: 0
+  run: |
+    rm -rf /tmp/arrow_state_710
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d -r tests/replications/arrow/a.710.incremental_state_int.yaml
+    sling run -d -r tests/replications/arrow/a.710.incremental_state_int.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 711
+  name: 'arrow lane: incremental incremental_state_ts'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_STATE: 'LOCAL//tmp/arrow_state_711'
+  rows: 0
+  run: |
+    rm -rf /tmp/arrow_state_711
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d -r tests/replications/arrow/a.711.incremental_state_ts.yaml
+    sling run -d -r tests/replications/arrow/a.711.incremental_state_ts.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 713
+  name: 'arrow lane: truncate mode'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_713" --mode truncate
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_713"
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_713" --mode truncate
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_713"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 714
+  name: 'arrow lane: snapshot mode'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_714" --mode snapshot
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_714"
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_714" --mode snapshot
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_714"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 715
+  name: 'arrow lane: add_new_columns'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_715" --mode full-refresh --tgt-options '{add_new_columns: true}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_715"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 716
+  name: 'arrow lane: adjust_column_type'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_716" --mode full-refresh --tgt-options '{adjust_column_type: true}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_716"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 717
+  name: 'arrow lane: target table exists from the row path'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 718
+  name: 'arrow lane: empty source'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 0
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_718" --mode full-refresh --where '1 = 0'
+    sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_718"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 719
+  name: 'arrow lane: all-null column and unicode'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 720
+  name: 'arrow lane: staged Parquet on Snowflake'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'SNOWFLAKE'
+    SCHEMA: 'public'
+  rows: 10000
+  # c_json declines on Snowflake (see 791), so this case excludes it
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_703" --mode full-refresh --select '-c_bin,-c_json'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_703"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 723
+  name: 'arrow lane: database to local Parquet'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'LOCAL'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    timeout 300 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_723.parquet --mode full-refresh --tgt-options '{format: parquet}'
+    rm -f /tmp/arrow_lane_723.parquet
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 724
+  name: 'arrow lane: database to S3 Arrow file'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'AWS_S3'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    timeout 300 sling run -d -r tests/replications/arrow/a.724.s3_arrow.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 725
+  name: 'arrow lane: S3 Parquet file to Snowflake'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    # the paths are relative to the AWS_S3 bucket: with SLING_HOME_DIR set, a
+    # full s3:// URL in a flag loses the connection's credentials
+    timeout 300 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn AWS_S3 --tgt-object temp/arrow_lane_725.parquet --mode full-refresh --tgt-options '{format: parquet}'
+    timeout 300 sling run -d --src-conn AWS_S3 --src-stream temp/arrow_lane_725.parquet --tgt-conn SNOWFLAKE --tgt-object "$SCHEMA.arrow_dst_725" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "drop table if exists $SCHEMA.arrow_dst_725"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 726
+  name: 'arrow lane quiet: CDC group source is a native MySQL connection'
+  group: arrow
+  env:
+    SOURCE: 'MYSQL'
+    TARGET: 'POSTGRES_ADBC'
+    # MySQL has no schema layer over databases: the seed loads into the
+    # existing `mysql` database, so no schema creation is attempted there.
+    SCHEMA: 'mysql'
+    KEEP_TARGET: 'false'
+  # the stream is one synthetic change-capture event, not the seeded table
+  rows: 1
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.726.cdc_group.yaml
+  output_contains:
+    - 'arrow lane: not used'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 727
+  name: 'arrow lane: Tier A transform'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_727" --mode full-refresh --transforms '{c_str: ["upper(value)"]}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_727"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 728
+  name: 'arrow lane: Tier B transform'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  # the transform dialect is goval's: a string literal is double quoted,
+  # and the row path's cast accepts int, not bigint
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_728" --mode full-refresh --transforms '{"c_int4": ["cast(value, \"int\")"]}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_728"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 729
+  name: 'arrow lane declines: columns cast (declines: the gate refuses any columns spec)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_729" --mode full-refresh --columns '{c_int4: bigint}'
+    sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_729"
+  output_contains:
+    - 'falling back to row-based'
+    - 'columns is set'
+
+- id: 730
+  name: 'arrow lane: file_max_rows rollover'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_730" --mode full-refresh --tgt-options '{file_max_rows: 500000}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_730"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 731
+  name: 'arrow lane: small record buffer'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    SLING_ARROW_LANE_BUFFER: '1'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 732
+  name: 'arrow lane: DuckDB ADBC to DuckDB ADBC'
+  group: arrow
+  env:
+    SOURCE: 'DUCKDB_ADBC'
+    TARGET: 'DUCKDB_ADBC'
+    SCHEMA: 'main'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 734
+  name: 'arrow lane: lane and row paths agree (verify)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    VERIFY_MODE: 'except'
+    # the lane types c_dec from the ADBC driver's schema (utf8), the row path
+    # from the table's own types (numeric): compare the values, not the text
+    VERIFY_PROJECTION: 'c_bool, c_int2, c_int4, c_int8, c_float, cast(c_dec as numeric) as c_dec, c_str, c_str_uni, c_bin, c_date, c_ts, c_tsz, c_time, c_json, c_null'
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT=10000 SLING_ARROW_LANE=false sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_734_row" --mode full-refresh
+    TABLE_A=public.arrow_dst_701 TABLE_B=public.arrow_dst_734_row sling run -d -p tests/pipelines/arrow/verify.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+    # the row leg turns the lane off through the env switch, which logs at
+    # debug; a gate decline would log "falling back to row-based" instead
+    - 'Reason: SLING_ARROW_LANE=false'
+    - 'arrow lane verify'
+
+- id: 735
+  name: 'arrow lane: lane and row paths agree (verify)'
+  group: arrow
+  env:
+    SOURCE: 'DUCKDB_ADBC'
+    TARGET: 'DUCKDB_ADBC'
+    SCHEMA: 'main'
+    VERIFY_MODE: 'except'
+    VERIFY_PROJECTION: 'c_bool, c_int2, c_int4, c_int8, c_float, cast(c_dec as numeric) as c_dec, c_str, c_str_uni, c_bin, c_date, c_ts, c_tsz, c_time, c_json, c_null'
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT=10000 SLING_ARROW_LANE=false sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_735_row" --mode full-refresh
+    TABLE_A=main.arrow_dst_701 TABLE_B=main.arrow_dst_735_row sling run -d -p tests/pipelines/arrow/verify.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+    # the row leg turns the lane off through the env switch, which logs at
+    # debug; a gate decline would log "falling back to row-based" instead
+    - 'Reason: SLING_ARROW_LANE=false'
+    - 'arrow lane verify'
+
+- id: 740
+  name: 'arrow lane declines: transform that reads record.'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  # The target is a local Parquet file: the row path writes it through
+  # DuckDB's csv bridge, which cannot carry the seed's type matrix. The
+  # decline is the assertion, so the run is forced and fails before the read.
+  err: true
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ARROW_LANE=force sling run -d -r tests/replications/arrow/a.740.transform_record.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'uses "record."'
+
+- id: 741
+  name: 'arrow lane declines: transform that adds a column'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.741.transform_add_column.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'targets the new column'
+
+- id: 742
+  name: 'arrow lane declines: transform stage the lane cannot classify'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.742.transform_plain.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'transforms are set'
+
+- id: 743
+  name: 'arrow lane declines: columns cast the lane refuses'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  err: true
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ARROW_LANE=force sling run -d -r tests/replications/arrow/a.743.columns_refuse.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'columns is set'
+
+- id: 744
+  name: 'arrow lane declines: column constraint'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.744.constraint.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'constraint'
+
+- id: 745
+  name: 'arrow lane: metadata column is appended by the lane'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    SLING_LOADED_AT_COLUMN: 'true'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: enabled'
+    - 'inserted 10000 rows'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 746
+  name: 'arrow lane declines: empty_as_null set away from the default'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  # A database source defaults empty_as_null to false, so false is the
+  # default and engages the lane; the case sets true, the value the gate
+  # refuses. The target is a local Parquet file, which the row path cannot
+  # write for this seed, so the run is forced.
+  err: true
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ARROW_LANE=force sling run -d -r tests/replications/arrow/a.746.empty_as_null.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'empty_as_null is set'
+
+- id: 747
+  name: 'arrow lane declines: null_if set'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.747.null_if.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'null_if'
+
+- id: 748
+  name: 'arrow lane declines: datetime_format set'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.748.datetime_format.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'datetime_format'
+
+- id: 749
+  name: 'arrow lane declines: max_decimals set'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.749.max_decimals.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'max_decimals'
+
+- id: 750
+  name: 'arrow lane declines: column_typing set'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.750.column_typing.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'column_typing'
+
+- id: 751
+  name: 'arrow lane declines: explicit format csv on Snowflake'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'SNOWFLAKE'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_751" --mode full-refresh --tgt-options '{format: csv}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_751"
+  output_contains:
+    - 'falling back to row-based'
+    - 'format: csv'
+
+- id: 752
+  name: 'arrow lane declines: use_bulk false'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.752.use_bulk_false.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'use_bulk'
+
+- id: 753
+  name: 'arrow lane: chunked read'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  # 9999, not 10000: a chunked read filters on the update key, so the seed's
+  # all-null row (its c_int2 is NULL) is outside every chunk range. The row
+  # path loads the same 9999 rows.
+  rows: 9999
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.753.chunk_size.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 754
+  name: 'arrow lane: incremental state on a string update key'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_STATE: 'LOCAL//tmp/arrow_state_754'
+  rows: 0
+  run: |
+    rm -rf /tmp/arrow_state_754
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT=10000 sling run -d -r tests/replications/arrow/a.754.state_string_key.yaml
+    sling run -d -r tests/replications/arrow/a.754.state_string_key.yaml
+  output_contains:
+    - 'arrow lane: enabled'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 755
+  name: 'arrow lane declines: adjust_column_type with a lossy gap'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  # The prep step gives the target a c_int8 the source cannot be cast to. The
+  # lane declines on the target-column rule and the row path writes the
+  # stream. DEBUG=LOW is needed because that decline is logged at debug level.
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_lane_755" --mode full-refresh --select c_int8 --columns '{c_int8: int32}'
+    DEBUG=LOW sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_lane_755" --mode full-refresh --tgt-options '{adjust_column_type: true}'
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_lane_755"
+  output_contains:
+    - 'arrow lane: falling back to row-based'
+    - 'no lossless cast'
+
+- id: 756
+  name: 'arrow lane declines: row checksum requested'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  err: true
+  # the checksum env var is set inline: the seed step would otherwise checksum
+  # its own load, and that query overflows smallint
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_CHECKSUM_ROWS=10000 SLING_ARROW_LANE=force sling run -d -r tests/replications/arrow/a.off.envdriven.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'checksum'
+
+- id: 757
+  name: 'arrow lane declines: direct_insert set'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.757.direct_insert.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'direct_insert'
+
+- id: 758
+  name: 'arrow lane declines: schema migrator enabled'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  err: true
+  # the migrator env var is set inline so the seed step keeps its own behavior
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_SCHEMA_MIGRATION=all SLING_ARROW_LANE=force sling run -d -r tests/replications/arrow/a.off.envdriven.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'schema migrat'
+
+- id: 759
+  name: 'arrow lane declines: SQL Server source is not in the lane list'
+  group: arrow
+  env:
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  # D15 keeps SQL Server out until its type matrix runs, so the source row
+  # declines before stage 2 can see the datetimeoffset column. The row path
+  # then completes the load, which is why this case is not forced.
+  run: |
+    sling run -d -r tests/replications/arrow/a.759.mssql_datetimeoffset.yaml
+  output_contains:
+    - 'not used for stream'
+    - 'sqlserver is not in the arrow lane list'
+
+- id: 760
+  name: 'arrow lane declines: Databricks copy_method zerobus'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'DATABRICKS'
+    SCHEMA: 'public'
+  rows: 10000
+  # The row path would then load through the zerobus ingest, which needs a UC
+  # token this suite does not carry, so the run is forced: the decline itself
+  # is the assertion, and it fires before the read.
+  err: true
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    SLING_ROW_CNT= sling conns exec "$SOURCE" "drop table if exists $SCHEMA.arrow_zerobus_src"
+    SLING_ARROW_LANE=force sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_760" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_760"
+  output_contains:
+    - 'zerobus'
+    - 'forced but not eligible'
+
+- id: 770
+  name: 'arrow lane quiet: native Postgres source'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES'
+    TARGET: 'POSTGRES'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
+  output_contains:
+    - 'arrow lane: not used'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 771
+  name: 'arrow lane quiet: CSV file target (format inferred)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'LOCAL'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_771.csv --mode full-refresh
+    rm -f /tmp/arrow_lane_771.csv
+  output_contains:
+    - 'arrow lane: not used'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 772
+  name: 'arrow lane quiet: MySQL target (not in the lane list)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream public.arrow_src --tgt-conn MYSQL --tgt-object mysql.arrow_dst_772 --mode full-refresh
+    SLING_ROW_CNT= sling conns exec MYSQL "drop table if exists mysql.arrow_dst_772"
+  output_contains:
+    - 'arrow lane: not used'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 773
+  name: 'arrow lane quiet: SLING_ARROW_LANE=false'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_ARROW_LANE: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d -r tests/replications/arrow/a.742.transform_plain.yaml
+  output_contains:
+    - 'arrow lane: not used'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 774
+  name: 'arrow lane quiet: open build (no closed engine)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 10000
+  run: |
+    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
+    OPEN="${SLING_OPEN_BIN:-/tmp/sling_open}"
+    "$OPEN" run -d -r tests/replications/arrow/a.774.open.yaml
+  output_contains:
+    - 'arrow lane: not used'
+    - 'official release'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+- id: 775
+  name: 'arrow lane declines: source with a uuid column (stage 2)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+  rows: 2
+  run: |
+    sling run -d -r tests/replications/arrow/a.775.uuid_column.yaml
+  output_contains:
+    - 'falling back to row-based'
+    - 'cannot cast'
+
+- id: 780
+  name: 'arrow lane forced: transform the lane refuses'
+  group: arrow
+  err: true
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_ARROW_LANE: 'force'
+  run: |
+    sling run -d -r tests/replications/arrow/a.740.transform_record.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'uses "record."'
+
+- id: 781
+  name: 'arrow lane forced: native source'
+  group: arrow
+  err: true
+  env:
+    SOURCE: 'POSTGRES'
+    TARGET: 'POSTGRES'
+    SCHEMA: 'public'
+    SLING_ARROW_LANE: 'force'
+  run: |
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_781.parquet --mode full-refresh --tgt-options '{format: parquet}'
+  output_contains:
+    - 'forced but not eligible'
+    - 'not ADBC'
+
+- id: 782
+  name: 'arrow lane forced: open build'
+  group: arrow
+  err: true
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    KEEP_TARGET: 'false'
+    SLING_ARROW_LANE: 'force'
+  run: |
+    OPEN="${SLING_OPEN_BIN:-/tmp/sling_open}"
+    "$OPEN" run -d -r tests/replications/arrow/a.774.open.yaml
+  output_contains:
+    - 'forced but not eligible'
+    - 'official release'
+
+- id: 783
+  name: 'arrow lane forced: no valid token'
+  group: arrow
+  err: true
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    SLING_ARROW_LANE: 'force'
+    SLING_CLI_TOKEN: ''
+    SLING_PROJECT_TOKEN: ''
+  run: |
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_783.parquet --mode full-refresh --tgt-options '{format: parquet}'
+  output_contains:
+    - 'forced but not eligible'
+    - 'not enabled for this plan'
+    - 'unable to validate CLI Pro token'
+
+- id: 784
+  name: 'row guard: smallint to parquet without duckdb compute'
+  env:
+    SLING_ARROW_LANE: 'false'
+    SLING_DUCKDB_COMPUTE: 'false'
+  run: |
+    rm -f /tmp/sling_arrow_784.parquet
+    sling run --src-conn POSTGRES --src-stream "select 1::smallint as c_int2, 'a'::text as c_str" --tgt-object file:///tmp/sling_arrow_784.parquet
+    sling run --src-stream file:///tmp/sling_arrow_784.parquet --stdout
+  output_contains:
+    - 'wrote 1 rows'
+    - 'c_int2,c_str'
+  output_does_not_contain:
+    - 'panic'
+
+- id: 785
+  name: 'row guard: json column on a DuckDB ADBC target stays json'
+  env:
+    SLING_ARROW_LANE: 'false'
+  run: |
+    rm -f /tmp/sling_arrow_785.duckdb
+    sling run -d --src-conn POSTGRES --src-stream "select 1 as id, '{\"a\":1}'::jsonb as c_json" --tgt-conn "duckdb:///tmp/sling_arrow_785.duckdb?use_adbc=true" --tgt-object main.arrow_785 --mode full-refresh
+  output_contains:
+    - '"c_json" json'
+    - 'inserted 1 rows'
+
+- id: 786
+  name: 'row guard: json column on a Postgres ADBC target stays jsonb'
+  env:
+    SLING_ARROW_LANE: 'false'
+  run: |
+    sling run -d --src-conn POSTGRES --src-stream "select 1 as id, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_786 --mode full-refresh
+    sling conns exec POSTGRES "select 'res=' || (c_json->>'a') || '|' || pg_typeof(c_json)::text as res from public.arrow_786"
+    sling conns exec POSTGRES "drop table if exists public.arrow_786"
+  output_contains:
+    - '"c_json" jsonb'
+    - 'inserted 1 rows'
+    - 'res=1|jsonb'
+  output_does_not_contain:
+    - 'unsupported jsonb version'
+
+- id: 787
+  name: 'row guard: SLING_ARROW_LANE=true is auto, not force'
+  env:
+    SLING_ARROW_LANE: 'true'
+  run: |
+    sling run --src-conn POSTGRES --src-stream "select 1 as id" --tgt-object file:///tmp/sling_arrow_787.csv
+  output_contains:
+    - 'wrote 1 rows'
+  output_does_not_contain:
+    - 'forced but not eligible'
+
+- id: 788
+  name: 'row guard: postgres numeric and uuid keep their types on an ADBC source'
+  run: |
+    sling conns exec POSTGRES "drop table if exists public.arrow_788"
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, '6f1c1b1e-2b7a-4c3e-9d7e-1a2b3c4d5e6f'::uuid as c_uuid" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_788 --mode full-refresh
+    sling conns exec POSTGRES "drop table if exists public.arrow_788"
+  output_contains:
+    - '"c_dec" numeric'
+    - '"c_uuid" uuid'
+    - 'inserted 1 rows'
+  output_does_not_contain:
+    - 'arrow lane: enabled'
+    - 'bytea'
+
+- id: 789
+  name: 'arrow lane: postgres jsonb keeps json on a DuckDB ADBC target'
+  run: |
+    rm -f /tmp/sling_arrow_789.duckdb
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, '{\"a\":1}'::jsonb as c_json" --tgt-conn "duckdb:///tmp/sling_arrow_789.duckdb?use_adbc=true" --tgt-object main.arrow_789 --mode full-refresh
+  output_contains:
+    - 'arrow lane: enabled'
+    - '"c_json" json'
+    - 'inserted 1 rows'
+
+- id: 790
+  name: 'arrow lane: postgres numeric and jsonb keep their types and values'
+  run: |
+    sling conns exec POSTGRES "drop table if exists public.arrow_790"
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, -0.5::numeric as c_dec2, null::numeric as c_dec3, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_790 --mode full-refresh
+    sling conns exec POSTGRES "select 'res=' || c_dec::text || '|' || c_dec2::text || '|' || (c_dec3 is null)::text || '|' || (c_json->>'a') || '|' || pg_typeof(c_json)::text as res from public.arrow_790"
+    sling conns exec POSTGRES "drop table if exists public.arrow_790"
+  output_contains:
+    - 'arrow lane: enabled (postgres -> postgres/adbc)'
+    - '"c_dec" numeric'
+    - '"c_json" jsonb'
+    - 'inserted 1 rows'
+    - 'res=12.34|-0.5|true|1|jsonb'
+  output_does_not_contain:
+    - 'character varying'
+    - 'unsupported jsonb version'
+
+- id: 791
+  name: 'arrow lane declines: json column on Snowflake stays a json object'
+  run: |
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, '{\"a\":1}'::jsonb as c_json" --tgt-conn SNOWFLAKE --tgt-object public.arrow_791 --mode full-refresh
+    sling conns exec SNOWFLAKE "select 'res=' || typeof(c_json) || '|' || c_json:a::string as res from public.arrow_791"
+    sling conns exec SNOWFLAKE "drop table if exists public.arrow_791"
+  output_contains:
+    - 'would load as a string on this target'
+    - 'inserted 1 rows'
+    - 'res=OBJECT|1'
+  output_does_not_contain:
+    - 'arrow lane: enabled'

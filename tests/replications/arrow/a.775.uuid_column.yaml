@@ -1,0 +1,42 @@
+# arrow lane CLI suite case 775: source with a uuid column (stage 2 decline).
+#
+# env: SOURCE, TARGET, SCHEMA, KEEP_TARGET (set by the suite entry). A uuid
+# target column is not in the lane's carry list, so stage 1 passes and the
+# stage 2 schema check declines at info with "the lane carries Arrow types
+# only". The target table is created first so the check sees its columns.
+source: '{SOURCE}'
+target: '{TARGET}'
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{SOURCE}'
+      query: |
+        drop table if exists {SCHEMA}.arrow_uuid_src;
+        create table {SCHEMA}.arrow_uuid_src (id int, c_uuid uuid);
+        insert into {SCHEMA}.arrow_uuid_src values
+          (1, '00000000-0000-0000-0000-000000000001'),
+          (2, null);
+    - type: query
+      connection: '{TARGET}'
+      query: |
+        drop table if exists {SCHEMA}.arrow_uuid_dst;
+        create table {SCHEMA}.arrow_uuid_dst (id int, c_uuid uuid);
+
+  end:
+    - type: query
+      if: 'env.KEEP_TARGET == "false"'
+      connection: '{TARGET}'
+      query: 'drop table if exists {SCHEMA}.arrow_uuid_dst'
+
+streams:
+  '{SCHEMA}.arrow_uuid_src':
+    object: '{SCHEMA}.arrow_uuid_dst'
+
+env:
+  SOURCE: ${SOURCE}
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

@@ -489,8 +489,15 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		}
 	}) // cleanup
 
+	// The Arrow lane writes Parquet records; the row path keeps CSV.
+	fileFormat := stageFileFormat(df, dbio.FileTypeCsv)
+
 	g.Info("writing to s3 for redshift import")
-	s3Fs.SetProp("null_as", `\N`)
+	if fileFormat == dbio.FileTypeParquet {
+		s3Fs.SetProp("format", "parquet")
+	} else {
+		s3Fs.SetProp("null_as", `\N`)
+	}
 	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
@@ -508,7 +515,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		}
 	}
 
-	_, err = conn.CopyFromS3(tableFName, s3Path, df.Columns)
+	_, err = conn.CopyFromS3(tableFName, s3Path, fileFormat, df.Columns)
 	if err != nil {
 		return df.Count(), g.Error(err, "error copying into redshift from s3")
 	}
@@ -540,7 +547,7 @@ func (conn *RedshiftConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable
 }
 
 // CopyFromS3 uses the COPY INTO Table command from AWS S3
-func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
+func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, fileFormat dbio.FileType, columns iop.Columns) (count uint64, err error) {
 	ok, err := conn.ensureAWSCredentials()
 	if err != nil {
 		return 0, g.Error(err, "Could not load AWS credentials for Redshift")
@@ -553,10 +560,17 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 
 	tgtColumns := conn.Template().QuoteNames(columns.Names()...)
 
+	// Parquet fields map to table columns by name (case-insensitively), so the
+	// parquet template takes no column list and no CSV options.
+	templateKey := "copy_from_s3"
+	if fileFormat == dbio.FileTypeParquet {
+		templateKey = "copy_from_s3_parquet"
+	}
+
 	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)
 	sql := g.R(
-		conn.template.Core["copy_from_s3"],
+		conn.template.Core[templateKey],
 		"tgt_table", tableFName,
 		"tgt_columns", strings.Join(tgtColumns, ", "),
 		"s3_path", s3Path,

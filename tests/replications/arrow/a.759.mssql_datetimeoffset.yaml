@@ -1,0 +1,37 @@
+# arrow lane CLI suite case 759: SQL Server datetimeoffset source.
+#
+# env: SCHEMA, KEEP_TARGET (set by the suite entry). Needs MSSQL_ADBC and
+# POSTGRES_ADBC. A datetimeoffset target column is not in the lane's carry
+# list, so the stage 2 check declines at info.
+source: MSSQL_ADBC
+target: POSTGRES_ADBC
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: MSSQL_ADBC
+      query: |
+        IF OBJECT_ID('dbo.arrow_dtoff_src', 'U') IS NOT NULL DROP TABLE dbo.arrow_dtoff_src;
+        CREATE TABLE dbo.arrow_dtoff_src (id int, c_dtoff datetimeoffset);
+        INSERT INTO dbo.arrow_dtoff_src VALUES (1, '2020-01-01 10:00:00 +02:00'), (2, NULL);
+    - type: query
+      connection: POSTGRES_ADBC
+      query: |
+        drop table if exists {SCHEMA}.arrow_dtoff_dst;
+        create table {SCHEMA}.arrow_dtoff_dst (id int, c_dtoff timestamptz);
+
+  end:
+    - type: query
+      if: 'env.KEEP_TARGET == "false"'
+      connection: POSTGRES_ADBC
+      query: 'drop table if exists {SCHEMA}.arrow_dtoff_dst'
+
+streams:
+  dbo.arrow_dtoff_src:
+    object: '{SCHEMA}.arrow_dtoff_dst'
+
+env:
+  SCHEMA: ${SCHEMA}

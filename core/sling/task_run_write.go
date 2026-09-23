@@ -48,15 +48,19 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 
-		// use duckdb for writing parquet
-		if t.shouldWriteViaDuckDB(uri) {
+		switch {
+		case df.ArrowOnly():
+			// the arrow lane carries records, not rows: DuckDB has nothing to
+			// read, so the records go straight to the file writer
+			bw, err = filesys.WriteDataflow(fs, df, uri)
+		case t.shouldWriteViaDuckDB(uri):
 			// push to temp duck file
 			if len(iop.ExtractPartitionFields(uri)) > 0 {
 				bw, err = writeDataflowViaTempDuckDB(t, df, fs, uri)
 			} else {
 				bw, err = filesys.WriteDataflowViaDuckDB(fs, df, uri)
 			}
-		} else {
+		default:
 			bw, err = filesys.WriteDataflow(fs, df, uri)
 		}
 		if err != nil {

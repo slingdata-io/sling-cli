@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -150,6 +151,8 @@ type Connection interface {
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 	UseADBC() bool
+	SetArrowLane(lane iop.ArrowLane, check LaneSchemaCheck)
+	HasArrowLane() bool
 }
 
 type ConnInfo struct {
@@ -565,6 +568,33 @@ func (conn *BaseConn) UseADBC() bool {
 	return cast.ToBool(conn.GetProp("use_adbc"))
 }
 
+// SetArrowLane sets the arrow lane engine on the ADBC sub-connection. It is a
+// no-op for a connection that has no ADBC sub-connection, which keeps the row
+// path in place. The eligibility gate calls it before the read.
+func (conn *BaseConn) SetArrowLane(lane iop.ArrowLane, check LaneSchemaCheck) {
+	if adbcConn, ok := conn.Self().(*ArrowDBConn); ok {
+		adbcConn.SetArrowLane(lane, check)
+		return
+	}
+	if conn.adbc == nil {
+		return
+	}
+	if adbcConn, ok := conn.adbc.(*ArrowDBConn); ok {
+		adbcConn.SetArrowLane(lane, check)
+	}
+}
+
+// HasArrowLane reports whether the connection carries an arrow lane engine.
+func (conn *BaseConn) HasArrowLane() bool {
+	if adbcConn, ok := conn.Self().(*ArrowDBConn); ok {
+		return adbcConn.lane != nil
+	}
+	if adbcConn, ok := conn.adbc.(*ArrowDBConn); ok {
+		return adbcConn.lane != nil
+	}
+	return false
+}
+
 // GetProp returns the value of a property
 func (conn *BaseConn) GetProp(key ...string) string {
 	conn.context.Mux.Lock()
@@ -906,13 +936,21 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
-	// letting the native drive handle export, which is fast enough generally
+	// letting the native driver handle export, which is fast enough generally
 	// some ADBC drivers do not handle time zones like sling does.
 	// for example, SQL server datetimeoffset is exported as timestamp (looses time zone)
 	// Also, arrow would need to be serialized, just as via driver, so we loose advantage
-	// if conn.UseADBC() {
-	// 	return conn.adbc.BulkExportStream(table)
-	// }
+	//
+	// The arrow lane is the exception: when the eligibility gate marked this
+	// connection as a candidate, the records go straight to the target and no
+	// row is built. The fidelity reason above still holds for the row path,
+	// so a stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.arrowLaneReader(); ok {
+		ds, err = adbcConn.laneExportStream(table.Select())
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return ds, err
+		}
+	}
 
 	g.Trace("BulkExportStream not implemented for %s", conn.GetType())
 	ds, err = conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
@@ -4270,4 +4308,28 @@ type ODBCConn struct {
 	URL          string
 	templateType dbio.Type // Underlying database type for templates
 	templateConn Connection
+}
+
+// stageFileFormat returns the file format a staged loader writes.
+//
+// The Arrow lane always writes Parquet: its staged COPY runs with a parquet
+// file format, and the records go straight to the parquet writer (D9). The
+// row path keeps its base format, defaulting to CSV, so the CSV bytes are
+// unchanged. base is the loader's own default: the `format` conn prop for
+// Snowflake and Databricks, and CSV for Redshift's S3 import.
+func stageFileFormat(df *iop.Dataflow, base dbio.FileType) dbio.FileType {
+	if df.ArrowOnly() {
+		return dbio.FileTypeParquet
+	}
+	if g.In(base, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		return base
+	}
+	return dbio.FileTypeCsv
+}
+
+// stageDuckDbCompute reports whether a Parquet staged write should merge the
+// dataflow into DuckDB first. The Arrow lane writes records straight to
+// Parquet, so it never merges (D10).
+func stageDuckDbCompute(df *iop.Dataflow) bool {
+	return env.UseDuckDbCompute() && !df.ArrowOnly()
 }
