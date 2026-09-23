@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	arrowCompress "github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
@@ -70,6 +72,11 @@ type Datastream struct {
 	paused        bool
 	pauseChan     chan struct{}
 	unpauseChan   chan struct{}
+
+	// Arrow mode: the stream carries arrow records instead of rows. Set at
+	// creation by the arrow lane gate; never changes after Start.
+	rs        *RecordStream
+	ArrowOnly bool
 }
 
 type schemaChg struct {
@@ -234,14 +241,124 @@ func (ds *Datastream) Df() *Dataflow {
 	return ds.df
 }
 
+// NewDatastreamArrow returns a datastream that carries arrow records instead
+// of rows. The sink pulls the records from the RecordStream; the row
+// machinery (Batch, bwRows, the iterator loop) never starts.
+//
+// The caller must set ds.Columns to the Sling columns derived from rs.Schema
+// before Start, or pass them here.
+func NewDatastreamArrow(ctx context.Context, columns Columns, rs *RecordStream) *Datastream {
+	ds := NewDatastreamContext(ctx, columns)
+	ds.rs = rs
+	ds.ArrowOnly = true
+	ds.Inferred = true
+
+	if rs != nil {
+		if len(columns) == 0 {
+			ds.Columns = rs.Columns
+		}
+		rs.SetOnTake(func(rec arrow.RecordBatch) {
+			// the sink goroutine takes the record while the run goroutine may
+			// read the count (Dataflow.Count, progress), so it is atomic
+			atomic.AddUint64(&ds.Count, uint64(rec.NumRows()))
+			ds.Bytes.Add(uint64(TotalRecordSize(rec)))
+		})
+	}
+
+	return ds
+}
+
+// RecordStream returns the arrow stream of an Arrow datastream, nil otherwise.
+func (ds *Datastream) RecordStream() *RecordStream {
+	return ds.rs
+}
+
+// setArrowStream puts the datastream in Arrow mode on the given record stream.
+// The datastream counts rows and bytes as the sink takes each record.
+func (ds *Datastream) setArrowStream(rs *RecordStream) {
+	ds.rs = rs
+	ds.ArrowOnly = true
+	ds.Inferred = true
+	if len(rs.Columns) > 0 {
+		ds.Columns = rs.Columns
+	}
+	rs.SetOnTake(func(rec arrow.RecordBatch) {
+		// the sink goroutine takes the record while the run goroutine may read
+		// the count (Dataflow.Count, progress), so it is atomic
+		atomic.AddUint64(&ds.Count, uint64(rec.NumRows()))
+		ds.Bytes.Add(uint64(TotalRecordSize(rec)))
+	})
+}
+
+// refreshArrowTypes copies the post-transform column types of the record
+// stream onto the datastream columns. Names and metadata stay as set.
+func (ds *Datastream) refreshArrowTypes() {
+	if ds.rs == nil {
+		return
+	}
+	cols := ds.rs.Columns
+	if len(cols) != len(ds.Columns) {
+		return
+	}
+	for i := range cols {
+		if cols[i].Type != "" {
+			ds.Columns[i].Type = cols[i].Type
+		}
+	}
+}
+
+// startArrow readies an Arrow datastream: it applies the column casing, takes
+// the sample rows from the first record, and sets the stream ready. There is
+// no goroutine; the sink pulls from ds.rs.
+func (ds *Datastream) startArrow() (err error) {
+	if ds.rs == nil {
+		return g.Error("arrow lane: datastream has no record stream")
+	}
+
+	// The metadata columns are appended by the stream to every record, so the
+	// sample, the DDL and the type map see them, as they do on the row path.
+	if metaCols := ds.metaColumnValues(); len(metaCols) > 0 {
+		if err := ds.rs.SetMetaColumns(metaCols); err != nil {
+			return err
+		}
+		ds.Columns = ds.rs.Columns
+	}
+
+	// Apply the column spec and casing to the Sling columns. The sink's
+	// Project renames the record fields, so this is a schema step only.
+	if len(ds.Sp.Config.Columns) > 0 || !ds.config.ColumnCasing.IsEmpty() {
+		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true, ds.config.ColumnCasing, ds.config.TargetType)
+	}
+
+	rows := ds.rs.SampleRows(SampleSize)
+	if len(rows) == 0 && ds.rs.Err() != nil {
+		return g.Error(ds.rs.Err(), "could not read the first arrow record")
+	}
+
+	// a lane transform can change a column type, and the DDL, the sample
+	// checks and the type map read ds.Columns
+	ds.refreshArrowTypes()
+
+	ds.Buffer = rows
+	if len(rows) == 0 {
+		ds.SetEmpty()
+	}
+
+	ds.Inferred = true
+	ds.SetReady()
+
+	return nil
+}
+
 func (ds *Datastream) Limited(limit ...int) bool {
-	if len(limit) > 0 && ds.Count >= uint64(limit[0]) {
+	count := atomic.LoadUint64(&ds.Count)
+	if len(limit) > 0 && count >= uint64(limit[0]) {
 		return true
 	}
 	if ds.df == nil || ds.df.Limit == 0 {
 		return false
 	}
-	return ds.Count >= ds.df.Limit
+	return count >= ds.df.Limit
 }
 
 func (ds *Datastream) processBwRows() {
@@ -422,6 +539,10 @@ func (ds *Datastream) Defer(f func()) {
 
 // Close closes the datastream
 func (ds *Datastream) Close() {
+	if ds.rs != nil {
+		ds.rs.Drain()
+	}
+
 	ds.Context.Lock()
 
 	if !ds.closed {
@@ -701,11 +822,154 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 
 // Err return the error if any
 func (ds *Datastream) Err() (err error) {
+	if ds.rs != nil {
+		if err = ds.rs.Err(); err != nil {
+			return err
+		}
+	}
 	return ds.Context.Err()
 }
 
 // Start generates the stream
 // Should cycle the Iter Func until done
+// metaColumnValues returns the metadata columns the stream appends, with one
+// value function per column. The row path calls it for every row, the Arrow
+// lane for every row of a record, so both report the same columns and values.
+func (ds *Datastream) metaColumnValues() []MetaColumn {
+	cols := []MetaColumn{}
+
+	// ensure there are no duplicates
+	ensureName := func(name string) string {
+		name = ds.config.ColumnCasing.Apply(name, ds.config.TargetType)
+		colNames := lo.Keys(ds.Columns.FieldMap(true))
+		for lo.Contains(colNames, strings.ToLower(name)) {
+			name = name + "_"
+		}
+		return name
+	}
+
+	add := func(col Column, value func(rowNum int64) any) {
+		col.Position = len(ds.Columns) + len(cols) + 1
+		cols = append(cols, MetaColumn{Column: col, Value: value})
+	}
+
+	if ds.Metadata.SyncedAt.Key != "" && ds.Metadata.SyncedAt.Value != nil {
+		ds.Metadata.SyncedAt.Key = ensureName(ds.Metadata.SyncedAt.Key)
+
+		// handle timestamp value
+		isTimestamp := false
+		if tVal, err := cast.ToTimeE(ds.Metadata.SyncedAt.Value); err == nil {
+			isTimestamp = true
+			ds.Metadata.SyncedAt.Value = tVal
+		} else {
+			ds.Metadata.SyncedAt.Value = cast.ToInt64(ds.Metadata.SyncedAt.Value)
+		}
+
+		add(Column{
+			Name:        ds.Metadata.SyncedAt.Key,
+			Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
+			Description: "Sling.Metadata.SyncedAt",
+			Metadata:    map[string]string{"sling_metadata": "synced_at"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			return ds.Metadata.SyncedAt.Value
+		})
+	}
+
+	if ds.Metadata.SyncedOp.Key != "" && ds.Metadata.SyncedOp.Value != nil {
+		ds.Metadata.SyncedOp.Key = ensureName(ds.Metadata.SyncedOp.Key)
+
+		add(Column{
+			Name:        ds.Metadata.SyncedOp.Key,
+			Type:        StringType,
+			DbPrecision: 4,
+			Description: "Sling.Metadata.SyncedOp",
+			Metadata:    map[string]string{"sling_metadata": "synced_op"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			return ds.Metadata.SyncedOp.Value
+		})
+	}
+
+	if ds.Metadata.SyncedSeq.Key != "" && ds.Metadata.SyncedSeq.Value != nil {
+		ds.Metadata.SyncedSeq.Key = ensureName(ds.Metadata.SyncedSeq.Key)
+
+		add(Column{
+			Name:        ds.Metadata.SyncedSeq.Key,
+			Type:        BigIntType,
+			Description: "Sling.Metadata.SyncedSeq",
+			Metadata:    map[string]string{"sling_metadata": "synced_seq"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			ds.Metadata.SyncedSeq.Value = cast.ToInt64(ds.Metadata.SyncedSeq.Value) + 1
+			return ds.Metadata.SyncedSeq.Value
+		})
+	}
+
+	if ds.Metadata.StreamURL.Key != "" && ds.Metadata.StreamURL.Value != nil {
+		ds.Metadata.StreamURL.Key = ensureName(ds.Metadata.StreamURL.Key)
+
+		add(Column{
+			Name:        ds.Metadata.StreamURL.Key,
+			Type:        StringType,
+			Description: "Sling.Metadata.StreamURL",
+			Metadata:    map[string]string{"sling_metadata": "stream_url"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			return ds.Metadata.StreamURL.Value
+		})
+	}
+
+	if ds.Metadata.RowNum.Key != "" {
+		ds.Metadata.RowNum.Key = ensureName(ds.Metadata.RowNum.Key)
+
+		add(Column{
+			Name:        ds.Metadata.RowNum.Key,
+			Type:        BigIntType,
+			Description: "Sling.Metadata.RowNum",
+			Metadata:    map[string]string{"sling_metadata": "row_num"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			return rowNum
+		})
+	}
+
+	if ds.Metadata.RowID.Key != "" {
+		ds.Metadata.RowID.Key = ensureName(ds.Metadata.RowID.Key)
+
+		add(Column{
+			Name:        ds.Metadata.RowID.Key,
+			Type:        StringType,
+			Description: "Sling.Metadata.RowID",
+			Metadata:    map[string]string{"sling_metadata": "row_id"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			for {
+				uid, err := ksuid.NewRandom()
+				if err == nil {
+					return uid.String()
+				}
+			}
+		})
+	}
+
+	if ds.Metadata.ExecID.Key != "" {
+		ds.Metadata.ExecID.Key = ensureName(ds.Metadata.ExecID.Key)
+
+		add(Column{
+			Name:        ds.Metadata.ExecID.Key,
+			Type:        StringType,
+			Description: "Sling.Metadata.ExecID",
+			Metadata:    map[string]string{"sling_metadata": "exec_id"},
+			Sourced:     true,
+		}, func(rowNum int64) any {
+			return ds.Metadata.ExecID.Value
+		})
+	}
+
+	return cols
+}
+
 func (ds *Datastream) Start() (err error) {
 	// recover from panic
 	defer func() {
@@ -717,6 +981,10 @@ func (ds *Datastream) Start() (err error) {
 
 	if !ds.NoDebug {
 		g.Trace("new ds.Start %s", ds.ID)
+	}
+
+	if ds.ArrowOnly {
+		return ds.startArrow()
 	}
 
 	if ds.it == nil {
@@ -825,144 +1093,13 @@ skipBuffer:
 	// add metadata
 	metaValuesMap := map[int]func(it *Iterator) any{}
 	{
-		// ensure there are no duplicates
-		ensureName := func(name string) string {
-			name = ds.config.ColumnCasing.Apply(name, ds.config.TargetType)
-			colNames := lo.Keys(ds.Columns.FieldMap(true))
-			for lo.Contains(colNames, strings.ToLower(name)) {
-				name = name + "_"
-			}
-			return name
-		}
-
-		if ds.Metadata.SyncedAt.Key != "" && ds.Metadata.SyncedAt.Value != nil {
-			ds.Metadata.SyncedAt.Key = ensureName(ds.Metadata.SyncedAt.Key)
-
-			// handle timestamp value
-			isTimestamp := false
-			if tVal, err := cast.ToTimeE(ds.Metadata.SyncedAt.Value); err == nil {
-				isTimestamp = true
-				ds.Metadata.SyncedAt.Value = tVal
-			} else {
-				ds.Metadata.SyncedAt.Value = cast.ToInt64(ds.Metadata.SyncedAt.Value)
-			}
-
-			col := Column{
-				Name:        ds.Metadata.SyncedAt.Key,
-				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.SyncedAt",
-				Metadata:    map[string]string{"sling_metadata": "synced_at"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.SyncedAt.Value
-			}
-		}
-
-		if ds.Metadata.SyncedOp.Key != "" && ds.Metadata.SyncedOp.Value != nil {
-			ds.Metadata.SyncedOp.Key = ensureName(ds.Metadata.SyncedOp.Key)
-
-			col := Column{
-				Name:        ds.Metadata.SyncedOp.Key,
-				Type:        StringType,
-				DbPrecision: 4,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.SyncedOp",
-				Metadata:    map[string]string{"sling_metadata": "synced_op"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.SyncedOp.Value
-			}
-		}
-
-		if ds.Metadata.SyncedSeq.Key != "" && ds.Metadata.SyncedSeq.Value != nil {
-			ds.Metadata.SyncedSeq.Key = ensureName(ds.Metadata.SyncedSeq.Key)
-
-			col := Column{
-				Name:        ds.Metadata.SyncedSeq.Key,
-				Type:        BigIntType,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.SyncedSeq",
-				Metadata:    map[string]string{"sling_metadata": "synced_seq"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				ds.Metadata.SyncedSeq.Value = cast.ToInt64(ds.Metadata.SyncedSeq.Value) + 1
-				return ds.Metadata.SyncedSeq.Value
-			}
-		}
-
-		if ds.Metadata.StreamURL.Key != "" && ds.Metadata.StreamURL.Value != nil {
-			ds.Metadata.StreamURL.Key = ensureName(ds.Metadata.StreamURL.Key)
-			col := Column{
-				Name:        ds.Metadata.StreamURL.Key,
-				Type:        StringType,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.StreamURL",
-				Metadata:    map[string]string{"sling_metadata": "stream_url"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.StreamURL.Value
-			}
-		}
-
-		if ds.Metadata.RowNum.Key != "" {
-			ds.Metadata.RowNum.Key = ensureName(ds.Metadata.RowNum.Key)
-			col := Column{
-				Name:        ds.Metadata.RowNum.Key,
-				Type:        BigIntType,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.RowNum",
-				Metadata:    map[string]string{"sling_metadata": "row_num"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return it.StreamRowNum
-			}
-		}
-
-		if ds.Metadata.RowID.Key != "" {
-			ds.Metadata.RowID.Key = ensureName(ds.Metadata.RowID.Key)
-			col := Column{
-				Name:        ds.Metadata.RowID.Key,
-				Type:        StringType,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.RowID",
-				Metadata:    map[string]string{"sling_metadata": "row_id"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				for {
-					uid, err := ksuid.NewRandom()
-					if err == nil {
-						return uid.String()
-					}
-				}
-			}
-		}
-
-		if ds.Metadata.ExecID.Key != "" {
-			ds.Metadata.ExecID.Key = ensureName(ds.Metadata.ExecID.Key)
-			col := Column{
-				Name:        ds.Metadata.ExecID.Key,
-				Type:        StringType,
-				Position:    len(ds.Columns) + 1,
-				Description: "Sling.Metadata.ExecID",
-				Metadata:    map[string]string{"sling_metadata": "exec_id"},
-				Sourced:     true,
-			}
-			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return ds.Metadata.ExecID.Value
+		// the metadata columns come from the same definitions the Arrow lane
+		// uses, so a run reports them on either path
+		for _, mc := range ds.metaColumnValues() {
+			mc := mc
+			ds.Columns = append(ds.Columns, mc.Column)
+			metaValuesMap[mc.Column.Position-1] = func(it *Iterator) any {
+				return mc.Value(int64(it.StreamRowNum))
 			}
 		}
 	}
@@ -1129,6 +1266,15 @@ skipBuffer:
 }
 
 func (ds *Datastream) Rows() chan []any {
+	if ds.ArrowOnly {
+		// A sink took the row branch on an Arrow stream. Do not panic: the
+		// error names the wiring bug and ends the run with a useful message.
+		ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
+		rows := MakeRowsChan()
+		close(rows)
+		return rows
+	}
+
 	rows := MakeRowsChan()
 
 	go func() {
@@ -1886,6 +2032,71 @@ func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
 	return
 }
 
+// ConsumeArrowRecords streams an Arrow IPC file as records, for the arrow
+// lane. The file schema is the stream schema: the cache writer built it with
+// ColumnsToArrowSchema, so it already carries the Sling-derived types. The
+// file is closed when the datastream closes.
+func (ds *Datastream) ConsumeArrowRecords(file *os.File, lane ArrowLane) (err error) {
+	reader, err := ipc.NewFileReader(file)
+	if err != nil {
+		return g.Error(err, "could not read arrow file")
+	}
+
+	rs := NewRecordStream(ds.Context, lane, reader.Schema(), ArrowLaneBuffer)
+	ds.setArrowStream(rs)
+	ds.SetFileURI()
+	ds.Defer(func() { _ = file.Close() })
+
+	go func() {
+		defer reader.Close()
+		defer func() {
+			if r := recover(); r != nil {
+				rs.Close(g.Error("panic occurred! %#v\n%s", r, string(debug.Stack())))
+			}
+		}()
+
+		for i := range reader.NumRecords() {
+			rec, err := reader.RecordBatchAt(i)
+			if err != nil {
+				rs.Close(g.Error(err, "could not read arrow record %d", i))
+				return
+			}
+			// Push takes the record: it releases it when the stream is closed
+			if err := rs.Push(rec); err != nil {
+				rs.Close(err)
+				return
+			}
+		}
+		rs.Close(nil)
+	}()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
+// ArrowIPCFileSchema returns the schema of an Arrow IPC file from its footer
+// and rewinds the file, so the same handle can be read afterwards. Only the
+// footer is read.
+func ArrowIPCFileSchema(file *os.File) (schema *arrow.Schema, err error) {
+	reader, err := ipc.NewFileReader(file)
+	if err != nil {
+		return nil, g.Error(err, "could not read arrow file footer")
+	}
+
+	schema = reader.Schema()
+	reader.Close()
+
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return nil, g.Error(err, "could not rewind arrow file")
+	}
+
+	return schema, nil
+}
+
 // ConsumeParquetReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
@@ -2286,7 +2497,7 @@ func (ds *Datastream) Chunk(limit uint64) (chDs chan *Datastream) {
 			default:
 				nDs.Push(row)
 
-				if nDs.Count == limit {
+				if atomic.LoadUint64(&nDs.Count) == limit {
 					nDs.Close()
 					nDs = NewDatastreamContext(ds.Context.Ctx, ds.Columns)
 					chDs <- nDs
@@ -2346,6 +2557,11 @@ func (ds *Datastream) Split(numStreams ...int) (dss []*Datastream) {
 }
 
 func (ds *Datastream) Pause() {
+	if ds.ArrowOnly {
+		// The bounded record channel already holds the producer.
+		ds.paused = true
+		return
+	}
 	if ds.Ready && !ds.closed {
 		g.Trace("pausing %s", ds.ID)
 		ds.pauseChan <- struct{}{}
@@ -2354,6 +2570,10 @@ func (ds *Datastream) Pause() {
 }
 
 func (ds *Datastream) TryPause() bool {
+	if ds.ArrowOnly {
+		ds.paused = true
+		return true
+	}
 	if ds.Ready && !ds.paused {
 		g.Trace("try pausing %s", ds.ID)
 		timer := time.NewTimer(10 * time.Millisecond)
@@ -2371,6 +2591,10 @@ func (ds *Datastream) TryPause() bool {
 
 // Unpause unpauses all streams
 func (ds *Datastream) Unpause() {
+	if ds.ArrowOnly {
+		ds.paused = false
+		return
+	}
 	if ds.paused {
 		g.Trace("unpausing %s", ds.ID)
 		ds.unpauseChan <- struct{}{}
@@ -2442,7 +2666,7 @@ func (ds *Datastream) MapParallel(transf func([]any) []any, numWorkers int) (nDs
 				break loop
 			default:
 				nDs.Rows() <- transf(row)
-				nDs.Count++
+				atomic.AddUint64(&nDs.Count, 1)
 			}
 		}
 	}
@@ -3131,18 +3355,7 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 			readerChn <- br
 
 			// default compression is snappy
-			codec := arrowCompress.Codecs.Snappy
-
-			switch sc.Compression {
-			case SnappyCompressorType:
-				codec = arrowCompress.Codecs.Snappy
-			case ZStandardCompressorType:
-				codec = arrowCompress.Codecs.Zstd
-			case GzipCompressorType:
-				codec = arrowCompress.Codecs.Gzip
-			case NoneCompressorType:
-				codec = arrowCompress.Codecs.Uncompressed
-			}
+			codec := parquetCodec(sc.Compression)
 
 			pw, err = NewParquetArrowWriter(pipeW, ds.Columns, codec)
 			if err != nil {
@@ -3191,6 +3404,284 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 
 		pipeW.Close()
 
+	}()
+
+	return readerChn
+}
+
+// parquetCodec maps a Sling compressor to a parquet compression codec.
+func parquetCodec(compression CompressorType) arrowCompress.Compression {
+	switch compression {
+	case SnappyCompressorType:
+		return arrowCompress.Codecs.Snappy
+	case ZStandardCompressorType:
+		return arrowCompress.Codecs.Zstd
+	case GzipCompressorType:
+		return arrowCompress.Codecs.Gzip
+	case NoneCompressorType:
+		return arrowCompress.Codecs.Uncompressed
+	}
+	return arrowCompress.Codecs.Snappy // default
+}
+
+// NewParquetRecordChnl provides a channel of Parquet readers built straight
+// from the records of an Arrow stream. No row is built and no builder is
+// refilled: the record's buffers go to the writer as they are.
+//
+// FileMaxRows splits a record with a zero-copy slice, so part row counts are
+// exact. FileMaxBytes is approximate: the writer rolls over at the first
+// record boundary after the written bytes pass the limit, since the final
+// compressed size is only known after the write.
+func (ds *Datastream) NewParquetRecordChnl(sc StreamConfig) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+	rs := ds.rs
+
+	go func() {
+		defer close(readerChn)
+
+		if rs == nil {
+			ds.Context.CaptureErr(g.Error("arrow lane: no record stream"))
+			return
+		}
+
+		pipeR, pipeW := io.Pipe()
+		codec := parquetCodec(sc.Compression)
+		// The writer schema comes from the first record, not rs.Schema: the
+		// stream schema is the reader's, while the records may already carry
+		// the target columns (an added audit column, for one). Driver
+		// extension types are unwrapped to the storage type the arrays carry.
+		var recordSchema *arrow.Schema
+
+		var pw *ParquetArrowWriter
+		var br *BatchReader
+		partBytes := int64(0)
+		partRows := int64(0)
+
+		nextPipe := func() error {
+			if pw != nil {
+				if err := pw.Close(); err != nil {
+					return g.Error(err, "could not close parquet writer")
+				}
+			}
+			pipeW.Close()
+			partBytes, partRows = 0, 0
+
+			pipeR, pipeW = io.Pipe()
+			br = &BatchReader{Columns: ds.Columns, Reader: pipeR, Counter: 0}
+			readerChn <- br
+
+			var err error
+			pw, err = NewParquetArrowWriterFromSchema(pipeW, recordSchema, codec)
+			if err != nil {
+				// the reader on this pipe must not be left waiting
+				pipeW.CloseWithError(err)
+				return g.Error(err, "could not create parquet writer")
+			}
+			return nil
+		}
+
+		for {
+			rec, ok := rs.Next()
+			if !ok {
+				break
+			}
+
+			if recordSchema == nil {
+				recordSchema = unwrapSchemaExtensions(rec.Schema())
+				if err := nextPipe(); err != nil {
+					rec.Release()
+					ds.Context.CaptureErr(err)
+					pipeW.CloseWithError(err)
+					return
+				}
+			}
+
+			// extension arrays are replaced by the storage arrays the writer
+			// schema declares, and field metadata is aligned with it
+			if unwrapped, err := unwrapRecordExtensions(rec, recordSchema); err != nil {
+				rec.Release()
+				ds.Context.CaptureErr(g.Error(err, "could not align arrow record"))
+				pipeW.CloseWithError(err)
+				return
+			} else if unwrapped != rec {
+				rec.Release()
+				rec = unwrapped
+			}
+
+			rows := rec.NumRows()
+			for offset := int64(0); offset < rows; {
+				if sc.FileMaxRows > 0 && partRows >= sc.FileMaxRows {
+					if err := nextPipe(); err != nil {
+						rec.Release()
+						ds.Context.CaptureErr(err)
+						pipeW.CloseWithError(err)
+						return
+					}
+				}
+
+				chunk := rows - offset
+				if sc.FileMaxRows > 0 && partRows+chunk > sc.FileMaxRows {
+					chunk = sc.FileMaxRows - partRows
+				}
+
+				var part arrow.RecordBatch
+				if chunk == rows {
+					rec.Retain()
+					part = rec
+				} else {
+					part = rec.NewSlice(offset, offset+chunk)
+				}
+
+				err := pw.WriteRecord(part)
+				partBytes += TotalRecordSize(part)
+				part.Release()
+				if err != nil {
+					rec.Release()
+					ds.Context.CaptureErr(g.Error(err, "could not write parquet record"))
+					pipeW.CloseWithError(err)
+					return
+				}
+
+				br.Counter += chunk
+				partRows += chunk
+				offset += chunk
+			}
+			rec.Release()
+
+			// roll over at the first record boundary after the byte limit
+			if sc.FileMaxBytes > 0 && partBytes >= sc.FileMaxBytes {
+				if err := nextPipe(); err != nil {
+					ds.Context.CaptureErr(err)
+					pipeW.CloseWithError(err)
+					return
+				}
+			}
+		}
+
+		if pw != nil {
+			if err := pw.Close(); err != nil {
+				ds.Context.CaptureErr(g.Error(err, "could not close parquet writer"))
+			}
+		}
+		if pipeW != nil {
+			pipeW.Close()
+		}
+	}()
+
+	return readerChn
+}
+
+// NewArrowRecordChnl provides a channel of Arrow IPC readers built straight
+// from the records of an Arrow stream. Same shape as NewParquetRecordChnl.
+func (ds *Datastream) NewArrowRecordChnl(sc StreamConfig) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+	rs := ds.rs
+
+	go func() {
+		defer close(readerChn)
+
+		if rs == nil {
+			ds.Context.CaptureErr(g.Error("arrow lane: no record stream"))
+			return
+		}
+
+		pipeR, pipeW := io.Pipe()
+
+		var aw *ArrowWriter
+		var br *BatchReader
+		partRows := int64(0)
+
+		nextPipe := func() error {
+			if aw != nil {
+				if err := ds.closeArrowWriter(aw, pipeW); err != nil {
+					return g.Error(err, "could not close arrow writer")
+				}
+			}
+			pipeW.Close()
+			partRows = 0
+
+			pipeR, pipeW = io.Pipe()
+			br = &BatchReader{Columns: ds.Columns, Reader: pipeR, Counter: 0}
+			readerChn <- br
+
+			var err error
+			// the pipe is not seekable, so the IPC stream format is the one
+			// that works here (the file format needs WriteAt for its footer)
+			aw, err = NewArrowStreamWriter(pipeW, ds.Columns)
+			if err != nil {
+				return g.Error(err, "could not create arrow writer")
+			}
+			return nil
+		}
+
+		if err := nextPipe(); err != nil {
+			ds.Context.CaptureErr(err)
+			pipeW.CloseWithError(err)
+			return
+		}
+
+		for {
+			rec, ok := rs.Next()
+			if !ok {
+				break
+			}
+
+			if unwrapped, err := unwrapRecordExtensions(rec, aw.arrowSchema); err != nil {
+				rec.Release()
+				ds.Context.CaptureErr(g.Error(err, "could not align arrow record"))
+				pipeW.CloseWithError(err)
+				return
+			} else if unwrapped != rec {
+				rec.Release()
+				rec = unwrapped
+			}
+
+			rows := rec.NumRows()
+			for offset := int64(0); offset < rows; {
+				if sc.FileMaxRows > 0 && partRows >= sc.FileMaxRows {
+					if err := nextPipe(); err != nil {
+						rec.Release()
+						ds.Context.CaptureErr(err)
+						return
+					}
+				}
+
+				chunk := rows - offset
+				if sc.FileMaxRows > 0 && partRows+chunk > sc.FileMaxRows {
+					chunk = sc.FileMaxRows - partRows
+				}
+
+				var part arrow.RecordBatch
+				if chunk == rows {
+					rec.Retain()
+					part = rec
+				} else {
+					part = rec.NewSlice(offset, offset+chunk)
+				}
+
+				err := aw.WriteRecord(part)
+				part.Release()
+				if err != nil {
+					rec.Release()
+					err = g.Error(err, "could not write arrow record")
+					ds.Context.CaptureErr(err)
+					pipeW.CloseWithError(err)
+					return
+				}
+
+				br.Counter += chunk
+				partRows += chunk
+				offset += chunk
+			}
+			rec.Release()
+		}
+
+		if aw != nil {
+			if err := aw.Close(); err != nil {
+				ds.Context.CaptureErr(g.Error(err, "could not close arrow writer"))
+			}
+		}
+		pipeW.Close()
 	}()
 
 	return readerChn

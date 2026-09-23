@@ -431,3 +431,53 @@ func TestArrowAppendToBuilderUUID(t *testing.T) {
 	assert.Equal(t, want, arr.ValueStr(1), "lowercase uuid should round-trip")
 	assert.True(t, arr.IsNull(2), "nil should append null")
 }
+
+// TestUnwrapSchemaExtensions pins the driver-extension handling the file sinks
+// rely on: an ADBC reader hands back arrow.opaque fields whose arrays carry the
+// storage values, and a Parquet file written with the extension in place cannot
+// be read back.
+func TestUnwrapSchemaExtensions(t *testing.T) {
+	ext := extensions.NewOpaqueType(arrow.BinaryTypes.String, "numeric", "PostgreSQL")
+	meta := arrow.NewMetadata(
+		[]string{arrowExtensionNameKey, arrowExtensionMetadataKey, "ADBC:postgresql:typname"},
+		[]string{"arrow.opaque", `{"type_name": "numeric"}`, "numeric"},
+	)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "c_dec", Type: ext, Nullable: true, Metadata: meta}}, nil)
+
+	out := unwrapSchemaExtensions(schema)
+	require.NotSame(t, schema, out)
+	assert.Equal(t, arrow.STRING, out.Field(0).Type.ID())
+	assert.Equal(t, []string{"ADBC:postgresql:typname"}, out.Field(0).Metadata.Keys())
+
+	plain := arrow.NewSchema([]arrow.Field{{Name: "c_str", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	assert.Same(t, plain, unwrapSchemaExtensions(plain))
+	assert.Nil(t, unwrapSchemaExtensions(nil))
+}
+
+// TestUnwrapRecordExtensions covers the record side: the extension array is
+// replaced by the storage array the target schema declares.
+func TestUnwrapRecordExtensions(t *testing.T) {
+	ext := extensions.NewOpaqueType(arrow.BinaryTypes.String, "numeric", "PostgreSQL")
+	src := arrow.NewSchema([]arrow.Field{{Name: "c_dec", Type: ext, Nullable: true}}, nil)
+
+	b := array.NewStringBuilder(memory.DefaultAllocator)
+	b.Append("42")
+	arr := array.NewExtensionArrayWithStorage(ext, b.NewArray())
+	defer arr.Release()
+	b.Release()
+	rec := array.NewRecordBatch(src, []arrow.Array{arr}, 1)
+	defer rec.Release()
+
+	tgt := arrow.NewSchema([]arrow.Field{{Name: "c_dec", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	out, err := unwrapRecordExtensions(rec, tgt)
+	require.NoError(t, err)
+	defer out.Release()
+	assert.Equal(t, tgt, out.Schema())
+	assert.Equal(t, arrow.STRING, out.Column(0).DataType().ID())
+	assert.Equal(t, "42", out.Column(0).(*array.String).Value(0))
+
+	// a field the target schema does not carry is a hard error, not a cast
+	other := arrow.NewSchema([]arrow.Field{{Name: "c_other", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	_, err = unwrapRecordExtensions(rec, other)
+	require.Error(t, err)
+}

@@ -3098,4 +3098,5 @@
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml
 - suite: suite.cli.conns.yaml
+- suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml

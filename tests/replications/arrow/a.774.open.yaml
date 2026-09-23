@@ -1,0 +1,28 @@
+# arrow lane CLI suite case 774: open build (no closed arrow_lane..go).
+#
+# env: SOURCE, SCHEMA, KEEP_TARGET (set by the suite entry). The entry runs the
+# binary at ${SLING_OPEN_BIN} against this file: the stub lane declines at
+# debug with the "official release" reason and the row path writes the Parquet
+# file. The target is a file so the row path does not touch the ADBC ingest
+# defect (smallint/jsonb COPY binary) that would fail a Postgres target.
+source: '{SOURCE}'
+target: LOCAL
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: parquet
+
+hooks:
+  end:
+    - type: command
+      if: 'env.KEEP_TARGET == "false"'
+      command: 'rm -f /tmp/arrow_lane_774.parquet'
+
+streams:
+  '{SCHEMA}.arrow_src':
+    object: 'file:///tmp/arrow_lane_774.parquet'
+
+env:
+  SOURCE: ${SOURCE}
+  SCHEMA: ${SCHEMA}

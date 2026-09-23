@@ -3,6 +3,7 @@ package database
 import (
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -291,6 +292,19 @@ func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 
 // BulkExportFlow reads in bulk
 func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	// Arrow lane: read through ADBC when the gate marked this connection. A
+	// stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
+		sql := table.Select()
+		if table.SQL != "" {
+			sql = table.SQL
+		}
+		df, err = adbcConn.laneExportFlow(sql)
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return df, err
+		}
+	}
+
 	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	columns, err := conn.GetSQLColumns(table)
@@ -834,11 +848,9 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		table.Schema = conn.GetProp("schema")
 	}
 
-	fileFormat := dbio.FileType(conn.GetProp("format"))
-	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
-		fileFormat = dbio.FileTypeCsv
-		// fileFormat = dbio.FileTypeParquet
-	}
+	// The Arrow lane writes Parquet records, so the COPY runs with a parquet
+	// file format; the row path keeps the `format` conn prop (CSV by default).
+	fileFormat := stageFileFormat(df, dbio.FileType(conn.GetProp("format")))
 
 	tableFName := table.FullName()
 
@@ -875,7 +887,7 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 			config.Delimiter = ","
 			_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 		case dbio.FileTypeParquet:
-			if env.UseDuckDbCompute() {
+			if stageDuckDbCompute(df) {
 				config.BinaryAsHex = true
 				_, err = filesys.WriteDataflowReadyViaDuckDB(fs, df, folderPath, fileReadyChn, config)
 			} else {

@@ -239,6 +239,7 @@ type ColumnStats struct {
 	UniqCnt      int64  `json:"uniq_cnt,omitempty"`
 	Checksum     uint64 `json:"checksum,omitempty"`
 	LastVal      any    `json:"-"` // last non-empty value. useful for state incremental
+	MaxStr       string `json:"-"` // maximum of a string update key, tracked by the arrow lane
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {

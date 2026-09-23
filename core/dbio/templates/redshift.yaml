@@ -36,6 +36,13 @@ core:
     from '{s3_path}'
     {credential_expr}
     CSV delimiter ',' EMPTYASNULL BLANKSASNULL GZIP IGNOREHEADER 1 DATEFORMAT 'auto' TIMEFORMAT 'auto'
+  # Parquet fields map to table columns by name, so no column list or
+  # CSV-style delimiter/format options.
+  copy_from_s3_parquet: |
+    COPY {tgt_table}
+    from '{s3_path}'
+    {credential_expr}
+    FORMAT AS PARQUET
   copy_to_s3: |
     unload ('{sql}')   
     to '{s3_path}'

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,11 +24,14 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -3305,4 +3309,370 @@ func TestDynamoDBIsStatement(t *testing.T) {
 	assert.False(t, isDynamoDBStatement("select * from my_table"))
 	assert.False(t, isDynamoDBStatement("select id, code from my_table limit 3"))
 	assert.False(t, isDynamoDBStatement(""))
+}
+
+// pgReaderSchema is the schema the postgres ADBC driver reports for
+// numeric, jsonb and uuid columns.
+func pgReaderSchema() *arrow.Schema {
+	label := func(ext, typname string) arrow.Metadata {
+		return arrow.NewMetadata(
+			[]string{"ARROW:extension:name", "ARROW:extension:metadata", "ADBC:postgresql:typname"},
+			[]string{ext, `{"type_name": "` + typname + `", "vendor_name": "PostgreSQL"}`, typname},
+		)
+	}
+	return arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "c_dec", Type: arrow.BinaryTypes.String, Nullable: true, Metadata: label("arrow.opaque", "numeric")},
+		{Name: "c_json", Type: arrow.BinaryTypes.String, Nullable: true, Metadata: label("arrow.json", "jsonb")},
+		{Name: "c_uuid", Type: arrow.BinaryTypes.Binary, Nullable: true, Metadata: label("arrow.opaque", "uuid")},
+		{Name: "c_str", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+}
+
+func TestAdbcLaneRead_Labels(t *testing.T) {
+	r := newAdbcLaneRead(pgReaderSchema())
+
+	types := map[string]iop.ColumnType{}
+	for _, col := range r.columns {
+		types[col.Name] = col.Type
+	}
+	assert.Equal(t, iop.IntegerType, types["id"])
+	assert.Equal(t, iop.DecimalType, types["c_dec"])
+	assert.Equal(t, iop.JsonType, types["c_json"])
+	assert.Equal(t, iop.UUIDType, types["c_uuid"])
+	assert.Equal(t, iop.StringType, types["c_str"])
+
+	// numeric is carried as the decimal the row path builds
+	assert.Equal(t, arrow.DECIMAL128, r.schema.Field(1).Type.ID())
+	assert.Equal(t, []int{1}, r.decimals)
+	// the other fields keep the driver's type
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.String, r.schema.Field(2).Type))
+	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.Binary, r.schema.Field(3).Type))
+}
+
+func TestAdbcLaneRead_Record(t *testing.T) {
+	src := pgReaderSchema()
+	r := newAdbcLaneRead(src)
+	mem := memory.NewGoAllocator()
+
+	b := array.NewRecordBuilder(mem, src)
+	defer b.Release()
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
+	b.Field(1).(*array.StringBuilder).AppendValues([]string{"12.34", ""}, []bool{true, false})
+	b.Field(2).(*array.StringBuilder).AppendValues([]string{`{"a": 1}`, "null"}, nil)
+	b.Field(3).(*array.BinaryBuilder).AppendValues([][]byte{make([]byte, 16), make([]byte, 16)}, nil)
+	b.Field(4).(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+
+	out, err := r.Record(rec)
+	require.NoError(t, err)
+	defer out.Release()
+
+	assert.True(t, out.Schema().Equal(r.schema))
+	dec := out.Column(1).(*array.Decimal128)
+	assert.Equal(t, "12.34", dec.ValueStr(0))
+	assert.EqualValues(t, 6, dec.DataType().(*arrow.Decimal128Type).Scale)
+	assert.True(t, dec.IsNull(1))
+	assert.Equal(t, `{"a": 1}`, out.Column(2).(*array.String).Value(0))
+}
+
+func TestAdbcLaneRead_NoLabels(t *testing.T) {
+	src := arrow.NewSchema([]arrow.Field{{Name: "c_str", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	r := newAdbcLaneRead(src)
+	assert.True(t, r.schema.Equal(src))
+	assert.Empty(t, r.decimals)
+}
+
+func TestArrowDBConn_IngestSchema(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "c_jsonb", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "c_json", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+	cols := iop.Columns{
+		{Name: "id", Type: iop.IntegerType, DbType: "integer"},
+		{Name: "c_jsonb", Type: iop.JsonType, DbType: "jsonb"},
+		{Name: "c_json", Type: iop.JsonType, DbType: "json"},
+	}
+
+	pg := &ArrowDBConn{driverType: dbio.TypeDbPostgres}
+	out := pg.ingestSchema(schema, cols)
+	name, _ := out.Field(1).Metadata.GetValue("ARROW:extension:name")
+	assert.Equal(t, "arrow.json", name, "a jsonb column needs the jsonb binary format")
+	assert.Equal(t, 0, out.Field(2).Metadata.Len(), "a json column takes raw text")
+	assert.Equal(t, 0, out.Field(0).Metadata.Len())
+
+	duck := &ArrowDBConn{driverType: dbio.TypeDbDuckDb}
+	assert.True(t, duck.ingestSchema(schema, cols) == schema)
+}
+
+// fakeArrowLane is a pass-through ArrowLane: it only accepts equal types and
+// never rewrites a record. It stands in for the closed engine in open tests.
+type fakeArrowLane struct{}
+
+func (fakeArrowLane) CastSupported(from, to arrow.DataType) (bool, string) {
+	if arrow.TypeEqual(from, to) {
+		return true, ""
+	}
+	return false, "fake lane only accepts equal types"
+}
+
+func (fakeArrowLane) Normalize(rec arrow.RecordBatch, to *arrow.Schema) (arrow.RecordBatch, error) {
+	rec.Retain()
+	return rec, nil
+}
+
+func (fakeArrowLane) Project(rec arrow.RecordBatch, cols iop.Columns) (arrow.RecordBatch, error) {
+	return rec, nil
+}
+
+func (fakeArrowLane) MaxOf(arr arrow.Array) (int64, bool) {
+	return 0, false
+}
+
+// ClassifyTransform declines every stage: the fake evaluates no transform.
+func (fakeArrowLane) ClassifyTransform(stages []map[string]string, cols iop.Columns) string {
+	if len(stages) > 0 {
+		return "fake lane does not evaluate transforms"
+	}
+	return ""
+}
+
+// NewTransform is never reached: ClassifyTransform declines every stage.
+func (fakeArrowLane) NewTransform(stages []map[string]string, sp *iop.StreamProcessor) (iop.RecordTransform, error) {
+	return nil, g.Error("fake lane does not evaluate transforms")
+}
+
+// TestArrowLane_StageLoaders covers the staged-parquet loaders' Arrow branch:
+// the format/config decision must pick Parquet and skip the DuckDB merge only
+// for an Arrow dataflow, and records must round-trip to Parquet.
+func TestArrowLane_StageLoaders(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+
+	ctx := g.NewContext(context.Background())
+
+	columns := iop.Columns{
+		{Name: "name", Type: iop.StringType},
+		{Name: "num", Type: iop.BigIntType},
+		{Name: "ts", Type: iop.TimestampType},
+	}
+	schema := iop.ColumnsToArrowSchema(columns)
+
+	// Arrow dataflow: two streams, 3 records each, built from the Sling schema.
+	dss := []*iop.Datastream{}
+	for s := 0; s < 2; s++ {
+		rs := iop.NewRecordStream(ctx, fakeArrowLane{}, schema, iop.ArrowLaneBuffer)
+		for i := 0; i < 3; i++ {
+			rec := newTestRecord(t, schema, s, i)
+			req.NoError(rs.Push(rec)) // ownership moves to the stream
+		}
+		rs.Close(nil)
+
+		ds := iop.NewDatastreamArrow(ctx.Ctx, columns, rs)
+		req.NoError(ds.Start()) // samples the first record, marks ready
+		dss = append(dss, ds)
+	}
+
+	// Assemble the dataflow directly: the two streams are already pushed and
+	// the channel closed, so nothing races with a producer while the sink
+	// reads. (MakeDataFlow's PushStreamChan goroutine keeps pushing streams
+	// while the sink runs; the loaders never hit that because the read is
+	// finished before the staged copy starts.)
+	arrowDf := iop.NewDataflow()
+	arrowDf.Columns = columns
+	arrowDf.Streams = dss
+	arrowDf.StreamCh = make(chan *iop.Datastream, len(dss))
+	for _, ds := range dss {
+		arrowDf.StreamCh <- ds
+	}
+	close(arrowDf.StreamCh)
+	req.True(arrowDf.ArrowOnly())
+
+	// Row-path dataflow: a plain datastream is never ArrowOnly.
+	rowDf := iop.NewDataflow()
+	rowDf.Streams = []*iop.Datastream{iop.NewDatastream(columns)}
+	req.False(rowDf.ArrowOnly())
+
+	// Format choice: the lane forces Parquet, the row path keeps CSV (the
+	// `format` prop wins when it is parquet).
+	asrt.Equal(dbio.FileTypeParquet, stageFileFormat(arrowDf, dbio.FileTypeNone))
+	asrt.Equal(dbio.FileTypeParquet, stageFileFormat(arrowDf, dbio.FileTypeCsv))
+	asrt.Equal(dbio.FileTypeCsv, stageFileFormat(rowDf, dbio.FileTypeNone))
+	asrt.Equal(dbio.FileTypeCsv, stageFileFormat(rowDf, dbio.FileTypeCsv))
+	asrt.Equal(dbio.FileTypeParquet, stageFileFormat(rowDf, dbio.FileTypeParquet))
+
+	// DuckDB compute: never merged on the lane, unchanged on the row path
+	// (UseDuckDbCompute defaults to true).
+	asrt.False(stageDuckDbCompute(arrowDf))
+	asrt.True(stageDuckDbCompute(rowDf))
+
+	// Round-trip the dataflow to Parquet through filesys.WriteDataflowReady,
+	// the same call the staged loaders make with a parquet config.
+	paths := writeDataflowParquet(t, arrowDf)
+	req.Len(paths, 2) // one part per stream
+	for s, parquetPath := range paths {
+		names, nums, tss := readParquetColumns(t, parquetPath)
+		wantNames, wantNums, wantTss := testRecordValues(s)
+		asrt.Equal(wantNames, names)
+		asrt.Equal(wantNums, nums)
+		req.Len(tss, len(wantTss))
+		for i := range wantTss {
+			asrt.Equal(wantTss[i].UnixMicro(), tss[i].UnixMicro(), "timestamp %d of stream %d", i, s)
+		}
+
+		// the datastream counted the rows the sink took
+		asrt.Equal(uint64(3), dss[s].Count)
+	}
+
+	// The Redshift parquet COPY runs from the new template; the CSV template
+	// must keep rendering as before.
+	t.Run("redshift s3 templates", func(t *testing.T) {
+		asrt := assert.New(t)
+		req := require.New(t)
+
+		tmpl, err := dbio.TypeDbRedshift.Template()
+		req.NoError(err)
+
+		args := []string{
+			"tgt_table", `"public"."t"`,
+			"tgt_columns", `"name", "num", "ts"`,
+			"s3_path", "s3://bucket/path/",
+			"credential_expr", "CREDENTIALS=(AWS_KEY_ID='a' AWS_SECRET_KEY='b')",
+		}
+
+		parquetSQL := g.R(tmpl.Core["copy_from_s3_parquet"], args...)
+		asrt.Contains(parquetSQL, `COPY "public"."t"`)
+		asrt.Contains(parquetSQL, "FORMAT AS PARQUET")
+		asrt.NotContains(strings.ToLower(parquetSQL), "delimiter")
+
+		csvSQL := g.R(tmpl.Core["copy_from_s3"], args...)
+		asrt.Contains(csvSQL, `COPY "public"."t" ("name", "num", "ts")`)
+		asrt.Contains(csvSQL, "delimiter ','")
+
+		// Snowflake and Databricks render their parquet COPY with the props
+		// the Arrow branch passes.
+		sfTmpl, err := dbio.TypeDbSnowflake.Template()
+		req.NoError(err)
+		sfSQL := g.R(sfTmpl.Core["copy_from_stage_parquet"], "table", `"db"."s"."t"`, "stage_path", "@stage/p/a.parquet")
+		asrt.Contains(sfSQL, "TYPE = PARQUET")
+		asrt.Contains(sfSQL, "@stage/p/a.parquet")
+
+		dbxTmpl, err := dbio.TypeDbDatabricks.Template()
+		req.NoError(err)
+		dbxSQL := g.R(dbxTmpl.Core["copy_from_volume_parquet"], "table", `"cat"."s"."t"`, "volume_path", "/Volumes/c/s/v/p")
+		asrt.Contains(dbxSQL, "PARQUET")
+		asrt.Contains(dbxSQL, "/Volumes/c/s/v/p")
+	})
+}
+
+// newTestRecord builds one record of the fixed test schema. The schema is the
+// one ColumnsToArrowSchema produced, so the types are String, Int64 and
+// Timestamp(us).
+func newTestRecord(t *testing.T, schema *arrow.Schema, stream, row int) arrow.RecordBatch {
+	names, nums, tss := testRecordValues(stream)
+
+	b := array.NewRecordBuilder(memory.NewGoAllocator(), schema)
+	defer b.Release()
+
+	sb, ok := b.Field(0).(*array.StringBuilder)
+	require.True(t, ok, "expected a string builder, got %T", b.Field(0))
+	ib, ok := b.Field(1).(*array.Int64Builder)
+	require.True(t, ok, "expected an int64 builder, got %T", b.Field(1))
+	tb, ok := b.Field(2).(*array.TimestampBuilder)
+	require.True(t, ok, "expected a timestamp builder, got %T", b.Field(2))
+
+	sb.Append(names[row])
+	ib.Append(nums[row])
+	tb.Append(arrow.Timestamp(tss[row].UnixMicro()))
+
+	return b.NewRecordBatch()
+}
+
+// testRecordValues returns the three rows of one test stream.
+func testRecordValues(stream int) (names []string, nums []int64, tss []time.Time) {
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		names = append(names, fmt.Sprintf("s%d-row%d", stream, i))
+		nums = append(nums, int64(stream*100+i))
+		tss = append(tss, base.Add(time.Duration(stream*3+i)*time.Hour))
+	}
+	return
+}
+
+// writeDataflowParquet writes an Arrow dataflow to a local temp dir through
+// filesys.WriteDataflowReady, the same call the staged loaders make with a
+// parquet config, and returns the written part files (one per stream).
+func writeDataflowParquet(t *testing.T, df *iop.Dataflow) []string {
+	req := require.New(t)
+
+	fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal)
+	req.NoError(err)
+
+	sc := iop.LoaderStreamConfig(true)
+	sc.Format = dbio.FileTypeParquet
+	sc.Compression = iop.ZStandardCompressorType
+	sc.FileMaxRows = 500000 // folder mode, one part per stream, like the loaders
+
+	fileReadyChn := make(chan filesys.FileReady, 100)
+	paths := []string{}
+	done := make(chan struct{})
+	go func() {
+		for file := range fileReadyChn {
+			paths = append(paths, file.Node.Path())
+		}
+		close(done)
+	}()
+
+	_, err = fs.WriteDataflowReady(df, t.TempDir(), fileReadyChn, sc)
+	req.NoError(err)
+	<-done
+	sort.Strings(paths)
+	return paths
+}
+
+// readParquetColumns reads a parquet file back and returns its columns as
+// plain Go values (strings are cloned: the table is released before use).
+func readParquetColumns(t *testing.T, parquetPath string) (names []string, nums []int64, tss []time.Time) {
+	require := require.New(t)
+
+	f, err := os.Open(parquetPath)
+	require.NoError(err)
+	defer f.Close()
+
+	pqFile, err := file.NewParquetReader(f)
+	require.NoError(err)
+	fr, err := pqarrow.NewFileReader(pqFile, pqarrow.ArrowReadProperties{}, memory.NewGoAllocator())
+	require.NoError(err)
+
+	tbl, err := fr.ReadTable(context.Background())
+	require.NoError(err)
+	defer tbl.Release()
+
+	require.Equal(int64(3), tbl.NumRows())
+	require.Equal(int64(3), tbl.NumCols())
+
+	for _, val := range tableColumnValues(tbl, 0) {
+		names = append(names, strings.Clone(val.(string)))
+	}
+	for _, val := range tableColumnValues(tbl, 1) {
+		nums = append(nums, val.(int64))
+	}
+	for _, val := range tableColumnValues(tbl, 2) {
+		tss = append(tss, val.(time.Time))
+	}
+	return
+}
+
+// tableColumnValues extracts every value of one column across its chunks.
+func tableColumnValues(tbl arrow.Table, colIdx int) []any {
+	col := tbl.Column(colIdx)
+	out := []any{}
+	for _, chunk := range col.Data().Chunks() {
+		for i := 0; i < chunk.Len(); i++ {
+			out = append(out, iop.GetValueFromArrowArray(chunk, i))
+		}
+	}
+	return out
 }

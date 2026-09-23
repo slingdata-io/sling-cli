@@ -1102,11 +1102,9 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
-	fileFormat := dbio.FileType(conn.GetProp("format"))
-	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
-		fileFormat = dbio.FileTypeCsv
-		// fileFormat = dbio.FileTypeParquet // error-prone, type mismatch
-	}
+	// The Arrow lane writes Parquet records, so the COPY runs with a parquet
+	// file format; the row path keeps the `format` conn prop (CSV by default).
+	fileFormat := stageFileFormat(df, dbio.FileType(conn.GetProp("format")))
 
 	go func() {
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
