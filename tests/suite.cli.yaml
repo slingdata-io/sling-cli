@@ -3093,6 +3093,41 @@
     - 'PRODUCT DESCRIPTION'
     - execution succeeded
 
+# The workbench server (plan 6.17, 3.15): the command's help, and a smoke test
+# that starts it on a free port, asks /healthz and stops it. The temp home keeps
+# the run out of the real ~/.sling.
+- id: 620
+  name: 'Serve workbench help'
+  run: sling serve workbench --help
+  output_contains:
+    - 'Run the Sling workbench'
+    - '--token'
+
+- id: 621
+  name: 'Serve workbench starts, answers healthz and stops'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    LOG=$(mktemp)
+    SLING_HOME_DIR="$HOME_DIR" sling serve workbench --no-browser --port 0 > "$LOG" 2>&1 &
+    PID=$!
+    PORT=""
+    for _ in $(seq 1 60); do
+      PORT=$(sed -n 's|.*workbench listening on http://127.0.0.1:\([0-9]*\).*|\1|p' "$LOG" | head -1)
+      [ -n "$PORT" ] && break
+      sleep 0.5
+    done
+    if [ -z "$PORT" ]; then
+      cat "$LOG"
+      kill "$PID" 2>/dev/null || true
+      exit 1
+    fi
+    BODY=$(curl -fsS "http://127.0.0.1:$PORT/healthz")
+    kill "$PID" 2>/dev/null || true
+    wait "$PID" 2>/dev/null || true
+    echo "healthz=$BODY"
+  output_contains:
+    - 'healthz=ok'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -99,6 +99,7 @@ require (
 	github.com/tidwall/jsonc v0.3.3
 	github.com/tidwall/sjson v1.2.5
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.19
+	github.com/trebi-ai/agent-wire v0.2.1
 	github.com/trinodb/trino-go-client v0.328.0
 	github.com/twpayne/go-geom v1.6.1
 	github.com/valentin-kaiser/go-dbase v1.14.4
@@ -194,6 +195,7 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/creasty/defaults v1.8.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
@@ -212,7 +214,7 @@ require (
 	github.com/exasol/error-reporting-go v0.2.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.7 // indirect
 	github.com/ganigeorgiev/fexpr v0.4.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
@@ -232,6 +234,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
+	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect

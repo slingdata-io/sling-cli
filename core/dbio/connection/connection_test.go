@@ -1,12 +1,22 @@
 package connection
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/microsoft/go-mssqldb/msdsn"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -555,4 +565,224 @@ func TestDynamoDBConnectionURL(t *testing.T) {
 	c, err = NewConnection("DDB", dbio.TypeDbDynamoDB, map[string]any{})
 	require.NoError(t, err)
 	assert.Equal(t, "ap-southeast-1", c.DataS(true)["aws_region"])
+}
+
+const testOptionsSpecYAML = `
+name: "Test Options API"
+defaults:
+  state:
+    page: 1
+endpoints:
+  items:
+    request:
+      url: "%s/items"
+      parameters:
+        page: "{state.page}"
+    response:
+      records:
+        jmespath: "data[]"
+    pagination:
+      stop_condition: "false"
+      next_state:
+        page: "state.page + 1"
+`
+
+func testOptionsEntries(t *testing.T, serverURL string) ConnEntries {
+	t.Helper()
+
+	specPath := filepath.Join(t.TempDir(), "spec.yaml")
+	require.NoError(t, os.WriteFile(specPath, []byte(fmt.Sprintf(testOptionsSpecYAML, serverURL)), 0644))
+
+	conn, err := NewConnection("TEST_OPTIONS_API", dbio.TypeApi, map[string]any{
+		"type": "api",
+		"spec": "file://" + specPath,
+	})
+	require.NoError(t, err)
+
+	return ConnEntries{{Name: "TEST_OPTIONS_API", Connection: conn}}
+}
+
+func TestConnEntriesTestWithOptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":1},{"id":2}]}`)
+	}))
+	defer server.Close()
+
+	var events []api.SpecEvent
+	levelBefore := g.GetLogLevel()
+	ok, err := testOptionsEntries(t, server.URL).TestWithOptions(context.Background(), "TEST_OPTIONS_API", TestOptions{
+		Endpoints:   []string{"items"},
+		Limit:       10,
+		MaxRequests: 2,
+		Trace:       true,
+		OnEvent:     func(e api.SpecEvent) { events = append(events, e) },
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, levelBefore, g.GetLogLevel(), "trace log level not restored")
+
+	types := []string{}
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	assert.Equal(t, []string{
+		api.SpecEventTypeEndpointStart,
+		api.SpecEventTypeRequestComplete, api.SpecEventTypeRecords,
+		api.SpecEventTypeRequestComplete, api.SpecEventTypeRecords,
+		api.SpecEventTypeEndpointDone,
+	}, types, "unexpected event sequence: %#v", types)
+
+	completes, records := 0, 0
+	for _, e := range events {
+		switch e.Type {
+		case api.SpecEventTypeRequestComplete:
+			completes++
+			assert.Equal(t, "items", e.Endpoint)
+			assert.Equal(t, completes, e.RequestIndex)
+			assert.NotNil(t, e.Request)
+			assert.NotNil(t, e.Response)
+			assert.NotNil(t, e.StateBefore, "state_before missing")
+			assert.NotNil(t, e.StateAfter, "state_after missing")
+			assert.EqualValues(t, 2, e.Response["record_count"])
+			assert.EqualValues(t, 200, e.Response["status"])
+			// legacy wire fields
+			assert.NotEmpty(t, e.ReqID)
+			assert.NotZero(t, e.Timestamp)
+			assert.NotEmpty(t, e.IterID)
+			assert.Equal(t, len(`{"data":[{"id":1},{"id":2}]}`), e.SizeBytes)
+		case api.SpecEventTypeEndpointDone:
+			assert.Equal(t, 4, e.RecordCount)
+		case api.SpecEventTypeRecords:
+			records++
+			assert.Len(t, e.Records, 2)
+		}
+	}
+	assert.Equal(t, 2, completes, "max_requests not honored")
+	assert.Equal(t, 2, records, "one records event per request expected")
+}
+
+func TestConnEntriesTestErrorEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := server.URL
+	server.Close() // no listener: requests fail to connect
+
+	var events []api.SpecEvent
+	ok, err := testOptionsEntries(t, deadURL).TestWithOptions(context.Background(), "TEST_OPTIONS_API", TestOptions{
+		Endpoints: []string{"items"},
+		OnEvent:   func(e api.SpecEvent) { events = append(events, e) },
+	})
+	require.Error(t, err)
+	assert.False(t, ok)
+	require.NotEmpty(t, events)
+	last := events[len(events)-1]
+	assert.Equal(t, api.SpecEventTypeError, last.Type, "events: %#v", events)
+	assert.Equal(t, "items", last.Endpoint)
+	assert.NotEmpty(t, last.Error)
+}
+
+func TestConnEntriesTestFromEnv(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":1}]}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("SLING_TEST_ENDPOINTS", "items")
+	t.Setenv("SLING_TEST_ENDPOINT_LIMIT", "5")
+	t.Setenv("SLING_TEST_ENDPOINT_MAX_REQUESTS", "1")
+
+	ok, err := testOptionsEntries(t, server.URL).Test("TEST_OPTIONS_API")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestConnEntriesTestSpecFileOverlay(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":1}]}`)
+	}))
+	defer server.Close()
+
+	// the connection's own spec has no "items" endpoint
+	connSpec := filepath.Join(t.TempDir(), "conn.yaml")
+	require.NoError(t, os.WriteFile(connSpec, []byte(fmt.Sprintf(`
+name: "Conn Spec"
+endpoints:
+  others:
+    request:
+      url: "%s/others"
+    response:
+      records:
+        jmespath: "data[]"
+`, server.URL)), 0644))
+
+	conn, err := NewConnection("TEST_OPTIONS_API", dbio.TypeApi, map[string]any{
+		"type": "api",
+		"spec": "file://" + connSpec,
+	})
+	require.NoError(t, err)
+	entries := ConnEntries{{Name: "TEST_OPTIONS_API", Connection: conn}}
+
+	// the draft spec replaces the connection's spec for this test only
+	draftSpec := filepath.Join(t.TempDir(), "draft.yaml")
+	require.NoError(t, os.WriteFile(draftSpec, []byte(fmt.Sprintf(testOptionsSpecYAML, server.URL)), 0644))
+
+	var events []api.SpecEvent
+	ok, err := entries.TestWithOptions(context.Background(), "TEST_OPTIONS_API", TestOptions{
+		SpecFile:  draftSpec,
+		Endpoints: []string{"items"},
+		OnEvent:   func(e api.SpecEvent) { events = append(events, e) },
+	})
+	require.NoError(t, err)
+	assert.True(t, ok)
+	require.NotEmpty(t, events)
+	assert.Equal(t, "items", events[0].Endpoint)
+
+	// the connection entry itself is untouched
+	assert.Equal(t, "file://"+connSpec, entries.Get("TEST_OPTIONS_API").Connection.Data["spec"])
+
+	// a missing spec file is reported
+	_, err = entries.TestWithOptions(context.Background(), "TEST_OPTIONS_API", TestOptions{
+		SpecFile: filepath.Join(t.TempDir(), "nope.yaml"),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec file not found")
+}
+
+func TestConnEntriesTestCancel(t *testing.T) {
+	blocked := make(chan struct{})
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(blocked) })
+		<-r.Context().Done() // returns when the client aborts the request
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := testOptionsEntries(t, server.URL).TestWithOptions(ctx, "TEST_OPTIONS_API", TestOptions{
+			Endpoints:   []string{"items"},
+			MaxRequests: 2,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-blocked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("request never reached the server")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, context.Canceled), "expected context.Canceled, got %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("test did not stop on cancel")
+	}
 }
