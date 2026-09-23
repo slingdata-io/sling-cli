@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"github.com/flarco/g"
@@ -15,6 +16,7 @@ import (
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -64,14 +66,69 @@ func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys
 	return
 }
 
+// Test keeps its signature: it builds the options from the SLING_TEST_* env
+// vars and calls TestWithOptions, so the CLI does not change.
 func (ce ConnEntries) Test(name string) (ok bool, err error) {
+	return ce.TestWithOptions(context.Background(), name, testOptionsFromEnv())
+}
+
+// TestWithOptions tests the named connection with opts. When opts.SpecFile is
+// set, it overlays that spec file on the connection's spec for this test only.
+func (ce ConnEntries) TestWithOptions(ctx context.Context, name string, opts TestOptions) (ok bool, err error) {
+	if opts.SpecFile != "" {
+		entries, err := ce.withSpecFile(name, opts.SpecFile)
+		if err != nil {
+			return false, err
+		}
+		ce = entries
+	}
+
 	conn := ce.Get(name)
 	if conn.Name == "" {
 		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 	defer conn.Connection.Close()
-	ok, err = conn.Connection.Test()
+	ok, err = conn.Connection.TestWithOptions(ctx, opts)
 	return
+}
+
+// withSpecFile returns a copy of entries where the named connection's spec
+// points at specFile (a relative path resolves against the working directory).
+// The original entries stay untouched.
+func (ce ConnEntries) withSpecFile(name, specFile string) (ConnEntries, error) {
+	absSpec := specFile
+	if !filepath.IsAbs(absSpec) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, g.Error(err, "could not resolve spec file path: %s", specFile)
+		}
+		absSpec = filepath.Join(wd, absSpec)
+	}
+	if _, err := os.Stat(absSpec); err != nil {
+		return nil, g.Error(err, "spec file not found: %s", absSpec)
+	}
+
+	out := make(ConnEntries, len(ce))
+	copy(out, ce)
+	for i := range out {
+		if !strings.EqualFold(out[i].Name, name) {
+			continue
+		}
+
+		data := make(map[string]any, len(out[i].Connection.Data)+1)
+		for k, v := range out[i].Connection.Data {
+			data[k] = v
+		}
+		data["spec"] = "file://" + absSpec
+
+		conn, err := NewConnection(out[i].Connection.Name, out[i].Connection.Type, data)
+		if err != nil {
+			return nil, g.Error(err, "could not overlay spec file on connection %s", name)
+		}
+		out[i].Connection = conn
+		return out, nil
+	}
+	return nil, g.Error("Invalid Connection name: %s. Make sure it is created.", name)
 }
 
 var (

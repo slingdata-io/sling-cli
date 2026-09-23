@@ -1435,6 +1435,7 @@ type SingleRequest struct {
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
 	durationMs int64          `yaml:"-" json:"-"`
+	index      int            `yaml:"-" json:"-"` // 1-based request number of the endpoint
 	iter       *Iteration     `yaml:"-" json:"-"` // the iteration that the req belongs to
 	state      StateMap       `yaml:"-" json:"-"` // copy of iteration state for request (prevents mutation)
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
@@ -1461,6 +1462,7 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 	return &SingleRequest{
 		id:        id,
 		timestamp: time.Now().UnixMilli(),
+		index:     iter.endpoint.totalReqs,
 		endpoint:  iter.endpoint,
 		iter:      iter,
 		state:     state,
@@ -1492,38 +1494,99 @@ func (lrs *SingleRequest) Map() map[string]any {
 	return vars
 }
 
-// SpecEventChn, when non-nil, receives structured spec test events as JSON-safe maps.
-// The LSP layer creates this channel before a test run and drains it in a goroutine.
-var SpecEventChn chan map[string]any
+// Spec event types. The strings are the contract for spec inspectors
+// (LSP, MCP, workbench).
+const (
+	SpecEventTypeEndpointStart   = "endpoint-start"
+	SpecEventTypeRequestComplete = "request-complete"
+	SpecEventTypeRecords         = "records"
+	SpecEventTypeEndpointDone    = "endpoint-done"
+	SpecEventTypeError           = "error"
+)
 
-// FireSpecEvent sends an event to SpecEventChn if it is non-nil.
-func FireSpecEvent(event map[string]any) {
-	if SpecEventChn != nil {
-		SpecEventChn <- event
+// SpecEvent is one structured event of a spec test run. It carries the
+// request/response, the iteration state before and after the request, and the
+// records the request pulled.
+type SpecEvent struct {
+	Type         string         `json:"type"`
+	Endpoint     string         `json:"endpoint,omitempty"`
+	RequestIndex int            `json:"request_index,omitempty"`
+	Request      map[string]any `json:"request,omitempty"`
+	Response     map[string]any `json:"response,omitempty"`
+	StateBefore  map[string]any `json:"state_before,omitempty"`
+	StateAfter   map[string]any `json:"state_after,omitempty"`
+	Records      []any          `json:"records,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	DurationMs   int64          `json:"duration_ms,omitempty"`
+
+	// legacy fields, read by released spec inspectors (VS Code extension)
+	ReqID        string `json:"req_id,omitempty"`
+	Timestamp    int64  `json:"timestamp,omitempty"`
+	IterID       string `json:"iter_id,omitempty"`
+	IterSequence int    `json:"iter_sequence,omitempty"`
+	SizeBytes    int    `json:"size_bytes,omitempty"`   // request-complete: response body size
+	RecordCount  int    `json:"record_count,omitempty"` // endpoint-done: records pulled
+}
+
+// specEventCtxKey carries a spec test's event handler through the request
+// context, so its events go to its own consumer instead of a package global.
+type specEventCtxKey struct{}
+
+// WithSpecEventHandler returns a context carrying fn as the spec event
+// handler. The API client picks it up from the request context, so a test run
+// is isolated and its cancel stops it.
+func WithSpecEventHandler(ctx context.Context, fn func(SpecEvent)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, specEventCtxKey{}, fn)
+}
+
+// fireSpecEvent sends one event to the handler carried by ctx, if any.
+func fireSpecEvent(ctx context.Context, event SpecEvent) {
+	if ctx == nil {
+		return
+	}
+	if fn, ok := ctx.Value(specEventCtxKey{}).(func(SpecEvent)); ok && fn != nil {
+		fn(event)
 	}
 }
 
-// ToSpecEvent builds a JSON-safe map with all request/response details
-// for the spec inspector. Includes unexported fields (id, timestamp,
-// endpoint name, iteration id) that don't normally marshal.
-func (req *SingleRequest) ToSpecEvent() map[string]any {
-	event := g.M(
-		"type", "request-complete",
-		"req_id", req.id,
-		"timestamp", req.timestamp,
-		"endpoint", req.endpoint.Name,
-		"duration_ms", req.durationMs,
-	)
+// recordsToAny adapts records for SpecEvent.Records ([]any).
+func recordsToAny(records []map[string]any) []any {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]any, len(records))
+	for i, rec := range records {
+		out[i] = rec
+	}
+	return out
+}
+
+// ToSpecEvent builds the request-complete event for the spec inspector.
+// It includes the request index, the iteration state before/after the request
+// and its duration, which don't normally marshal.
+func (req *SingleRequest) ToSpecEvent() SpecEvent {
+	event := SpecEvent{
+		Type:         SpecEventTypeRequestComplete,
+		ReqID:        req.id,
+		Timestamp:    req.timestamp,
+		Endpoint:     req.endpoint.Name,
+		RequestIndex: req.index,
+		DurationMs:   req.durationMs,
+		StateBefore:  maps.Clone(req.state),
+	}
 
 	// iteration context
 	if req.iter != nil {
-		event["iter_id"] = req.iter.id
-		event["iter_sequence"] = req.iter.sequence
+		event.IterID = req.iter.id
+		event.IterSequence = req.iter.sequence
 	}
 
 	// request state
 	if req.Request != nil {
-		event["request"] = g.M(
+		event.Request = g.M(
 			"method", req.Request.Method,
 			"url", req.Request.URL,
 			"headers", req.Request.Headers,
@@ -1534,14 +1597,25 @@ func (req *SingleRequest) ToSpecEvent() map[string]any {
 
 	// response state
 	if req.Response != nil {
-		event["size_bytes"] = len(req.Response.Text)
-		event["response"] = g.M(
+		event.SizeBytes = len(req.Response.Text)
+		event.Response = g.M(
 			"status", req.Response.Status,
 			"headers", req.Response.Headers,
 			"body", req.Response.Text,
+			"size_bytes", len(req.Response.Text),
 			"record_count", len(req.Response.Records),
 			"records", req.Response.Records,
 		)
+	}
+
+	// state after the request: processors may have moved the iteration state.
+	// Lock iter.context: other goroutines write iter.state concurrently.
+	if req.iter != nil {
+		stateAfter := StateMap{}
+		req.iter.context.Lock()
+		maps.Copy(stateAfter, req.iter.state)
+		req.iter.context.Unlock()
+		event.StateAfter = stateAfter
 	}
 
 	return event

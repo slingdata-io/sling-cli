@@ -28,10 +28,34 @@ type EnvFile struct {
 	Connections map[string]map[string]any `json:"connections,omitempty" yaml:"connections,omitempty"`
 	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
 	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
+	Workbench   *WorkbenchConfig          `json:"workbench,omitempty" yaml:"workbench,omitempty"`
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
 	Body       string `json:"-" yaml:"-"`
+}
+
+// WorkbenchConfig is the `workbench:` block of env.yaml: the settings of
+// `sling serve workbench`. A command-line flag wins over the file.
+type WorkbenchConfig struct {
+	// Host is the listen address. The default is 127.0.0.1.
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
+	// Port is the listen port. The default is 7879; 0 picks a free port.
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
+	// Token is required when Host is not loopback.
+	Token string `json:"token,omitempty" yaml:"token,omitempty"`
+	// ProjectsRoot limits the Open-folder dialog to one folder tree.
+	ProjectsRoot string `json:"projects_root,omitempty" yaml:"projects_root,omitempty"`
+	// Shell allows interactive shell terminals. The default is true.
+	Shell *bool `json:"shell,omitempty" yaml:"shell,omitempty"`
+	// WorkerIdle stops a project worker that has no sessions and no running
+	// work after this duration, for example "15m". The default is 15m.
+	WorkerIdle string `json:"worker_idle,omitempty" yaml:"worker_idle,omitempty"`
+	// PathExtra is prepended to PATH for shells, runs and agent CLIs, so a
+	// launchd or systemd service finds the tools the user's shell does.
+	PathExtra string `json:"path_extra,omitempty" yaml:"path_extra,omitempty"`
+	// Env holds extra environment variables for workers.
+	Env map[string]any `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
 func (ef *EnvFile) WriteEnvFile() (err error) {
@@ -123,7 +147,7 @@ func (ef *EnvFile) structToRootNode(original *yaml.Node) (*yaml.Node, error) {
 	}
 
 	managed := map[string]struct{}{
-		"connections": {}, "variables": {}, "env": {},
+		"connections": {}, "variables": {}, "env": {}, "workbench": {},
 	}
 	if original != nil && len(original.Content) > 0 && original.Content[0].Kind == yaml.MappingNode {
 		newMap := doc.Content[0]
