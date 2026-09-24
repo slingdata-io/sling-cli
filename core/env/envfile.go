@@ -197,11 +197,15 @@ func LoadDotEnvSlingFrom(dir string) map[string]string {
 	}
 
 	for key, val := range ParseDotEnv(string(bytes)) {
-		// don't overwrite existing env vars
-		if _, exists := os.LookupEnv(key); !exists {
-			dotEnvMap.Set(key, val)
-			os.Setenv(key, val)
+		// don't overwrite existing env vars; the real process env wins
+		if _, exists := os.LookupEnv(key); exists {
+			if _, fromFile := dotEnvMap.Get(key); !fromFile {
+				g.Debug("env: .env.sling key %s is hidden by the process environment", key)
+			}
+			continue
 		}
+		dotEnvMap.Set(key, val)
+		os.Setenv(key, val)
 	}
 	return dotEnvMap.Items()
 }
