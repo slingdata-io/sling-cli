@@ -547,6 +547,7 @@ func main() {
 		case <-kill:
 			env.Println("\nkilling process...")
 			exitCode = 111
+			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
 			exit()
 		case <-interrupt:
 			g.SentryClear()
@@ -560,6 +561,7 @@ func main() {
 				case <-time.After(10 * time.Second):
 				}
 			}
+			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
 			exit()
 			return
 		case <-done:

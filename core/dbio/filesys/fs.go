@@ -1561,7 +1561,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	}
 
 	props := g.MapToKVArr(fs.Props())
-	duck := iop.NewDuckDb(context.Background(), props...)
+	duck := iop.NewDuckDb(fs.Context().Ctx, props...) // a cancelled run stops the query
 
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))

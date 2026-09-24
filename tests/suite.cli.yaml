@@ -3128,6 +3128,66 @@
   output_contains:
     - 'healthz=ok'
 
+# Bug d694bc25d2138b6e: the DuckDB sidecar dies during the parquet COPY and
+# procDeathErr (duckdb.go) fails the task with no retry. The test kills the
+# sidecar once with SIGKILL (OOM killer, external kill). The streamed source
+# rows are gone, so sling runs the task again with a new sidecar.
+- id: 622
+  name: 'duckdb sidecar killed during parquet write recovers'
+  rows: 200000
+  run: |
+    mkdir -p temp/duck_death
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 200000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
+    PID=$!
+    # sling starts short-lived duckdb processes first; wait for one that lives 2s
+    DUCK=""
+    SEEN=0
+    for _ in $(seq 1 600); do
+      CUR=$(pgrep -P "$PID" duckdb | head -1 || true)
+      if [ -n "$CUR" ] && [ "$CUR" = "$DUCK" ]; then SEEN=$((SEEN + 1)); else DUCK=$CUR; SEEN=0; fi
+      [ "$SEEN" -ge 20 ] && break
+      sleep 0.1
+    done
+    [ "$SEEN" -ge 20 ] || { echo 'FAIL: duckdb sidecar not found' >&2; exit 1; }
+    kill -9 "$DUCK"
+    echo "killed duckdb sidecar $DUCK" >&2
+    wait "$PID"
+  output_contains:
+    - 'duckdb process died, retrying the task once'
+    - 'execution succeeded'
+
+# Bug d694bc25d2138b6e: a console interrupt (Ctrl-C, Windows exit status
+# 0xc000013a) reaches sling and the sidecar together. The sidecar exits first,
+# and sling reported a duckdb failure, not a cancellation. The sidecar now runs
+# in its own process group. The test sends SIGINT to sling's process group.
+# Expected: the run fails as interrupted.
+- id: 623
+  name: 'console interrupt during duckdb parquet write is a cancellation'
+  err: true
+  run: |
+    set -m
+    mkdir -p temp/duck_death
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 200000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
+    PID=$!
+    # sling starts short-lived duckdb processes first; wait for one that lives 2s
+    DUCK=""
+    SEEN=0
+    for _ in $(seq 1 600); do
+      CUR=$(pgrep -P "$PID" duckdb | head -1 || true)
+      if [ -n "$CUR" ] && [ "$CUR" = "$DUCK" ]; then SEEN=$((SEEN + 1)); else DUCK=$CUR; SEEN=0; fi
+      [ "$SEEN" -ge 20 ] && break
+      sleep 0.1
+    done
+    [ "$SEEN" -ge 20 ] || { echo 'FAIL: duckdb sidecar not found' >&2; exit 1; }
+    kill -INT -- "-$PID"
+    echo "sent SIGINT to process group $PID" >&2
+    wait "$PID"
+  output_contains:
+    - 'sent SIGINT to process group'
+    - 'interrupting...'
+  output_does_not_contain:
+    - 'duckdb process exited before query completed'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

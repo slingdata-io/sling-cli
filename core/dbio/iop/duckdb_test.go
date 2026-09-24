@@ -10,6 +10,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -253,6 +254,60 @@ func TestDuckDbProcessDeathError(t *testing.T) {
 	if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
 		assert.Equal(t, int64(9), data.Rows[0][0])
 	}
+}
+
+// The death error must carry the last stderr lines of the sidecar, so the
+// real cause reaches telemetry.
+func TestDuckDbProcessDeathStderrTail(t *testing.T) {
+	t.Setenv("SLING_DUCKDB_STALL_TIMEOUT", "0")
+
+	duck := NewDuckDb(context.Background())
+	defer duck.Close()
+
+	_, err := duck.Exec("select * from table_that_is_not_there_xyz")
+	require.Error(t, err)
+
+	_, err = duck.Exec("create table death_tail (id bigint)")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := duck.Exec("insert into death_tail select i from range(1, 50000000000) t(i)")
+		done <- err
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, duck.Proc.Cmd.Process.Kill())
+
+	select {
+	case err = <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("query did not return after the duckdb process died")
+	}
+
+	require.Error(t, err)
+	assert.True(t, IsDuckDbProcDeath(err), err.Error())
+	assert.Contains(t, err.Error(), "last duckdb stderr output")
+	assert.Contains(t, err.Error(), "table_that_is_not_there_xyz")
+}
+
+// KillChildProcs must stop every live sidecar, since they are not in the
+// process group of sling and get no console signal.
+func TestDuckDbKillChildProcs(t *testing.T) {
+	duck := NewDuckDb(context.Background())
+	defer duck.Close()
+
+	_, err := duck.Exec("select 1")
+	require.NoError(t, err)
+	require.False(t, duck.Proc.Exited())
+
+	env.KillChildProcs()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !duck.Proc.Exited() && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	assert.True(t, duck.Proc.Exited(), "duckdb sidecar still runs after KillChildProcs")
 }
 
 func TestDuckDbStreamArrow(t *testing.T) {

@@ -580,11 +580,21 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = ctx
 
 	// set into store after
-	defer task.StateSet()
+	defer func() { task.StateSet() }()
 
 	// run task
 	setTM()
 	err = task.Execute()
+
+	// A file target is written to a temp location first, so a new run is safe.
+	// The source rows are gone after a sidecar death, so run the whole task again.
+	if iop.IsDuckDbProcDeath(err) && !interrupted && task.Config.TgtConn.Type.IsFile() {
+		g.Warn("duckdb process died, retrying the task once: %s", g.ErrMsgSimple(err))
+		task = sling.NewTask(env.ExecID, cfg)
+		task.Replication = replication
+		task.Context = ctx
+		err = task.Execute()
+	}
 
 	if err != nil {
 

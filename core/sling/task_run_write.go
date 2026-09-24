@@ -1234,6 +1234,11 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 	}
 
 	_, err = duckConn.Exec(sql)
+	if iop.IsDuckDbProcDeath(err) {
+		// the rows are on disk in the temp duckdb file, so a new sidecar can copy them again
+		g.Warn("duckdb process died during export, retrying once: %s", g.ErrMsgSimple(err))
+		_, err = duckConn.Exec(sql)
+	}
 	if err != nil {
 		err = g.Error(err, "Could not write to parquet file")
 		return bw, err
