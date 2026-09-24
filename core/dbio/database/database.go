@@ -260,7 +260,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		// issue with some drivers not parsing special characters in go escaped format
 		if u.Password() != "" {
 			passwordEncOld := strings.Replace(u.U.User.String(), u.Username()+":", "", 1)
-			passwordEncNew := url.QueryEscape(u.Password())
+			// userinfo does not decode "+" as a space
+			passwordEncNew := strings.ReplaceAll(url.QueryEscape(u.Password()), "+", "%20")
 			URL = strings.Replace(URL, ":"+passwordEncOld+"@", ":"+passwordEncNew+"@", 1)
 		}
 	} else {

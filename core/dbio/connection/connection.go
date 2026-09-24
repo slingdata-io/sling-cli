@@ -1230,7 +1230,8 @@ func (c *Connection) setURL() (err error) {
 	for k, v := range c.Data {
 		urlData[k] = v
 	}
-	urlData["password"] = url.QueryEscape(cast.ToString(urlData["password"]))
+	// userinfo does not decode "+" as a space
+	urlData["password"] = strings.ReplaceAll(url.QueryEscape(cast.ToString(urlData["password"])), "+", "%20")
 	setIfMissing("url", g.Rm(template, urlData))
 
 	return nil
