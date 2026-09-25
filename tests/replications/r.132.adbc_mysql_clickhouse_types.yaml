@@ -1,0 +1,97 @@
+# ADBC type matrix for the MySQL and ClickHouse drivers.
+# Loads typed Postgres rows through the ADBC bulk ingest (use_adbc: true),
+# then an incremental merge, and checks the values in the target.
+# Usage: TARGET=MYSQL_ADBC SCHEMA=mysql sling run -r tests/replications/r.132.adbc_mysql_clickhouse_types.yaml
+
+source: POSTGRES
+target: '{TARGET}'
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists {SCHEMA}.adbc_types_test
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      # the text copy keeps bigint precision, the hook result holds floats
+      query: select *, concat('', big_val) as big_txt from {SCHEMA}.adbc_types_test order by id
+      into: result
+
+    - type: log
+      message: 'ADBC types result: {store.result}'
+
+    # 3 rows from the first load, row 2 updated and row 4 added by the merge
+    - type: check
+      check: length(store.result) == 4
+      failure_message: 'expected 4 rows, got {store.result}'
+
+    - type: check
+      check: int_parse(store.result[0].id) == 1 && store.result[0].big_txt == "9007199254740993"
+      failure_message: 'bigint mismatch: {store.result[0]}'
+
+    - type: check
+      check: float_parse(store.result[0].num_val) == 12345.678901
+      failure_message: 'decimal mismatch: {store.result[0]}'
+
+    - type: check
+      check: float_parse(store.result[0].dbl_val) == 1.5
+      failure_message: 'double mismatch: {store.result[0]}'
+
+    - type: check
+      check: store.result[0].txt_val == "héllo, \"world\""
+      failure_message: 'text mismatch: {store.result[0]}'
+
+    - type: check
+      check: contains(cast(store.result[0].date_val, "string"), "2024-01-15")
+      failure_message: 'date mismatch: {store.result[0]}'
+
+    - type: check
+      # compare instants: the server time zone sets the rendered offset
+      check: date_diff(store.result[0].ts_val, "2024-01-15T10:30:45Z", "second") == 0 && date_diff(store.result[0].tstz_val, "2024-01-15T10:30:45Z", "second") == 0
+      failure_message: 'timestamp mismatch: {store.result[0]}'
+
+    - type: check
+      check: store.result[2].txt_val == nil && store.result[2].num_val == nil && store.result[2].ts_val == nil
+      failure_message: 'null mismatch: {store.result[2]}'
+
+    - type: check
+      check: store.result[1].txt_val == "updated" && int_parse(store.result[3].id) == 4
+      failure_message: 'merge mismatch: {store.result}'
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists {SCHEMA}.adbc_types_test
+
+    - type: log
+      message: 'ADBC types test completed successfully for {target.name}'
+
+streams:
+  adbc_types_load:
+    sql: |
+      select * from (values
+        (1, 9007199254740993::bigint, 12345.678901::numeric(18,6), 1.5::float8, true, 'héllo, "world"'::text, '2024-01-15'::date, '2024-01-15 10:30:45'::timestamp, '2024-01-15 10:30:45+00'::timestamptz),
+        (2, -42::bigint, -0.5::numeric(18,6), -2.25::float8, false, 'second'::text, '1999-12-31'::date, '1999-12-31 23:59:59'::timestamp, '1999-12-31 23:59:59+00'::timestamptz),
+        (3, 0::bigint, null::numeric(18,6), null::float8, null::boolean, null::text, null::date, null::timestamp, null::timestamptz)
+      ) t(id, big_val, num_val, dbl_val, bool_val, txt_val, date_val, ts_val, tstz_val)
+    object: '{SCHEMA}.adbc_types_test'
+    mode: full-refresh
+
+  adbc_types_merge:
+    sql: |
+      select * from (values
+        (2, -42::bigint, -0.5::numeric(18,6), -2.25::float8, false, 'updated'::text, '1999-12-31'::date, '1999-12-31 23:59:59'::timestamp, '1999-12-31 23:59:59+00'::timestamptz),
+        (4, 4::bigint, 4.25::numeric(18,6), 4.5::float8, true, 'fourth'::text, '2024-02-29'::date, '2024-02-29 12:00:00'::timestamp, '2024-02-29 12:00:00+00'::timestamptz)
+      ) t(id, big_val, num_val, dbl_val, bool_val, txt_val, date_val, ts_val, tstz_val)
+    object: '{SCHEMA}.adbc_types_test'
+    mode: incremental
+    primary_key: [id]
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

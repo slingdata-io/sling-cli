@@ -425,6 +425,10 @@ func (conn *ClickhouseConn) injectInlineIndexes(ddl string, table *Table, column
 
 // BulkImportStream inserts a stream into a table
 func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	if conn.UseADBC() {
+		return conn.adbc.BulkImportStream(tableFName, ds)
+	}
+
 	var columns iop.Columns
 
 	table, err := ParseTableName(tableFName, conn.GetType())

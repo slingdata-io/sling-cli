@@ -3188,6 +3188,43 @@
   output_does_not_contain:
     - 'duckdb process exited before query completed'
 
+# ADBC MySQL target: use_adbc routes the bulk load through the ADBC ingest.
+# Requires MYSQL_ADBC (type mysql, use_adbc: true) and the mysql ADBC driver.
+- id: 624
+  name: 'ADBC MySQL write, type matrix and incremental merge'
+  run: |
+    TARGET=MYSQL_ADBC SCHEMA=mysql sling run -d -r tests/replications/r.79.adbc_write.yaml
+    TARGET=MYSQL_ADBC SCHEMA=mysql sling run -d -r tests/replications/r.132.adbc_mysql_clickhouse_types.yaml
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'ADBC types test completed successfully for MYSQL_ADBC'
+    - 'mysql_adbc-adbc-'
+
+# ADBC ClickHouse target: the driver speaks the HTTP interface and supports
+# only append ingest, into the table that sling creates.
+# Requires CLICKHOUSE_ADBC (type clickhouse, use_adbc: true) and the clickhouse ADBC driver.
+- id: 625
+  name: 'ADBC ClickHouse write, type matrix and incremental merge'
+  run: |
+    TARGET=CLICKHOUSE_ADBC SCHEMA=default sling run -d -r tests/replications/r.79.adbc_write.yaml
+    TARGET=CLICKHOUSE_ADBC SCHEMA=default sling run -d -r tests/replications/r.132.adbc_mysql_clickhouse_types.yaml
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'ADBC types test completed successfully for CLICKHOUSE_ADBC'
+    - 'clickhouse_adbc-adbc-'
+
+# ADBC ClickHouse source (type adbc) into an ADBC MySQL target.
+# Requires ADBC_CLICKHOUSE (type adbc, driver_name clickhouse) and MYSQL_ADBC.
+- id: 626
+  name: 'ADBC ClickHouse source to ADBC MySQL target'
+  run: |
+    sling run -d --src-conn ADBC_CLICKHOUSE --src-stream "select number as id, concat('row_', toString(number)) as name, toDateTime64('2024-01-15 10:30:45', 6, 'UTC') + number as ts from numbers(50000)" --tgt-conn MYSQL_ADBC --tgt-object mysql.adbc_ch_to_my_626 --mode full-refresh
+    sling conns exec MYSQL_ADBC "select concat('count=', count(*), ' max_ts=', max(ts)) as res from mysql.adbc_ch_to_my_626"
+    sling conns exec MYSQL_ADBC "drop table mysql.adbc_ch_to_my_626"
+  output_contains:
+    - 'inserted 50000 rows'
+    - 'count=50000 max_ts=2024-01-16 00:24:04'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

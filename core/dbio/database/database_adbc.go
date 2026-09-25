@@ -93,6 +93,7 @@ func (conn *ArrowDBConn) Init() error {
 		"adbc.duckdb.connection_string":     "path",
 		"adbc.mysql.connection_string":      "uri",
 		"adbc.trino.connection_string":      "uri",
+		"adbc.clickhouse.connection_string": "uri",
 	}
 
 	for key, val := range conn.properties {
@@ -112,6 +113,11 @@ func (conn *ArrowDBConn) Init() error {
 		// would open an in-memory database instead of the instance file.
 		if key == "driver" || key == "driver_entrypoint" || key == "uri" || key == "path" ||
 			strings.HasPrefix(key, "adbc.") {
+			adbcProps[key] = val
+		}
+
+		// the clickhouse driver takes credentials as options, libpq rejects them
+		if (key == "username" || key == "password") && strings.EqualFold(conn.GetProp("driver_name"), "clickhouse") {
 			adbcProps[key] = val
 		}
 	}
@@ -453,6 +459,7 @@ func GetArrowDBCDriverType(driverName string) dbio.Type {
 		"bigquery":   dbio.TypeDbBigQuery,
 		"mysql":      dbio.TypeDbMySQL,
 		"trino":      dbio.TypeDbTrino,
+		"clickhouse": dbio.TypeDbClickhouse,
 	}
 	if t, ok := mapping[strings.ToLower(driverName)]; ok {
 		return t
@@ -1612,6 +1619,16 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 // ingestOptions targets the catalog and schema of the table, not the
 // connection defaults.
 func (conn *ArrowDBConn) ingestOptions(table Table) adbc.IngestStreamOptions {
+	switch conn.driverType {
+	case dbio.TypeDbMySQL:
+		// a MySQL schema is the database, which the driver names catalog.
+		// The driver joins catalog and schema, so the schema stays empty.
+		return adbc.IngestStreamOptions{Catalog: table.Schema}
+	case dbio.TypeDbClickhouse:
+		// ClickHouse has no catalog level, the driver rejects the option
+		return adbc.IngestStreamOptions{DBSchema: table.Schema}
+	}
+
 	opts := adbc.IngestStreamOptions{
 		Catalog:  table.Database,
 		DBSchema: table.Schema,
@@ -1841,6 +1858,18 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 	case dbio.TypeDbMySQL:
 		connMap["driver_name"] = "mysql"
 		connMap["uri"] = buildMySQLAdbcURI(info, getProp)
+
+	case dbio.TypeDbClickhouse:
+		connMap["driver_name"] = "clickhouse"
+		// the driver speaks the HTTP interface, credentials go as options
+		uri, user, password := buildClickhouseAdbcURI(info, getProp)
+		connMap["uri"] = uri
+		if user != "" {
+			connMap["username"] = user
+		}
+		if password != "" {
+			connMap["password"] = password
+		}
 
 	case dbio.TypeDbTrino:
 		connMap["driver_name"] = "trino"
@@ -2167,36 +2196,66 @@ func buildSQLServerAdbcURI(info ConnInfo, getProp func(string) string) string {
 // Note: MySQL does not have an official ADBC driver
 // Format: user:password@tcp(host:port)/database
 func buildMySQLAdbcURI(info ConnInfo, getProp func(string) string) string {
-	var uri strings.Builder
-
-	// User and password
+	// the mysql:// form decodes the credentials, the Go DSN form does not
+	u := url.URL{Scheme: "mysql", Host: info.Host, Path: "/" + info.Database}
+	if info.Port > 0 {
+		u.Host = fmt.Sprintf("%s:%d", info.Host, info.Port)
+	}
 	if info.User != "" {
-		uri.WriteString(url.QueryEscape(info.User))
+		u.User = url.User(info.User)
 		if info.Password != "" {
-			uri.WriteString(":")
-			uri.WriteString(url.QueryEscape(info.Password))
+			u.User = url.UserPassword(info.User, info.Password)
 		}
-		uri.WriteString("@")
 	}
+	return u.String()
+}
 
-	// Host and port with tcp protocol
-	if info.Host != "" {
-		uri.WriteString("tcp(")
-		uri.WriteString(info.Host)
-		if info.Port > 0 {
-			uri.WriteString(fmt.Sprintf(":%d", info.Port))
+// buildClickhouseAdbcURI builds the HTTP URL of the ClickHouse ADBC driver.
+// It returns the credentials apart, since the driver takes them as options.
+// Format: http[s]://host:port?database=db
+func buildClickhouseAdbcURI(info ConnInfo, getProp func(string) string) (uri, user, password string) {
+	user, password = info.User, info.Password
+
+	u := &url.URL{Scheme: "http", Host: info.Host}
+	if httpURL := getProp("http_url"); httpURL != "" {
+		if parsed, err := url.Parse(httpURL); err == nil {
+			u = parsed
+			if u.User != nil {
+				user = u.User.Username()
+				if pass, ok := u.User.Password(); ok {
+					password = pass
+				}
+				u.User = nil
+			}
+		} else {
+			g.Warn("invalid http_url: %s", err.Error())
 		}
-		uri.WriteString(")")
+	} else {
+		// the native port does not serve HTTP
+		port := getProp("http_port")
+		if cast.ToBool(getProp("secure")) {
+			u.Scheme = "https"
+			if port == "" {
+				port = "8443"
+			}
+		} else if port == "" {
+			port = "8123"
+		}
+		u.Host = info.Host + ":" + port
 	}
 
-	// Database
-	if info.Database != "" {
-		uri.WriteString("/")
-		uri.WriteString(info.Database)
+	database := info.Database
+	if db := strings.Trim(u.Path, "/"); db != "" {
+		database = db
+	}
+	u.Path = ""
+	if database != "" {
+		q := u.Query()
+		q.Set("database", database)
+		u.RawQuery = q.Encode()
 	}
 
-	result := uri.String()
-	return result
+	return u.String(), user, password
 }
 
 // ErrArrowLaneDeclined is returned by a lane-only read when stage 2 declines.

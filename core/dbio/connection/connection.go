@@ -496,6 +496,7 @@ func (c *Connection) setUseADBC() {
 		dbio.TypeDbBigQuery,
 		dbio.TypeDbMySQL,
 		dbio.TypeDbTrino,
+		dbio.TypeDbClickhouse,
 	}
 
 	if !cast.ToBool(os.Getenv("SLING_USE_ADBC")) {

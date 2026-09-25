@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
@@ -3675,4 +3676,50 @@ func tableColumnValues(tbl arrow.Table, colIdx int) []any {
 		}
 	}
 	return out
+}
+
+func TestArrowDBConn_MySQLAndClickhouseURI(t *testing.T) {
+	noProps := func(string) string { return "" }
+
+	// special characters must survive the round trip through the driver
+	uri := buildMySQLAdbcURI(ConnInfo{Host: "db", Port: 3306, Database: "app", User: "u", Password: "p@ss w:rd/#?"}, noProps)
+	parsed, err := url.Parse(uri)
+	if assert.NoError(t, err) {
+		assert.Equal(t, "mysql", parsed.Scheme)
+		assert.Equal(t, "db:3306", parsed.Host)
+		assert.Equal(t, "/app", parsed.Path)
+		pass, _ := parsed.User.Password()
+		assert.Equal(t, "p@ss w:rd/#?", pass)
+	}
+
+	// http_url: credentials move to options, the path becomes the database
+	props := map[string]string{"http_url": "http://admin:s3cret!@ch:8123/analytics"}
+	uri, user, pass := buildClickhouseAdbcURI(ConnInfo{}, func(k string) string { return props[k] })
+	assert.Equal(t, "http://ch:8123?database=analytics", uri)
+	assert.Equal(t, "admin", user)
+	assert.Equal(t, "s3cret!", pass)
+
+	// native settings: the HTTP port replaces the native port
+	info := ConnInfo{Host: "ch", Port: 9000, Database: "default", User: "u", Password: "p"}
+	uri, user, pass = buildClickhouseAdbcURI(info, noProps)
+	assert.Equal(t, "http://ch:8123?database=default", uri)
+	assert.Equal(t, "u", user)
+	assert.Equal(t, "p", pass)
+
+	props = map[string]string{"secure": "true"}
+	uri, _, _ = buildClickhouseAdbcURI(info, func(k string) string { return props[k] })
+	assert.Equal(t, "https://ch:8443?database=default", uri)
+
+	props = map[string]string{"http_port": "18123"}
+	uri, _, _ = buildClickhouseAdbcURI(info, func(k string) string { return props[k] })
+	assert.Equal(t, "http://ch:18123?database=default", uri)
+
+	// MySQL puts the schema in the catalog, ClickHouse has no catalog
+	table := Table{Schema: "sales", Name: "orders"}
+	mysql := &ArrowDBConn{driverType: dbio.TypeDbMySQL}
+	assert.Equal(t, adbc.IngestStreamOptions{Catalog: "sales"}, mysql.ingestOptions(table))
+	ch := &ArrowDBConn{driverType: dbio.TypeDbClickhouse}
+	assert.Equal(t, adbc.IngestStreamOptions{DBSchema: "sales"}, ch.ingestOptions(table))
+
+	assert.Equal(t, dbio.TypeDbClickhouse, GetArrowDBCDriverType("clickhouse"))
 }
