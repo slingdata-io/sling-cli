@@ -2786,9 +2786,15 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 		var cnt uint64
 		if conn.GetProp("use_bulk") == "false" {
 			cnt, err = conn.Self().InsertBatchStream(tableFName, ds)
-		} else if conn.UseADBC() {
-			cnt, err = conn.BulkImportStream(tableFName, ds)
 		} else {
+			// Dispatch through Self() so the concrete type's BulkImportStream
+			// override is used (ADBC and non-ADBC both land here). The SQL
+			// Server, PostgreSQL and MySQL overrides commit any open
+			// transaction first; bypassing them would leave the primary
+			// connection holding a Sch-M (schema-modification) lock on the
+			// target table while the spawned ADBC connection requests a Sch-S
+			// lock for its metadata probe, deadlocking the ADBC ingest.
+			// See https://github.com/slingdata-io/sling-cli/issues/816
 			cnt, err = conn.Self().BulkImportStream(tableFName, ds)
 		}
 		count += cnt
