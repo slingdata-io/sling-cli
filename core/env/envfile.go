@@ -99,6 +99,9 @@ func (ef *EnvFile) freshRoot() *yaml.Node {
 // marshalEnvFileBytes renders the EnvFile as YAML, preserving comments, key
 // order, and unmanaged top-level keys from the file at ef.Path.
 func (ef *EnvFile) marshalEnvFileBytes() ([]byte, error) {
+	if err := ef.CheckFile(); err != nil {
+		return nil, err
+	}
 	original, err := ef.loadRootNode()
 	if err != nil {
 		return nil, err
@@ -465,7 +468,10 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 		return ef.freshRoot(), nil
 	}
 	data, rerr := os.ReadFile(ef.Path)
-	if rerr != nil || len(bytes.TrimSpace(data)) == 0 {
+	if rerr != nil && !os.IsNotExist(rerr) {
+		return nil, g.Error(rerr, "could not read %s", ef.Path)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
 		return ef.freshRoot(), nil
 	}
 	if uerr := yaml.Unmarshal(data, root); uerr != nil {
@@ -478,6 +484,26 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
 	return root, nil
+}
+
+// CheckFile returns an error when the file at ef.Path does not fully parse
+// into EnvFile. A struct write from a partial parse drops the entries that did
+// not parse. A missing or empty file is valid.
+func (ef *EnvFile) CheckFile() error {
+	data, err := os.ReadFile(ef.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return g.Error(err, "could not read %s", ef.Path)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	if err := yaml.Unmarshal(data, &EnvFile{}); err != nil {
+		return g.Error("%s is not valid YAML. Fix it before sling changes the file: %s", ef.Path, g.ErrMsgSimple(err))
+	}
+	return nil
 }
 
 // IsEnvVarRef is true when s is a whole-string ${VAR} reference.

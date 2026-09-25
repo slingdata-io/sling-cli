@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -135,6 +136,7 @@ var (
 	localConns        ConnEntries
 	localConnsTs      time.Time
 	localConnsExclude string
+	invalidEnvWarned  sync.Map // env file paths already warned as invalid
 )
 
 type LocalConnsExclude string
@@ -187,8 +189,14 @@ func GetLocalConns(options ...any) ConnEntries {
 	}
 
 	if envFilePath := env.GetEnvFilePath(env.HomeDir); g.PathExists(envFilePath) {
+		ef := env.LoadEnvFile(envFilePath)
+		if err := ef.CheckFile(); err != nil {
+			if _, warned := invalidEnvWarned.LoadOrStore(envFilePath, true); !warned {
+				g.Warn("ignoring connections in env file: %s", g.ErrMsgSimple(err))
+			}
+		}
 		m := g.M()
-		g.JSONConvert(env.LoadEnvFile(envFilePath), &m)
+		g.JSONConvert(ef, &m)
 		profileConns, err := ReadConnections(m)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
@@ -546,6 +554,9 @@ func (ec *EnvFileConns) Unset(name string) (err error) {
 	}
 
 	ef := ec.EnvFile
+	if err = ef.CheckFile(); err != nil {
+		return err
+	}
 	_, ok := ef.Connections[name]
 	if !ok {
 		return g.Error("did not find connection `%s`", name)

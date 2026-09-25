@@ -884,3 +884,25 @@ env:
 		t.Errorf("env block lost\n--- got ---\n%s", got)
 	}
 }
+
+func TestWriteRefusesInvalidEnvFile(t *testing.T) {
+	cases := map[string]string{
+		"tab":        "connections:\n  PG1:\n\t host: h\n    type: postgres\n",
+		"bad conn":   "connections:\n  PG1:\n    type: postgres\n  PG2: [bad]\n",
+		"conns list": "connections:\n  - PG1\nenv:\n  KEEP: me\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "env.yaml")
+			assert.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+			ef := LoadEnvFile(path)
+			ef.Connections["PG3"] = map[string]any{"type": "postgres"}
+			assert.ErrorContains(t, ef.WriteEnvFile(), "Fix it before sling changes the file")
+			assert.ErrorContains(t, ef.CheckFile(), "Fix it before sling changes the file")
+
+			after, _ := os.ReadFile(path)
+			assert.Equal(t, body, string(after))
+		})
+	}
+}

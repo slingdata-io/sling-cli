@@ -111,10 +111,6 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			kvMap["type"] = strings.ToLower(t)
 		}
 
-		if err = connection.RejectLiteralSecrets(name, kvMap); err != nil {
-			return ok, err
-		}
-
 		err = ec.Set(name, kvMap)
 		if err != nil {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)

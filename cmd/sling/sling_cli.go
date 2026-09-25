@@ -375,7 +375,7 @@ var cliConns = &g.CliSC{
 				{
 					Name:        "type",
 					Type:        "string",
-					Description: "Connection type (postgres, s3, api, ...). Use ${NAME_KEY} refs for secrets.",
+					Description: "Connection type (postgres, s3, api, ...).",
 				},
 				{
 					Name:        "output",
