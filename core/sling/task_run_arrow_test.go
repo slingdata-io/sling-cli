@@ -239,7 +239,7 @@ func TestArrowLane_Gate(t *testing.T) {
 		{
 			name: "source driver is not listed",
 			mutate: func(t *testing.T, cfg *Config, src, tgt *gateFakeConn) {
-				src.typ = dbio.TypeDbMySQL
+				src.typ = dbio.TypeDbSQLServer
 			},
 			wantLevel:  arrowLaneDebug,
 			wantReason: "not in the arrow lane list",

@@ -698,6 +698,7 @@ func snakeCase(name string) string {
 // matrix.
 var arrowLaneSourceTypes = []dbio.Type{
 	dbio.TypeDbPostgres,
+	dbio.TypeDbMySQL,
 	dbio.TypeDbDuckDb,
 	dbio.TypeDbSQLite,
 	dbio.TypeDbSnowflake,
@@ -707,6 +708,7 @@ var arrowLaneSourceTypes = []dbio.Type{
 // arrowLaneTargetTypes is D15 for ADBC targets.
 var arrowLaneTargetTypes = []dbio.Type{
 	dbio.TypeDbPostgres,
+	dbio.TypeDbClickhouse,
 	dbio.TypeDbDuckDb,
 	dbio.TypeDbSQLite,
 	dbio.TypeDbSnowflake,

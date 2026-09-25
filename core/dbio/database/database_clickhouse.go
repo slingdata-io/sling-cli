@@ -296,7 +296,16 @@ func (conn *ClickhouseConn) ConnString() string {
 		return url
 	}
 
-	return conn.BaseConn.ConnString()
+	// http_port is for the ADBC driver. The native driver sends unknown query
+	// keys as settings, the server rejects them, and the driver hangs.
+	connURL := conn.BaseConn.ConnString()
+	if parsedURL, err := net.NewURL(connURL); err == nil && parsedURL.U.Query().Has("http_port") {
+		query := parsedURL.U.Query()
+		query.Del("http_port")
+		parsedURL.U.RawQuery = query.Encode()
+		connURL = parsedURL.String()
+	}
+	return connURL
 }
 
 // NewTransaction creates a new transaction

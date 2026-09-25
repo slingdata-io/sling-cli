@@ -1627,6 +1627,12 @@ func (conn *ArrowDBConn) ingestOptions(table Table) adbc.IngestStreamOptions {
 	case dbio.TypeDbClickhouse:
 		// ClickHouse has no catalog level, the driver rejects the option
 		return adbc.IngestStreamOptions{DBSchema: table.Schema}
+	case dbio.TypeDbDuckDb:
+		// the staging table is a temp table, in the "temp" catalog. Driver
+		// v1.5+ does not find it with a catalog or schema option.
+		if strings.HasSuffix(table.Name, "_sling_duckdb_tmp") {
+			return adbc.IngestStreamOptions{Temporary: true}
+		}
 	}
 
 	opts := adbc.IngestStreamOptions{

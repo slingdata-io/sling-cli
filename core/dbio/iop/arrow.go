@@ -189,18 +189,11 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 		case arrow.FLOAT32, arrow.FLOAT64:
 			col.Type = FloatType
 			col.DbType = field.Type.String()
-		case arrow.DECIMAL128:
+		case arrow.DECIMAL32, arrow.DECIMAL64, arrow.DECIMAL128, arrow.DECIMAL256:
 			col.Type = DecimalType
-			if dt, ok := field.Type.(*arrow.Decimal128Type); ok {
-				col.DbPrecision = int(dt.Precision)
-				col.DbScale = int(dt.Scale)
-			}
-			col.DbType = "DECIMAL"
-		case arrow.DECIMAL256:
-			col.Type = DecimalType
-			if dt, ok := field.Type.(*arrow.Decimal256Type); ok {
-				col.DbPrecision = int(dt.Precision)
-				col.DbScale = int(dt.Scale)
+			if dt, ok := field.Type.(arrow.DecimalType); ok {
+				col.DbPrecision = int(dt.GetPrecision())
+				col.DbScale = int(dt.GetScale())
 			}
 			col.DbType = "DECIMAL"
 		case arrow.DATE32, arrow.DATE64:

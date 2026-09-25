@@ -3721,5 +3721,16 @@ func TestArrowDBConn_MySQLAndClickhouseURI(t *testing.T) {
 	ch := &ArrowDBConn{driverType: dbio.TypeDbClickhouse}
 	assert.Equal(t, adbc.IngestStreamOptions{DBSchema: "sales"}, ch.ingestOptions(table))
 
+	// the DuckDB staging table is a temp table, in the "temp" catalog
+	duck := &ArrowDBConn{driverType: dbio.TypeDbDuckDb}
+	tmpTable := Table{Schema: "main", Name: "orders_sling_duckdb_tmp"}
+	assert.Equal(t, adbc.IngestStreamOptions{Temporary: true}, duck.ingestOptions(tmpTable))
+
+	// the native driver must not get the ADBC http_port as a setting
+	nativeCh, err := NewConn("clickhouse://u:p@ch:9000/db?http_port=18123&secure=false")
+	require.NoError(t, err)
+	assert.NotContains(t, nativeCh.ConnString(), "http_port")
+	assert.Contains(t, nativeCh.ConnString(), "secure=false")
+
 	assert.Equal(t, dbio.TypeDbClickhouse, GetArrowDBCDriverType("clickhouse"))
 }

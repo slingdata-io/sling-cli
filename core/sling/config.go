@@ -139,8 +139,11 @@ func (cfg *Config) SetDefault() {
 			}
 		}
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
-		cfg.Source.Options.MaxDecimals = g.Int(11)
-		cfg.Target.Options.MaxDecimals = g.Int(11)
+		// the ADBC driver writes typed decimals, the cap is for the native driver
+		if !cast.ToBool(cfg.TgtConn.Data["use_adbc"]) {
+			cfg.Source.Options.MaxDecimals = g.Int(11)
+			cfg.Target.Options.MaxDecimals = g.Int(11)
+		}
 		if cfg.Target.Options.BatchLimit == nil {
 			// set default batch_limit to limit memory usage. Bug in clickhouse driver?
 			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
