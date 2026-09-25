@@ -83,7 +83,7 @@ test-dbio-database:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio database"
-    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys')
+    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL')
     (cd core/dbio/database && go test -run TestChunkByColumnRange)
 
 # Test dbio filesys

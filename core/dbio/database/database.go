@@ -2668,6 +2668,16 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		// time regardless of schema-migration
 		colExplicit := col.IsDDLExplicit() && !temporary
 
+		// NOT NULL for non-nullable columns (schema-migration nullable gate OR explicit modifier).
+		dialectNoNotNull := g.In(conn.Self().GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton)
+		notNull := !temporary && !col.IsNullable() && !dialectNoNotNull && (sm.HasNullableEnabled() || colExplicit)
+
+		// StarRocks requires NOT NULL before AUTO_INCREMENT and DEFAULT
+		notNullFirst := conn.Self().GetType() == dbio.TypeDbStarRocks
+		if notNull && notNullFirst {
+			columnDDL += " NOT NULL"
+		}
+
 		// Add schema migration attributes when enabled and not temporary
 		if sm.IsEnabled() && !temporary {
 			// Auto-increment (before NOT NULL)
@@ -2690,14 +2700,13 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			}
 		}
 
-		// NOT NULL for non-nullable columns (schema-migration nullable gate OR explicit modifier).
-		dialectNoNotNull := g.In(conn.Self().GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton)
-		if !temporary && !col.IsNullable() && !dialectNoNotNull && (sm.HasNullableEnabled() || colExplicit) {
+		if notNull && !notNullFirst {
 			columnDDL += " NOT NULL"
 		}
 
 		// UNIQUE column constraint (explicit modifier, or schema-migration unique gate)
-		if !temporary && col.HasUniqueConstraint() && (colExplicit || sm.HasUniqueEnabled()) {
+		dialectNoUnique := g.In(conn.Self().GetType(), dbio.TypeDbStarRocks)
+		if !temporary && col.HasUniqueConstraint() && !dialectNoUnique && (colExplicit || sm.HasUniqueEnabled()) {
 			columnDDL += " UNIQUE"
 		}
 
@@ -2752,7 +2761,8 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			}
 		}
 
-		if len(pkCols) > 0 {
+		// StarRocks declares keys after the column list (see StarRocksConn.GenerateDDL)
+		if len(pkCols) > 0 && conn.Self().GetType() != dbio.TypeDbStarRocks {
 			pkConstraint := g.F("PRIMARY KEY (%s)", strings.Join(pkCols, ", "))
 			// BigQuery requires NOT ENFORCED for primary keys
 			if conn.Self().GetType() == dbio.TypeDbBigQuery {

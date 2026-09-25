@@ -388,6 +388,12 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 			addRowIDCol = false
 		}
 
+		// source primary key found by schema migration (known after ReadFromDB)
+		if pkNames := t.Config.Source.table.Columns.PrimaryKeyNames(); addRowIDCol && len(pkNames) > 0 {
+			t.Config.Target.Options.TableKeys[iop.PrimaryKey] = pkNames
+			addRowIDCol = false
+		}
+
 		if addRowIDCol {
 			metadata.RowID.Key = env.ReservedFields.RowID
 			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{env.ReservedFields.RowID}

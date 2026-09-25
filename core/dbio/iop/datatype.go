@@ -374,6 +374,17 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 	return keys
 }
 
+// PrimaryKeyNames returns the names of the columns with the primary key constraint
+// (from schema migration metadata or the columns DSL)
+func (cols Columns) PrimaryKeyNames() (names []string) {
+	for _, col := range cols {
+		if col.IsPrimaryKey() {
+			names = append(names, col.Name)
+		}
+	}
+	return names
+}
+
 // SetKeys sets key columns
 func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 	for _, colName := range colNames {

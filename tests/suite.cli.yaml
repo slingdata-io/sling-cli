@@ -3225,6 +3225,87 @@
     - 'inserted 50000 rows'
     - 'count=50000 max_ts=2024-01-16 00:24:04'
 
+# StarRocks target: SLING_SCHEMA_MIGRATION=primary_key without a stream primary_key.
+# User report (v1.6.3): sling added _sling_row_id as hash key and an inline
+# PRIMARY KEY clause, which StarRocks rejects (Error 1064). The source primary
+# key must make a Primary Key table.
+- id: 627
+  name: 'StarRocks schema migration primary_key DDL'
+  run: 'sling run -d -r tests/replications/r.133.starrocks_schema_migration_pk.yaml'
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'StarRocks schema migration PK test passed'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'Error 1064'
+
+# StarRocks target: incremental + primary_key + delete_missing: soft.
+# Repro (user report, v1.6.3): the first run into a new table failed with
+# "could not find column id in table". Fixed in cf5430c8 (column refresh).
+# The second run soft-deletes the row that is missing in the source.
+- id: 628
+  name: 'StarRocks delete_missing soft'
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01'),(2,'bob',20.00,'2024-01-02'),(3,'carol',30.25,'2024-01-03')"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec postgres "DELETE FROM public.sr_dm_orders WHERE id = 2; UPDATE public.sr_dm_orders SET updated_at = '2024-02-01', amount = 99 WHERE id = 3"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "select concat('soft_deleted=', count(*)) as res from public.sr_dm_orders where _sling_deleted_at is not null and id = 2"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders"
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'soft_deleted=1'
+  output_does_not_contain:
+    - 'could not find column'
+    - 'could not delete missing records'
+
+# StarRocks target: incremental run with zero new rows (with fe_url / Stream Load).
+# Stream Load of an empty batch must not fail with
+# "No partitions have data available for loading" (empty_load_as_error).
+- id: 629
+  name: 'StarRocks incremental with no new rows'
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01')"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling run -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling run -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders"
+  conns:
+    - postgres
+    - starrocks
+  output_does_not_contain:
+    - 'No partitions have data available for loading'
+    - 'execution failed'
+
+# Schema migration - PostgreSQL to StarRocks (all attributes)
+- id: 630
+  name: 'Schema migration comprehensive (Postgres to StarRocks)'
+  run: 'sling run -d tests/pipelines/schema_migration/p.32.sm_pg_starrocks.yaml'
+  streams: 5
+  group: schema_migration
+  output_contains:
+    - 'PK constraints found: 5'
+    - 'Identity columns found'
+    - 'Non-nullable columns found'
+    - 'Default values found'
+    - 'Indexes found'
+    - 'FK constraints found: 3'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not apply'
+    - 'Error 1064 (HY000): Getting syntax error'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

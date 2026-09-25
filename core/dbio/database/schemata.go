@@ -1693,6 +1693,7 @@ type SchemaMigrator interface {
 	HasNullableEnabled() bool
 	HasDefaultValueEnabled() bool
 	HasUniqueEnabled() bool
+	HasDescriptionEnabled() bool
 	IsEnabled() bool
 }
 
@@ -1736,6 +1737,10 @@ func (d *dummySchemaMigrator) HasNullableEnabled() bool {
 }
 
 func (d *dummySchemaMigrator) HasDefaultValueEnabled() bool {
+	return false
+}
+
+func (d *dummySchemaMigrator) HasDescriptionEnabled() bool {
 	return false
 }
 

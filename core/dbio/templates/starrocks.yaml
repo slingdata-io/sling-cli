@@ -1,7 +1,13 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
-  create_index: "select 'create_index not implemented'"
+  # StarRocks secondary indexes are single-column BITMAP indexes (no unique indexes)
+  create_index: create index {index} on {table} ({cols}) using bitmap
+  create_unique_index: create index {index} on {table} ({cols}) using bitmap
+  add_table_comment: alter table {table} comment = {comment}
+  # foreign keys are informational: one table property holds all of them, with unquoted names
+  add_foreign_key: '({column_unquoted}) REFERENCES {ref_table_unquoted}({ref_column_unquoted})'
+  add_foreign_keys: alter table {table} set ('foreign_key_constraints' = '{foreign_keys}')
   create_table: create table if not exists {table} ({col_types}) {distribution} distributed by hash({hash_key})
   insert: insert into {table} ({fields}) values ({values})
   alter_columns: alter table {table} modify {col_ddl}
@@ -504,6 +510,8 @@ variable:
   # Default to 'insert' since most tables are Duplicate Key tables
   # Use table_keys.primary for Primary Key tables to enable other merge strategies
   default_merge_strategy: insert
+  # DEFAULT only accepts quoted literals (DEFAULT '0', not DEFAULT 0)
+  default_quote_numbers: true
 
 error_filter:
   table_not_exist: exist
@@ -570,3 +578,16 @@ general_type_map:
   timestampz: datetime
   timez: "varchar()"
   uuid: "varchar(36)"
+
+# StarRocks DEFAULT accepts quoted literals, CURRENT_TIMESTAMP (datetime only) and (uuid()).
+# An empty value drops the default.
+default_value_map:
+  from_general:
+    "current_timestamp": "CURRENT_TIMESTAMP"
+    "current_timestamp_utc": "CURRENT_TIMESTAMP"
+    "current_date": ""
+    "current_time": ""
+    "uuid()": "(uuid())"
+    "true": "'1'"
+    "false": "'0'"
+    "null": "NULL"

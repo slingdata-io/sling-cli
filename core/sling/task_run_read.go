@@ -55,6 +55,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	cfg.Source.table = sTable
 
+	// StarRocks: the first metadata pass did not know the source primary key
+	// and set _sling_row_id as hash key. Use the primary key instead.
+	if cfg.TgtConn.Type == dbio.TypeDbStarRocks && len(sTable.Columns.PrimaryKeyNames()) > 0 {
+		if hashKeys := cfg.Target.Options.TableKeys[iop.HashKey]; len(hashKeys) == 1 && hashKeys[0] == env.ReservedFields.RowID {
+			delete(cfg.Target.Options.TableKeys, iop.HashKey)
+			srcConn.SetProp("METADATA", g.Marshal(t.setGetMetadata()))
+		}
+	}
+
 	if len(cfg.Source.Select) > 0 {
 		// Normalize select expressions
 		rawSelect := lo.Map(cfg.Source.Select, func(f string, i int) string {
