@@ -906,3 +906,50 @@ func TestWriteRefusesInvalidEnvFile(t *testing.T) {
 		})
 	}
 }
+
+func TestRepairEnvYAML(t *testing.T) {
+	const nb = " "
+	cases := []struct {
+		name, body string
+		repaired   bool
+	}{
+		{"nbsp everywhere", "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type:" + nb + "sqlserver\n" + nb + nb + nb + nb + "host:" + nb + "TEST101\n", true},
+		{"nbsp indent only", "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type: sqlserver\n" + nb + nb + nb + nb + "host: TEST101\n", true},
+		{"tabs only", "connections:\n\tMSSQL:\n\t\ttype: sqlserver\n\t\thost: TEST101\n", true},
+		{"spaces then tab", "connections:\r\n  MSSQL:\r\n\ttype: sqlserver\r\n\thost: TEST101\r\n", true},
+		{"valid with nbsp in value", "connections:\n  MSSQL:\n    type: sqlserver\n    host: TEST101\n    password: 'a" + nb + "b'\n", false},
+		{"unrepairable", "connections:\n  MSSQL:\n\t host: TEST101\n    type: sqlserver\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := string(repairEnvYAML([]byte(c.body)))
+			if !c.repaired {
+				assert.Equal(t, c.body, got)
+				return
+			}
+			ef, err := loadEnvFile(c.body, "")
+			assert.NoError(t, err)
+			assert.Equal(t, "sqlserver", ef.Connections["MSSQL"]["type"])
+			assert.Equal(t, "TEST101", ef.Connections["MSSQL"]["host"])
+			assert.NotContains(t, got, nb)
+			assert.NotContains(t, got, "\t")
+		})
+	}
+}
+
+func TestWriteRepairsEnvFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	body := "connections:\n  KEEP:\n    type: postgres\n    host: h\n"
+	assert.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+	ef := LoadEnvFile(path)
+	assert.NoError(t, ef.CheckFile())
+	ef.Connections["NEW"] = map[string]any{"type": "postgres", "host": "n"}
+	assert.NoError(t, ef.WriteEnvFile())
+
+	after, _ := os.ReadFile(path)
+	assert.NotContains(t, string(after), " ")
+	reloaded := LoadEnvFile(path)
+	assert.Equal(t, "h", reloaded.Connections["KEEP"]["host"])
+	assert.Equal(t, "n", reloaded.Connections["NEW"]["host"])
+}

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -282,6 +284,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 // when a path is provided), and exports scalar entries from `env:` into
 // os.Environ. `path` is recorded on the returned EnvFile when non-empty.
 func loadEnvFile(body, path string) (ef EnvFile, err error) {
+	body = string(repairEnvYAML([]byte(body)))
 	ef.Body = body
 	ef.Path = path
 
@@ -474,6 +477,7 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return ef.freshRoot(), nil
 	}
+	data = repairEnvYAML(data)
 	if uerr := yaml.Unmarshal(data, root); uerr != nil {
 		return nil, g.Error(uerr, "could not parse %s", ef.Path)
 	}
@@ -500,10 +504,92 @@ func (ef *EnvFile) CheckFile() error {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil
 	}
-	if err := yaml.Unmarshal(data, &EnvFile{}); err != nil {
+	if err := checkEnvYAML(repairEnvYAML(data)); err != nil {
 		return g.Error("%s is not valid YAML. Fix it before sling changes the file: %s", ef.Path, g.ErrMsgSimple(err))
 	}
 	return nil
+}
+
+// oddSpaces look like a space but YAML does not read them as whitespace.
+const oddSpaces = "\u00a0\u2007\u202f"
+
+// checkEnvYAML returns an error when b does not parse into EnvFile, or when a
+// mapping key starts with a space character (an indentation error that
+// still parses).
+func checkEnvYAML(b []byte) error {
+	if err := yaml.Unmarshal(b, &EnvFile{}); err != nil {
+		return err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(b, &root); err != nil {
+		return err
+	}
+	var badKey *yaml.Node
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n == nil || badKey != nil {
+			return
+		}
+		for i, c := range n.Content {
+			if n.Kind == yaml.MappingNode && i%2 == 0 {
+				if r, _ := utf8.DecodeRuneInString(c.Value); unicode.IsSpace(r) {
+					badKey = c
+					return
+				}
+			}
+			walk(c)
+		}
+	}
+	walk(&root)
+	if badKey != nil {
+		return g.Error("line %d: key %q starts with a space character", badKey.Line, badKey.Value)
+	}
+	return nil
+}
+
+// repairEnvYAML turns tab and non-breaking-space indentation into spaces when
+// b does not pass checkEnvYAML and the repaired body does. Tab widths 2, 4 and
+// 8 are tried in order. Otherwise b is returned unchanged.
+func repairEnvYAML(b []byte) []byte {
+	if !bytes.ContainsAny(b, "\t"+oddSpaces) || checkEnvYAML(b) == nil {
+		return b
+	}
+	for _, width := range []int{2, 4, 8} {
+		if fixed := respaceIndent(b, width); checkEnvYAML(fixed) == nil {
+			return fixed
+		}
+	}
+	return b
+}
+
+// respaceIndent rewrites the leading whitespace of each line as spaces, with
+// tabs expanded to tabWidth stops. An odd space after a key colon becomes a
+// space.
+func respaceIndent(b []byte, tabWidth int) []byte {
+	var sb strings.Builder
+	for _, line := range strings.SplitAfter(string(b), "\n") {
+		col, i := 0, 0
+	indent:
+		for i < len(line) {
+			r, size := utf8.DecodeRuneInString(line[i:])
+			switch {
+			case r == ' ' || strings.ContainsRune(oddSpaces, r):
+				col++
+			case r == '\t':
+				col += tabWidth - col%tabWidth
+			default:
+				break indent
+			}
+			i += size
+		}
+		rest := line[i:]
+		for _, r := range oddSpaces {
+			rest = strings.ReplaceAll(rest, ":"+string(r), ": ")
+		}
+		sb.WriteString(strings.Repeat(" ", col))
+		sb.WriteString(rest)
+	}
+	return []byte(sb.String())
 }
 
 // IsEnvVarRef is true when s is a whole-string ${VAR} reference.
@@ -549,7 +635,7 @@ func (ef *EnvFile) LookupConnection(name string) (ConnLocation, error) {
 // recorded on the result for display only. No ${VAR} interpolation happens.
 func LookupConnectionBody(body, name, path string) (ConnLocation, error) {
 	var root yaml.Node
-	if err := yaml.Unmarshal([]byte(body), &root); err != nil {
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
 		return ConnLocation{Path: path, Connection: strings.ToUpper(name), Missing: []MissingRef{}}, g.Error(err, "could not parse env file body")
 	}
 	if root.Kind == 0 {
@@ -667,7 +753,7 @@ func (ef *EnvFile) RawConnections() (map[string]map[string]any, error) {
 // maps, without ${VAR} interpolation.
 func ParseEnvFileConnections(body string) (map[string]map[string]any, error) {
 	var root yaml.Node
-	if err := yaml.Unmarshal([]byte(body), &root); err != nil {
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
 		return nil, g.Error(err, "could not parse env file body")
 	}
 	if root.Kind == 0 {
@@ -697,7 +783,7 @@ func rawConnectionsFromRoot(root *yaml.Node) map[string]map[string]any {
 // and env keys (legacy `variables:` included). No ${VAR} interpolation.
 func ParseEnvFileKeys(body string) (connNames, envKeys []string, err error) {
 	var root yaml.Node
-	if err := yaml.Unmarshal([]byte(body), &root); err != nil {
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
 		return nil, nil, g.Error(err, "could not parse env file body")
 	}
 	if root.Kind == 0 {
