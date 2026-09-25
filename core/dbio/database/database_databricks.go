@@ -1,18 +1,30 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"math/rand/v2"
+	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/databricks/databricks-sql-go/driverctx"
 	dbsqllog "github.com/databricks/databricks-sql-go/logger"
+	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -32,6 +44,13 @@ type DatabricksConn struct {
 	Warehouse   string
 	CopyMethod  string
 	TableFormat string
+
+	ZerobusEndpoint    string
+	ClientID           string
+	ClientSecret       string
+	BatchSize          int
+	IPCCompression     string
+	MaxInflightBatches int
 }
 
 // Init initiates the object
@@ -53,9 +72,36 @@ func (conn *DatabricksConn) Init() error {
 	if tf := conn.GetProp("table_format"); tf != "" {
 		conn.TableFormat = strings.ToLower(tf)
 	}
+	if conn.CopyMethod == "zerobus" && conn.TableFormat != "delta" {
+		g.Debug("copy_method: zerobus requires Delta tables; using table_format=delta instead of %s", conn.TableFormat)
+		conn.TableFormat = "delta"
+	}
 
 	if w := conn.GetProp("warehouse"); w != "" {
 		conn.Warehouse = w
+	}
+
+	conn.ZerobusEndpoint = conn.GetProp("zerobus_endpoint")
+	conn.ClientID = conn.GetProp("client_id")
+	conn.ClientSecret = conn.GetProp("client_secret")
+
+	if conn.BatchSize <= 0 {
+		conn.BatchSize = cast.ToInt(conn.GetProp("batch_size"))
+		if conn.BatchSize <= 0 {
+			conn.BatchSize = 10000
+		}
+	}
+	if conn.IPCCompression == "" {
+		conn.IPCCompression = strings.ToLower(conn.GetProp("ipc_compression", "compression"))
+		if conn.IPCCompression == "" {
+			conn.IPCCompression = "none"
+		}
+	}
+	if conn.MaxInflightBatches <= 0 {
+		conn.MaxInflightBatches = cast.ToInt(conn.GetProp("max_inflight_batches"))
+		if conn.MaxInflightBatches <= 0 {
+			conn.MaxInflightBatches = 1000
+		}
 	}
 
 	// disable internal log
@@ -174,6 +220,12 @@ func (conn *DatabricksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) 
 	switch conn.CopyMethod {
 	case "aws":
 		return conn.CopyViaS3(tableFName, df)
+	case "zerobus":
+		table, err := ParseTableName(tableFName, conn.Type)
+		if err != nil {
+			return 0, g.Error(err, "could not parse table name: "+tableFName)
+		}
+		return conn.CopyViaZerobus(table, df)
 	}
 
 	// Try volume-based loading as fallback
@@ -823,29 +875,169 @@ func (conn *DatabricksConn) VolumeList(volumePath string) (data iop.Dataset, err
 	return data, nil
 }
 
+var (
+	volumeFilesMaxRetries = 5
+	volumeFilesRetryBase  = 500 * time.Millisecond
+	volumeFilesMaxWait    = 8 * time.Second
+)
+
+func (conn *DatabricksConn) volumeFilesAPIURL(volumePath string) string {
+	host := conn.GetProp("host")
+	scheme := "https"
+	switch {
+	case strings.HasPrefix(host, "http://"):
+		scheme = "http"
+		host = strings.TrimPrefix(host, "http://")
+	case strings.HasPrefix(host, "https://"):
+		host = strings.TrimPrefix(host, "https://")
+	case conn.GetProp("protocol") == "http", conn.GetProp("use_ssl") == "false", conn.GetProp("ssl") == "false":
+		scheme = "http"
+	}
+	host = strings.TrimRight(host, "/")
+	if !strings.HasPrefix(volumePath, "/") {
+		volumePath = "/" + volumePath
+	}
+	return fmt.Sprintf("%s://%s/api/2.0/fs/files%s", scheme, host, volumePath)
+}
+
+func volumeFilesRetryWait(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		if retryAfter > 30*time.Second {
+			return 30 * time.Second
+		}
+		return retryAfter
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 5 {
+		attempt = 5
+	}
+	base := volumeFilesRetryBase * time.Duration(1<<uint(attempt))
+	if base > volumeFilesMaxWait {
+		base = volumeFilesMaxWait
+	}
+	jitterMax := int64(base / 2)
+	if jitterMax < 1 {
+		jitterMax = 1
+	}
+	return base/2 + time.Duration(rand.Int64N(jitterMax))
+}
+
+func parseRetryAfter(h http.Header) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	secs, err := strconv.Atoi(v)
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
+func isVolumeFilesRetryable(status int, body string) bool {
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return true
+	}
+	upper := strings.ToUpper(body)
+	return strings.Contains(upper, "RESOURCE_EXHAUSTED") ||
+		strings.Contains(upper, "THROTTL") ||
+		strings.Contains(upper, "TOO MANY REQUESTS")
+}
+
+func (conn *DatabricksConn) volumeDeleteFile(ctx context.Context, volumePath string) error {
+	if volumePath == "" {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	url := conn.volumeFilesAPIURL(volumePath)
+	token := conn.GetProp("token")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	var lastErr error
+	var retryAfter time.Duration
+	for attempt := 0; attempt <= volumeFilesMaxRetries; attempt++ {
+		if attempt > 0 {
+			wait := volumeFilesRetryWait(attempt, retryAfter)
+			retryAfter = 0
+			g.Debug("volume delete throttled for %s, retrying in %s (attempt %d/%d)", volumePath, wait, attempt, volumeFilesMaxRetries)
+			select {
+			case <-ctx.Done():
+				if lastErr != nil {
+					return g.Error(lastErr, "could not delete volume file %s: %s", volumePath, ctx.Err())
+				}
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+		if err != nil {
+			return g.Error(err, "could not build volume delete request for %s", volumePath)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return g.Error(err, "could not delete volume file %s", volumePath)
+			}
+			continue
+		}
+
+		respBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		body := string(respBytes)
+
+		if resp.StatusCode == http.StatusNotFound || (resp.StatusCode >= 200 && resp.StatusCode < 300) {
+			return nil
+		}
+
+		lastErr = g.Error("unexpected response %d deleting volume file %s: %s", resp.StatusCode, volumePath, body)
+		if !isVolumeFilesRetryable(resp.StatusCode, body) {
+			return lastErr
+		}
+		retryAfter = parseRetryAfter(resp.Header)
+	}
+
+	return g.Error(lastErr, "could not delete volume file %s after %d retries", volumePath, volumeFilesMaxRetries)
+}
+
 // VolumeDelete delete files in a Databricks volume path
 func (conn *DatabricksConn) VolumeDelete(volumePaths ...string) (err error) {
+	if len(volumePaths) == 0 {
+		return nil
+	}
 
-	deleteContext := g.NewContext(conn.context.Ctx)
+	parent := context.Background()
+	if conn.Context() != nil && conn.Context().Ctx != nil {
+		parent = conn.Context().Ctx
+	}
+	// Cap parallelism so cleanup does not stampede S3 behind Volumes.
+	deleteContext := g.NewContext(parent, 3)
 
 	for _, volumePath := range volumePaths {
+		if volumePath == "" {
+			continue
+		}
 		deleteContext.Wg.Write.Add()
-
 		go func(volumePath string) {
 			defer deleteContext.Wg.Write.Done()
-
-			url := g.F("https://%s/api/2.0/fs/files%s", conn.GetProp("host"), volumePath)
-			headers := map[string]string{"Authorization": "Bearer " + conn.GetProp("token")}
-			_, respBytes, err := net.ClientDo("DELETE", url, nil, headers)
-			if err != nil {
-				deleteContext.CaptureErr(g.Error(err, "could not delete volume via API with for `%s` %s\nResponse: %s", volumePath, string(respBytes)))
+			// Use parent ctx so one exhausted failure does not cancel sibling backoff.
+			if err := conn.volumeDeleteFile(parent, volumePath); err != nil {
+				deleteContext.CaptureErr(g.Error(err, "could not delete volume file `%s`", volumePath))
 			}
-
 		}(volumePath)
 	}
 
 	deleteContext.Wg.Write.Wait()
-
 	return deleteContext.Err()
 }
 
@@ -910,11 +1102,9 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
-	fileFormat := dbio.FileType(conn.GetProp("format"))
-	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
-		fileFormat = dbio.FileTypeCsv
-		// fileFormat = dbio.FileTypeParquet // error-prone, type mismatch
-	}
+	// The Arrow lane writes Parquet records, so the COPY runs with a parquet
+	// file format; the row path keeps the `format` conn prop (CSV by default).
+	fileFormat := stageFileFormat(df, dbio.FileType(conn.GetProp("format")))
 
 	go func() {
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
@@ -1047,9 +1237,8 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 	defer func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			g.Debug("deleting temporary volume: %s", volumeFolderPath)
-			err = conn.VolumeDelete(volumeFilePaths...)
-			if err != nil {
-				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, err.Error())
+			if delErr := conn.VolumeDelete(volumeFilePaths...); delErr != nil {
+				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, delErr.Error())
 			}
 		}
 	}()
@@ -1141,4 +1330,664 @@ func (conn *DatabricksConn) GetSchemata(level SchemataLevel, schemaName string, 
 	}
 
 	return conn.BaseConn.GetSchemata(level, schemaName, tableNames...)
+}
+
+type zerobusStream interface {
+	IngestBatch(ipc []byte) (int64, error)
+	Flush() error
+	Close() error
+	GetUnackedBatches() ([][]byte, error)
+}
+
+type zerobusStreamOpener func(endpoint, workspaceURL, tableName string, schemaIPC []byte, clientID, clientSecret string, opts *zerobus.ArrowStreamConfigurationOptions) (zerobusStream, func(), error)
+
+var openZerobusStream zerobusStreamOpener = openZerobusStreamSDK
+
+var zerobusDescribe = func(conn *DatabricksConn, tableFName string) (iop.Columns, error) {
+	cols, err := conn.GetColumns(tableFName)
+	if err != nil {
+		return nil, g.Error(err, "create the table first or use copy_method: stage")
+	}
+	if len(cols) == 0 {
+		return nil, g.Error("create the table first or use copy_method: stage")
+	}
+	return cols, nil
+}
+
+func openZerobusStreamSDK(endpoint, workspaceURL, tableName string, schemaIPC []byte, clientID, clientSecret string, opts *zerobus.ArrowStreamConfigurationOptions) (zerobusStream, func(), error) {
+	sdk, err := zerobus.NewZerobusSdk(endpoint, workspaceURL)
+	if err != nil {
+		return nil, nil, g.Error(err, "could not create Zerobus SDK")
+	}
+	stream, err := sdk.CreateArrowStream(tableName, schemaIPC, clientID, clientSecret, opts)
+	if err != nil {
+		sdk.Free()
+		return nil, nil, g.Error(err, "could not create Zerobus Arrow stream for %s", tableName)
+	}
+	return stream, sdk.Free, nil
+}
+
+type zerobusPATHeaders struct {
+	token, tableName string
+}
+
+func (p *zerobusPATHeaders) GetHeaders() (map[string]string, error) {
+	return map[string]string{
+		"authorization":                   "Bearer " + p.token,
+		"x-databricks-zerobus-table-name": p.tableName,
+	}, nil
+}
+
+func openZerobusStreamPAT(endpoint, workspaceURL, tableName string, schemaIPC []byte, token string, opts *zerobus.ArrowStreamConfigurationOptions) (zerobusStream, func(), error) {
+	sdk, err := zerobus.NewZerobusSdk(endpoint, workspaceURL)
+	if err != nil {
+		return nil, nil, g.Error(err, "could not create Zerobus SDK")
+	}
+	stream, err := sdk.CreateArrowStreamWithHeadersProvider(tableName, schemaIPC, &zerobusPATHeaders{token: token, tableName: tableName}, opts)
+	if err != nil {
+		sdk.Free()
+		return nil, nil, g.Error(err, "could not create Zerobus Arrow stream for %s", tableName)
+	}
+	return stream, sdk.Free, nil
+}
+
+func isZerobusSchemaLag(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "schema comparison failed") ||
+		strings.Contains(s, "schema_validation_failed") ||
+		strings.Contains(s, "does not exist in delta schema") ||
+		strings.Contains(s, "field_not_in_table")
+}
+
+func (conn *DatabricksConn) openZerobusArrowStream(endpoint, workspaceURL, tableName string, schemaIPC []byte, opts *zerobus.ArrowStreamConfigurationOptions) (zerobusStream, func(), error) {
+	open := func() (zerobusStream, func(), error) {
+		if conn.ClientID != "" && conn.ClientSecret != "" {
+			return openZerobusStream(endpoint, workspaceURL, tableName, schemaIPC, conn.ClientID, conn.ClientSecret, opts)
+		}
+		return openZerobusStreamPAT(endpoint, workspaceURL, tableName, schemaIPC, conn.GetProp("token"), opts)
+	}
+
+	stream, free, err := open()
+	if err == nil || conn.db == nil || !isZerobusSchemaLag(err) {
+		return stream, free, err
+	}
+
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		g.Debug("zerobus Delta schema not yet visible for %s, retrying", tableName)
+		time.Sleep(time.Second)
+		stream, free, err = open()
+		if err == nil || !isZerobusSchemaLag(err) {
+			return stream, free, err
+		}
+	}
+	return nil, nil, err
+}
+
+func (conn *DatabricksConn) databricksGETJSON(path string, dest any) error {
+	workspaceURL, err := conn.unityCatalogURL()
+	if err != nil {
+		return err
+	}
+	token := conn.GetProp("token")
+	if token == "" {
+		return g.Error("databricks token is required")
+	}
+	req, err := http.NewRequest(http.MethodGet, workspaceURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return g.Error("databricks API %s returned %d: %s", path, resp.StatusCode, string(body))
+	}
+	if dest == nil {
+		return nil
+	}
+	return json.Unmarshal(body, dest)
+}
+
+func (conn *DatabricksConn) resolveZerobusEndpoint() error {
+	if strings.TrimSpace(conn.ZerobusEndpoint) != "" {
+		return nil
+	}
+	if v := conn.GetProp("zerobus_endpoint"); v != "" {
+		conn.ZerobusEndpoint = v
+		return nil
+	}
+	if conn.GetProp("host") == "" || conn.GetProp("token") == "" {
+		return g.Error("zerobus_endpoint is required for copy_method: zerobus (the shard URL, not the workspace host)")
+	}
+
+	var assignment struct {
+		WorkspaceID json.Number `json:"workspace_id"`
+		MetastoreID string      `json:"metastore_id"`
+	}
+	if err := conn.databricksGETJSON("/api/2.1/unity-catalog/current-metastore-assignment", &assignment); err != nil {
+		return g.Error(err, "zerobus_endpoint is required for copy_method: zerobus (the shard URL, not the workspace host)")
+	}
+
+	var listing struct {
+		Metastores []struct {
+			MetastoreID string `json:"metastore_id"`
+			Region      string `json:"region"`
+			Cloud       string `json:"cloud"`
+		} `json:"metastores"`
+	}
+	_ = conn.databricksGETJSON("/api/2.1/unity-catalog/metastores", &listing)
+
+	region, cloud := "", "aws"
+	for _, m := range listing.Metastores {
+		if m.MetastoreID == assignment.MetastoreID || (assignment.MetastoreID == "" && m.Region != "") {
+			region = m.Region
+			if m.Cloud != "" {
+				cloud = strings.ToLower(m.Cloud)
+			}
+			if m.MetastoreID == assignment.MetastoreID {
+				break
+			}
+		}
+	}
+	workspaceID := assignment.WorkspaceID.String()
+	if workspaceID == "" || region == "" {
+		return g.Error("zerobus_endpoint is required for copy_method: zerobus (could not detect workspace_id/region)")
+	}
+
+	suffix := "cloud.databricks.com"
+	host := conn.GetProp("host")
+	switch {
+	case strings.Contains(host, "azuredatabricks.net"):
+		suffix = "azuredatabricks.net"
+	case strings.Contains(host, "gcp.databricks.com"):
+		suffix = "gcp.databricks.com"
+	case cloud == "azure":
+		suffix = "azuredatabricks.net"
+	case cloud == "gcp":
+		suffix = "gcp.databricks.com"
+	}
+
+	conn.ZerobusEndpoint = fmt.Sprintf("https://%s.zerobus.%s.%s", workspaceID, region, suffix)
+	g.Debug("detected zerobus_endpoint=%s", conn.ZerobusEndpoint)
+	return nil
+}
+
+func (conn *DatabricksConn) validateZerobusConfig() error {
+	if err := conn.resolveZerobusEndpoint(); err != nil {
+		return err
+	}
+	if conn.ZerobusEndpoint == "" {
+		return g.Error("zerobus_endpoint is required for copy_method: zerobus (the shard URL, not the workspace host)")
+	}
+	if (conn.ClientID == "" || conn.ClientSecret == "") && conn.GetProp("token") == "" {
+		return g.Error("client_id and client_secret (OAuth M2M) or token (PAT) are required for copy_method: zerobus")
+	}
+	return nil
+}
+
+func (conn *DatabricksConn) unityCatalogURL() (string, error) {
+	host := conn.GetProp("host")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimRight(host, "/")
+	if host == "" {
+		return "", g.Error("databricks host is required for copy_method: zerobus")
+	}
+	return "https://" + host, nil
+}
+
+func (conn *DatabricksConn) zerobusTableName(table Table) string {
+	catalog := table.Database
+	if catalog == "" {
+		catalog = conn.Catalog
+	}
+	schema := table.Schema
+	if schema == "" {
+		schema = conn.Schema
+	}
+	parts := []string{}
+	if catalog != "" {
+		parts = append(parts, catalog)
+	}
+	if schema != "" {
+		parts = append(parts, schema)
+	}
+	parts = append(parts, table.Name)
+	return strings.Join(parts, ".")
+}
+
+func mapZerobusIPCCompression(s string) (zerobus.IPCCompressionType, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "none":
+		return zerobus.IPCCompressionNone, nil
+	case "lz4", "lz4_frame":
+		return zerobus.IPCCompressionLZ4Frame, nil
+	case "zstd", "zstandard":
+		return zerobus.IPCCompressionZstd, nil
+	default:
+		return 0, g.Error("unsupported Zerobus IPC compression: %s (supported: none, lz4, zstd)", s)
+	}
+}
+
+func normalizeZerobusEndpoint(endpoint string) string {
+	endpoint = strings.TrimRight(endpoint, "/")
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return endpoint
+	}
+	return "https://" + endpoint
+}
+
+// CopyViaZerobus streams Arrow RecordBatches into an existing Delta table.
+func (conn *DatabricksConn) CopyViaZerobus(table Table, df *iop.Dataflow) (count uint64, err error) {
+	if err = conn.validateZerobusConfig(); err != nil {
+		return 0, err
+	}
+
+	workspaceURL, err := conn.unityCatalogURL()
+	if err != nil {
+		return 0, err
+	}
+
+	tableName := conn.zerobusTableName(table)
+	if table.Name == "" {
+		return 0, g.Error("target table must be specified for Zerobus ingestion")
+	}
+
+	tgtCols, err := zerobusDescribe(conn, table.FullName())
+	if err != nil {
+		return 0, err
+	}
+	for i := range tgtCols {
+		if v := tgtCols[i].Metadata["is_nullable"]; v != "" {
+			tgtCols[i].SetMetadata(string(iop.ColMetaNullable), v)
+		}
+	}
+
+	srcIdx, err := alignZerobusSource(df.Columns, tgtCols)
+	if err != nil {
+		return 0, err
+	}
+
+	arrowSchema, err := ColumnsToZerobusArrowSchema(tgtCols)
+	if err != nil {
+		return 0, err
+	}
+
+	schemaIPC, err := SerializeSchemaToIPC(arrowSchema)
+	if err != nil {
+		return 0, err
+	}
+
+	codec, err := mapZerobusIPCCompression(conn.IPCCompression)
+	if err != nil {
+		return 0, err
+	}
+
+	opts := zerobus.DefaultArrowStreamConfigurationOptions()
+	if conn.MaxInflightBatches > 0 {
+		opts.MaxInflightBatches = uint64(conn.MaxInflightBatches)
+	}
+	opts.IPCCompression = codec
+
+	g.Info("ingesting into Databricks via Zerobus Arrow stream: %s", tableName)
+
+	endpoint := normalizeZerobusEndpoint(conn.ZerobusEndpoint)
+	stream, free, err := conn.openZerobusArrowStream(endpoint, workspaceURL, tableName, schemaIPC, opts)
+	if err != nil {
+		return 0, err
+	}
+	if free != nil {
+		defer free()
+	}
+	defer stream.Close()
+
+	count, err = ingestZerobusFlow(conn, df, stream, arrowSchema, tgtCols, srcIdx)
+	if err != nil {
+		unacked, _ := stream.GetUnackedBatches()
+		return 0, g.Error(err, "zerobus ingest failed, %d batches unacked", len(unacked))
+	}
+
+	if err = stream.Flush(); err != nil {
+		unacked, _ := stream.GetUnackedBatches()
+		return 0, g.Error(err, "zerobus flush failed, %d batches unacked", len(unacked))
+	}
+
+	// SQL warehouse snapshots can lag the Zerobus Delta commit.
+	if count > 0 && conn.db != nil {
+		_, _ = conn.Exec("REFRESH TABLE " + table.FullName() + env.NoDebugKey)
+		deadline := time.Now().Add(30 * time.Second)
+		var visible int64
+		for {
+			visible, err = conn.GetCount(table.FullName())
+			if err == nil && uint64(visible) >= count {
+				break
+			}
+			if time.Now().After(deadline) {
+				if err != nil {
+					return count, g.Error(err, "zerobus rows not yet visible in SQL warehouse for %s", table.FullName())
+				}
+				return count, g.Error("zerobus SQL warehouse count is %d after streaming %d rows into %s", visible, count, table.FullName())
+			}
+			time.Sleep(4 * time.Second)
+		}
+	}
+
+	g.Info("successfully streamed %d rows to Zerobus table %s", count, tableName)
+	return count, nil
+}
+
+func alignZerobusSource(src, tgt iop.Columns) ([]int, error) {
+	srcMap := map[string]int{}
+	for i, c := range src {
+		srcMap[strings.ToLower(c.Name)] = i
+	}
+
+	used := map[string]bool{}
+	srcIdx := make([]int, len(tgt))
+	for i, tcol := range tgt {
+		si, ok := srcMap[strings.ToLower(tcol.Name)]
+		if !ok {
+			if !columnZerobusNullable(tcol) {
+				return nil, g.Error("source is missing non-null target column %s", tcol.Name)
+			}
+			srcIdx[i] = -1
+			continue
+		}
+		used[strings.ToLower(tcol.Name)] = true
+		srcIdx[i] = si
+	}
+
+	for _, c := range src {
+		if !used[strings.ToLower(c.Name)] {
+			return nil, g.Error("source has extra column %s not in target table", c.Name)
+		}
+	}
+	return srcIdx, nil
+}
+
+func ingestZerobusFlow(conn *DatabricksConn, df *iop.Dataflow, stream zerobusStream, arrowSchema *arrow.Schema, tgtCols iop.Columns, srcIdx []int) (count uint64, err error) {
+	mem := memory.NewGoAllocator()
+	batchSize := conn.BatchSize
+	if batchSize <= 0 {
+		batchSize = 10000
+	}
+
+	builders := make([]array.Builder, len(tgtCols))
+	createBuilder := func(dtype arrow.DataType) array.Builder {
+		switch dtype.ID() {
+		case arrow.BOOL:
+			return array.NewBooleanBuilder(mem)
+		case arrow.INT8:
+			return array.NewInt8Builder(mem)
+		case arrow.INT16:
+			return array.NewInt16Builder(mem)
+		case arrow.INT32:
+			return array.NewInt32Builder(mem)
+		case arrow.INT64:
+			return array.NewInt64Builder(mem)
+		case arrow.FLOAT32:
+			return array.NewFloat32Builder(mem)
+		case arrow.FLOAT64:
+			return array.NewFloat64Builder(mem)
+		case arrow.LARGE_STRING:
+			return array.NewLargeStringBuilder(mem)
+		case arrow.STRING:
+			return array.NewStringBuilder(mem)
+		case arrow.LARGE_BINARY:
+			return array.NewBinaryBuilder(mem, arrow.BinaryTypes.LargeBinary)
+		case arrow.BINARY:
+			return array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
+		case arrow.DATE32:
+			return array.NewDate32Builder(mem)
+		case arrow.TIMESTAMP:
+			return array.NewTimestampBuilder(mem, dtype.(*arrow.TimestampType))
+		case arrow.DECIMAL128:
+			return array.NewDecimal128Builder(mem, dtype.(*arrow.Decimal128Type))
+		default:
+			return array.NewLargeStringBuilder(mem)
+		}
+	}
+
+	resetBuilders := func() {
+		for i, field := range arrowSchema.Fields() {
+			builders[i] = createBuilder(field.Type)
+		}
+	}
+	releaseBuilders := func() {
+		for _, b := range builders {
+			if b != nil {
+				b.Release()
+			}
+		}
+	}
+	defer releaseBuilders()
+	resetBuilders()
+
+	rowsInBatch := 0
+	flushBatch := func() error {
+		if rowsInBatch == 0 {
+			return nil
+		}
+
+		arrays := make([]arrow.Array, len(builders))
+		for i, b := range builders {
+			arrays[i] = b.NewArray()
+		}
+		record := array.NewRecord(arrowSchema, arrays, int64(rowsInBatch))
+
+		batchBytes, err := SerializeRecordToIPC(arrowSchema, record, conn.IPCCompression)
+		record.Release()
+		for _, arr := range arrays {
+			arr.Release()
+		}
+		releaseBuilders()
+		resetBuilders()
+		rowsInBatch = 0
+		if err != nil {
+			return err
+		}
+
+		_, err = stream.IngestBatch(batchBytes)
+		return err
+	}
+
+	for ds := range df.StreamCh {
+		for row := range ds.Rows() {
+			for i, col := range tgtCols {
+				var val interface{}
+				si := srcIdx[i]
+				if si >= 0 && si < len(row) {
+					val = row[si]
+				}
+				appendToZerobusBuilder(builders[i], &col, val)
+			}
+			rowsInBatch++
+			count++
+			if rowsInBatch >= batchSize {
+				if err := flushBatch(); err != nil {
+					return count, g.Error(err, "failed to stream Arrow RecordBatch to Zerobus")
+				}
+			}
+		}
+		if err := ds.Context.Err(); err != nil {
+			return count, g.Error(err, "error reading source stream")
+		}
+	}
+
+	if err := flushBatch(); err != nil {
+		return count, g.Error(err, "failed to flush final Arrow RecordBatch to Zerobus")
+	}
+	return count, nil
+}
+
+// SerializeSchemaToIPC serializes an Arrow Schema into IPC stream bytes without data batches,
+// exactly as expected by the Zerobus SDK (sdk.CreateArrowStream(table, schemaIPC, ...)).
+func SerializeSchemaToIPC(schema *arrow.Schema) ([]byte, error) {
+	var buf bytes.Buffer
+	w := ipc.NewWriter(&buf, ipc.WithSchema(schema))
+	if err := w.Close(); err != nil {
+		return nil, g.Error(err, "failed to serialize Arrow Schema to IPC bytes for Zerobus")
+	}
+	return buf.Bytes(), nil
+}
+
+// SerializeRecordToIPC serializes an Arrow Record into IPC stream bytes containing exactly one RecordBatch.
+func SerializeRecordToIPC(schema *arrow.Schema, record arrow.Record, compression string) ([]byte, error) {
+	var buf bytes.Buffer
+	opts := []ipc.Option{ipc.WithSchema(schema)}
+
+	switch strings.ToLower(compression) {
+	case "lz4", "lz4_frame":
+		opts = append(opts, ipc.WithLZ4())
+	case "zstd", "zstandard":
+		opts = append(opts, ipc.WithZstd())
+	case "", "none":
+	default:
+		return nil, g.Error("unsupported Zerobus IPC compression: %s (supported: none, lz4, zstd)", compression)
+	}
+
+	w := ipc.NewWriter(&buf, opts...)
+	if err := w.Write(record); err != nil {
+		w.Close()
+		return nil, g.Error(err, "failed to write Arrow Record to IPC writer for Zerobus")
+	}
+	if err := w.Close(); err != nil {
+		return nil, g.Error(err, "failed to close Arrow IPC writer for Zerobus")
+	}
+
+	return buf.Bytes(), nil
+}
+
+func zerobusUnsupportedDbType(col iop.Column) error {
+	dt := strings.ToLower(strings.TrimSpace(col.DbType))
+	if dt == "" {
+		return nil
+	}
+	if strings.HasPrefix(dt, "array") || strings.HasPrefix(dt, "map") ||
+		strings.HasPrefix(dt, "struct") || strings.HasPrefix(dt, "variant") || dt == "object" {
+		return g.Error("unsupported Zerobus type %s for column %s", col.DbType, col.Name)
+	}
+	return nil
+}
+
+func zerobusDecimalPrecisionScale(col iop.Column) (prec, scale int) {
+	prec = col.DbPrecision
+	scale = col.DbScale
+	if prec <= 0 {
+		dt := strings.ToLower(col.DbType)
+		if i := strings.Index(dt, "("); i >= 0 {
+			nums := strings.TrimSuffix(dt[i+1:], ")")
+			parts := strings.Split(nums, ",")
+			if len(parts) >= 1 {
+				prec = cast.ToInt(strings.TrimSpace(parts[0]))
+			}
+			if len(parts) >= 2 {
+				scale = cast.ToInt(strings.TrimSpace(parts[1]))
+			}
+		}
+	}
+	if prec <= 0 {
+		prec = 38
+	}
+	if scale < 0 {
+		scale = 0
+	}
+	return prec, scale
+}
+
+func columnZerobusNullable(col iop.Column) bool {
+	if col.Metadata != nil {
+		if v, ok := col.Metadata["is_nullable"]; ok {
+			return v == "true" || strings.EqualFold(v, "yes")
+		}
+	}
+	return col.IsNullable()
+}
+
+// ColumnsToZerobusArrowSchema maps Sling columns to the Arrow schema specified by
+// Databricks Zerobus Arrow Flight ingestion.
+func ColumnsToZerobusArrowSchema(columns iop.Columns) (*arrow.Schema, error) {
+	fields := make([]arrow.Field, len(columns))
+
+	for i, col := range columns {
+		if err := zerobusUnsupportedDbType(col); err != nil {
+			return nil, err
+		}
+
+		var arrowType arrow.DataType
+
+		switch col.Type {
+		case iop.BoolType:
+			arrowType = arrow.FixedWidthTypes.Boolean
+		case iop.SmallIntType:
+			if strings.EqualFold(col.DbType, "tinyint") || strings.EqualFold(col.DbType, "int8") || strings.EqualFold(col.DbType, "byte") {
+				arrowType = arrow.PrimitiveTypes.Int8
+			} else {
+				arrowType = arrow.PrimitiveTypes.Int16
+			}
+		case iop.IntegerType:
+			if strings.EqualFold(col.DbType, "tinyint") || strings.EqualFold(col.DbType, "int8") || strings.EqualFold(col.DbType, "byte") {
+				arrowType = arrow.PrimitiveTypes.Int8
+			} else if strings.EqualFold(col.DbType, "smallint") || strings.EqualFold(col.DbType, "int16") || strings.EqualFold(col.DbType, "short") {
+				arrowType = arrow.PrimitiveTypes.Int16
+			} else {
+				arrowType = arrow.PrimitiveTypes.Int32
+			}
+		case iop.BigIntType:
+			arrowType = arrow.PrimitiveTypes.Int64
+		case iop.FloatType:
+			if strings.EqualFold(col.DbType, "float") || strings.EqualFold(col.DbType, "float32") || strings.EqualFold(col.DbType, "real") {
+				arrowType = arrow.PrimitiveTypes.Float32
+			} else {
+				arrowType = arrow.PrimitiveTypes.Float64
+			}
+		case iop.DecimalType:
+			prec, scale := zerobusDecimalPrecisionScale(col)
+			arrowType = &arrow.Decimal128Type{Precision: int32(prec), Scale: int32(scale)}
+		case iop.DateType:
+			arrowType = arrow.FixedWidthTypes.Date32
+		case iop.TimestampzType:
+			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+		case iop.DatetimeType, iop.TimestampType:
+			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ""}
+		case iop.BinaryType:
+			arrowType = arrow.BinaryTypes.LargeBinary
+		case iop.StringType, iop.TextType, iop.JsonType, iop.UUIDType:
+			arrowType = arrow.BinaryTypes.LargeString
+		default:
+			arrowType = arrow.BinaryTypes.LargeString
+		}
+
+		fields[i] = arrow.Field{
+			Name:     col.Name,
+			Type:     arrowType,
+			Nullable: columnZerobusNullable(col),
+		}
+	}
+
+	return arrow.NewSchema(fields, nil), nil
+}
+
+func appendToZerobusBuilder(builder array.Builder, col *iop.Column, val interface{}) {
+	if val == nil {
+		builder.AppendNull()
+		return
+	}
+	switch b := builder.(type) {
+	case *array.LargeStringBuilder:
+		b.Append(cast.ToString(val))
+	default:
+		iop.AppendToBuilder(builder, col, val)
+	}
 }

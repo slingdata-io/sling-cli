@@ -388,6 +388,12 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 			addRowIDCol = false
 		}
 
+		// source primary key found by schema migration (known after ReadFromDB)
+		if pkNames := t.Config.Source.table.Columns.PrimaryKeyNames(); addRowIDCol && len(pkNames) > 0 {
+			t.Config.Target.Options.TableKeys[iop.PrimaryKey] = pkNames
+			addRowIDCol = false
+		}
+
 		if addRowIDCol {
 			metadata.RowID.Key = env.ReservedFields.RowID
 			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{env.ReservedFields.RowID}
@@ -632,7 +638,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		// which accepts the `copy_method` property
 		usesDuckDb := false
 		for _, connType := range connTypes {
-			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake) {
+			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
 				usesDuckDb = true
 			}
 		}

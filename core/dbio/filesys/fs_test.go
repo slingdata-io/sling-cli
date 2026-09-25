@@ -2,10 +2,15 @@ package filesys
 
 import (
 	"bytes"
+	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +23,12 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/stretchr/testify/require"
 
 	"github.com/flarco/g"
 	"github.com/stretchr/testify/assert"
@@ -1002,6 +1012,31 @@ func TestFileSysAzure(t *testing.T) {
 	// Delete(fs, writeFolderPath)
 }
 
+// TestFileSysGoogleADC reproduces https://github.com/slingdata-io/sling-cli/issues/808
+// A BigQuery connection with `gc_bucket` set creates a GCS client without any explicit
+// credential props, so it must fall back to Application Default Credentials.
+// Regression for "dialing: multiple credential options provided": storage.NewClient
+// appends WithAuthCredentials internally, which google.golang.org/api v0.258.0 counts
+// as a second credential option when sling also passes one.
+func TestFileSysGoogleADC(t *testing.T) {
+	// fake Application Default Credentials (no token is ever fetched)
+	adc := `{"type":"authorized_user","client_id":"fake.apps.googleusercontent.com","client_secret":"fake","refresh_token":"fake"}`
+	adcDir := t.TempDir()
+	adcFile := filepath.Join(adcDir, "application_default_credentials.json")
+	if !assert.NoError(t, os.WriteFile(adcFile, []byte(adc), 0600)) {
+		return
+	}
+	t.Setenv("CLOUDSDK_CONFIG", adcDir)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+	fs, err := NewFileSysClient(dbio.TypeFileGoogle, "BUCKET=some_bucket")
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer fs.Close()
+	assert.NotNil(t, fs.Client())
+}
+
 func TestFileSysGoogle(t *testing.T) {
 	t.Parallel()
 
@@ -1667,4 +1702,743 @@ func TestCopyRecursive(t *testing.T) {
 		// Clean up
 		_ = Delete(tt.toFs, tt.toPath)
 	}
+}
+
+// fsArrowTestLane is a pass-through ArrowLane. The file-target lane never runs
+// a cast or a projection, it only needs a live lane to build record streams.
+type fsArrowTestLane struct{}
+
+func (fsArrowTestLane) CastSupported(from, to arrow.DataType) (bool, string) {
+	if arrow.TypeEqual(from, to) {
+		return true, ""
+	}
+	return false, "fsArrowTestLane: only equal types"
+}
+
+func (fsArrowTestLane) Normalize(rec arrow.RecordBatch, to *arrow.Schema) (arrow.RecordBatch, error) {
+	rec.Retain() // the lane hands back a record the caller owns
+	return rec, nil
+}
+
+func (fsArrowTestLane) Project(rec arrow.RecordBatch, cols iop.Columns) (arrow.RecordBatch, error) {
+	rec.Retain()
+	return rec, nil
+}
+
+// ClassifyTransform declines every stage: the test lane evaluates no transform.
+func (fsArrowTestLane) ClassifyTransform(stages []map[string]string, cols iop.Columns) string {
+	if len(stages) > 0 {
+		return "fsArrowTestLane does not evaluate transforms"
+	}
+	return ""
+}
+
+// NewTransform is never reached: ClassifyTransform declines every stage.
+func (fsArrowTestLane) NewTransform(stages []map[string]string, sp *iop.StreamProcessor) (iop.RecordTransform, error) {
+	return nil, g.Error("fsArrowTestLane does not evaluate transforms")
+}
+
+func (fsArrowTestLane) MaxOf(arr arrow.Array) (int64, bool) {
+	return 0, false
+}
+
+func fsArrowTestColumns() iop.Columns {
+	return iop.NewColumns(
+		iop.Column{Name: "id", Type: iop.BigIntType},
+		iop.Column{Name: "name", Type: iop.StringType},
+	)
+}
+
+// fsArrowTestRecord builds one record of fsArrowTestColumns: id, then name,
+// where a nil name appends a null.
+func fsArrowTestRecord(t *testing.T, schema *arrow.Schema, rows [][]any) arrow.RecordBatch {
+	t.Helper()
+
+	b := array.NewRecordBuilder(memory.NewGoAllocator(), schema)
+	defer b.Release()
+
+	for _, row := range rows {
+		b.Field(0).(*array.Int64Builder).Append(cast.ToInt64(row[0]))
+		if row[1] == nil {
+			b.Field(1).(*array.StringBuilder).AppendNull()
+		} else {
+			b.Field(1).(*array.StringBuilder).Append(cast.ToString(row[1]))
+		}
+	}
+
+	return b.NewRecordBatch()
+}
+
+// fsArrowTestDataflow builds an Arrow-mode dataflow with one record stream per
+// element of streams, each carrying a single record.
+func fsArrowTestDataflow(t *testing.T, streams [][][]any) *iop.Dataflow {
+	t.Helper()
+
+	columns := fsArrowTestColumns()
+	schema := iop.ColumnsToArrowSchema(columns)
+
+	dss := make([]*iop.Datastream, len(streams))
+	for i, rows := range streams {
+		ctx := g.NewContext(context.Background())
+		rs := iop.NewRecordStream(ctx, fsArrowTestLane{}, schema, iop.ArrowLaneBuffer)
+		ds := iop.NewDatastreamArrow(ctx.Ctx, columns, rs)
+
+		rec := fsArrowTestRecord(t, schema, rows)
+		rec.Retain() // Push takes this reference
+		require.NoError(t, rs.Push(rec))
+		rec.Release()
+		rs.Close(nil)
+
+		require.NoError(t, ds.Start())
+		dss[i] = ds
+	}
+
+	df, err := iop.MakeDataFlow(dss...)
+	require.NoError(t, err)
+	return df
+}
+
+// fsArrowTestWrite writes df to target and returns the bytes written plus the
+// ready parts, in the order the writer announced them.
+func fsArrowTestWrite(t *testing.T, df *iop.Dataflow, target string, sc iop.StreamConfig) (bw int64, ready []FileReady) {
+	t.Helper()
+
+	fileReadyChn := make(chan FileReady, 1000)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for file := range fileReadyChn {
+			ready = append(ready, file)
+		}
+	}()
+
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+
+	bw, err = fs.WriteDataflowReady(df, target, fileReadyChn, sc)
+	require.NoError(t, err)
+	wg.Wait()
+
+	return bw, ready
+}
+
+// fsArrowTestPartNames lists the part names in dir, in name order, and the
+// total size of those parts.
+func fsArrowTestPartNames(t *testing.T, dir string) (names []string, size int64) {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		names = append(names, entry.Name())
+		if info, err := entry.Info(); err == nil {
+			size += info.Size()
+		}
+	}
+	sort.Strings(names)
+	return names, size
+}
+
+// fsArrowTestReadyNames returns the part names of the ready signals, in name
+// order, so a write can be checked against the files it announced.
+func fsArrowTestReadyNames(ready []FileReady) []string {
+	names := make([]string, len(ready))
+	for i, file := range ready {
+		names[i] = filepath.Base(file.Node.URI)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func fsArrowTestReadParquet(t *testing.T, path string) [][]any {
+	t.Helper()
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	p, err := iop.NewParquetArrowReader(f, nil)
+	require.NoError(t, err)
+
+	table, err := p.Reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer table.Release()
+
+	colVals := make([][]any, int(table.NumCols()))
+	for c := range colVals {
+		for _, chunk := range table.Column(c).Data().Chunks() {
+			for i := 0; i < chunk.Len(); i++ {
+				colVals[c] = append(colVals[c], iop.GetValueFromArrowArray(chunk, i))
+			}
+		}
+	}
+
+	rows := make([][]any, len(colVals[0]))
+	for r := range rows {
+		rows[r] = make([]any, len(colVals))
+		for c := range colVals {
+			rows[r][c] = colVals[c][r]
+		}
+	}
+	return rows
+}
+
+func fsArrowTestReadArrowIPC(t *testing.T, path string) [][]any {
+	t.Helper()
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// the writer emits the IPC stream format (its sink is a pipe); the file
+	// format is what other tools write, so read whichever this is
+	fileReader, fileErr := ipc.NewFileReader(f)
+	if fileErr == nil {
+		defer fileReader.Close()
+		rows := [][]any{}
+		for i := 0; i < fileReader.NumRecords(); i++ {
+			rec, err := fileReader.Record(i)
+			require.NoError(t, err)
+			rows = append(rows, fsArrowTestRecordRows(rec)...)
+			rec.Release()
+		}
+		return rows
+	}
+
+	_, err = f.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+
+	streamReader, err := ipc.NewReader(f)
+	require.NoError(t, err)
+	defer streamReader.Release()
+
+	rows := [][]any{}
+	for streamReader.Next() {
+		rec := streamReader.Record()
+		rows = append(rows, fsArrowTestRecordRows(rec)...)
+	}
+	require.NoError(t, streamReader.Err())
+	return rows
+}
+
+// fsArrowTestRecordRows turns one record into rows, in column order.
+func fsArrowTestRecordRows(rec arrow.RecordBatch) [][]any {
+	rows := [][]any{}
+	for r := 0; r < int(rec.NumRows()); r++ {
+		row := make([]any, rec.NumCols())
+		for c := 0; c < int(rec.NumCols()); c++ {
+			row[c] = iop.GetValueFromArrowArray(rec.Column(c), r)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// fsArrowTestReadArrowGzip reads a gzip-compressed arrow ipc file.
+func fsArrowTestReadArrowGzip(t *testing.T, path string) [][]any {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	defer zr.Close()
+
+	buf, err := io.ReadAll(zr)
+	require.NoError(t, err)
+
+	if fileReader, err := ipc.NewFileReader(bytes.NewReader(buf)); err == nil {
+		defer fileReader.Close()
+		rows := [][]any{}
+		for i := 0; i < fileReader.NumRecords(); i++ {
+			rec, err := fileReader.Record(i)
+			require.NoError(t, err)
+			rows = append(rows, fsArrowTestRecordRows(rec)...)
+			rec.Release()
+		}
+		return rows
+	}
+
+	streamReader, err := ipc.NewReader(bytes.NewReader(buf))
+	require.NoError(t, err)
+	defer streamReader.Release()
+
+	rows := [][]any{}
+	for streamReader.Next() {
+		rows = append(rows, fsArrowTestRecordRows(streamReader.Record())...)
+	}
+	require.NoError(t, streamReader.Err())
+	return rows
+}
+
+// fsArrowTestRows reads every part in dir (name order) with read and appends
+// the rows, so a folder write can be compared to what went in.
+func fsArrowTestRows(t *testing.T, dir string, read func(*testing.T, string) [][]any) [][]any {
+	t.Helper()
+
+	names, _ := fsArrowTestPartNames(t, dir)
+	rows := [][]any{}
+	for _, name := range names {
+		rows = append(rows, read(t, filepath.Join(dir, name))...)
+	}
+	return rows
+}
+
+func fsArrowTestAssertRows(t *testing.T, expected, actual [][]any) {
+	t.Helper()
+
+	require.Len(t, actual, len(expected), "row count")
+	for i, row := range expected {
+		require.Len(t, actual[i], len(row), "row %d: column count", i)
+		for c := range row {
+			switch v := row[c].(type) {
+			case nil:
+				assert.Nil(t, actual[i][c], "row %d, col %d", i, c)
+			case string:
+				assert.Equal(t, v, cast.ToString(actual[i][c]), "row %d, col %d", i, c)
+			default:
+				assert.Equal(t, cast.ToInt64(v), cast.ToInt64(actual[i][c]), "row %d, col %d", i, c)
+			}
+		}
+	}
+}
+
+func TestArrowLaneFileWrites(t *testing.T) {
+	streamA := [][]any{{1, "a1"}, {2, "a2"}, {3, "a3"}, {4, nil}}
+	streamB := [][]any{{11, "b1"}, {12, "b2"}, {13, "b3"}, {14, nil}}
+
+	t.Run("parquet one stream folder", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeParquet
+		sc.FileMaxRows = 3
+
+		bw, ready := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{"part.01.0001.parquet", "part.01.0002.parquet"}, names)
+		assert.Equal(t, names, fsArrowTestReadyNames(ready))
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadParquet)
+		fsArrowTestAssertRows(t, streamA, rows)
+	})
+
+	t.Run("parquet two streams folder", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA, streamB})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeParquet
+		sc.FileMaxRows = 3
+
+		bw, ready := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{
+			"part.01.0001.parquet", "part.01.0002.parquet",
+			"part.02.0001.parquet", "part.02.0002.parquet",
+		}, names)
+		assert.Equal(t, names, fsArrowTestReadyNames(ready))
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadParquet)
+		fsArrowTestAssertRows(t, append(append([][]any{}, streamA...), streamB...), rows)
+	})
+
+	t.Run("arrow one stream folder", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeArrow
+		sc.FileMaxRows = 3
+
+		bw, ready := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{"part.01.0001.arrow", "part.01.0002.arrow"}, names)
+		assert.Equal(t, names, fsArrowTestReadyNames(ready))
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadArrowIPC)
+		fsArrowTestAssertRows(t, streamA, rows)
+	})
+
+	t.Run("arrow two streams folder", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA, streamB})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeArrow
+		sc.FileMaxRows = 3
+
+		bw, ready := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{
+			"part.01.0001.arrow", "part.01.0002.arrow",
+			"part.02.0001.arrow", "part.02.0002.arrow",
+		}, names)
+		assert.Equal(t, names, fsArrowTestReadyNames(ready))
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadArrowIPC)
+		fsArrowTestAssertRows(t, append(append([][]any{}, streamA...), streamB...), rows)
+	})
+
+	// one file and no row limit: every stream must land in the same file
+	t.Run("parquet two streams single file", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.parquet")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA, streamB})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeParquet
+
+		bw, ready := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, dir)
+		assert.Equal(t, []string{"out.parquet"}, names)
+		assert.Len(t, ready, 1)
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestReadParquet(t, target)
+		fsArrowTestAssertRows(t, append(append([][]any{}, streamA...), streamB...), rows)
+	})
+
+	// parquet compresses internally, so the file name keeps no compression suffix
+	t.Run("parquet compression stays internal", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeParquet
+		sc.Compression = iop.GzipCompressorType
+		sc.FileMaxRows = 3
+
+		bw, _ := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{"part.01.0001.parquet", "part.01.0002.parquet"}, names)
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadParquet)
+		fsArrowTestAssertRows(t, streamA, rows)
+	})
+
+	// arrow ipc has no internal compression, so the file name carries the suffix
+	t.Run("arrow compression appends suffix", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out")
+
+		df := fsArrowTestDataflow(t, [][][]any{streamA})
+		sc := iop.DefaultStreamConfig()
+		sc.Format = dbio.FileTypeArrow
+		sc.Compression = iop.GzipCompressorType
+		sc.FileMaxRows = 3
+
+		bw, _ := fsArrowTestWrite(t, df, target, sc)
+
+		names, size := fsArrowTestPartNames(t, target)
+		assert.Equal(t, []string{"part.01.0001.arrow.gz", "part.01.0002.arrow.gz"}, names)
+		assert.Equal(t, size, bw)
+
+		rows := fsArrowTestRows(t, target, fsArrowTestReadArrowGzip)
+		fsArrowTestAssertRows(t, streamA, rows)
+	})
+}
+
+// TestArrowLaneRowPathUnchanged checks that a non-Arrow dataflow still takes the
+// row path: same csv funnel, same file, same content.
+func TestArrowLaneRowPathUnchanged(t *testing.T) {
+	columns := fsArrowTestColumns()
+	data := iop.NewDataset(columns)
+	data.Inferred = true
+	data.Append(
+		[]any{int64(1), "a1"},
+		[]any{int64(2), nil},
+	)
+
+	df, err := iop.MakeDataFlow(data.Stream())
+	require.NoError(t, err)
+	assert.False(t, df.ArrowOnly())
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.csv")
+
+	sc := iop.DefaultStreamConfig()
+	sc.Format = dbio.FileTypeCsv
+	sc.Delimiter = ","
+	sc.Header = true
+
+	bw, ready := fsArrowTestWrite(t, df, target, sc)
+	assert.Positive(t, bw)
+	assert.Len(t, ready, 1)
+
+	names, size := fsArrowTestPartNames(t, dir)
+	assert.Equal(t, []string{"out.csv"}, names)
+	assert.Equal(t, size, bw)
+
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+
+	lines := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		lines = append(lines, strings.TrimSuffix(line, "\r"))
+	}
+	assert.Equal(t, []string{"id,name", "1,a1", "2,"}, lines)
+}
+
+// arrowSrcTestWriteParquet writes a parquet file of columns and rows.
+func arrowSrcTestWriteParquet(t *testing.T, dir, name string, columns iop.Columns, rows [][]any) {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	defer file.Close()
+
+	schema := iop.ColumnsToArrowSchema(columns)
+	writer, err := iop.NewParquetArrowWriterFromSchema(file, schema, compress.Codecs.Snappy)
+	require.NoError(t, err)
+
+	// the fsArrowTestRecord helper builds the (id, name) pair of
+	// fsArrowTestColumns, which is the schema the tests write
+	rec := fsArrowTestRecord(t, schema, rows)
+	require.NoError(t, writer.WriteRecord(rec))
+	rec.Release()
+
+	require.NoError(t, writer.Close())
+}
+
+// arrowSrcTestColumnsWithExtra is fsArrowTestColumns plus one column, for the
+// schema drift case.
+func arrowSrcTestColumnsWithExtra() iop.Columns {
+	return append(fsArrowTestColumns(), iop.Column{Name: "extra", Type: iop.BigIntType})
+}
+
+// arrowSrcTestRows drains every record of every stream of df and returns the
+// rows. The dataflow is closed: a lane dataflow pushes one stream per file.
+func arrowSrcTestRows(t *testing.T, df *iop.Dataflow) (rows [][]any) {
+	t.Helper()
+
+	for ds := range df.StreamCh {
+		rs := ds.RecordStream()
+		require.NotNil(t, rs, "lane streams carry records")
+
+		for {
+			rec, ok := rs.Next()
+			if !ok {
+				break
+			}
+			for r := range int(rec.NumRows()) {
+				row := make([]any, rec.NumCols())
+				for c := range int(rec.NumCols()) {
+					row[c] = iop.GetValueFromArrowArray(rec.Column(c), r)
+				}
+				rows = append(rows, row)
+			}
+			rec.Release()
+		}
+
+		require.NoError(t, rs.Err())
+		require.Greater(t, ds.Count, uint64(0), "the stream counted its rows")
+		ds.Close()
+	}
+
+	return rows
+}
+
+// TestArrowFileSet_SchemaDrift checks the up-front footer check: files that
+// share one schema give a set, and a later file with a different schema
+// declines the whole set with a reason that names the file.
+func TestArrowFileSet_SchemaDrift(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+
+	cfg := iop.FileStreamConfig{Format: dbio.FileTypeParquet}
+	columns := fsArrowTestColumns()
+
+	// one file alone: no drift possible
+	arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns, [][]any{{1, "a"}})
+	set, reason, err := NewArrowFileSet(fs, dir, cfg)
+	require.NoError(t, err)
+	require.Empty(t, reason)
+	require.NotNil(t, set)
+	assert.Equal(t, columns.Names(), iop.ArrowSchemaToColumns(set.Schema()).Names())
+	set.RemoveTemps()
+
+	// a second file with the same schema: one set
+	arrowSrcTestWriteParquet(t, dir, "part.02.parquet", columns, [][]any{{2, "b"}})
+	set, reason, err = NewArrowFileSet(fs, dir, cfg)
+	require.NoError(t, err)
+	require.Empty(t, reason)
+	require.NotNil(t, set)
+	set.RemoveTemps()
+
+	// a third file with a different schema: the whole set declines
+	arrowSrcTestWriteParquet(t, dir, "part.03.parquet", arrowSrcTestColumnsWithExtra(), nil)
+	set, reason, err = NewArrowFileSet(fs, dir, cfg)
+	require.NoError(t, err)
+	assert.Nil(t, set)
+	require.NotEmpty(t, reason)
+	assert.Contains(t, reason, "part.03.parquet")
+
+	// the temp copies of a declined set are gone: the drift file is local, so
+	// there was nothing to copy, and every file is still in place
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 3)
+}
+
+// TestArrowFileSet_Dataflow checks that every file is its own stream: two
+// files give two lane datastreams with the rows of each file, in file order.
+func TestArrowFileSet_Dataflow(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+
+	columns := fsArrowTestColumns()
+	arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns, [][]any{{1, "a"}, {2, nil}})
+	arrowSrcTestWriteParquet(t, dir, "part.02.parquet", columns, [][]any{{3, "c"}})
+
+	set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{Format: dbio.FileTypeParquet})
+	require.NoError(t, err)
+	require.Empty(t, reason)
+	require.NotNil(t, set)
+
+	df, err := set.Dataflow(fsArrowTestLane{}, iop.FileStreamConfig{Format: dbio.FileTypeParquet}, "")
+	require.NoError(t, err)
+	require.True(t, df.ArrowOnly(), "the dataflow carries records, not rows")
+	assert.Equal(t, columns.Names(), df.Columns.Names())
+
+	rows := arrowSrcTestRows(t, df)
+	assert.Equal(t, [][]any{{int64(1), "a"}, {int64(2), nil}, {int64(3), "c"}}, rows)
+	assert.Len(t, df.Streams, 2, "one datastream per file")
+
+	set.RemoveTemps()
+}
+
+// TestArrowFileSet_DataflowSelectAndLimit checks the two reader knobs: the
+// select prunes the record columns and the limit stops the stream.
+func TestArrowFileSet_DataflowSelectAndLimit(t *testing.T) {
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+
+	columns := fsArrowTestColumns()
+
+	t.Run("select", func(t *testing.T) {
+		dir := t.TempDir()
+		arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns, [][]any{{1, "a"}, {2, "b"}})
+
+		set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{Format: dbio.FileTypeParquet})
+		require.NoError(t, err)
+		require.Empty(t, reason)
+		require.NotNil(t, set)
+
+		df, err := set.Dataflow(fsArrowTestLane{}, iop.FileStreamConfig{
+			Format: dbio.FileTypeParquet,
+			Select: []string{"name"},
+		}, "")
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"name"}, df.Columns.Names())
+		assert.Equal(t, [][]any{{"a"}, {"b"}}, arrowSrcTestRows(t, df))
+
+		set.RemoveTemps()
+	})
+
+	t.Run("select missing column", func(t *testing.T) {
+		dir := t.TempDir()
+		arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns, [][]any{{1, "a"}})
+
+		// the select is checked with the footer schema, before any dataflow
+		set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{
+			Format: dbio.FileTypeParquet,
+			Select: []string{"nope"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nope")
+		assert.Nil(t, set)
+		assert.Empty(t, reason)
+	})
+
+	t.Run("not a parquet file", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "part.01.parquet"), []byte("not parquet"), 0o600))
+
+		set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{Format: dbio.FileTypeParquet})
+		require.Error(t, err)
+		assert.Nil(t, set)
+		assert.Empty(t, reason)
+	})
+
+	t.Run("limit", func(t *testing.T) {
+		dir := t.TempDir()
+		arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns,
+			[][]any{{1, "a"}, {2, "b"}, {3, "c"}, {4, "d"}, {5, "e"}})
+
+		set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{Format: dbio.FileTypeParquet})
+		require.NoError(t, err)
+		require.Empty(t, reason)
+
+		df, err := set.Dataflow(fsArrowTestLane{}, iop.FileStreamConfig{
+			Format: dbio.FileTypeParquet,
+			Limit:  3,
+		}, "")
+		require.NoError(t, err)
+
+		assert.Equal(t, [][]any{{int64(1), "a"}, {int64(2), "b"}, {int64(3), "c"}}, arrowSrcTestRows(t, df))
+
+		set.RemoveTemps()
+	})
+}
+
+// TestArrowFileSet_DataflowMaxKey checks that the update key of the
+// incremental state is tracked: the stream reports its maximum.
+func TestArrowFileSet_DataflowMaxKey(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+
+	columns := fsArrowTestColumns()
+	arrowSrcTestWriteParquet(t, dir, "part.01.parquet", columns, [][]any{{1, "a"}, {7, "g"}})
+
+	set, reason, err := NewArrowFileSet(fs, dir, iop.FileStreamConfig{Format: dbio.FileTypeParquet})
+	require.NoError(t, err)
+	require.Empty(t, reason)
+
+	df, err := set.Dataflow(fsArrowTestLane{}, iop.FileStreamConfig{Format: dbio.FileTypeParquet}, "id")
+	require.NoError(t, err)
+
+	rows := arrowSrcTestRows(t, df)
+	require.Len(t, rows, 2)
+
+	// fsArrowTestLane tracks nothing, so the max stays unset: the index is what
+	// this test checks, through the tracked column of the stream
+	rs := df.Streams[0].RecordStream()
+	_, _, ok := rs.TrackedMax()
+	assert.False(t, ok, "the fake lane reports no max")
+
+	set.RemoveTemps()
+
+	// a max key that no file column matches is not tracked
+	df, err = set.Dataflow(fsArrowTestLane{}, iop.FileStreamConfig{Format: dbio.FileTypeParquet}, "nope")
+	require.NoError(t, err)
+	assert.Equal(t, rows, arrowSrcTestRows(t, df))
 }

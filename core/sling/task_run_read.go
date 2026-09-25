@@ -55,6 +55,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	cfg.Source.table = sTable
 
+	// StarRocks: the first metadata pass did not know the source primary key
+	// and set _sling_row_id as hash key. Use the primary key instead.
+	if cfg.TgtConn.Type == dbio.TypeDbStarRocks && len(sTable.Columns.PrimaryKeyNames()) > 0 {
+		if hashKeys := cfg.Target.Options.TableKeys[iop.HashKey]; len(hashKeys) == 1 && hashKeys[0] == env.ReservedFields.RowID {
+			delete(cfg.Target.Options.TableKeys, iop.HashKey)
+			srcConn.SetProp("METADATA", g.Marshal(t.setGetMetadata()))
+		}
+	}
+
 	if len(cfg.Source.Select) > 0 {
 		// Normalize select expressions
 		rawSelect := lo.Map(cfg.Source.Select, func(f string, i int) string {
@@ -336,8 +345,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	return
 }
 
-// ReadFromFile reads from a source file
-func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+// ReadFromFile reads from a source file. tgtConn is the live target
+// connection when the run has one, so the arrow lane can check the target
+// schema before the read starts.
+func (t *TaskExecution) ReadFromFile(cfg *Config, tgtConn database.Connection) (df *iop.Dataflow, err error) {
 
 	setStage("3 - prepare-dataflow")
 
@@ -445,7 +456,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {
 			fsCfg.Format = *ffmt
 		}
-		df, err = fs.ReadDataflow(uri, fsCfg)
+		df, err = t.readFsDataflow(fs, uri, fsCfg, tgtConn)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
 			return t.df, err
@@ -480,6 +491,107 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	setStage("3 - dataflow-stream")
 
 	return
+}
+
+// readFsDataflow reads a source file system: on the arrow lane when the gate
+// allows it, on the row path otherwise.
+func (t *TaskExecution) readFsDataflow(fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (df *iop.Dataflow, err error) {
+	df, err = t.readArrowFileDataflow(fs, uri, fsCfg, tgtConn)
+	if err != nil || df != nil {
+		return df, err
+	}
+
+	return fs.ReadDataflow(uri, fsCfg)
+}
+
+// readArrowFileDataflow returns a dataflow of Arrow records for a parquet or
+// arrow file source, or nil when the stream takes the row path. The gate runs
+// first, so a decline costs nothing; the file footers are read only when the
+// lane is on.
+func (t *TaskExecution) readArrowFileDataflow(fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (df *iop.Dataflow, err error) {
+	cfg := t.Config
+	if cfg.SrcConn.Type.Kind() != dbio.KindFile {
+		return nil, nil
+	}
+
+	stream := cfg.Source.Stream
+	if stream == "" {
+		stream = uri
+	}
+
+	decision := t.decideArrowLane(arrowLaneSource{file: true, stream: stream}, tgtConn)
+	decision.Log()
+
+	if err = decision.forcedErr(); err != nil {
+		return nil, err
+	} else if !decision.enabled() {
+		return nil, nil
+	}
+
+	// the lane reads the footers up front: every file must share one schema
+	set, reason, err := filesys.NewArrowFileSet(fs, uri, fsCfg)
+	if err != nil {
+		return nil, g.Error(err, "could not read the arrow files of %s", uri)
+	} else if reason != "" {
+		return nil, arrowLaneFileDecline(stream, reason)
+	}
+
+	// stage 2 on the footer schema: there is no query to read the real schema
+	// from later, so the verdict is final here
+	maxKey := ""
+	if decision.check != nil {
+		ok, _, maxCol := decision.check(set.Schema(), iop.ArrowSchemaToColumns(set.Schema()))
+		if !ok {
+			// the check logged its own decline line
+			set.RemoveTemps()
+			return nil, nil
+		}
+		if maxCol >= 0 {
+			maxKey = set.Schema().Field(maxCol).Name
+			if !arrowSelectHas(fsCfg.Select, maxKey) {
+				// the row path still advances the incremental state
+				set.RemoveTemps()
+				return nil, arrowLaneFileDecline(stream, g.F("update_key column %q is not read", maxKey))
+			}
+		}
+	}
+
+	df, err = set.Dataflow(decision.lane, fsCfg, maxKey)
+	if err != nil {
+		set.RemoveTemps()
+		return nil, g.Error(err, "could not read the arrow files of %s", uri)
+	}
+
+	// the temp copies outlive the streams: the datastreams read from them
+	df.Defer(set.RemoveTemps)
+	df.FsURL = uri
+
+	return df, nil
+}
+
+// arrowLaneFileDecline logs the one decline line of a file-source stream and
+// returns the error of a forced run.
+func arrowLaneFileDecline(stream, reason string) error {
+	d := arrowLaneDecline(getArrowLaneSwitch(), arrowLaneDebug, reason)
+	d.stream = stream
+	d.Log()
+	return d.forcedErr()
+}
+
+// arrowSelectHas reports whether a select list names the column. The files of
+// the lane are read by plain column names.
+func arrowSelectHas(selects []string, name string) bool {
+	if len(selects) == 0 {
+		return true
+	}
+
+	for _, sel := range selects {
+		if strings.EqualFold(strings.TrimSpace(sel), name) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ReadFromApi reads from a source api

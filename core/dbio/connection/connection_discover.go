@@ -18,8 +18,78 @@ import (
 	"github.com/spf13/cast"
 )
 
+// TestOptions configures a connection test.
+type TestOptions struct {
+	Endpoints   []string       // endpoint names to test; empty means all
+	Limit       int            // records per request (default 10)
+	MaxRequests int            // requests per endpoint (default 2)
+	Context     map[string]any // spec test context (store, range, mode)
+	SpecFile    string         // overlay this spec file on the connection's spec
+	Trace       bool           // trace-level logging
+	OnEvent     func(api.SpecEvent)
+}
+
+// testOptionsFromEnv builds TestOptions from the SLING_TEST_* environment
+// variables, the way `sling conns test` has always configured a test.
+func testOptionsFromEnv() TestOptions {
+	opts := TestOptions{}
+
+	if val := os.Getenv("SLING_TEST_ENDPOINTS"); val != "" {
+		opts.Endpoints = strings.Split(val, ",")
+	}
+
+	limit := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_LIMIT", "10"))
+	if limit > 1000 {
+		limit = 1000 // let's set the max limit to 1000 for testing
+	}
+	if g.Getenv("SLING_TEST_ENDPOINT_LIMIT") == "" {
+		g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
+	}
+	opts.Limit = limit
+
+	maxRequests := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS", "2"))
+	if maxRequests == 0 {
+		maxRequests = 3
+	}
+	if g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS") == "" {
+		g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", maxRequests)))
+	}
+	opts.MaxRequests = maxRequests
+
+	if val := g.Getenv("SLING_TEST_ENDPOINT_CONTEXT"); val != "" {
+		contextMap := g.M()
+		if err := g.Unmarshal(val, &contextMap); err != nil {
+			g.Warn("could not set context for spec testing: %s", err.Error())
+		}
+		opts.Context = contextMap
+	}
+
+	return opts
+}
+
+// Test keeps its signature: it builds the options from the SLING_TEST_* env
+// vars and calls TestWithOptions, so the CLI does not change.
 func (c *Connection) Test() (ok bool, err error) {
+	return c.TestWithOptions(context.Background(), testOptionsFromEnv())
+}
+
+// TestWithOptions tests a connection. For API connections it tests the
+// requested (or all) endpoints, emitting a spec event per step to opts.OnEvent
+// and stopping promptly when ctx is cancelled.
+func (c *Connection) TestWithOptions(ctx context.Context, opts TestOptions) (ok bool, err error) {
 	os.Setenv("SLING_TEST_MODE", "true")
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if opts.OnEvent != nil {
+		ctx = api.WithSpecEventHandler(ctx, opts.OnEvent)
+	}
+	if opts.Trace {
+		level := g.GetLogLevel()
+		g.SetLogLevel(g.TraceLevel)
+		defer g.SetLogLevel(level)
+	}
 
 	switch {
 	case c.Type.IsDb():
@@ -37,9 +107,9 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		fileCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		defer cancel()
-		err = fileClient.Init(ctx)
+		err = fileClient.Init(fileCtx)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
@@ -56,7 +126,7 @@ func (c *Connection) Test() (ok bool, err error) {
 			g.Debug(g.Marshal(nodes.Paths()))
 		}
 	case c.Type.IsAPI():
-		apiClient, err := c.AsAPI(AsConnOptions{UseCache: false})
+		apiClient, err := c.AsAPIContext(ctx, AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -68,40 +138,46 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not authenticate to %s", c.Name)
 		}
 
-		var testEndpoints, testedEndpoints []string
-		if val := os.Getenv("SLING_TEST_ENDPOINTS"); val != "" {
-			testEndpoints = strings.Split(os.Getenv("SLING_TEST_ENDPOINTS"), ",")
-		}
+		testEndpoints := opts.Endpoints
 
 		endpoints, err := apiClient.ListEndpoints()
 		if err != nil {
 			return ok, g.Error(err, "could not list endpoints")
 		}
 
-		limit := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_LIMIT", "10"))
+		limit := opts.Limit
+		if limit <= 0 {
+			limit = 10
+		}
 		if limit > 1000 {
 			limit = 1000 // let's set the max limit to 1000 for testing
 		}
-		if g.Getenv("SLING_TEST_ENDPOINT_LIMIT") == "" {
-			g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
-		}
 
-		maxRequests := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS", "2"))
-		if maxRequests == 0 {
-			maxRequests = 3
+		maxRequests := opts.MaxRequests
+		if maxRequests <= 0 {
+			maxRequests = 2
 		}
-
 		apiClient.Context.Map.Set("max_requests", maxRequests)
-		if g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS") == "" {
-			g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", maxRequests)))
-		}
 
 		// obtain the best endpoint for testing one (for connectivity/authentication)
+		// (legacy env path, kept for callers that use Test)
 		if cast.ToBool(g.Getenv("SLING_TEST_SINGLE_ENDPOINT")) {
 			testEndpoints = []string{apiClient.GetTestEndpoint()}
 		}
 
+		emit := func(event api.SpecEvent) {
+			if opts.OnEvent != nil {
+				opts.OnEvent(event)
+			}
+		}
+
+		var testedEndpoints []string
 		for _, endpoint := range endpoints {
+			// a cancelled test stops before the next endpoint
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+
 			// check for match to test (if provided)
 			allowTest := len(testEndpoints) == 0
 			for _, testEndpoint := range testEndpoints {
@@ -115,22 +191,16 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			println()
 			g.Info("testing endpoint: %#v", endpoint.Name)
-			api.FireSpecEvent(g.M("type", "endpoint-start", "endpoint", endpoint.Name))
+			emit(api.SpecEvent{Type: api.SpecEventTypeEndpointStart, Endpoint: endpoint.Name})
 			testedEndpoints = append(testedEndpoints, endpoint.Name)
 
 			// set limits for testing
 			options := api.APIStreamConfig{Flatten: 1, Limit: limit}
 
 			// set context if provided
-			contextPayload := cast.ToString(g.Getenv("SLING_TEST_ENDPOINT_CONTEXT"))
-			if contextPayload != "" {
-				contextMap := g.M()
-				if err := g.Unmarshal(contextPayload, &contextMap); err != nil {
-					g.Warn("could not set context for spec testing: %s", err.Error())
-				}
-
+			if len(opts.Context) > 0 {
 				// set store
-				if store, ok := contextMap["store"]; ok && store != "" {
+				if store, ok := opts.Context["store"]; ok && store != "" {
 					storeMap, err := g.UnmarshalMap(cast.ToString(store))
 					if err != nil {
 						g.Warn("could not unmarshal context store: %s", err.Error())
@@ -139,28 +209,41 @@ func (c *Connection) Test() (ok bool, err error) {
 				}
 
 				// set range & mode
-				options.Range = cast.ToString(contextMap["range"])
-				options.Mode = cast.ToString(contextMap["mode"])
+				options.Range = cast.ToString(opts.Context["range"])
+				options.Mode = cast.ToString(opts.Context["mode"])
 			}
 
 			df, err := apiClient.ReadDataflow(endpoint.Name, options)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return false, ctxErr
+				}
+				emit(api.SpecEvent{Type: api.SpecEventTypeError, Endpoint: endpoint.Name, Error: err.Error()})
 				return ok, g.Error(err, "error testing endpoint: %s", endpoint.Name)
 			}
 
 			data, err := df.Collect()
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return false, ctxErr
+				}
+				emit(api.SpecEvent{Type: api.SpecEventTypeError, Endpoint: endpoint.Name, Error: err.Error()})
 				return ok, g.Error(err, "could collect data from endpoint: %s", endpoint.Name)
 			}
 
 			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
-			api.FireSpecEvent(g.M("type", "endpoint-done", "endpoint", endpoint.Name, "record_count", len(data.Rows)))
 
 			records := data.Records(false)
 			if len(records) > 0 {
 				record := records[0]
 				g.Debug("   columns = %s", g.Marshal(lo.Keys(record)))
 			}
+
+			emit(api.SpecEvent{
+				Type:        api.SpecEventTypeEndpointDone,
+				Endpoint:    endpoint.Name,
+				RecordCount: len(data.Rows),
+			})
 
 		}
 
@@ -174,6 +257,11 @@ func (c *Connection) Test() (ok bool, err error) {
 			if !tested {
 				g.Warn(`did not test endpoint "%s" (not found)`, testEndpoint)
 			}
+		}
+
+		// a cancelled test reports cancellation, not success
+		if err := ctx.Err(); err != nil {
+			return false, err
 		}
 
 	}

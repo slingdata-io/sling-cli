@@ -32,11 +32,127 @@ func MergeConnProps(existing, incoming map[string]any) map[string]any {
 	return out
 }
 
+// EnvVarNameOf builds the canonical env var name for a connection field.
+func EnvVarNameOf(connName, key string) string {
+	name := sanitizeEnvVarPart(connName)
+	prop := sanitizeEnvVarPart(key)
+	return name + "_" + prop
+}
+
+func sanitizeEnvVarPart(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
 // EnvVarRef builds ${<NAME>_<PROP>} for a connection field.
 func EnvVarRef(connName, key string) string {
-	name := strings.ToUpper(strings.TrimSpace(connName))
-	prop := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
-	return "${" + name + "_" + prop + "}"
+	return "${" + EnvVarNameOf(connName, key) + "}"
+}
+
+// PromoteLiteralSecrets replaces literal secret values in props with ${VAR}
+// refs, recording the values to write under `env:` in envUpdates. It returns
+// the promoted prop paths, e.g. []string{"password", "secrets.client_id"}.
+//
+// Secret fields are: top-level keys in env.SecretKeys, and every leaf under a
+// nested `secrets` map (same rule RejectLiteralSecrets applies when refusing).
+// Values that are already ${VAR} refs are left alone, and so are values that
+// equal the expansion of the ref already on disk for that field (existing),
+// so retyping an unchanged secret does not add a plaintext copy to env:.
+func PromoteLiteralSecrets(connName string, props, existing map[string]any, envUpdates map[string]any) (promoted []string) {
+	if props == nil || envUpdates == nil {
+		return nil
+	}
+
+	for _, k := range env.SecretKeys {
+		v, ok := props[k]
+		if !ok || !isLiteralSecret(v) {
+			continue
+		}
+		if ref, ok := existingRefFor(existing[k], cast.ToString(v)); ok {
+			props[k] = ref
+			continue
+		}
+		envUpdates[EnvVarNameOf(connName, k)] = cast.ToString(v)
+		props[k] = EnvVarRef(connName, k)
+		promoted = append(promoted, k)
+	}
+
+	secrets := asAnyMap(props["secrets"])
+	if secrets == nil {
+		return promoted
+	}
+	existingSecrets := asAnyMap(existing["secrets"])
+	keys := lo.Keys(secrets)
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !isLiteralSecret(secrets[k]) {
+			continue
+		}
+		if ref, ok := existingRefFor(existingSecrets[k], cast.ToString(secrets[k])); ok {
+			secrets[k] = ref
+			continue
+		}
+		envKey := EnvVarNameOf(connName, k)
+		if _, taken := envUpdates[envKey]; taken {
+			// leaf name collides with another promoted secret; use the path
+			envKey = EnvVarNameOf(connName, "secrets."+k)
+		}
+		envUpdates[envKey] = cast.ToString(secrets[k])
+		secrets[k] = "${" + envKey + "}"
+		promoted = append(promoted, "secrets."+k)
+	}
+	return promoted
+}
+
+// existingRefFor returns the on-disk ref for a field when literal equals that
+// ref's expansion.
+func existingRefFor(existing any, literal string) (string, bool) {
+	ref, ok := existing.(string)
+	if !ok || !env.IsEnvVarRef(ref) {
+		return "", false
+	}
+	if literal == "" || env.ExpandRef(ref) != literal {
+		return "", false
+	}
+	return ref, true
+}
+
+// PreserveRefs keeps an on-disk ${VAR} ref for any incoming literal value that
+// equals that ref's expansion. The GUI never receives expanded values, but the
+// CLI contract does allow setting a props map with resolved values; keeping the
+// ref keeps the file free of plaintext secrets.
+func PreserveRefs(existing, incoming map[string]any) {
+	if existing == nil || incoming == nil {
+		return
+	}
+	keys := lo.Keys(incoming)
+	sort.Strings(keys)
+	for _, k := range keys {
+		if nested := asAnyMap(incoming[k]); nested != nil {
+			PreserveRefs(asAnyMap(existing[k]), nested)
+			continue
+		}
+		oldRef, ok := existing[k].(string)
+		if !ok || !env.IsEnvVarRef(oldRef) {
+			continue
+		}
+		val, ok := incoming[k].(string)
+		if !ok || env.IsEnvVarRef(val) {
+			continue
+		}
+		if env.ExpandRef(oldRef) == val {
+			incoming[k] = oldRef
+		}
+	}
 }
 
 // NormalizeConnProps parses secrets/inputs YAML strings into maps.

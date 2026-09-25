@@ -1,0 +1,16 @@
+# Repro: incremental + primary_key + delete_missing: soft into StarRocks.
+# User report: fails after the load with "could not find column id in table ...".
+# Setup and second run are in suite.cli.yaml.
+source: postgres
+target: starrocks
+
+defaults:
+  mode: incremental
+  primary_key: [id]
+  update_key: updated_at
+  target_options:
+    delete_missing: soft
+
+streams:
+  public.sr_dm_orders:
+    object: public.sr_dm_orders

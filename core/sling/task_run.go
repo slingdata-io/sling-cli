@@ -406,6 +406,11 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		defer srcConn.Close()
 	}
 
+	// arrow lane: a parquet or arrow file target takes the records as they are
+	if err = t.setArrowLane(arrowLaneSource{conn: srcConn}, nil); err != nil {
+		return err
+	}
+
 	t.SetProgress("reading from source database")
 	defer t.Cleanup()
 	t.df, err = t.ReadFromDB(t.Config, srcConn)
@@ -491,7 +496,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config)
+	t.df, err = t.ReadFromFile(t.Config, tgtConn)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
@@ -766,7 +771,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config)
+	t.df, err = t.ReadFromFile(t.Config, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
@@ -841,6 +846,12 @@ func (t *TaskExecution) runDbToDb() (err error) {
 			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
 			return nil
 		}
+	}
+
+	// arrow lane: decide before the read, so the stream mode never changes
+	// after it starts (D26)
+	if err = t.setArrowLane(arrowLaneSource{conn: srcConn}, tgtConn); err != nil {
+		return err
 	}
 
 	// get watermark

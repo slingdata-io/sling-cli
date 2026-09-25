@@ -1,0 +1,16 @@
+# LanceDB incremental merge (upsert) from a local CSV, using the default
+# delete_insert strategy, which the lance extension serves as MERGE INTO.
+source: LOCAL
+target: LANCEDB_TEST
+
+defaults:
+  mode: incremental
+  primary_key: id
+  update_key: create_dt
+  target_options:
+    add_new_columns: true
+    use_bulk: true
+
+streams:
+  file://tests/files/test1.upsert.csv:
+    object: main.lancedb_cli_test

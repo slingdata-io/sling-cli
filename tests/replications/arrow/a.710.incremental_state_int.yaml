@@ -1,0 +1,27 @@
+# arrow lane CLI suite case 710: incremental with state, integer update key
+#
+# env: SOURCE, TARGET, SCHEMA, KEEP_TARGET (all set by the suite entry in
+# tests/suite.cli.arrow.yaml). The end hook drops this case's target table
+# unless the entry sets KEEP_TARGET=true so that verify.yaml can compare it.
+source: '{SOURCE}'
+target: '{TARGET}'
+
+defaults:
+  mode: incremental
+
+hooks:
+  end:
+    - type: query
+      if: 'env.KEEP_TARGET == "false"'
+      connection: '{TARGET}'
+      query: 'drop table if exists {SCHEMA}.arrow_dst_710'
+
+streams:
+  '{SCHEMA}.arrow_src':
+    object: '{SCHEMA}.arrow_dst_710'
+    update_key: c_int8
+
+env:
+  SOURCE: ${SOURCE}
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

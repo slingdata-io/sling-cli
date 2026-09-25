@@ -1,13 +1,9 @@
 package connection
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
-	"os"
-	"sort"
-	"strings"
-	"time"
-
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
@@ -19,6 +15,12 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 )
 
 type ConnEntry struct {
@@ -65,20 +67,76 @@ func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys
 	return
 }
 
+// Test keeps its signature: it builds the options from the SLING_TEST_* env
+// vars and calls TestWithOptions, so the CLI does not change.
 func (ce ConnEntries) Test(name string) (ok bool, err error) {
+	return ce.TestWithOptions(context.Background(), name, testOptionsFromEnv())
+}
+
+// TestWithOptions tests the named connection with opts. When opts.SpecFile is
+// set, it overlays that spec file on the connection's spec for this test only.
+func (ce ConnEntries) TestWithOptions(ctx context.Context, name string, opts TestOptions) (ok bool, err error) {
+	if opts.SpecFile != "" {
+		entries, err := ce.withSpecFile(name, opts.SpecFile)
+		if err != nil {
+			return false, err
+		}
+		ce = entries
+	}
+
 	conn := ce.Get(name)
 	if conn.Name == "" {
 		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 	defer conn.Connection.Close()
-	ok, err = conn.Connection.Test()
+	ok, err = conn.Connection.TestWithOptions(ctx, opts)
 	return
+}
+
+// withSpecFile returns a copy of entries where the named connection's spec
+// points at specFile (a relative path resolves against the working directory).
+// The original entries stay untouched.
+func (ce ConnEntries) withSpecFile(name, specFile string) (ConnEntries, error) {
+	absSpec := specFile
+	if !filepath.IsAbs(absSpec) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, g.Error(err, "could not resolve spec file path: %s", specFile)
+		}
+		absSpec = filepath.Join(wd, absSpec)
+	}
+	if _, err := os.Stat(absSpec); err != nil {
+		return nil, g.Error(err, "spec file not found: %s", absSpec)
+	}
+
+	out := make(ConnEntries, len(ce))
+	copy(out, ce)
+	for i := range out {
+		if !strings.EqualFold(out[i].Name, name) {
+			continue
+		}
+
+		data := make(map[string]any, len(out[i].Connection.Data)+1)
+		for k, v := range out[i].Connection.Data {
+			data[k] = v
+		}
+		data["spec"] = "file://" + absSpec
+
+		conn, err := NewConnection(out[i].Connection.Name, out[i].Connection.Type, data)
+		if err != nil {
+			return nil, g.Error(err, "could not overlay spec file on connection %s", name)
+		}
+		out[i].Connection = conn
+		return out, nil
+	}
+	return nil, g.Error("Invalid Connection name: %s. Make sure it is created.", name)
 }
 
 var (
 	localConns        ConnEntries
 	localConnsTs      time.Time
 	localConnsExclude string
+	invalidEnvWarned  sync.Map // env file paths already warned as invalid
 )
 
 type LocalConnsExclude string
@@ -131,8 +189,14 @@ func GetLocalConns(options ...any) ConnEntries {
 	}
 
 	if envFilePath := env.GetEnvFilePath(env.HomeDir); g.PathExists(envFilePath) {
+		ef := env.LoadEnvFile(envFilePath)
+		if err := ef.CheckFile(); err != nil {
+			if _, warned := invalidEnvWarned.LoadOrStore(envFilePath, true); !warned {
+				g.Warn("ignoring connections in env file: %s", g.ErrMsgSimple(err))
+			}
+		}
 		m := g.M()
-		g.JSONConvert(env.LoadEnvFile(envFilePath), &m)
+		g.JSONConvert(ef, &m)
 		profileConns, err := ReadConnections(m)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
@@ -301,6 +365,143 @@ type EnvFileConns struct {
 	EnvFile *env.EnvFile
 }
 
+// SetOptions controls SetValidated.
+type SetOptions struct {
+	// RejectLiteralSecrets refuses secret fields (and nested secrets values)
+	// that are not ${VAR} refs. The GUI path promotes literals first
+	// (PromoteLiteralSecrets) and then sets this as a backstop.
+	RejectLiteralSecrets bool
+	// AllowOverwrite permits replacing an existing connection entry.
+	AllowOverwrite bool
+	// RequireExisting makes a missing connection entry an error.
+	RequireExisting bool
+	// EnvUpdates, when non-empty, are written under `env:` in the same save
+	// as the connection entry (one write).
+	EnvUpdates map[string]any
+	// AllowEnvOverwrite permits replacing existing env: values.
+	AllowEnvOverwrite bool
+}
+
+// Get returns the raw (unexpanded) props of one connection from the env file,
+// plus whether it exists in this specific file. Unlike ConnectionEntries, it
+// does not go through LoadSlingEnvFile / ReadConnections, so ${VAR} refs stay
+// refs and a resolved secret can never be surfaced.
+func (ec *EnvFileConns) Get(name string) (props map[string]any, found bool) {
+	if ec.EnvFile == nil || strings.TrimSpace(name) == "" {
+		return nil, false
+	}
+	raw, err := ec.EnvFile.RawConnections()
+	if err != nil {
+		return nil, false
+	}
+	for k, v := range raw {
+		if strings.EqualFold(k, name) {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// SetValidated is Set + validation/drop-guards, used by the GUI path. It
+// merges over the raw on-disk entry (not the expanded struct), validates the
+// name and type, and writes through EnvFile.SetConnectionNode so ${VAR} refs
+// are never expanded onto disk.
+func (ec *EnvFileConns) SetValidated(name string, props map[string]any, opts SetOptions) (err error) {
+	if ec.EnvFile == nil {
+		return g.Error("env file is not set")
+	}
+	if strings.TrimSpace(name) == "" {
+		return g.Error("name is blank")
+	}
+	name = strings.ToUpper(strings.TrimSpace(name))
+	if err = env.ValidateKey(name); err != nil {
+		return err
+	}
+	if props == nil {
+		return g.Error("no properties provided for connection %s", name)
+	}
+
+	existing, exists := ec.Get(name)
+	if exists {
+		if !opts.AllowOverwrite {
+			return g.Error("connection %s already exists", name)
+		}
+		props = MergeConnProps(existing, props)
+	} else if opts.RequireExisting {
+		return g.Error("did not find connection `%s`", name)
+	}
+
+	if err = NormalizeConnProps(props); err != nil {
+		return err
+	}
+
+	// keep on-disk refs when a literal equals the ref's expansion
+	if exists {
+		PreserveRefs(existing, props)
+	}
+
+	// parse url
+	if url := cast.ToString(props["url"]); url != "" {
+		conn, uErr := NewConnectionFromURL(name, url)
+		if uErr != nil {
+			return g.Error(uErr, "could not parse url")
+		}
+		if _, ok := props["type"]; !ok {
+			props["type"] = conn.Type.String()
+		}
+	}
+
+	t, found := props["type"]
+	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
+		return g.Error("invalid type (%s)", cast.ToString(t))
+	} else if !found {
+		return g.Error("need to specify valid `type` key or provide `url`")
+	}
+
+	if opts.RejectLiteralSecrets {
+		if err = RejectLiteralSecrets(name, props); err != nil {
+			return err
+		}
+	}
+
+	if len(opts.EnvUpdates) > 0 {
+		if err = ec.checkEnvOverwrite(opts.EnvUpdates, opts.AllowEnvOverwrite); err != nil {
+			return err
+		}
+	}
+
+	if err = ec.EnvFile.SetConnectionNode(name, props, opts.EnvUpdates); err != nil {
+		return g.Error(err, "could not write env file")
+	}
+	return nil
+}
+
+// checkEnvOverwrite refuses to replace an existing env: value unless allowed.
+func (ec *EnvFileConns) checkEnvOverwrite(updates map[string]any, allowOverwrite bool) error {
+	if allowOverwrite {
+		return nil
+	}
+	existing, err := ec.EnvFile.RawEnv()
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		cur, ok := existing[k]
+		if !ok {
+			continue
+		}
+		if cast.ToString(cur) != cast.ToString(updates[k]) {
+			return g.Error("env var %s already exists in env.yaml; pass allow_overwrite to update it", k)
+		}
+	}
+	return nil
+}
+
 func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 
 	if name == "" {
@@ -353,6 +554,9 @@ func (ec *EnvFileConns) Unset(name string) (err error) {
 	}
 
 	ef := ec.EnvFile
+	if err = ef.CheckFile(); err != nil {
+		return err
+	}
 	_, ok := ef.Connections[name]
 	if !ok {
 		return g.Error("did not find connection `%s`", name)

@@ -104,6 +104,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &GoogleDriveFileSysClient{}
 	case dbio.TypeFileHTTP:
 		fsClient = &HTTPFileSysClient{}
+	case dbio.TypeFileDatabricksVolume:
+		fsClient = &DatabricksVolumeFileSysClient{}
 	default:
 		err = g.Error("Unrecognized File System")
 		return
@@ -176,6 +178,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
+	case strings.HasPrefix(url, "databricks-volume://"), strings.HasPrefix(url, "databricks://Volumes/"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileDatabricksVolume, props...)
 	case strings.HasPrefix(url, "file://"):
 		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
@@ -276,6 +281,13 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			return fs.Prefix("/") + path
 		}
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	case dbio.TypeFileDatabricksVolume:
+		for _, p := range []string{"databricks-volume://", "databricks://Volumes/"} {
+			if strings.HasPrefix(uri, p) {
+				return uri
+			}
+		}
+		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	case dbio.TypeFileS3, dbio.TypeFileGoogle:
 		// For S3/GCS, if URI already has the scheme prefix (e.g., s3://bucket/path),
 		// return it as-is to allow accessing different buckets with the same credentials.
@@ -297,7 +309,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	connType, _, path, err := ParseURLType(uri)
+	connType, host, path, err := ParseURLType(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +320,8 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	switch connType {
 	case dbio.TypeFileLocal:
 		path = strings.TrimPrefix(path, "./")
+	case dbio.TypeFileDatabricksVolume:
+		path = stripDatabricksVolumePrefix(host, path)
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
@@ -649,56 +663,9 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 		return df, nil
 	}
 
-	var nodes FileNodes
-	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
-		nodes = FileNodes{FileNode{URI: url}}
-	} else if prefixes := Cfg.FileSelect; len(prefixes) > 0 {
-		// Check if any FileSelect entries are full URIs with scheme prefix.
-		// If so, they may reference different buckets (multi-bucket access).
-		fullURIPrefixes := []string{}
-		relativePrefixes := []string{}
-
-		for _, prefix := range prefixes {
-			if strings.Contains(prefix, "://") {
-				fullURIPrefixes = append(fullURIPrefixes, prefix)
-			} else {
-				relativePrefixes = append(relativePrefixes, prefix)
-			}
-		}
-
-		// Handle full URI prefixes (may be from different buckets)
-		if len(fullURIPrefixes) > 0 {
-			for _, uri := range fullURIPrefixes {
-				g.Trace("listing path (full URI): %s", uri)
-				uriNodes, err := fs.Self().ListRecursive(uri)
-				if err != nil {
-					err = g.Error(err, "Error getting paths for %s", uri)
-					return df, err
-				}
-				nodes = append(nodes, uriNodes...)
-			}
-		}
-
-		// Handle relative prefixes (original behavior)
-		if len(relativePrefixes) > 0 {
-			rootPath := GetDeepestPartitionParent(url)
-			g.Trace("listing path: %s", rootPath)
-			pathNodes, err := fs.Self().ListRecursive(rootPath)
-			if err != nil {
-				err = g.Error(err, "Error getting paths")
-				return df, err
-			}
-			// select only prefixes
-			pathNodes = pathNodes.SelectWithPrefix(relativePrefixes...)
-			nodes = append(nodes, pathNodes...)
-		}
-	} else {
-		g.Trace("listing path: %s", url)
-		nodes, err = fs.Self().ListRecursive(url)
-		if err != nil {
-			err = g.Error(err, "Error getting paths")
-			return
-		}
+	nodes, err := ListFileNodes(fs.Self(), url, Cfg)
+	if err != nil {
+		return df, err
 	}
 
 	if Cfg.Format == dbio.FileTypeNone {
@@ -1062,7 +1029,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		}
 	}
 
-	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
+	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp, dbio.TypeFileDatabricksVolume) {
 		path, err := fsClient.GetPath(url)
 		if err != nil {
 			return 0, g.Error(err, "Error Parsing url: "+url)
@@ -1072,6 +1039,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		if err != nil {
 			return 0, g.Error(err, "could not create directory")
 		}
+	}
+
+	// Arrow-native lane: the records go from the record stream straight to the
+	// file writer, so no row is built, no merge runs and no DuckDB is involved.
+	// The layout, naming, compression and counters match the row path below,
+	// which this replaces for these two formats.
+	if df.ArrowOnly() && g.In(sc.Format, dbio.FileTypeParquet, dbio.FileTypeArrow) {
+		return fs.writeDataflowRecords(df, url, fileReadyChn, sc, singleFile, concurrency, fileExt)
 	}
 
 	// set default batch limit
@@ -1115,6 +1090,204 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	return
 }
 
+// writeDataflowRecords writes an Arrow-only dataflow straight to parquet or
+// Arrow IPC files. The records flow from the record stream to the file writer,
+// so no row is built, no merge runs and no DuckDB is involved. Part naming,
+// partitioning, the compression suffix, the readiness signals and the byte
+// counters match the row path in WriteDataflowReady, which this replaces for
+// these two formats.
+func (fs *BaseFileSysClient) writeDataflowRecords(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc iop.StreamConfig, singleFile bool, concurrency int, fileExt string) (bw int64, err error) {
+	fsClient := fs.Self()
+
+	// set default batch limit
+	df.SetBatchLimit(sc.BatchLimit)
+
+	// parts of different streams are written concurrently
+	var bwTotal atomic.Int64
+
+	processStream := func(ds *iop.Datastream, partURL string) {
+		defer df.Context.Wg.Read.Done()
+		localCtx := g.NewContext(ds.Context.Ctx, concurrency)
+
+		writePart := func(reader io.Reader, batchR *iop.BatchReader, partURL string) {
+			defer localCtx.Wg.Read.Done()
+
+			bw0, err := fsClient.Write(partURL, reader)
+			bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
+			node := FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
+
+			if err != nil {
+				g.LogError(err)
+				df.Context.CaptureErr(g.Error(err))
+				ds.Context.CaptureErr(g.Error(err))
+				io.Copy(io.Discard, reader) // flush it out so it can close
+			}
+			g.Trace("wrote %s [%d rows] to %s", humanize.Bytes(cast.ToUint64(bw0)), batchR.Counter, partURL)
+			bwTotal.Add(bw0) // parts of several streams are written concurrently
+		}
+
+		// pre-add to WG to not hold next reader in memory while waiting
+		localCtx.Wg.Read.Add()
+		fileCount := 0
+
+		processReader := func(batchR *iop.BatchReader) error {
+			fileCount++
+			fileSuffix := lo.Ternary(fileExt == "", sc.Format.Ext(), fileExt)
+			subPartURL := fmt.Sprintf("%s.%04d%s", partURL, fileCount, fileSuffix)
+			if singleFile {
+				subPartURL = partURL
+				for _, comp := range []iop.CompressorType{
+					iop.GzipCompressorType,
+					iop.SnappyCompressorType,
+					iop.ZStandardCompressorType,
+				} {
+					compressor := iop.NewCompressor(comp)
+					if strings.HasSuffix(subPartURL, compressor.Suffix()) {
+						sc.Compression = comp
+						subPartURL = strings.TrimSuffix(subPartURL, compressor.Suffix())
+						break
+					}
+				}
+			}
+
+			compressor := iop.NewCompressor(sc.Compression)
+			if sc.Format == dbio.FileTypeParquet {
+				compressor = iop.NewCompressor("none") // compression is done internally
+			} else {
+				subPartURL = subPartURL + compressor.Suffix()
+			}
+
+			g.Trace("writing stream to " + subPartURL)
+			go writePart(compressor.Compress(batchR.Reader), batchR, subPartURL)
+			localCtx.Wg.Read.Add()
+
+			return df.Err()
+		}
+
+		// each reader is a part: the record channel rolls the file over at
+		// sc.FileMaxRows / sc.FileMaxBytes, and reads straight off the records
+		newRecordChnl := ds.NewParquetRecordChnl
+		if sc.Format == dbio.FileTypeArrow {
+			newRecordChnl = ds.NewArrowRecordChnl
+		}
+		for batchR := range newRecordChnl(sc) {
+			if err := processReader(batchR); err != nil {
+				break
+			}
+		}
+
+		ds.Buffer = nil // clear buffer
+		if ds.Err() != nil {
+			df.Context.CaptureErr(g.Error(ds.Err()))
+		}
+		localCtx.Wg.Read.Done() // clear that pre-added WG
+		localCtx.Wg.Read.Wait()
+	}
+
+	if singleFile {
+		// single file: funnel every stream into one record stream, the same way
+		// the row path funnels them through iop.MergeDataflow
+		ds := mergeRecordDataflow(df)
+		if ds == nil {
+			if e := df.Err(); e != nil {
+				return 0, g.Error(e)
+			}
+			return 0, g.Error("arrow lane: no stream to write to " + url)
+		}
+
+		g.Debug("writing to %s [compression=%s concurrency=%d fileFormat=%v singleFile=true]", url, sc.Compression, concurrency, sc.Format)
+
+		df.Context.Wg.Read.Add()
+		ds.SetConfig(fs.Props()) // pass options
+		go processStream(ds, url)
+	} else {
+		partCnt := 1
+		for ds := range df.StreamCh {
+			partURL := fmt.Sprintf("%s/part.%02d", url, partCnt)
+			g.Debug("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d fileFormat=%v singleFile=false]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, sc.Format)
+
+			df.Context.Wg.Read.Add()
+			ds.SetConfig(fs.Props()) // pass options
+			go processStream(ds, partURL)
+			partCnt++
+		}
+	}
+
+	df.Context.Wg.Read.Wait()
+	if df.Err() != nil {
+		err = g.Error(df.Err())
+	}
+
+	bw = bwTotal.Load()
+	df.AddEgressBytes(uint64(bw))
+
+	return bw, err
+}
+
+// mergeRecordDataflow funnels every record stream of df into one Arrow
+// datastream, the same way iop.MergeDataflow funnels the rows, so that a
+// single-file target gets one writer. The records are not copied: each is
+// retained while the merged stream carries it, and released afterwards.
+// Streams are drained in the order they flow out of df.StreamCh.
+func mergeRecordDataflow(df *iop.Dataflow) *iop.Datastream {
+	first, ok := <-df.StreamCh
+	if !ok {
+		return nil
+	}
+
+	rs0 := first.RecordStream()
+	if rs0 == nil {
+		return nil
+	}
+
+	merged := iop.NewRecordStream(df.Context, rs0.Lane(), rs0.Schema, iop.ArrowLaneBuffer)
+	ds := iop.NewDatastreamArrow(df.Context.Ctx, df.Columns, merged)
+
+	go func() {
+		var err error
+		defer func() { merged.Close(err) }()
+
+		feed := func(s *iop.Datastream) bool {
+			srs := s.RecordStream()
+			if srs == nil {
+				err = g.Error("arrow lane: stream is not an Arrow stream")
+				return false
+			}
+			for {
+				rec, ok := srs.Next()
+				if !ok {
+					break
+				}
+				rec.Retain() // Push takes this reference
+				if e := merged.Push(rec); e != nil {
+					rec.Release()
+					err = e
+					return false
+				}
+				rec.Release()
+			}
+			if e := srs.Err(); e != nil {
+				err = e
+				return false
+			}
+			s.Buffer = nil // clear buffer
+			return true
+		}
+
+		if !feed(first) {
+			return
+		}
+		for s := range df.StreamCh {
+			if !feed(s) {
+				return
+			}
+		}
+	}()
+
+	return ds
+}
+
 // Delete deletes the provided path before writing
 // with some safeguards so to not accidentally delete some root path
 func Delete(fs FileSysClient, uri string) (err error) {
@@ -1153,6 +1326,10 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	case dbio.TypeFileFtp:
 		if len(p) == 0 {
 			return g.Error("invalid uri / path for overwriting (root): %s", uri)
+		}
+	case dbio.TypeFileDatabricksVolume:
+		if len(pArr) <= 3 {
+			return g.Error("invalid uri / path for deleting (volume): %s", uri)
 		}
 	}
 
@@ -1384,7 +1561,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	}
 
 	props := g.MapToKVArr(fs.Props())
-	duck := iop.NewDuckDb(context.Background(), props...)
+	duck := iop.NewDuckDb(fs.Context().Ctx, props...) // a cancelled run stops the query
 
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))

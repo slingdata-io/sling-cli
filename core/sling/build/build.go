@@ -280,6 +280,8 @@ func (b *Build) Execute() error {
 		}
 
 		var wg sync.WaitGroup
+		var mu sync.Mutex
+		subBuilds := make([]*Build, 0, len(b.Project.SubProjects))
 		sem := make(chan struct{}, threads)
 		errCh := make(chan error, len(b.Project.SubProjects))
 
@@ -298,14 +300,32 @@ func (b *Build) Execute() error {
 					errCh <- g.Error(err, "could not compile sub-project %s", sp.Dir)
 					return
 				}
-				if err := subBuild.Execute(); err != nil {
-					errCh <- g.Error(err, "could not execute sub-project %s", sp.Dir)
+				execErr := subBuild.Execute()
+
+				// Collect regardless of the error: a failed sub-project still
+				// has per-node results, which callers report.
+				mu.Lock()
+				subBuilds = append(subBuilds, subBuild)
+				mu.Unlock()
+
+				if execErr != nil {
+					errCh <- g.Error(execErr, "could not execute sub-project %s", sp.Dir)
 				}
 			}(subProject)
 		}
 
 		wg.Wait()
 		close(errCh)
+
+		// Deterministic order (goroutines finish in any order)
+		sort.Slice(subBuilds, func(i, j int) bool {
+			return subBuilds[i].Project.Dir < subBuilds[j].Project.Dir
+		})
+		b.SubBuilds = subBuilds
+		for _, subBuild := range subBuilds {
+			b.ExecRows += subBuild.ExecRows
+			b.ExecBytes += subBuild.ExecBytes
+		}
 
 		var errs []string
 		for err := range errCh {
@@ -450,6 +470,19 @@ func (b *Build) PrintTestJSON() {
 		items = append(items, it)
 	}
 	fmt.Println(g.Marshal(items))
+}
+
+// PrintRunJSON prints the run payload as JSON (per-node results, counts, and
+// row/byte totals). Uses the same shape as the pipeline `type: build` step
+// state, so `sling build run --json` and hooks share one contract.
+// The payload is printed even when the run failed, so callers get the
+// per-node errors alongside the non-zero exit code.
+func (b *Build) PrintRunJSON(path string) {
+	if len(b.Project.SubProjects) > 0 {
+		fmt.Println(g.Marshal(SubProjectsPayload(path, b.SubBuilds)))
+		return
+	}
+	fmt.Println(g.Marshal(RunResultsPayload(path, b.GetTarget(), b.Results)))
 }
 
 // PrintCompileOutput prints the compile output in YAML format for each selected node.
@@ -746,7 +779,7 @@ func mapDialect(dbType dbio.Type) string {
 		return "bigquery"
 	case dbio.TypeDbSnowflake:
 		return "snowflake"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB:
 		return "duckdb"
 	case dbio.TypeDbDatabricks:
 		return "databricks"

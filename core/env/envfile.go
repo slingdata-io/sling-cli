@@ -2,10 +2,15 @@ package env
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -15,14 +20,44 @@ import (
 // envVarRefRe matches a whole-string ${VAR} ref. Unset refs stay literal after g.Rmd.
 var envVarRefRe = regexp.MustCompile(`^\$\{([A-Z_][A-Z0-9_]*)\}$`)
 
+// envKeyRe matches a safe YAML mapping key (connection name).
+var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+
+// envVarKeyRe matches a safe environment variable name (env: key).
+var envVarKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
 type EnvFile struct {
 	Connections map[string]map[string]any `json:"connections,omitempty" yaml:"connections,omitempty"`
 	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
 	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
+	Workbench   *WorkbenchConfig          `json:"workbench,omitempty" yaml:"workbench,omitempty"`
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
 	Body       string `json:"-" yaml:"-"`
+}
+
+// WorkbenchConfig is the `workbench:` block of env.yaml: the settings of
+// `sling serve workbench`. A command-line flag wins over the file.
+type WorkbenchConfig struct {
+	// Host is the listen address. The default is 127.0.0.1.
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
+	// Port is the listen port. The default is 7879; 0 picks a free port.
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
+	// Token is required when Host is not loopback.
+	Token string `json:"token,omitempty" yaml:"token,omitempty"`
+	// ProjectsRoot limits the Open-folder dialog to one folder tree.
+	ProjectsRoot string `json:"projects_root,omitempty" yaml:"projects_root,omitempty"`
+	// Shell allows interactive shell terminals. The default is true.
+	Shell *bool `json:"shell,omitempty" yaml:"shell,omitempty"`
+	// WorkerIdle stops a project worker that has no sessions and no running
+	// work after this duration, for example "15m". The default is 15m.
+	WorkerIdle string `json:"worker_idle,omitempty" yaml:"worker_idle,omitempty"`
+	// PathExtra is prepended to PATH for shells, runs and agent CLIs, so a
+	// launchd or systemd service finds the tools the user's shell does.
+	PathExtra string `json:"path_extra,omitempty" yaml:"path_extra,omitempty"`
+	// Env holds extra environment variables for workers.
+	Env map[string]any `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
 func (ef *EnvFile) WriteEnvFile() (err error) {
@@ -66,6 +101,9 @@ func (ef *EnvFile) freshRoot() *yaml.Node {
 // marshalEnvFileBytes renders the EnvFile as YAML, preserving comments, key
 // order, and unmanaged top-level keys from the file at ef.Path.
 func (ef *EnvFile) marshalEnvFileBytes() ([]byte, error) {
+	if err := ef.CheckFile(); err != nil {
+		return nil, err
+	}
 	original, err := ef.loadRootNode()
 	if err != nil {
 		return nil, err
@@ -114,7 +152,7 @@ func (ef *EnvFile) structToRootNode(original *yaml.Node) (*yaml.Node, error) {
 	}
 
 	managed := map[string]struct{}{
-		"connections": {}, "variables": {}, "env": {},
+		"connections": {}, "variables": {}, "env": {}, "workbench": {},
 	}
 	if original != nil && len(original.Content) > 0 && original.Content[0].Kind == yaml.MappingNode {
 		newMap := doc.Content[0]
@@ -164,11 +202,15 @@ func LoadDotEnvSlingFrom(dir string) map[string]string {
 	}
 
 	for key, val := range ParseDotEnv(string(bytes)) {
-		// don't overwrite existing env vars
-		if _, exists := os.LookupEnv(key); !exists {
-			dotEnvMap.Set(key, val)
-			os.Setenv(key, val)
+		// don't overwrite existing env vars; the real process env wins
+		if _, exists := os.LookupEnv(key); exists {
+			if _, fromFile := dotEnvMap.Get(key); !fromFile {
+				g.Debug("env: .env.sling key %s is hidden by the process environment", key)
+			}
+			continue
 		}
+		dotEnvMap.Set(key, val)
+		os.Setenv(key, val)
 	}
 	return dotEnvMap.Items()
 }
@@ -242,6 +284,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 // when a path is provided), and exports scalar entries from `env:` into
 // os.Environ. `path` is recorded on the returned EnvFile when non-empty.
 func loadEnvFile(body, path string) (ef EnvFile, err error) {
+	body = string(repairEnvYAML([]byte(body)))
 	ef.Body = body
 	ef.Path = path
 
@@ -428,9 +471,13 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 		return ef.freshRoot(), nil
 	}
 	data, rerr := os.ReadFile(ef.Path)
-	if rerr != nil || len(bytes.TrimSpace(data)) == 0 {
+	if rerr != nil && !os.IsNotExist(rerr) {
+		return nil, g.Error(rerr, "could not read %s", ef.Path)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
 		return ef.freshRoot(), nil
 	}
+	data = repairEnvYAML(data)
 	if uerr := yaml.Unmarshal(data, root); uerr != nil {
 		return nil, g.Error(uerr, "could not parse %s", ef.Path)
 	}
@@ -441,6 +488,108 @@ func (ef *EnvFile) loadRootNode() (*yaml.Node, error) {
 		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
 	return root, nil
+}
+
+// CheckFile returns an error when the file at ef.Path does not fully parse
+// into EnvFile. A struct write from a partial parse drops the entries that did
+// not parse. A missing or empty file is valid.
+func (ef *EnvFile) CheckFile() error {
+	data, err := os.ReadFile(ef.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return g.Error(err, "could not read %s", ef.Path)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	if err := checkEnvYAML(repairEnvYAML(data)); err != nil {
+		return g.Error("%s is not valid YAML. Fix it before sling changes the file: %s", ef.Path, g.ErrMsgSimple(err))
+	}
+	return nil
+}
+
+// oddSpaces look like a space but YAML does not read them as whitespace.
+const oddSpaces = "\u00a0\u2007\u202f"
+
+// checkEnvYAML returns an error when b does not parse into EnvFile, or when a
+// mapping key starts with a space character (an indentation error that
+// still parses).
+func checkEnvYAML(b []byte) error {
+	if err := yaml.Unmarshal(b, &EnvFile{}); err != nil {
+		return err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(b, &root); err != nil {
+		return err
+	}
+	var badKey *yaml.Node
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n == nil || badKey != nil {
+			return
+		}
+		for i, c := range n.Content {
+			if n.Kind == yaml.MappingNode && i%2 == 0 {
+				if r, _ := utf8.DecodeRuneInString(c.Value); unicode.IsSpace(r) {
+					badKey = c
+					return
+				}
+			}
+			walk(c)
+		}
+	}
+	walk(&root)
+	if badKey != nil {
+		return g.Error("line %d: key %q starts with a space character", badKey.Line, badKey.Value)
+	}
+	return nil
+}
+
+// repairEnvYAML turns tab and non-breaking-space indentation into spaces when
+// b does not pass checkEnvYAML and the repaired body does. Tab widths 2, 4 and
+// 8 are tried in order. Otherwise b is returned unchanged.
+func repairEnvYAML(b []byte) []byte {
+	if !bytes.ContainsAny(b, "\t"+oddSpaces) || checkEnvYAML(b) == nil {
+		return b
+	}
+	for _, width := range []int{2, 4, 8} {
+		if fixed := respaceIndent(b, width); checkEnvYAML(fixed) == nil {
+			return fixed
+		}
+	}
+	return b
+}
+
+// respaceIndent rewrites the leading whitespace of each line as spaces, with
+// tabs expanded to tabWidth stops. An odd space after a key colon becomes a
+// space.
+func respaceIndent(b []byte, tabWidth int) []byte {
+	var sb strings.Builder
+	for _, line := range strings.SplitAfter(string(b), "\n") {
+		col, i := 0, 0
+	indent:
+		for i < len(line) {
+			r, size := utf8.DecodeRuneInString(line[i:])
+			switch {
+			case r == ' ' || strings.ContainsRune(oddSpaces, r):
+				col++
+			case r == '\t':
+				col += tabWidth - col%tabWidth
+			default:
+				break indent
+			}
+			i += size
+		}
+		rest := line[i:]
+		for _, r := range oddSpaces {
+			rest = strings.ReplaceAll(rest, ":"+string(r), ": ")
+		}
+		sb.WriteString(strings.Repeat(" ", col))
+		sb.WriteString(rest)
+	}
+	return []byte(sb.String())
 }
 
 // IsEnvVarRef is true when s is a whole-string ${VAR} reference.
@@ -475,24 +624,41 @@ type MissingRef struct {
 // LookupConnection re-parses ef.Path and returns line numbers for
 // connections.<NAME> and each ${VAR} field under it.
 func (ef *EnvFile) LookupConnection(name string) (ConnLocation, error) {
-	loc := ConnLocation{
-		Path:       ef.Path,
-		Connection: strings.ToUpper(name),
-		Missing:    []MissingRef{},
-	}
 	root, err := ef.loadRootNode()
 	if err != nil {
-		return loc, err
+		return ConnLocation{Path: ef.Path, Connection: strings.ToUpper(name), Missing: []MissingRef{}}, err
+	}
+	return lookupConnectionInRoot(root, name, ef.Path)
+}
+
+// LookupConnectionBody is LookupConnection against a body string. path is
+// recorded on the result for display only. No ${VAR} interpolation happens.
+func LookupConnectionBody(body, name, path string) (ConnLocation, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
+		return ConnLocation{Path: path, Connection: strings.ToUpper(name), Missing: []MissingRef{}}, g.Error(err, "could not parse env file body")
+	}
+	if root.Kind == 0 {
+		root = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+	}
+	return lookupConnectionInRoot(&root, name, path)
+}
+
+func lookupConnectionInRoot(root *yaml.Node, name, path string) (ConnLocation, error) {
+	loc := ConnLocation{
+		Path:       path,
+		Connection: strings.ToUpper(name),
+		Missing:    []MissingRef{},
 	}
 
 	conns := mappingChild(root, "connections")
 	if conns == nil {
-		return loc, g.Error("connections block not found in %s", ef.Path)
+		return loc, g.Error("connections block not found in %s", path)
 	}
 
 	keyNode, valNode := mappingChildFold(conns, name)
 	if keyNode == nil {
-		return loc, g.Error("connection %s not found in %s", name, ef.Path)
+		return loc, g.Error("connection %s not found in %s", name, path)
 	}
 	loc.Line = keyNode.Line
 	collectMissingRefs(valNode, "", &loc.Missing)
@@ -510,6 +676,535 @@ func mappingChild(n *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+// ValidateKey returns an error if key is not a safe YAML mapping key
+// (^[A-Za-z_][A-Za-z0-9_-]*$, no leading/trailing whitespace).
+func ValidateKey(key string) error {
+	if key == "" {
+		return g.Error("name is blank")
+	}
+	if strings.TrimSpace(key) != key {
+		return g.Error("name %q must not have leading or trailing whitespace", key)
+	}
+	if !envKeyRe.MatchString(key) {
+		return g.Error("invalid name %q: must match %s", key, envKeyRe.String())
+	}
+	return nil
+}
+
+// ValidateEnvKey returns an error if key is not a safe environment variable
+// name (^[A-Z_][A-Z0-9_]*$).
+func ValidateEnvKey(key string) error {
+	if key == "" {
+		return g.Error("env var name is blank")
+	}
+	if !envVarKeyRe.MatchString(key) {
+		return g.Error("invalid env var name %q: must match %s", key, envVarKeyRe.String())
+	}
+	return nil
+}
+
+// ExpandRef expands a whole-string ${VAR} against the process environment.
+// An unset var keeps the ref as-is.
+func ExpandRef(s string) string {
+	name := EnvVarRefName(s)
+	if name == "" {
+		return s
+	}
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+	return s
+}
+
+// BodySha returns the sha256 hex digest of an env file body. Clients send it
+// back on save so a stale buffer cannot overwrite a newer file.
+func BodySha(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+// ConnectionEditorEnabled reports whether the GUI connection editor is
+// enabled. SLING_DISABLE_CONNECTION_EDITOR=1 turns it off, which also disables
+// the EnvironmentSet removal guard (a client that does not know about
+// allow_removals cannot act on that refusal).
+func ConnectionEditorEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SLING_DISABLE_CONNECTION_EDITOR"))) {
+	case "1", "true", "yes", "on":
+		return false
+	}
+	return true
+}
+
+// RawConnections parses the file at ef.Path into connection prop maps, without
+// ${VAR} interpolation. Load/ReadConnections expand refs against the process
+// environment; this does not, so callers that hand values to a UI (or write
+// them back) can never observe a resolved secret.
+func (ef *EnvFile) RawConnections() (map[string]map[string]any, error) {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return nil, err
+	}
+	return rawConnectionsFromRoot(root), nil
+}
+
+// ParseEnvFileConnections parses an env.yaml body into raw connection prop
+// maps, without ${VAR} interpolation.
+func ParseEnvFileConnections(body string) (map[string]map[string]any, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
+		return nil, g.Error(err, "could not parse env file body")
+	}
+	if root.Kind == 0 {
+		return map[string]map[string]any{}, nil
+	}
+	return rawConnectionsFromRoot(&root), nil
+}
+
+func rawConnectionsFromRoot(root *yaml.Node) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	conns := mappingChild(root, "connections")
+	if conns == nil {
+		return out
+	}
+	for i := 0; i < len(conns.Content)-1; i += 2 {
+		props := map[string]any{}
+		if err := conns.Content[i+1].Decode(&props); err != nil {
+			// non-mapping entry (e.g. `MY_PG:` with no fields); keep it empty
+			props = map[string]any{}
+		}
+		out[conns.Content[i].Value] = props
+	}
+	return out
+}
+
+// ParseEnvFileKeys parses a raw env.yaml body and returns its connection names
+// and env keys (legacy `variables:` included). No ${VAR} interpolation.
+func ParseEnvFileKeys(body string) (connNames, envKeys []string, err error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(repairEnvYAML([]byte(body)), &root); err != nil {
+		return nil, nil, g.Error(err, "could not parse env file body")
+	}
+	if root.Kind == 0 {
+		return nil, nil, nil
+	}
+
+	for name := range rawConnectionsFromRoot(&root) {
+		connNames = append(connNames, name)
+	}
+	seen := map[string]struct{}{}
+	for _, block := range []string{"env", "variables"} {
+		n := mappingChild(&root, block)
+		if n == nil {
+			continue
+		}
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			seen[n.Content[i].Value] = struct{}{}
+		}
+	}
+	for k := range seen {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(connNames)
+	sort.Strings(envKeys)
+	return connNames, envKeys, nil
+}
+
+// RemovedKeys lists connections and env vars (prefixed `env.`) present in
+// oldBody but not in newBody. Used to refuse a raw-editor save that would drop
+// credentials the previous body had, unless the client confirms.
+func RemovedKeys(oldBody, newBody string) ([]string, error) {
+	oldConns, oldEnv, err := ParseEnvFileKeys(oldBody)
+	if err != nil {
+		return nil, g.Error(err, "could not parse current env.yaml")
+	}
+	newConns, newEnv, err := ParseEnvFileKeys(newBody)
+	if err != nil {
+		// let the save path produce the parse error
+		return nil, nil
+	}
+
+	inNew := func(list []string, key string) bool {
+		for _, k := range list {
+			if strings.EqualFold(k, key) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var removed []string
+	for _, k := range oldConns {
+		if !inNew(newConns, k) {
+			removed = append(removed, k)
+		}
+	}
+	for _, k := range oldEnv {
+		if !inNew(newEnv, k) {
+			removed = append(removed, "env."+k)
+		}
+	}
+	sort.Strings(removed)
+	return removed, nil
+}
+
+// ConnectionNames returns the connection keys present in the raw file at
+// ef.Path, sorted.
+func (ef *EnvFile) ConnectionNames() ([]string, error) {
+	raw, err := ef.RawConnections()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// EnvKeys returns the keys under `env:` (legacy `variables:` included) in the
+// raw file at ef.Path, sorted. No ${VAR} interpolation.
+func (ef *EnvFile) EnvKeys() ([]string, error) {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	for _, block := range []string{"env", "variables"} {
+		n := mappingChild(root, block)
+		if n == nil {
+			continue
+		}
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			seen[n.Content[i].Value] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// RawEnv returns the `env:` values (legacy `variables:` included) from the raw
+// file at ef.Path, without ${VAR} interpolation.
+func (ef *EnvFile) RawEnv() (map[string]any, error) {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for _, block := range []string{"env", "variables"} {
+		n := mappingChild(root, block)
+		if n == nil {
+			continue
+		}
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			key := n.Content[i].Value
+			var v any
+			if err := n.Content[i+1].Decode(&v); err != nil {
+				continue
+			}
+			out[key] = v
+		}
+	}
+	return out, nil
+}
+
+// SetConnectionNode writes one connection's props into the YAML node tree at
+// ef.Path and saves. It never reads ef.Connections, so expanded ${VAR} values
+// held in the struct cannot leak to disk. Existing scalars under the entry that
+// are ${VAR} refs are kept as refs when the incoming value is identical.
+//
+// envUpdates, when non-empty, are written under `env:` in the same save (one
+// atomic write; used for secret promotion). Existing env values are replaced:
+// callers that must protect hand-set values (EnvFileConns.SetValidated) check
+// first.
+func (ef *EnvFile) SetConnectionNode(name string, props map[string]any, envUpdates map[string]any) error {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return err
+	}
+
+	conns := ensureMappingChild(root, "connections")
+	valNode, err := anyToNode(props)
+	if err != nil {
+		return g.Error(err, "could not render connection %s", name)
+	}
+
+	keyNode, existingVal := mappingChildFold(conns, name)
+	if keyNode == nil {
+		key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}
+		conns.Content = append(conns.Content, key, valNode)
+	} else {
+		// mergeNode (nil envMap) keeps identical on-disk scalars — including
+		// ${VAR} refs — and otherwise takes the incoming value verbatim. Do not
+		// pass interpEnvMap here: the write must not depend on the writer's
+		// process environment.
+		merged := mergeNode(existingVal, valNode, nil)
+		for i := 0; i < len(conns.Content)-1; i += 2 {
+			if conns.Content[i] == keyNode {
+				conns.Content[i+1] = merged
+				break
+			}
+		}
+	}
+
+	if len(envUpdates) > 0 {
+		if err := setEnvNodes(root, envUpdates, true); err != nil {
+			return err
+		}
+	}
+
+	annotateEnvVarRefComments(root)
+	return ef.saveRootNode(root)
+}
+
+// DeleteConnectionNode removes one connection entry (and the comments attached
+// to it) from the node tree at ef.Path and saves. A trailing comment that is
+// attached to the last entry of the `connections:` block is kept: it is moved
+// onto the preceding entry (or the block itself when there is none), so
+// deleting the last connection does not silently eat it.
+func (ef *EnvFile) DeleteConnectionNode(name string) error {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return err
+	}
+
+	conns := mappingChild(root, "connections")
+	if conns == nil {
+		return g.Error("connections block not found in %s", ef.Path)
+	}
+
+	idx := -1
+	for i := 0; i < len(conns.Content)-1; i += 2 {
+		if strings.EqualFold(conns.Content[i].Value, name) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return g.Error("did not find connection `%s`", name)
+	}
+
+	keyNode, valNode := conns.Content[idx], conns.Content[idx+1]
+	if idx == len(conns.Content)-2 {
+		// last entry: comments attached as FootComment inside its subtree
+		// describe the end of the block, not the entry
+		notes := collectFootComments(keyNode, valNode)
+		if len(notes) > 0 {
+			if idx == 0 {
+				// no neighbor to carry it: keep it on the block header
+				connsKey, _ := mappingChildFold(mappingRoot(root), "connections")
+				if connsKey != nil {
+					connsKey.FootComment = joinComment(connsKey.FootComment, notes)
+				}
+			} else {
+				target := deepestLastNode(conns.Content[idx-1])
+				if target != nil {
+					target.FootComment = joinComment(target.FootComment, notes)
+				}
+			}
+		}
+	}
+
+	conns.Content = append(conns.Content[:idx], conns.Content[idx+2:]...)
+	return ef.saveRootNode(root)
+}
+
+// SetEnvNodes sets keys under the `env:` block (legacy `variables:` when `env:`
+// is absent) in the node tree at ef.Path and saves. Existing keys are only
+// replaced when allowOverwrite is true or the value is unchanged.
+func (ef *EnvFile) SetEnvNodes(updates map[string]any, allowOverwrite bool) error {
+	root, err := ef.loadRootNode()
+	if err != nil {
+		return err
+	}
+	if err := setEnvNodes(root, updates, allowOverwrite); err != nil {
+		return err
+	}
+	return ef.saveRootNode(root)
+}
+
+// setEnvNodes splices updates into the effective env block of root.
+func setEnvNodes(root *yaml.Node, updates map[string]any, allowOverwrite bool) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	blockKey := effectiveEnvKey(root)
+	block := ensureMappingChild(root, blockKey)
+
+	existing := map[string]*yaml.Node{}
+	for i := 0; i < len(block.Content)-1; i += 2 {
+		existing[block.Content[i].Value] = block.Content[i]
+	}
+
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		if err := ValidateEnvKey(k); err != nil {
+			return err
+		}
+		valNode, err := anyToNode(updates[k])
+		if err != nil {
+			return g.Error(err, "could not render env var %s", k)
+		}
+		if keyNode, ok := existing[k]; ok {
+			cur := block.Content[indexOfNode(block, keyNode)+1]
+			if !allowOverwrite && !nodesEqualScalar(cur, valNode) {
+				return g.Error("env var %s already exists in env.yaml; pass allow_overwrite to update it", k)
+			}
+			block.Content[indexOfNode(block, keyNode)+1] = valNode
+			continue
+		}
+		key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k}
+		block.Content = append(block.Content, key, valNode)
+		existing[k] = key
+	}
+	return nil
+}
+
+// effectiveEnvKey returns the block that holds env vars: `env:` when present,
+// otherwise the legacy `variables:` block (which loadEnvFile treats as env).
+func effectiveEnvKey(root *yaml.Node) string {
+	if mappingChild(root, "env") != nil {
+		return "env"
+	}
+	if mappingChild(root, "variables") != nil {
+		return "variables"
+	}
+	return "env"
+}
+
+// ensureMappingChild returns the mapping value for key, creating it when
+// absent.
+func ensureMappingChild(root *yaml.Node, key string) *yaml.Node {
+	root = mappingRoot(root)
+	if root == nil {
+		return nil
+	}
+	if n := mappingChild(root, key); n != nil {
+		if n.Kind != yaml.MappingNode {
+			n.Kind = yaml.MappingNode
+			n.Tag = "!!map"
+			n.Value = ""
+			n.Content = nil
+		}
+		return n
+	}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	valNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	root.Content = append(root.Content, keyNode, valNode)
+	return valNode
+}
+
+// anyToNode renders any value as a yaml.Node.
+func anyToNode(v any) (*yaml.Node, error) {
+	b, err := yaml.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 {
+		return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, nil
+	}
+	return doc.Content[0], nil
+}
+
+// saveRootNode encodes root and writes it to ef.Path.
+func (ef *EnvFile) saveRootNode(root *yaml.Node) error {
+	if ef.Path == "" {
+		return g.Error("env file path is not set")
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(root); err != nil {
+		_ = enc.Close()
+		return g.Error(err, "could not marshal into YAML")
+	}
+	if err := enc.Close(); err != nil {
+		return g.Error(err, "could not finalize YAML encoder")
+	}
+	ef.Path = strings.ReplaceAll(ef.Path, `\`, `/`)
+	if err := os.WriteFile(ef.Path, buf.Bytes(), 0644); err != nil {
+		return g.Error(err, "could not write YAML file")
+	}
+	return nil
+}
+
+// collectFootComments gathers FootComment text from the key node and the value
+// subtree, in document order.
+func collectFootComments(keyNode, valNode *yaml.Node) []string {
+	var out []string
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n == nil {
+			return
+		}
+		if n.FootComment != "" {
+			out = append(out, n.FootComment)
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(keyNode)
+	walk(valNode)
+	return out
+}
+
+// deepestLastNode returns the last node in document order under n.
+func deepestLastNode(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	for n.Kind == yaml.MappingNode || n.Kind == yaml.SequenceNode || n.Kind == yaml.DocumentNode {
+		if len(n.Content) == 0 {
+			return n
+		}
+		n = n.Content[len(n.Content)-1]
+	}
+	return n
+}
+
+func joinComment(existing string, notes []string) string {
+	out := existing
+	for _, n := range notes {
+		if n == "" {
+			continue
+		}
+		if out == "" {
+			out = n
+		} else {
+			out = out + "\n" + n
+		}
+	}
+	return out
+}
+
+func indexOfNode(m *yaml.Node, key *yaml.Node) int {
+	for i := 0; i < len(m.Content)-1; i += 2 {
+		if m.Content[i] == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func nodesEqualScalar(a, b *yaml.Node) bool {
+	return a.Kind == b.Kind && a.Tag == b.Tag && a.Value == b.Value
 }
 
 func mappingChildFold(n *yaml.Node, key string) (keyNode, valNode *yaml.Node) {

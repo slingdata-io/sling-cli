@@ -5,6 +5,8 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,12 +14,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-adbc/go/adbc/drivermgr"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -36,6 +40,24 @@ type ArrowDBConn struct {
 	db         adbc.Database
 	Conn       adbc.Connection
 	driverType dbio.Type // Underlying database type for templates
+
+	// arrow lane: set by the eligibility gate before the read. A nil lane
+	// means the row path.
+	lane      iop.ArrowLane
+	laneCheck LaneSchemaCheck
+}
+
+// LaneSchemaCheck is stage 2 of the arrow lane gate. The sling package builds
+// it with the target columns, the update-key column and the logger. It runs
+// once per stream, on the real reader schema, before the datastream starts.
+// maxCol is the update-key field index for incremental state, or -1.
+type LaneSchemaCheck func(src *arrow.Schema, cols iop.Columns) (ok bool, reason string, maxCol int)
+
+// SetArrowLane sets the arrow lane engine on the connection. A nil lane keeps
+// the row path. The gate calls this before the read.
+func (conn *ArrowDBConn) SetArrowLane(lane iop.ArrowLane, check LaneSchemaCheck) {
+	conn.lane = lane
+	conn.laneCheck = check
 }
 
 // Init initiates the connection
@@ -71,6 +93,7 @@ func (conn *ArrowDBConn) Init() error {
 		"adbc.duckdb.connection_string":     "path",
 		"adbc.mysql.connection_string":      "uri",
 		"adbc.trino.connection_string":      "uri",
+		"adbc.clickhouse.connection_string": "uri",
 	}
 
 	for key, val := range conn.properties {
@@ -85,8 +108,16 @@ func (conn *ArrowDBConn) Init() error {
 			continue
 		}
 
-		// Include driver property and any adbc.* prefixed properties
-		if key == "driver" || key == "driver_entrypoint" || key == "uri" || strings.HasPrefix(key, "adbc.") {
+		// Include driver property and any adbc.* prefixed properties. "path"
+		// is the file option of the duckdb and sqlite drivers: dropping it
+		// would open an in-memory database instead of the instance file.
+		if key == "driver" || key == "driver_entrypoint" || key == "uri" || key == "path" ||
+			strings.HasPrefix(key, "adbc.") {
+			adbcProps[key] = val
+		}
+
+		// the clickhouse driver takes credentials as options, libpq rejects them
+		if (key == "username" || key == "password") && strings.EqualFold(conn.GetProp("driver_name"), "clickhouse") {
 			adbcProps[key] = val
 		}
 	}
@@ -428,6 +459,7 @@ func GetArrowDBCDriverType(driverName string) dbio.Type {
 		"bigquery":   dbio.TypeDbBigQuery,
 		"mysql":      dbio.TypeDbMySQL,
 		"trino":      dbio.TypeDbTrino,
+		"clickhouse": dbio.TypeDbClickhouse,
 	}
 	if t, ok := mapping[strings.ToLower(driverName)]; ok {
 		return t
@@ -1138,9 +1170,25 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 
 	// Get options
 	limit := uint64(0)
+	noArrowLane := false
+	arrowRecords := false
+	laneOnly := false
 	if len(options) > 0 {
 		if val, ok := options[0]["limit"]; ok {
 			limit = cast.ToUint64(val)
+		}
+		if val, ok := options[0]["no_arrow_lane"]; ok {
+			noArrowLane = cast.ToBool(val)
+		}
+		// Only the lane's own read wants records. Every other caller (schema,
+		// count and DDL queries on the same connection) consumes rows, and an
+		// Arrow-only stream cannot serve them.
+		if val, ok := options[0]["arrow_records"]; ok {
+			arrowRecords = cast.ToBool(val)
+		}
+		// a connection with its own driver reads here only for the lane
+		if val, ok := options[0]["lane_only"]; ok {
+			laneOnly = cast.ToBool(val)
 		}
 	}
 
@@ -1168,90 +1216,56 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	schema := reader.Schema()
 	columns := iop.ArrowSchemaToColumns(schema)
 
-	// Create the next function for streaming records
-	makeNextFunc := func() func(it *iop.Iterator) bool {
-		var currentRecord arrow.Record
-		var previousRecord arrow.Record // Keep previous record until next iteration to prevent string memory corruption
-		var currentRowIdx int
-		var recordChan = make(chan arrow.Record, 10)
+	// Arrow lane: stage 2 of the gate runs on the real reader schema, before
+	// the datastream starts, so the stream mode never changes after Start.
+	lane := conn.lane
+	if lane != nil && conn.laneCheck == nil {
+		lane = nil
+	}
+	if lane != nil && (noArrowLane || limit > 0 || !arrowRecords) {
+		lane = nil
+	}
 
-		// Stream records in a goroutine
-		go func() {
-			defer close(recordChan)
-			defer reader.Release()
-			defer stmt.Close()
-
-			for reader.Next() {
-				record := reader.Record()
-				record.Retain() // Retain so it doesn't get freed
-				select {
-				case recordChan <- record:
-				case <-queryContext.Ctx.Done():
-					record.Release()
-					return
-				}
-			}
-
-			if err := reader.Err(); err != nil {
-				queryContext.CaptureErr(g.Error(err, "error reading Arrow records"))
-			}
-		}()
-
-		return func(it *iop.Iterator) bool {
-			if limit > 0 && uint64(it.Counter) >= limit {
-				return false
-			}
-
-			// Release the previous record (now safe since its data has been consumed)
-			if previousRecord != nil {
-				previousRecord.Release()
-				previousRecord = nil
-			}
-
-			// Check if we need to fetch next record batch
-			if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
-				// Move current to previous (will be released on next iteration)
-				previousRecord = currentRecord
-				currentRecord = nil
-
-				select {
-				case record, ok := <-recordChan:
-					if !ok {
-						// Channel closed, no more records
-						return false
-					}
-					currentRecord = record
-					currentRowIdx = 0
-				case <-queryContext.Ctx.Done():
-					return false
-				}
-			}
-
-			// Convert current row to interface{} slice
-			// Copy string values since Arrow buffer memory may be reused
-			it.Row = make([]interface{}, currentRecord.NumCols())
-			for colIdx := 0; colIdx < int(currentRecord.NumCols()); colIdx++ {
-				col := currentRecord.Column(colIdx)
-				val := iop.GetValueFromArrowArray(col, currentRowIdx)
-				// Copy string values to avoid referencing Arrow buffer memory
-				if s, ok := val.(string); ok {
-					val = strings.Clone(s)
-				}
-				it.Row[colIdx] = val
-			}
-
-			currentRowIdx++
-			return true
+	if lane != nil {
+		// the lane reads the driver's type labels; the row path keeps the
+		// plain columns and infers from the values, as before the lane
+		laneRead := newAdbcLaneRead(schema)
+		ok, reason, maxCol := conn.laneCheck(laneRead.schema, laneRead.columns)
+		if ok {
+			ds = conn.arrowDatastream(queryContext, laneRead, reader, stmt, maxCol)
+		} else {
+			_ = reason // the check logs its own decline line
+			lane = nil
 		}
 	}
 
-	ds = iop.NewDatastreamIt(queryContext.Ctx, columns, makeNextFunc())
+	if lane == nil && laneOnly {
+		reader.Release()
+		stmt.Close()
+		queryContext.Cancel()
+		return nil, ErrArrowLaneDeclined
+	}
+
+	if lane == nil {
+		ds = iop.NewDatastreamIt(queryContext.Ctx, columns, conn.makeRecordNextFunc(queryContext, reader, stmt, limit))
+	}
+
 	ds.NoDebug = strings.Contains(sql, noDebugKey)
 	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 
 	if !ds.NoDebug {
 		ds.SetMetadata(conn.GetProp("METADATA"))
 		ds.SetConfig(conn.Props())
+	}
+
+	// the gate classified the transforms, so the lane evaluates them on
+	// records instead of rows. The sink still casts (Normalize) and renames
+	// (Project) the transformed records.
+	if lane != nil {
+		if err = conn.setArrowLaneTransforms(ds); err != nil {
+			queryContext.Cancel()
+			return ds, g.Error(err, "could not set the arrow lane transforms")
+		}
 	}
 
 	err = ds.Start()
@@ -1263,6 +1277,162 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	return ds, nil
 }
 
+// arrowDatastream builds the Arrow-mode datastream: the reader goroutine
+// pushes records into a RecordStream and the sink pulls them. No []any row is
+// built and no string is cloned.
+func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbcLaneRead, reader array.RecordReader, stmt adbc.Statement, maxCol int) *iop.Datastream {
+	rs := iop.NewRecordStream(queryContext, conn.lane, laneRead.schema, iop.ArrowLaneBuffer)
+	rs.Columns = laneRead.columns // the labels, which the plain schema does not carry
+	if maxCol >= 0 {
+		rs.TrackMax(maxCol)
+	}
+
+	ds := iop.NewDatastreamArrow(queryContext.Ctx, laneRead.columns, rs)
+
+	go func() {
+		defer stmt.Close()
+		defer reader.Release()
+
+		for reader.Next() {
+			// the reader owns its record until the next Next, so the stream
+			// gets its own reference
+			record, err := laneRead.Record(reader.Record())
+			if err != nil {
+				rs.Close(err)
+				return
+			}
+			if err := rs.Push(record); err != nil {
+				// Push released the record. Close the stream so a Drain
+				// goroutine that ranges over it can end.
+				rs.Close(nil)
+				return
+			}
+		}
+
+		if err := reader.Err(); err != nil {
+			rs.Close(g.Error(err, "error reading Arrow records"))
+			return
+		}
+		rs.Close(nil)
+	}()
+
+	return ds
+}
+
+// setArrowLaneTransforms hands the source transforms to the record stream, so
+// the lane evaluates them on records. The payload is the same one the stream
+// processor parsed into ds.Sp.Config.Transforms, so both paths run the same
+// functions map.
+func (conn *ArrowDBConn) setArrowLaneTransforms(ds *iop.Datastream) error {
+	payload := conn.GetProp("transforms")
+	if strings.TrimSpace(payload) == "" {
+		return nil
+	}
+
+	stages, err := iop.ParseStageTransforms(payload)
+	if err != nil {
+		return g.Error(err, "could not parse the source transforms")
+	}
+	if len(stages) == 0 {
+		return nil
+	}
+
+	// the gate classified these stages, so a failure here is a wiring bug: the
+	// stream must not run without them
+	return ds.RecordStream().SetTransform(stages, ds.Sp)
+}
+
+// makeRecordNextFunc tears each record into []any rows, for the row path.
+func (conn *ArrowDBConn) makeRecordNextFunc(queryContext *g.Context, reader array.RecordReader, stmt adbc.Statement, limit uint64) func(it *iop.Iterator) bool {
+	var currentRecord arrow.Record
+	var previousRecord arrow.Record // Keep previous record until next iteration to prevent string memory corruption
+	var currentRowIdx int
+	var recordChan = make(chan arrow.Record, 10)
+
+	// Stream records in a goroutine
+	go func() {
+		defer close(recordChan)
+		defer reader.Release()
+		defer stmt.Close()
+
+		for reader.Next() {
+			record := reader.Record()
+			record.Retain() // Retain so it doesn't get freed
+			select {
+			case recordChan <- record:
+			case <-queryContext.Ctx.Done():
+				record.Release()
+				return
+			}
+		}
+
+		if err := reader.Err(); err != nil {
+			queryContext.CaptureErr(g.Error(err, "error reading Arrow records"))
+		}
+	}()
+
+	return func(it *iop.Iterator) bool {
+		// Release the previous record (now safe since its data has been consumed)
+		release := func() {
+			if previousRecord != nil {
+				previousRecord.Release()
+				previousRecord = nil
+			}
+			if currentRecord != nil {
+				currentRecord.Release()
+				currentRecord = nil
+			}
+		}
+
+		if limit > 0 && uint64(it.Counter) >= limit {
+			release()
+			return false
+		}
+
+		if previousRecord != nil {
+			previousRecord.Release()
+			previousRecord = nil
+		}
+
+		// Check if we need to fetch next record batch
+		if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
+			// Move current to previous (will be released on next iteration)
+			previousRecord = currentRecord
+			currentRecord = nil
+
+			select {
+			case record, ok := <-recordChan:
+				if !ok {
+					// Channel closed, no more records
+					release()
+					return false
+				}
+				currentRecord = record
+				currentRowIdx = 0
+			case <-queryContext.Ctx.Done():
+				release()
+				return false
+			}
+		}
+
+		// Convert current row to interface{} slice
+		// Copy string values since Arrow buffer memory may be reused
+		it.Row = make([]interface{}, currentRecord.NumCols())
+		for colIdx := 0; colIdx < int(currentRecord.NumCols()); colIdx++ {
+			col := currentRecord.Column(colIdx)
+			val := iop.GetValueFromArrowArray(col, currentRowIdx)
+			// Copy string values to avoid referencing Arrow buffer memory
+			if s, ok := val.(string); ok {
+				val = strings.Clone(s)
+			}
+			it.Row[colIdx] = val
+		}
+
+		currentRowIdx++
+		return true
+	}
+}
+
 // GetSQLColumns returns columns for a SQL query using Arrow schema
 // This avoids wrapping with LIMIT which may not work for all database types
 func (conn *ArrowDBConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
@@ -1270,15 +1440,19 @@ func (conn *ArrowDBConn) GetSQLColumns(table Table) (columns iop.Columns, err er
 		return conn.GetColumns(table.FullName())
 	}
 
-	// For ADBC, we can execute the query directly and get schema from Arrow
-	// Use limit 0 approach by wrapping, but if that fails, execute directly
 	sql := table.SQL
 	if sql == "" {
 		sql = table.Select()
 	}
 
-	// Execute and get columns from Arrow schema directly
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("limit", 1))
+	// Prefer the schema-only call: it does not run the query.
+	if schema, err := conn.ExecuteSchema(sql); err == nil {
+		return iop.ArrowSchemaToColumns(schema), nil
+	}
+
+	// Fallback: run the query with limit 1. The arrow lane is off here: this
+	// call only wants the columns, and it never drains the stream.
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("limit", 1, "no_arrow_lane", true))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}
@@ -1292,9 +1466,39 @@ func (conn *ArrowDBConn) GetSQLColumns(table Table) (columns iop.Columns, err er
 	return ds.Columns, nil
 }
 
+// ExecuteSchema returns the result schema of a query without running it, when
+// the driver implements StatementExecuteSchema.
+func (conn *ArrowDBConn) ExecuteSchema(sql string) (schema *arrow.Schema, err error) {
+	if conn.Conn == nil {
+		return nil, g.Error("ADBC connection is not open")
+	}
+
+	stmt, err := conn.Conn.NewStatement()
+	if err != nil {
+		return nil, g.Error(err, "could not create ADBC statement")
+	}
+	defer stmt.Close()
+
+	execSchema, ok := stmt.(adbc.StatementExecuteSchema)
+	if !ok {
+		return nil, g.Error("driver does not support ExecuteSchema")
+	}
+
+	if err := stmt.SetSqlQuery(sql); err != nil {
+		return nil, g.Error(err, "could not set SQL query")
+	}
+
+	schema, err = execSchema.ExecuteSchema(conn.Context().Ctx)
+	if err != nil {
+		return nil, g.Error(err, "could not get query schema")
+	}
+	return schema, nil
+}
+
 // BulkExportStream streams the rows in bulk
 func (conn *ArrowDBConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
-	return conn.StreamRowsContext(conn.Context().Ctx, table.Select())
+	// the lane's read: records, not rows
+	return conn.StreamRowsContext(conn.Context().Ctx, table.Select(), g.M("arrow_records", true))
 }
 
 // BulkExportFlow exports data as a dataflow
@@ -1305,7 +1509,7 @@ func (conn *ArrowDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 		sql = table.SQL
 	}
 
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true))
 	if err != nil {
 		return nil, g.Error(err, "could not stream rows")
 	}
@@ -1351,6 +1555,11 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		return 0, g.Error("ADBC connection is not open")
 	}
 
+	// Arrow lane: the records go to the driver as they are.
+	if ds != nil && ds.ArrowOnly && ds.RecordStream() != nil {
+		return conn.ingestRecordStream(tableFName, ds)
+	}
+
 	// Parse table name to get catalog and schema
 	table, err := ParseTableName(tableFName, conn.Type)
 	if err != nil {
@@ -1361,21 +1570,23 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 	ingestMode := conn.getIngestMode()
 
 	// Target the catalog/schema of the table, not the connection defaults
-	opts := adbc.IngestStreamOptions{
-		Catalog:  table.Database,
-		DBSchema: table.Schema,
-	}
-
-	// For 2-part targets (schema.table), ParseTableName leaves table.Database empty
-	if opts.Catalog == "" {
-		opts.Catalog = conn.GetProp("database")
-	}
+	opts := conn.ingestOptions(table)
 
 	g.Trace("arrow schema => %s", iop.ColumnsToArrowSchema(ds.Columns))
 
+	// The driver matches the record schema against the target table, so the
+	// record is built in the table's own column types when the names agree.
+	tgtCols, err := conn.GetSQLColumns(table)
+	if err != nil {
+		g.Debug("arrow lane: could not get columns of %s: %s", tableFName, err.Error())
+		tgtCols = nil
+	} else if !sameColumnNames(tgtCols, ds.Columns) {
+		tgtCols = nil
+	}
+
 	for batch := range ds.BatchChan {
 		// Convert batch to Arrow record reader
-		reader, err := conn.batchToRecordReader(batch)
+		reader, batchRows, err := conn.batchToRecordReader(batch, tgtCols)
 		if err != nil {
 			return count, g.Error(err, "error converting batch to Arrow")
 		}
@@ -1394,10 +1605,119 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			return count, g.Error(err, "error ingesting batch via ADBC")
 		}
 
-		count += uint64(ingested)
+		if ingested > 0 {
+			count += uint64(ingested)
+		} else {
+			// some drivers do not report a row count for a bulk ingest
+			count += uint64(batchRows)
+		}
 	}
 
 	return count, nil
+}
+
+// ingestOptions targets the catalog and schema of the table, not the
+// connection defaults.
+func (conn *ArrowDBConn) ingestOptions(table Table) adbc.IngestStreamOptions {
+	switch conn.driverType {
+	case dbio.TypeDbMySQL:
+		// a MySQL schema is the database, which the driver names catalog.
+		// The driver joins catalog and schema, so the schema stays empty.
+		return adbc.IngestStreamOptions{Catalog: table.Schema}
+	case dbio.TypeDbClickhouse:
+		// ClickHouse has no catalog level, the driver rejects the option
+		return adbc.IngestStreamOptions{DBSchema: table.Schema}
+	case dbio.TypeDbDuckDb:
+		// the staging table is a temp table, in the "temp" catalog. Driver
+		// v1.5+ does not find it with a catalog or schema option.
+		if strings.HasSuffix(table.Name, "_sling_duckdb_tmp") {
+			return adbc.IngestStreamOptions{Temporary: true}
+		}
+	}
+
+	opts := adbc.IngestStreamOptions{
+		Catalog:  table.Database,
+		DBSchema: table.Schema,
+	}
+	// For 2-part targets (schema.table), ParseTableName leaves table.Database empty
+	if opts.Catalog == "" {
+		opts.Catalog = conn.GetProp("database")
+	}
+	return opts
+}
+
+// ingestRecordStream ingests an Arrow datastream with one IngestStream call.
+// The records flow through: no batch is materialized into one in-memory
+// record and no builder is refilled.
+func (conn *ArrowDBConn) ingestRecordStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	table, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return 0, g.Error(err, "could not parse table name: %s", tableFName)
+	}
+
+	rs, err := ds.RecordStream().Normalize(iop.ColumnsToArrowSchema(ds.Columns))
+	if err != nil {
+		return 0, g.Error(err, "could not normalize records for %s", tableFName)
+	}
+
+	// Align the record field names with the temp table when the target agrees
+	// on the column set. The driver matches the record schema against the
+	// target table, so its names and order win.
+	cols := ds.Columns
+	if tgtCols, err := conn.GetSQLColumns(table); err == nil && len(tgtCols) > 0 && sameColumnNames(tgtCols, ds.Columns) {
+		rs, err = rs.Project(tgtCols)
+		if err != nil {
+			return 0, g.Error(err, "could not project records for %s", tableFName)
+		}
+		cols = tgtCols
+	} else if err != nil {
+		g.Debug("arrow lane: could not get columns of %s: %s", tableFName, err.Error())
+	}
+
+	rs, err = rs.Relabel(conn.ingestSchema(rs.Schema, cols))
+	if err != nil {
+		return 0, g.Error(err, "could not label records for %s", tableFName)
+	}
+
+	reader := rs.Reader()
+	defer reader.Release()
+
+	g.Trace("arrow lane schema => %s", rs.Schema)
+
+	ingested, err := adbc.IngestStream(
+		ds.Context.Ctx,
+		conn.Conn,
+		reader,
+		table.Name,
+		conn.getIngestMode(),
+		conn.ingestOptions(table),
+	)
+	if err != nil {
+		return 0, g.Error(err, "error ingesting records via ADBC")
+	}
+
+	if ingested != int64(ds.Count) {
+		g.Debug("arrow lane: driver ingested %d rows, stream counted %d", ingested, ds.Count)
+	}
+
+	// Return the stream count so the post-load check and the progress bar use
+	// the same number.
+	return ds.Count, nil
+}
+
+// sameColumnNames reports whether two column sets hold the same names, in any
+// order and any case.
+func sameColumnNames(a, b iop.Columns) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	bMap := b.FieldMap(true)
+	for _, col := range a {
+		if _, ok := bMap[strings.ToLower(col.Name)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // getIngestMode returns the ADBC ingest mode based on the ingest_mode property
@@ -1422,9 +1742,38 @@ func (conn *ArrowDBConn) getIngestMode() string {
 
 // batchToRecordReader converts an iop.Batch to an Arrow RecordReader
 // It consumes all rows from the batch channel
-func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch) (array.RecordReader, error) {
+func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Columns) (reader array.RecordReader, rows int, err error) {
 	// Create Arrow schema from columns
-	schema := iop.ColumnsToArrowSchema(batch.Columns)
+	cols := batch.Columns
+	schema := iop.ColumnsToArrowSchema(cols)
+
+	// The target table's types win when the column names agree: the driver
+	// checks the record schema against the table before it ingests.
+	srcIdx := make([]int, len(cols))
+	for i := range srcIdx {
+		srcIdx[i] = i
+	}
+	if len(tgtCols) > 0 {
+		tgtIdx := map[string]int{}
+		for i, col := range cols {
+			tgtIdx[strings.ToLower(col.Name)] = i
+		}
+		srcIdx = make([]int, len(tgtCols))
+		ok := true
+		for i, col := range tgtCols {
+			j, found := tgtIdx[strings.ToLower(col.Name)]
+			if !found {
+				ok = false
+				break
+			}
+			srcIdx[i] = j
+		}
+		if ok {
+			cols = tgtCols
+			schema = iop.ColumnsToArrowSchema(cols)
+		}
+	}
+	schema = conn.ingestSchema(schema, cols)
 
 	// Create memory allocator
 	mem := memory.NewGoAllocator()
@@ -1435,10 +1784,11 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch) (array.RecordRead
 	// Consume all rows from the batch channel and append to builder
 	rowCount := 0
 	for row := range batch.Rows {
-		for colIdx, col := range batch.Columns {
+		for colIdx, col := range cols {
+			srcCol := srcIdx[colIdx]
 			var val interface{}
-			if colIdx < len(row) {
-				val = row[colIdx]
+			if srcCol < len(row) {
+				val = row[srcCol]
 			}
 			iop.AppendToBuilder(builder.Field(colIdx), &col, val)
 		}
@@ -1452,18 +1802,19 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch) (array.RecordRead
 	if rowCount == 0 {
 		// Return empty reader with schema
 		record.Release()
-		return array.NewRecordReader(schema, []arrow.Record{})
+		reader, err = array.NewRecordReader(schema, []arrow.Record{})
+		return reader, 0, err
 	}
 
 	// Create a RecordReader from the single record
-	reader, err := array.NewRecordReader(schema, []arrow.Record{record})
+	reader, err = array.NewRecordReader(schema, []arrow.Record{record})
 	if err != nil {
 		record.Release()
-		return nil, g.Error(err, "error creating record reader")
+		return nil, 0, g.Error(err, "error creating record reader")
 	}
 
 	// Note: record will be released when reader is released
-	return reader, nil
+	return reader, rowCount, nil
 }
 
 // NewAdbcConn creates a new ADBC conn from a parent conn
@@ -1513,6 +1864,18 @@ func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
 	case dbio.TypeDbMySQL:
 		connMap["driver_name"] = "mysql"
 		connMap["uri"] = buildMySQLAdbcURI(info, getProp)
+
+	case dbio.TypeDbClickhouse:
+		connMap["driver_name"] = "clickhouse"
+		// the driver speaks the HTTP interface, credentials go as options
+		uri, user, password := buildClickhouseAdbcURI(info, getProp)
+		connMap["uri"] = uri
+		if user != "" {
+			connMap["username"] = user
+		}
+		if password != "" {
+			connMap["password"] = password
+		}
 
 	case dbio.TypeDbTrino:
 		connMap["driver_name"] = "trino"
@@ -1708,8 +2071,13 @@ func buildSQLiteAdbcURI(info ConnInfo, getProp func(string) string) string {
 // DuckDB uses 'path' parameter instead of 'uri'
 // Format: /path/to/file.db or :memory:
 func buildDuckDbAdbcPath(info ConnInfo, getProp func(string) string) string {
-	// Get database path
-	dbPath := info.Database
+	// The instance property holds the file path (or the "md:" DSN) as written.
+	// ConnInfo.Database strips the slashes, so it cannot carry a path: using it
+	// would open a different file than the CLI session does.
+	dbPath := getProp("instance")
+	if dbPath == "" {
+		dbPath = info.URL.Path()
+	}
 	if dbPath == "" {
 		dbPath = getProp("database")
 	}
@@ -1834,34 +2202,276 @@ func buildSQLServerAdbcURI(info ConnInfo, getProp func(string) string) string {
 // Note: MySQL does not have an official ADBC driver
 // Format: user:password@tcp(host:port)/database
 func buildMySQLAdbcURI(info ConnInfo, getProp func(string) string) string {
-	var uri strings.Builder
-
-	// User and password
+	// the mysql:// form decodes the credentials, the Go DSN form does not
+	u := url.URL{Scheme: "mysql", Host: info.Host, Path: "/" + info.Database}
+	if info.Port > 0 {
+		u.Host = fmt.Sprintf("%s:%d", info.Host, info.Port)
+	}
 	if info.User != "" {
-		uri.WriteString(url.QueryEscape(info.User))
+		u.User = url.User(info.User)
 		if info.Password != "" {
-			uri.WriteString(":")
-			uri.WriteString(url.QueryEscape(info.Password))
+			u.User = url.UserPassword(info.User, info.Password)
 		}
-		uri.WriteString("@")
 	}
+	return u.String()
+}
 
-	// Host and port with tcp protocol
-	if info.Host != "" {
-		uri.WriteString("tcp(")
-		uri.WriteString(info.Host)
-		if info.Port > 0 {
-			uri.WriteString(fmt.Sprintf(":%d", info.Port))
+// buildClickhouseAdbcURI builds the HTTP URL of the ClickHouse ADBC driver.
+// It returns the credentials apart, since the driver takes them as options.
+// Format: http[s]://host:port?database=db
+func buildClickhouseAdbcURI(info ConnInfo, getProp func(string) string) (uri, user, password string) {
+	user, password = info.User, info.Password
+
+	u := &url.URL{Scheme: "http", Host: info.Host}
+	if httpURL := getProp("http_url"); httpURL != "" {
+		if parsed, err := url.Parse(httpURL); err == nil {
+			u = parsed
+			if u.User != nil {
+				user = u.User.Username()
+				if pass, ok := u.User.Password(); ok {
+					password = pass
+				}
+				u.User = nil
+			}
+		} else {
+			g.Warn("invalid http_url: %s", err.Error())
 		}
-		uri.WriteString(")")
+	} else {
+		// the native port does not serve HTTP
+		port := getProp("http_port")
+		if cast.ToBool(getProp("secure")) {
+			u.Scheme = "https"
+			if port == "" {
+				port = "8443"
+			}
+		} else if port == "" {
+			port = "8123"
+		}
+		u.Host = info.Host + ":" + port
 	}
 
-	// Database
-	if info.Database != "" {
-		uri.WriteString("/")
-		uri.WriteString(info.Database)
+	database := info.Database
+	if db := strings.Trim(u.Path, "/"); db != "" {
+		database = db
+	}
+	u.Path = ""
+	if database != "" {
+		q := u.Query()
+		q.Set("database", database)
+		u.RawQuery = q.Encode()
 	}
 
-	result := uri.String()
-	return result
+	return u.String(), user, password
+}
+
+// ErrArrowLaneDeclined is returned by a lane-only read when stage 2 declines.
+// The caller then reads with its own driver, as it does without the lane.
+var ErrArrowLaneDeclined = errors.New("arrow lane: declined by the schema check")
+
+// adbcLaneRead is the lane's view of an ADBC reader schema. The postgres
+// driver labels the types that have no plain Arrow type: numeric comes as
+// utf8, json as utf8 and uuid as binary. The row path infers these types from
+// the values. The lane reads the labels, and decodes numeric to the same
+// decimal the row path builds.
+type adbcLaneRead struct {
+	schema   *arrow.Schema // the schema the lane carries
+	columns  iop.Columns
+	decimals []int // utf8 numeric fields, decoded to decimal128
+	mem      memory.Allocator
+}
+
+func newAdbcLaneRead(src *arrow.Schema) *adbcLaneRead {
+	r := &adbcLaneRead{
+		columns: iop.ArrowSchemaToColumns(src),
+		mem:     memory.NewGoAllocator(),
+	}
+
+	fields := slices.Clone(src.Fields())
+	for i, field := range fields {
+		col := &r.columns[i]
+		switch adbcFieldTypeName(field) {
+		case "json", "jsonb":
+			col.Type = iop.JsonType
+			col.DbType = "JSON"
+		case "uuid":
+			// stage 2 derives arrow.uuid, which the binary field does not
+			// reach, so the stream stays on the row path
+			col.Type = iop.UUIDType
+			col.DbType = "UUID"
+		case "numeric":
+			if !g.In(arrowStorageType(field.Type).ID(), arrow.STRING, arrow.LARGE_STRING) {
+				continue
+			}
+			col.Type = iop.DecimalType
+			col.DbType = "DECIMAL"
+			fields[i] = arrow.Field{
+				Name:     field.Name,
+				Type:     iop.ColumnsToArrowSchema(iop.Columns{*col}).Field(0).Type,
+				Nullable: true,
+			}
+			r.decimals = append(r.decimals, i)
+		}
+	}
+
+	meta := src.Metadata()
+	r.schema = arrow.NewSchema(fields, &meta)
+	return r
+}
+
+// Record returns rec in the lane schema. The caller owns the result, and
+// still owns rec.
+func (r *adbcLaneRead) Record(rec arrow.RecordBatch) (arrow.RecordBatch, error) {
+	if len(r.decimals) == 0 {
+		rec.Retain()
+		return rec, nil
+	}
+
+	cols := slices.Clone(rec.Columns())
+	for _, i := range r.decimals {
+		arr, err := r.decodeDecimal(cols[i], i)
+		if err != nil {
+			return nil, err
+		}
+		defer arr.Release()
+		cols[i] = arr
+	}
+	return array.NewRecordBatch(r.schema, cols, rec.NumRows()), nil
+}
+
+// decodeDecimal builds the decimal array the row path builds from the same
+// text values (iop.AppendToBuilder).
+func (r *adbcLaneRead) decodeDecimal(arr arrow.Array, i int) (arrow.Array, error) {
+	col := &r.columns[i]
+	if ext, ok := arr.(array.ExtensionArray); ok {
+		arr = ext.Storage()
+	}
+	type stringArray interface {
+		arrow.Array
+		Value(int) string
+	}
+	strs, ok := arr.(stringArray)
+	if !ok {
+		return nil, g.Error("arrow lane: numeric column %q is %s, not utf8", col.Name, arr.DataType())
+	}
+
+	b := array.NewDecimal128Builder(r.mem, r.schema.Field(i).Type.(*arrow.Decimal128Type))
+	defer b.Release()
+	b.Reserve(strs.Len())
+	for j := 0; j < strs.Len(); j++ {
+		if strs.IsNull(j) {
+			b.AppendNull()
+			continue
+		}
+		iop.AppendToBuilder(b, col, strs.Value(j))
+	}
+	return b.NewArray(), nil
+}
+
+// adbcFieldTypeName returns the database type an ADBC driver labels a field
+// with, in lower case, or "" when the field has no label.
+func adbcFieldTypeName(field arrow.Field) string {
+	switch ext := field.Type.(type) {
+	case *extensions.OpaqueType:
+		return strings.ToLower(ext.TypeName)
+	case arrow.ExtensionType:
+		return extensionTypeName(ext.ExtensionName(), "")
+	}
+
+	if name, ok := field.Metadata.GetValue("ADBC:postgresql:typname"); ok {
+		return strings.ToLower(name)
+	}
+	if name, ok := field.Metadata.GetValue("ARROW:extension:name"); ok {
+		extMeta, _ := field.Metadata.GetValue("ARROW:extension:metadata")
+		return extensionTypeName(name, extMeta)
+	}
+	return ""
+}
+
+// extensionTypeName maps an extension name (and the opaque metadata) to a
+// database type name.
+func extensionTypeName(name, extMeta string) string {
+	switch name {
+	case "arrow.json":
+		return "json"
+	case "arrow.uuid":
+		return "uuid"
+	case "arrow.opaque":
+		opaque := struct {
+			TypeName string `json:"type_name"`
+		}{}
+		_ = json.Unmarshal([]byte(extMeta), &opaque)
+		return strings.ToLower(opaque.TypeName)
+	}
+	return ""
+}
+
+// arrowStorageType returns the storage type of an extension type, or dt.
+func arrowStorageType(dt arrow.DataType) arrow.DataType {
+	if ext, ok := dt.(arrow.ExtensionType); ok {
+		return ext.StorageType()
+	}
+	return dt
+}
+
+// arrowJSONMetadata labels a utf8 field as the arrow.json extension.
+var arrowJSONMetadata = arrow.NewMetadata(
+	[]string{"ARROW:extension:name", "ARROW:extension:metadata"},
+	[]string{"arrow.json", ""},
+)
+
+// ingestSchema labels the json fields for the postgres driver. Its COPY
+// writer sends a labeled utf8 field in the jsonb binary format, and a plain
+// one as raw text, which a jsonb column rejects. A json column takes raw
+// text, so it keeps a plain field.
+func (conn *ArrowDBConn) ingestSchema(schema *arrow.Schema, cols iop.Columns) *arrow.Schema {
+	if conn.driverType != dbio.TypeDbPostgres {
+		return schema
+	}
+
+	colMap := cols.FieldMap(true)
+	fields := slices.Clone(schema.Fields())
+	changed := false
+	for i, field := range fields {
+		j, ok := colMap[strings.ToLower(field.Name)]
+		if !ok || field.Type.ID() != arrow.STRING {
+			continue
+		}
+		if col := cols[j]; col.Type != iop.JsonType || strings.EqualFold(col.DbType, "json") {
+			continue
+		}
+		fields[i].Metadata = arrowJSONMetadata
+		changed = true
+	}
+	if !changed {
+		return schema
+	}
+
+	meta := schema.Metadata()
+	return arrow.NewSchema(fields, &meta)
+}
+
+// arrowLaneReader returns the ADBC sub-connection the lane reads through,
+// when the gate marked this connection as a candidate.
+func (conn *BaseConn) arrowLaneReader() (*ArrowDBConn, bool) {
+	if !conn.UseADBC() || conn.GetProp("arrow_lane") != "candidate" {
+		return nil, false
+	}
+	adbcConn, ok := conn.adbc.(*ArrowDBConn)
+	return adbcConn, ok
+}
+
+// laneExportStream is the lane's read for a connection that reads with its
+// own driver otherwise. It returns ErrArrowLaneDeclined when stage 2
+// declines, so the caller keeps its own reader for the row path.
+func (conn *ArrowDBConn) laneExportStream(sql string) (*iop.Datastream, error) {
+	return conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "lane_only", true))
+}
+
+// laneExportFlow is laneExportStream as a dataflow.
+func (conn *ArrowDBConn) laneExportFlow(sql string) (*iop.Dataflow, error) {
+	ds, err := conn.laneExportStream(sql)
+	if err != nil {
+		return nil, err
+	}
+	return iop.MakeDataFlow(ds)
 }

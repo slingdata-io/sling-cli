@@ -1,0 +1,103 @@
+# Arrow lane CLI suite: seed pipeline (tests/suite.cli.arrow.yaml).
+#
+# Creates {SCHEMA}.arrow_src on {SOURCE} with 10 000 rows that cover the type
+# matrix the lane has to carry: a null in every column, the minimum and the
+# maximum value of each numeric type, the epoch and year 9999 for the timestamp
+# columns, unicode text, binary, json, and an empty string.
+#
+# The rows are generated as CSV by a bash loop and loaded through the row path
+# with explicit column types, so the same pipeline runs on every engine the
+# suite uses (DuckDB, SQLite, Postgres, Snowflake, MySQL, SQL Server).
+#
+# The loop is plain bash on purpose: a pipeline `command` is rendered as a
+# sling expression, so the generator must not contain `{` or `}`.
+#
+# env (from the suite entry): SOURCE, SCHEMA
+
+# The source is a file, so sling would append its `_sling_loaded_at` metadata
+# column by default. The type matrix has no room for it, so turn it off.
+env:
+  SLING_LOADED_AT_COLUMN: 'false'
+
+steps:
+  - id: generate
+    type: command
+    command: |
+      (
+        echo "c_bool,c_int2,c_int4,c_int8,c_float,c_dec,c_str,c_str_uni,c_bin,c_date,c_ts,c_tsz,c_time,c_json,c_null"
+        i=0
+        while [ "$i" -lt 10000 ]; do
+          b=true
+          if [ $((i % 2)) -eq 1 ]; then b=false; fi
+          i2=$((i % 32767)); i4=$i; i8=$i
+          printf -v f '%d.%06d' $((i / 3)) $((i % 3 * 333333))
+          dec="$i.$i"
+          s="s$i"
+          uni="üñî-$i-日本語-😀"
+          printf -v bin '%08X' "$i"
+          printf -v dt '%04d-%02d-%02d' $((2000 + i % 25)) $((1 + i % 12)) $((1 + i % 28))
+          ts="$dt 12:34:56"; tsz="$ts+00:00"; tm="12:34:56"
+          js="[$i]"
+          nul=""
+          if [ "$i" -eq 0 ]; then i2=-32768; i4=-2147483648; i8=-9223372036854775808; f=-1.7976931348623157e308; dec=-99999999999999.9999; fi
+          if [ "$i" -eq 1 ]; then i2=32767; i4=2147483647; i8=9223372036854775807; f=1.7976931348623157e308; dec=99999999999999.9999; fi
+          if [ "$i" -eq 2 ]; then dt=1970-01-01; ts="1970-01-01 00:00:00"; tsz="$ts+00:00"; fi
+          if [ "$i" -eq 3 ]; then dt=9999-12-31; ts="9999-12-31 23:59:59"; tsz="$ts+00:00"; fi
+          if [ "$i" -eq 4 ]; then s=""; uni=""; fi
+          # a json column has no empty-string form: DuckDB rejects the cast,
+          # so the all-null row carries the JSON null literal
+          if [ "$i" -eq 5 ]; then b=""; i2=""; i4=""; i8=""; f=""; dec=""; s=""; uni=""; bin=""; dt=""; ts=""; tsz=""; tm=""; js=null; fi
+          if [ $((i % 7)) -eq 0 ]; then b=""; fi
+          if [ $((i % 11)) -eq 0 ]; then dec=""; fi
+          if [ $((i % 13)) -eq 0 ]; then s=""; fi
+          if [ $((i % 17)) -eq 0 ]; then f=""; fi
+          if [ $((i % 19)) -eq 0 ]; then ts=""; fi
+          printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$b" "$i2" "$i4" "$i8" "$f" "$dec" "$s" "$uni" "$bin" "$dt" "$ts" "$tsz" "$tm" "$js" "$nul"
+          i=$((i + 1))
+        done
+      ) > /tmp/arrow_src.csv
+      echo "generated /tmp/arrow_src.csv with $(( $(wc -l < /tmp/arrow_src.csv) - 1 )) rows"
+
+  - id: load
+    type: replication
+    replication:
+      source: LOCAL
+      target: '{env.SOURCE}'
+      defaults:
+        mode: full-refresh
+        target_options:
+          # The ADBC bulk-ingest path rejects the smallint column on Postgres
+          # ("incorrect binary data format"). The seed is not the lane test, so
+          # use plain inserts, which work on every engine.
+          use_bulk: false
+      streams:
+        file:///tmp/arrow_src.csv:
+          object: '{env.SCHEMA}.arrow_src'
+          columns:
+            c_bool: bool
+            c_int2: smallint
+            c_int4: integer
+            c_int8: bigint
+            c_float: float
+            c_dec: decimal(18,4)
+            c_str: string
+            c_str_uni: string
+            c_bin: binary
+            c_date: date
+            c_ts: timestamp
+            c_tsz: timestampz
+            c_time: time
+            c_json: json
+            c_null: string
+
+  - id: count
+    connection: '{env.SOURCE}'
+    query: select count(*) as cnt from {env.SCHEMA}.arrow_src
+    into: cnt
+
+  - type: check
+    check: int_parse(store.cnt[0].cnt) == 10000
+    failure_message: 'expected 10000 seeded rows, got {store.cnt[0].cnt}'
+
+  - type: log
+    message: 'arrow lane seed complete: {store.cnt[0].cnt} rows in {env.SCHEMA}.arrow_src'

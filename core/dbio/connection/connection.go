@@ -314,7 +314,7 @@ func (c *Connection) URL() string {
 	}
 
 	switch c.Type {
-	case dbio.TypeDbDuckDb:
+	case dbio.TypeDbDuckDb, dbio.TypeDbDBase:
 		// fix windows path
 		url = strings.ReplaceAll(url, `\`, `/`)
 	}
@@ -496,6 +496,7 @@ func (c *Connection) setUseADBC() {
 		dbio.TypeDbBigQuery,
 		dbio.TypeDbMySQL,
 		dbio.TypeDbTrino,
+		dbio.TypeDbClickhouse,
 	}
 
 	if !cast.ToBool(os.Getenv("SLING_USE_ADBC")) {
@@ -599,7 +600,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB, dbio.TypeDbSQLite, dbio.TypeDbDBase, dbio.TypeDbD1, dbio.TypeDbBigQuery, dbio.TypeDbDynamoDB) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("user", U.Username())
 				setIfMissing("username", U.Username())
@@ -624,6 +625,15 @@ func (c *Connection) setURL() (err error) {
 			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
 				setIfMissing("instance", U.Path())
 				setIfMissing("schema", "main")
+			case dbio.TypeDbDBase:
+				setIfMissing("path", database.DbasePathFromURL(c.URL()))
+				setIfMissing("schema", "main")
+			case dbio.TypeDbLanceDB:
+				setIfMissing("path", lanceDBPathFromURL(c.URL()))
+				setIfMissing("schema", "main")
+			case dbio.TypeDbDynamoDB:
+				// `dynamodb://us-east-1` carries the region in the host
+				setIfMissing("aws_region", U.Hostname())
 			case dbio.TypeDbMotherDuck:
 				setIfMissing("schema", "main")
 			case dbio.TypeDbD1:
@@ -814,6 +824,22 @@ func (c *Connection) setURL() (err error) {
 		} else {
 			template = "elasticsearch://{username}:{password}@{host}:{port}"
 		}
+	case dbio.TypeDbOpenSearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		template = "opensearch://{username}:{password}@{host}:{port}"
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())
@@ -900,6 +926,12 @@ func (c *Connection) setURL() (err error) {
 			}
 		}
 		template = "sqlite://{instance}?cache=shared&mode=rwc&_journal_mode=WAL&_synchronous=NORMAL"
+	case dbio.TypeDbDBase:
+		if val, ok := c.Data["path"]; ok {
+			c.Data["path"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+		}
+		setIfMissing("schema", "main")
+		template = "dbase://{path}"
 	case dbio.TypeDbDuckDb:
 		if val, ok := c.Data["instance"]; ok {
 			dbURL, err := net.NewURL(cast.ToString(val))
@@ -956,6 +988,13 @@ func (c *Connection) setURL() (err error) {
 		// Build the ducklake URL based on catalog configuration
 		// Default to simple ducklake:// if no specific catalog URL is provided
 		template = "ducklake://"
+	case dbio.TypeDbLanceDB:
+		// the namespace root is a directory path or an object store URI
+		if val, ok := c.Data["path"]; ok {
+			c.Data["path"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+		}
+		setIfMissing("schema", "main")
+		template = "lancedb://{path}"
 	case dbio.TypeDbMotherDuck:
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)
@@ -1089,6 +1128,39 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("keyspace", "")
 		template = "scylladb://{username}:{password}@{host}:{port}/{keyspace}"
+	case dbio.TypeDbDynamoDB:
+		// AWS SDK based: credentials come from the AWS credential chain when absent
+		region := cast.ToString(c.Data["region"])
+		if region == "" {
+			region = os.Getenv("AWS_REGION")
+		}
+		if region == "" {
+			region = os.Getenv("AWS_DEFAULT_REGION")
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+		setIfMissing("aws_region", region)
+
+		setIfMissing("aws_access_key_id", cast.ToString(c.Data["user"]))
+		setIfMissing("aws_access_key_id", cast.ToString(c.Data["access_key_id"]))
+		setIfMissing("aws_secret_access_key", cast.ToString(c.Data["password"]))
+		setIfMissing("aws_secret_access_key", cast.ToString(c.Data["secret_access_key"]))
+		setIfMissing("aws_session_token", cast.ToString(c.Data["session_token"]))
+		setIfMissing("aws_profile", cast.ToString(c.Data["profile"]))
+		// DynamoDB tables have no schema: `default` keeps object names simple
+		setIfMissing("schema", "default")
+		template = "dynamodb://{aws_region}"
+	case dbio.TypeDbFirebolt:
+		// Firebolt Core has no authentication; username/password stay optional
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("database", "firebolt")
+		setIfMissing("schema", "public")
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
+		template = "firebolt://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
@@ -1097,7 +1169,7 @@ func (c *Connection) setURL() (err error) {
 			template = template + path
 		}
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure, dbio.TypeFileAzureABFS,
-		dbio.TypeFileLocal:
+		dbio.TypeFileDatabricksVolume, dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
 		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables, sql
@@ -1159,7 +1231,8 @@ func (c *Connection) setURL() (err error) {
 	for k, v := range c.Data {
 		urlData[k] = v
 	}
-	urlData["password"] = url.QueryEscape(cast.ToString(urlData["password"]))
+	// userinfo does not decode "+" as a space
+	urlData["password"] = strings.ReplaceAll(url.QueryEscape(cast.ToString(urlData["password"])), "+", "%20")
 	setIfMissing("url", g.Rm(template, urlData))
 
 	return nil
@@ -1429,6 +1502,18 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 
 func (i *Info) IsURL() bool {
 	return strings.Contains(i.Name, "://")
+}
+
+// lanceDBPathFromURL extracts the namespace root from a `lancedb://` URL.
+// The root is everything after the scheme, so that it can itself be an object
+// store URI (`lancedb://s3://bucket/prefix`) as well as a local directory
+// (`lancedb:///data/lancedb`). Query params are not part of the path.
+func lanceDBPathFromURL(connURL string) string {
+	connPath := strings.TrimPrefix(connURL, "lancedb://")
+	if i := strings.Index(connPath, "?"); i >= 0 {
+		connPath = connPath[:i]
+	}
+	return connPath
 }
 
 // SchemeType returns the correct scheme of the url

@@ -152,7 +152,7 @@ var cliBuild = &g.CliSC{
 			Name:        "run",
 			Description: "Materialize models, then run each model's declarative tests",
 			PosFlags:    []g.Flag{buildPathFlag},
-			Flags:       concatFlags(buildCommonFlags, buildRunFlags),
+			Flags:       concatFlags(buildCommonFlags, buildRunFlags, buildOutputFlags),
 		},
 		{
 			Name:        "list",
@@ -335,15 +335,21 @@ func processBuild(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
-	// Execute the build
-	if err := b.Execute(); err != nil {
-		if opts.Test && opts.JSON {
-			b.PrintTestJSON()
-		}
-		return ok, g.Error(err, "build execution failed")
+	// Execute the build. Machine-readable output is emitted before returning,
+	// so a failed run still hands the caller the per-node results along with
+	// the non-zero exit code.
+	runErr := b.Execute()
+	switch {
+	case opts.Test && opts.JSON:
+		b.PrintTestJSON()
+	case opts.JSON:
+		b.PrintRunJSON(projectPath)
+	}
+
+	if runErr != nil {
+		return ok, g.Error(runErr, "build execution failed")
 	}
 	if opts.Test && opts.JSON {
-		b.PrintTestJSON()
 		return ok, nil
 	}
 	if err := testOutput(int64(b.ExecRows), b.ExecBytes, 0); err != nil {

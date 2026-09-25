@@ -1,0 +1,5 @@
+# Fixture for `sling build run --json`. No target: the tests pass --target to a
+# DuckDB connection defined in the suite's env, so no database is required.
+
+defaults:
+  mode: full-refresh

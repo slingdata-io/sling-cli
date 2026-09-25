@@ -1,0 +1,88 @@
+source: postgres
+target: '{target}'
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.iceberg_inc_merge_src;
+        CREATE TABLE public.iceberg_inc_merge_src (
+          id int primary key,
+          val text,
+          updated_at timestamp
+        );
+        INSERT INTO public.iceberg_inc_merge_src (id, val, updated_at) VALUES
+          (1, 'a', '2020-01-01 00:00:00'),
+          (2, 'b', '2020-01-01 00:00:00'),
+          (3, 'c', '2020-01-01 00:00:00');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: check
+      id: target_check
+      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql" && lower(target.name) != "iceberg_glue"
+      failure_message: skipping duckdb verify for {target.name}
+      on_failure: break
+
+    - type: query
+      connection: '{target}'
+      query: |
+        select count(*) as cnt, count(distinct id) as did from iceberg_catalog.public.iceberg_inc_merge
+      into: counts
+
+    - type: log
+      message: 'iceberg merge counts => { store.counts[0] }'
+
+    - type: check
+      check: int_parse(store.counts[0].cnt) == 4
+      message: 'expected 4 rows (3 seed + 1 insert, 2 updates in place), got {store.counts[0].cnt}'
+
+    - type: check
+      check: int_parse(store.counts[0].did) == 4
+      message: 'duplicate primary keys in Iceberg merge result: distinct={store.counts[0].did} count={store.counts[0].cnt}'
+
+    - type: query
+      connection: '{target}'
+      query: select id, val from iceberg_catalog.public.iceberg_inc_merge order by id
+      into: rows
+
+    - type: check
+      check: store.rows[0].val == "a2"
+      message: "id=1 should be updated to a2, got '{store.rows[0].val}'"
+
+    - type: check
+      check: store.rows[1].val == "b2"
+      message: "id=2 should be updated to b2, got '{store.rows[1].val}'"
+
+    - type: check
+      check: store.rows[3].val == "d"
+      message: "id=4 should be inserted, got '{store.rows[3].val}'"
+
+streams:
+  seed:
+    sql: select * from public.iceberg_inc_merge_src
+    object: public.iceberg_inc_merge
+    mode: full-refresh
+    primary_key: [id]
+
+  merge:
+    sql: select * from public.iceberg_inc_merge_src where {incremental_where_cond}
+    object: public.iceberg_inc_merge
+    mode: incremental
+    primary_key: [id]
+    update_key: updated_at
+    hooks:
+      pre:
+        - type: query
+          connection: '{source.name}'
+          query: |
+            UPDATE public.iceberg_inc_merge_src SET val = 'a2', updated_at = now() WHERE id = 1;
+            UPDATE public.iceberg_inc_merge_src SET val = 'b2', updated_at = now() WHERE id = 2;
+            INSERT INTO public.iceberg_inc_merge_src (id, val, updated_at) VALUES (4, 'd', now());
+
+env:
+  target: ${TARGET}

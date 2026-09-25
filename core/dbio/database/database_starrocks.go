@@ -642,7 +642,10 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		} else {
 			respMap, _ := g.UnmarshalMap(respString)
 			g.Debug("stream-load completed for %s => %s", localFile.Node.Path(), respString)
-			if cast.ToString(respMap["Status"]) == "Fail" {
+			// an empty batch (e.g. no new incremental rows) fails when the FE sets empty_load_as_error
+			emptyLoad := cast.ToInt(respMap["NumberTotalRows"]) == 0 &&
+				strings.Contains(cast.ToString(respMap["Message"]), "No partitions have data available for loading")
+			if cast.ToString(respMap["Status"]) == "Fail" && !emptyLoad {
 				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 				df.Context.Cancel()
 			}
@@ -691,9 +694,10 @@ func (conn *StarRocksConn) injectInlineColumnComments(ddl string, columns iop.Co
 	}
 
 	// build lookup of described columns (escaped)
+	describeAll := NewSchemaMigrator(nil).HasDescriptionEnabled()
 	comments := map[string]string{}
 	for _, col := range columns {
-		if !col.IsDDLExplicit() {
+		if !col.IsDDLExplicit() && !describeAll {
 			continue
 		}
 		description := col.Metadata[iop.ColMetaDescription.String()]

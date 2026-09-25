@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -123,7 +122,6 @@ func (p *ParquetArrowReader) readRowsLoop() {
 			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 			p.Context.CaptureErr(err)
 		}
-		p.done = true
 		close(p.nextRow)
 	}()
 
@@ -186,7 +184,6 @@ func (p *ParquetArrowReader) getValueFromColumn(col *arrow.Column, idx int, colM
 }
 
 func (p *ParquetArrowReader) nextFunc(it *Iterator) bool {
-retry:
 	select {
 	case nextRow, ok := <-p.nextRow:
 		if !ok {
@@ -201,15 +198,9 @@ retry:
 		}
 		it.Row = nextRow.row
 		return true
-	default:
+	case <-it.Context.Ctx.Done():
+		return false
 	}
-
-	if !p.done {
-		time.Sleep(10 * time.Millisecond)
-		goto retry
-	}
-
-	return false
 }
 
 type ParquetArrowWriter struct {
@@ -220,6 +211,11 @@ type ParquetArrowWriter struct {
 	builders      []array.Builder
 	rowsBuffered  int
 	decimalScales []*big.Rat
+
+	// record path (NewParquetArrowWriterFromSchema): no builders, records go
+	// straight to the writer
+	recordsWritten int64
+	groupBytes     int64 // bytes of the current buffered row group
 }
 
 func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compression) (p *ParquetArrowWriter, err error) {
@@ -271,6 +267,8 @@ func (p *ParquetArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 	switch dtype.ID() {
 	case arrow.BOOL:
 		return array.NewBooleanBuilder(p.mem)
+	case arrow.INT16:
+		return array.NewInt16Builder(p.mem)
 	case arrow.INT32:
 		return array.NewInt32Builder(p.mem)
 	case arrow.INT64:
@@ -376,6 +374,78 @@ func (p *ParquetArrowWriter) Close() error {
 
 func (p *ParquetArrowWriter) Columns() Columns {
 	return p.columns
+}
+
+// parquetArrowRowGroupBytes is the row group size the record path aims for.
+// WriteBuffered groups records, so the writer is told to start a new row group
+// once the current one passes this mark.
+const parquetArrowRowGroupBytes = 128 << 20
+
+// NewParquetArrowWriterFromSchema returns a Parquet writer that writes whole
+// records, for the arrow lane. There are no per-column builders: the record
+// buffers go straight to pqarrow.
+func NewParquetArrowWriterFromSchema(w io.Writer, schema *arrow.Schema, codec compress.Compression) (p *ParquetArrowWriter, err error) {
+	if schema == nil {
+		return nil, g.Error("could not create parquet writer: nil schema")
+	}
+
+	p = &ParquetArrowWriter{
+		columns:     ArrowSchemaToColumns(schema),
+		arrowSchema: schema,
+		mem:         memory.NewGoAllocator(),
+	}
+
+	writerProps := parquet.NewWriterProperties(
+		parquet.WithDictionaryDefault(true),
+		parquet.WithVersion(parquet.V2_LATEST),
+		parquet.WithCompression(codec),
+	)
+	arrowProps := pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema())
+
+	p.Writer, err = pqarrow.NewFileWriter(schema, w, writerProps, arrowProps)
+	if err != nil {
+		return nil, g.Error(err, "could not create parquet writer")
+	}
+
+	return p, nil
+}
+
+// WriteRecord writes one record to the Parquet file. The record must carry the
+// writer's schema. Small records are grouped into one row group by
+// WriteBuffered; a new row group starts once the current one passes
+// parquetArrowRowGroupBytes.
+func (p *ParquetArrowWriter) WriteRecord(rec arrow.RecordBatch) error {
+	if rec == nil || rec.NumRows() == 0 {
+		return nil
+	}
+	if !rec.Schema().Equal(p.arrowSchema) {
+		return g.Error("record schema %s does not match the writer schema %s", rec.Schema(), p.arrowSchema)
+	}
+
+	if err := p.Writer.WriteBuffered(rec); err != nil {
+		return g.Error(err, "could not write record")
+	}
+
+	p.recordsWritten++
+
+	// The row group is broken by the bytes this writer counted, not by
+	// pqarrow's RowGroupTotalBytesWritten: a buffered row group only reports
+	// the bytes of its flushed pages, so the counter can stay near zero while
+	// the group holds gigabytes in memory. The break must be a *buffered* row
+	// group too: NewRowGroup leaves the writer in the eager state, and the
+	// next WriteBuffered after the break panics.
+	p.groupBytes += TotalRecordSize(rec)
+	if p.groupBytes >= parquetArrowRowGroupBytes {
+		p.Writer.NewBufferedRowGroup()
+		p.groupBytes = 0
+	}
+
+	return nil
+}
+
+// RowGroupBytes returns the bytes buffered in the current row group.
+func (p *ParquetArrowWriter) RowGroupBytes() int64 {
+	return p.groupBytes
 }
 
 // Helper functions

@@ -239,6 +239,7 @@ type ColumnStats struct {
 	UniqCnt      int64  `json:"uniq_cnt,omitempty"`
 	Checksum     uint64 `json:"checksum,omitempty"`
 	LastVal      any    `json:"-"` // last non-empty value. useful for state incremental
+	MaxStr       string `json:"-"` // maximum of a string update key, tracked by the arrow lane
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -371,6 +372,17 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 		}
 	}
 	return keys
+}
+
+// PrimaryKeyNames returns the names of the columns with the primary key constraint
+// (from schema migration metadata or the columns DSL)
+func (cols Columns) PrimaryKeyNames() (names []string) {
+	for _, col := range cols {
+		if col.IsPrimaryKey() {
+			names = append(names, col.Name)
+		}
+	}
+	return names
 }
 
 // SetKeys sets key columns

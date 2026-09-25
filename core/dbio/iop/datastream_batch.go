@@ -2,6 +2,7 @@ package iop
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/flarco/g"
@@ -27,6 +28,18 @@ type Batch struct {
 // NewBatch create new batch with fixed columns
 // should be used each time column type changes, or columns are added
 func (ds *Datastream) NewBatch(columns Columns) *Batch {
+	if ds.ArrowOnly {
+		// A sink took the row branch on an Arrow stream. Do not panic: the
+		// error names the wiring bug and ends the run with a useful message.
+		ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
+		return &Batch{
+			Columns:   columns,
+			Rows:      MakeRowsChan(),
+			closeChan: make(chan struct{}),
+			context:   g.NewContext(ds.Context.Ctx),
+		}
+	}
+
 	batch := &Batch{
 		id:          len(ds.Batches),
 		Columns:     columns,
@@ -214,7 +227,7 @@ func (b *Batch) Push(row []any) {
 		b.ds.schemaChgChan <- v
 	case b.Rows <- newRow:
 		b.Count++
-		b.ds.Count++
+		atomic.AddUint64(&b.ds.Count, 1)
 		b.ds.bwRows <- newRow
 		b.ds.Sp.commitChecksum()
 

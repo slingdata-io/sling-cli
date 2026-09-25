@@ -36,7 +36,6 @@ type ArrowReader struct {
 	selectedColIndices []int
 	colMap             map[string]int
 	nextRow            chan nextRow
-	done               bool
 	schema             *arrow.Schema
 	columns            Columns
 }
@@ -172,7 +171,10 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 		case arrow.BOOL:
 			col.Type = BoolType
 			col.DbType = "BOOL"
-		case arrow.INT8, arrow.INT16, arrow.INT32:
+		case arrow.INT8, arrow.INT16:
+			col.Type = SmallIntType
+			col.DbType = field.Type.String()
+		case arrow.INT32:
 			col.Type = IntegerType
 			col.DbType = field.Type.String()
 		case arrow.INT64:
@@ -187,23 +189,22 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 		case arrow.FLOAT32, arrow.FLOAT64:
 			col.Type = FloatType
 			col.DbType = field.Type.String()
-		case arrow.DECIMAL128:
+		case arrow.DECIMAL32, arrow.DECIMAL64, arrow.DECIMAL128, arrow.DECIMAL256:
 			col.Type = DecimalType
-			if dt, ok := field.Type.(*arrow.Decimal128Type); ok {
-				col.DbPrecision = int(dt.Precision)
-				col.DbScale = int(dt.Scale)
+			if dt, ok := field.Type.(arrow.DecimalType); ok {
+				col.DbPrecision = int(dt.GetPrecision())
+				col.DbScale = int(dt.GetScale())
 			}
 			col.DbType = "DECIMAL"
-		case arrow.DECIMAL256:
-			col.Type = DecimalType
-			if dt, ok := field.Type.(*arrow.Decimal256Type); ok {
-				col.DbPrecision = int(dt.Precision)
-				col.DbScale = int(dt.Scale)
-			}
-			col.DbType = "DECIMAL"
-		case arrow.DATE32:
+		case arrow.DATE32, arrow.DATE64:
 			col.Type = DateType
 			col.DbType = "DATE"
+		case arrow.TIME32, arrow.TIME64:
+			// ColumnsToArrowSchema maps TimeType back to time64[us], so a
+			// TIME column round-trips. Without this it arrived as utf8, which
+			// the lane cannot cast from time64[us] (D3).
+			col.Type = TimeType
+			col.DbType = "TIME"
 		case arrow.TIMESTAMP:
 			col.Type = DatetimeType
 			col.DbType = "TIMESTAMP"
@@ -256,7 +257,6 @@ func (a *ArrowReader) readRowsLoop() {
 			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 			a.Context.CaptureErr(err)
 		}
-		a.done = true
 		close(a.nextRow)
 	}()
 
@@ -303,7 +303,6 @@ func (a *ArrowReader) readFileRowsLoop() {
 			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 			a.Context.CaptureErr(err)
 		}
-		a.done = true
 		close(a.nextRow)
 	}()
 
@@ -346,12 +345,14 @@ func (a *ArrowReader) readFileRowsLoop() {
 	}
 }
 
+// nextFunc blocks on the row channel: the reader loop closes it when the last
+// row is pushed, and the context closes the wait on a cancel. The old polling
+// loop both slept 10 ms per row and read `done` from the other goroutine.
 func (a *ArrowReader) nextFunc(it *Iterator) bool {
-retry:
 	select {
 	case nextRow, ok := <-a.nextRow:
 		if !ok {
-			// Channel is closed, no more rows
+			// channel is closed, no more rows
 			return false
 		}
 		if err := nextRow.err; err != nil {
@@ -360,15 +361,9 @@ retry:
 		}
 		it.Row = nextRow.row
 		return true
-	default:
+	case <-it.Context.Ctx.Done():
+		return false
 	}
-
-	if !a.done {
-		time.Sleep(10 * time.Millisecond)
-		goto retry
-	}
-
-	return false
 }
 
 // arrowRecordWriter is the subset of *ipc.FileWriter / *ipc.Writer we use,
@@ -386,6 +381,9 @@ type ArrowWriter struct {
 	mem          memory.Allocator
 	builders     []array.Builder
 	rowsBuffered int
+
+	// record path (WriteRecord): the record buffers go straight to the writer
+	recordsWritten int64
 }
 
 // NewArrowWriter creates a new Arrow IPC file writer. Extra options (e.g.
@@ -462,6 +460,8 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 	switch dtype.ID() {
 	case arrow.BOOL:
 		return array.NewBooleanBuilder(a.mem)
+	case arrow.INT16:
+		return array.NewInt16Builder(a.mem)
 	case arrow.INT32:
 		return array.NewInt32Builder(a.mem)
 	case arrow.INT64:
@@ -565,6 +565,142 @@ func (a *ArrowWriter) Columns() Columns {
 	return a.columns
 }
 
+// unwrapSchemaExtensions returns schema with every extension field replaced by
+// its storage type. The stream schema of an ADBC reader carries the driver's
+// arrow.opaque fields, but the records it produces carry plain storage arrays,
+// so a file written from the stream schema alone would not read back.
+func unwrapSchemaExtensions(schema *arrow.Schema) *arrow.Schema {
+	if schema == nil {
+		return nil
+	}
+	changed := false
+	fields := make([]arrow.Field, schema.NumFields())
+	for i, f := range schema.Fields() {
+		if ext, ok := f.Type.(arrow.ExtensionType); ok {
+			f.Type = ext.StorageType()
+			changed = true
+		}
+		// the ARROW extension keys rebuild the extension type on read, so
+		// they must go with it, or a Parquet reader re-applies the driver's
+		// opaque type to a column whose storage does not match it
+		if md := f.Metadata; hasMetadataKey(md, arrowExtensionNameKey) || hasMetadataKey(md, arrowExtensionMetadataKey) {
+			keys := []string{}
+			values := []string{}
+			for j, k := range md.Keys() {
+				if k == arrowExtensionNameKey || k == arrowExtensionMetadataKey {
+					continue
+				}
+				keys = append(keys, k)
+				values = append(values, md.Values()[j])
+			}
+			f.Metadata = arrow.NewMetadata(keys, values)
+			changed = true
+		}
+		fields[i] = f
+	}
+	if !changed {
+		return schema
+	}
+	meta := schema.Metadata()
+	return arrow.NewSchema(fields, &meta)
+}
+
+// hasMetadataKey reports whether metadata carries key.
+func hasMetadataKey(md arrow.Metadata, key string) bool {
+	for _, k := range md.Keys() {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	arrowExtensionNameKey     = "ARROW:extension:name"
+	arrowExtensionMetadataKey = "ARROW:extension:metadata"
+)
+
+// unwrapRecordExtensions rebinds a record to schema, replacing every
+// extension array with its storage array. A parquet file written straight
+// from an ADBC reader otherwise carries arrow.opaque for its numeric columns,
+// and a reader that applies the file's arrow schema then sees a storage type
+// the file's physical column does not match.
+func unwrapRecordExtensions(rec arrow.RecordBatch, schema *arrow.Schema) (arrow.RecordBatch, error) {
+	if rec.Schema().Equal(schema) {
+		return rec, nil
+	}
+	if !arrowSchemaFieldsMatch(rec.Schema(), schema) && !arrowSchemaStoragesMatch(rec.Schema(), schema) {
+		return nil, g.Error("record schema %s does not match %s", rec.Schema(), schema)
+	}
+	cols := make([]arrow.Array, rec.NumCols())
+	for i := range cols {
+		arr := rec.Column(i)
+		if extArr, ok := arr.(array.ExtensionArray); ok {
+			cols[i] = extArr.Storage()
+			continue
+		}
+		cols[i] = arr
+	}
+	return array.NewRecordBatch(schema, cols, rec.NumRows()), nil
+}
+
+// arrowSchemaStoragesMatch reports whether every field of a has the same name
+// and type as b once extensions are replaced by their storage types.
+func arrowSchemaStoragesMatch(a, b *arrow.Schema) bool {
+	if a == nil || b == nil || a.NumFields() != b.NumFields() {
+		return false
+	}
+	for i := 0; i < a.NumFields(); i++ {
+		af, bf := a.Field(i), b.Field(i)
+		at := af.Type
+		if ext, ok := at.(arrow.ExtensionType); ok {
+			at = ext.StorageType()
+		}
+		if af.Name != bf.Name || !arrow.TypeEqual(at, bf.Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// arrowSchemaFieldsMatch reports whether two schemas carry the same fields in
+// the same order with the same names and types, ignoring field metadata.
+func arrowSchemaFieldsMatch(a, b *arrow.Schema) bool {
+	if a == nil || b == nil || a.NumFields() != b.NumFields() {
+		return false
+	}
+	for i := 0; i < a.NumFields(); i++ {
+		af, bf := a.Field(i), b.Field(i)
+		if af.Name != bf.Name || !arrow.TypeEqual(af.Type, bf.Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// WriteRecord writes one record to the Arrow IPC file, for the arrow lane.
+// The record must carry the writer's schema. A record whose fields match by
+// name and type is rebound to the writer's schema first: a reader's field
+// metadata (driver type hints) is not part of the schema this writer stores.
+func (a *ArrowWriter) WriteRecord(rec arrow.RecordBatch) error {
+	if rec == nil || rec.NumRows() == 0 {
+		return nil
+	}
+	if !rec.Schema().Equal(a.arrowSchema) {
+		if !arrowSchemaFieldsMatch(rec.Schema(), a.arrowSchema) {
+			return g.Error("record schema %s does not match the writer schema %s", rec.Schema(), a.arrowSchema)
+		}
+		bound := array.NewRecordBatch(a.arrowSchema, rec.Columns(), rec.NumRows())
+		defer bound.Release()
+		rec = bound
+	}
+	if err := a.Writer.Write(rec); err != nil {
+		return g.Error(err, "could not write record")
+	}
+	a.recordsWritten++
+	return nil
+}
+
 func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 	fields := make([]arrow.Field, len(columns))
 
@@ -574,8 +710,12 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		switch col.Type {
 		case BoolType:
 			arrowType = arrow.FixedWidthTypes.Boolean
-		case IntegerType, SmallIntType:
+		case IntegerType:
 			arrowType = arrow.PrimitiveTypes.Int32
+		case SmallIntType:
+			// a smallint source keeps its width so an ADBC ingest matches the
+			// SMALLINT DDL, and the parquet/arrow file type stays int16
+			arrowType = arrow.PrimitiveTypes.Int16
 		case BigIntType:
 			arrowType = arrow.PrimitiveTypes.Int64
 		case FloatType:
@@ -1137,6 +1277,10 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 		}
 		return values
 	case *array.LargeString:
+		// TODO: arrow-go returns a string that aliases the record buffer, so a
+		// value kept past the record's Release() (nested strings) can dangle.
+		// The lane never reaches this path; fix with strings.Clone when a
+		// nested-string consumer lands.
 		return a.Value(idx)
 	case *array.List:
 		// Return as a slice of values

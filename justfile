@@ -6,6 +6,7 @@ set shell := ["bash", "-lc"]
 # Run all tests
 test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
     #!/usr/bin/env bash
+    set -e
     echo "✓ All tests passed!"
 
 # Build the sling binary
@@ -13,12 +14,13 @@ build:
     #!/usr/bin/env bash
     set -e
     echo "Building sling binary..."
-    cd cmd/sling && rm -f sling && go build . && cd -
+    (cd cmd/sling && rm -f sling && go build .)
     echo "✓ Build complete"
 
 # Test CLI
 test-cli arg1="": build
     #!/usr/bin/env bash
+    set -e
     echo "TESTING CLI {{arg1}}"
     export SLING_BINARY="$PWD/cmd/sling/sling"
     export RUN_ALL=true
@@ -27,33 +29,39 @@ test-cli arg1="": build
 # Test replication defaults
 test-replication-defaults:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING replication defaults"
-    cd cmd/sling && go test -v -run 'TestReplicationDefaults' && cd -
+    (cd cmd/sling && go test -v -run 'TestReplicationDefaults')
 
 # Test file connections
 test-connections-file arg1="TestSuiteFile" arg2="" arg3="":
     #!/usr/bin/env bash
+    set -e
     echo "TESTING file connections {{arg1}} {{arg2}}"
-    cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
+    (cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}")
 
 # Test database connections
 test-connections-database arg1="TestSuiteDatabase" arg2="" arg3="":
     #!/usr/bin/env bash
+    set -e
     echo "TESTING database connections {{arg1}} {{arg2}}"
-    cd cmd/sling && RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}" && cd -
+    (cd cmd/sling && RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" "{{arg3}}")
 
 # Test core (sling core functionality)
 test-core:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING core sling functionality"
-    cd core/sling && go test -v -run 'TestTransformMsUUID' && cd -
-    cd core/sling && go test -v -run 'TestReplication' && cd -
-    cd core/sling && go test -v -run 'TestColumnCasing' && cd -
-    cd core/sling && go test -run 'TestCheck' && cd -
-    cd core/sling/assist && go test -v && cd -
-    cd core/sling/project && go test -v && cd -
-    cd core/sling/validate && go test -v && cd -
-    cd core/sling/build && go test -v && cd -
+    (cd core/sling && go test -v -run 'TestTransformMsUUID')
+    (cd core/sling && go test -v -run 'TestReplication')
+    (cd core/sling && go test -v -run 'TestColumnCasing')
+    (cd core/sling && go test -run 'TestCheck')
+    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines')
+    (cd core/env && go test -v)
+    (cd core/sling/assist && go test -v)
+    (cd core/sling/project && go test -v)
+    (cd core/sling/validate && go test -v)
+    (cd core/sling/build && go test -v)
 
 # Test all connections (file + database)
 test-connections: test-replication-defaults test-connections-file test-connections-database
@@ -61,82 +69,107 @@ test-connections: test-replication-defaults test-connections-file test-connectio
 # Test dbio connection
 test-dbio-connection:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING dbio connection"
-    cd core/dbio/connection && go test -v -run 'TestConnection' && cd -
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:
     echo "TESTING dbio iop"
-    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping' && cd -
+    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping|TestRecordStream|TestDatastream|TestConsumeArrowRecords|TestParquetArrowWriter|TestUnwrap|TestApplySelect|TestSelector|TestFlattenRecord|TestCoerceUnsizedDecimalCast|TestDecodeJSONIfBase64|TestEncodeRowAsJSONObject|TestCSVSkipLines|TestReaderReadyRetriesFailedOpenAndClose|TestPause|TestParseModifiers|TestTokenizeModifiers|TestCollectInlineIndexes|TestMakeIndexName|TestGenerateCopyStatementEpochPartitionKey|TestRenderStringMethodCallHint|TestOpenTunnelProxy_(ForwardsTraffic|UnreachableProxy)' && cd -
 
 # Test dbio database
 test-dbio-database:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING dbio database"
-    cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL' && cd -
-    cd core/dbio/database && go test -run TestChunkByColumnRange && cd -
+    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL')
+    (cd core/dbio/database && go test -run TestChunkByColumnRange)
 
 # Test dbio filesys
 test-dbio-filesys:
     echo "TESTING dbio filesys"
     infisical-load dev /dbio && cd core/dbio/filesys && go test -v -run 'TestFileSysLocalCsv|TestFileSysLocalJson|TestFileSysLocalParquet|TestFileSysLocalFormat|TestFileSysGoogle|TestFileSysGoogleDrive|TestFileSysS3|TestFileSysAzure|TestFileSysSftp|TestFileSysFtp|TestExcel|TestFileSysLocalIceberg|TestFileSysLocalDelta' && cd -
 
+# Test dbio filesys without cloud credentials
+test-dbio-filesys-local:
+    #!/usr/bin/env bash
+    set -e
+    echo "TESTING dbio filesys (local)"
+    (cd core/dbio/filesys && go test -v -run 'TestArrowFileSet|TestArrowLane|TestDatabricksVolume|TestMergeReaders|TestExcelRangeFormats|TestFileSysGoogleADC')
+
+# Test dbio types
+test-dbio-types:
+    #!/usr/bin/env bash
+    set -e
+    echo "TESTING dbio types"
+    (cd core/dbio && go test -v .)
+
 # Test dbio api
 test-dbio-api:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING dbio api"
-    cd core/dbio/api && go test -v && cd -
+    (cd core/dbio/api && go test -v)
 
 # Test all dbio
-test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-api # test-dbio-filesys
+test-dbio: test-dbio-types test-dbio-connection test-dbio-iop test-dbio-database test-dbio-filesys-local test-dbio-api # test-dbio-filesys
 
 # Test Python (default, without ARROW)
 test-python-main:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING Python"
     export SLING_BINARY="$PWD/cmd/sling/sling"
-    cd ../sling-python/sling && uv sync --group test && uv run python -m pytest tests/tests.py -v && cd -
-    cd ../sling-python/sling && uv run python -m pytest tests/test_api_spec.py -v && cd -
+    (cd ../sling-python/sling && uv sync --group test && uv run python -m pytest tests/tests.py -v)
+    (cd ../sling-python/sling && uv run python -m pytest tests/test_api_spec.py -v)
 
 # Test Python class without ARROW
 test-python-arrow-false:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING Python class (ARROW=false)"
     export SLING_BINARY="$PWD/cmd/sling/sling"
-    cd ../sling-python/sling && uv sync --group test && SLING_USE_ARROW=false uv run python -m pytest tests/test_sling_class.py -v && cd -
+    (cd ../sling-python/sling && uv sync --group test && SLING_USE_ARROW=false uv run python -m pytest tests/test_sling_class.py -v)
 
 # Test Python class with ARROW
 test-python-arrow-true:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING Python class (ARROW=true)"
     export SLING_BINARY="$PWD/cmd/sling/sling"
-    cd ../sling-python/sling && uv sync --group test && SLING_USE_ARROW=true uv run python -m pytest tests/test_sling_class.py -v && cd -
+    (cd ../sling-python/sling && uv sync --group test && SLING_USE_ARROW=true uv run python -m pytest tests/test_sling_class.py -v)
 
 # Test Python Connection class (sling conns exec/test, arrow IPC, CSV streaming, limit)
 test-python-conns:
     #!/usr/bin/env bash
+    set -e
     echo "TESTING Python Connection class"
     export SLING_BINARY="$PWD/cmd/sling/sling"
-    cd ../sling-python/sling && uv sync --group test && uv run python -m pytest tests/test_connection.py -v && cd -
+    (cd ../sling-python/sling && uv sync --group test && uv run python -m pytest tests/test_connection.py -v)
 
 # Run all Python tests
 test-python: test-python-main test-python-arrow-false test-python-arrow-true test-python-conns
 
 test-cdc-basic:
     #!/usr/bin/env bash
-    cd ../sling && bash scripts/test.cdc.sh basic && cd -
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh basic)
 
 test-cdc-soft-delete:
     #!/usr/bin/env bash
-    cd ../sling && bash scripts/test.cdc.sh soft_delete && cd -
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh soft_delete)
 
 test-cdc-soft-replay:
     #!/usr/bin/env bash
-    cd ../sling && bash scripts/test.cdc.sh replay && cd -
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh replay)
 
 test-cdc-soft-sustained:
     #!/usr/bin/env bash
-    cd ../sling && bash scripts/test.cdc.sh sustained && cd -
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh sustained)
 
 # Run all CDC test
 test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay
@@ -144,6 +177,7 @@ test-cdc: test-cdc-basic test-cdc-soft-delete test-cdc-soft-replay
 # Eval assist smoke (claude, smoke tags, 1 trial)
 test-eval-smoke: build
     #!/usr/bin/env bash
+    set -e
     echo "EVAL assist smoke (claude, 1 trial)"
     export SLING_BIN="$PWD/cmd/sling/sling"
     go test -v -count=1 ./tests/evals -run TestEvalAssist -- \
@@ -152,6 +186,7 @@ test-eval-smoke: build
 # Eval assist full (claude+grok, 3 trials). Optional baseline: just eval-assist-full path.jsonl
 test-eval-full baseline="": build
     #!/usr/bin/env bash
+    set -e
     echo "EVAL assist full (claude+grok, 3 trials)"
     export SLING_BIN="$PWD/cmd/sling/sling"
     EXTRA=""
@@ -165,6 +200,7 @@ test-eval: test-eval-full
 
 test-dbio-core-python: test-dbio test-core test-python
     #!/usr/bin/env bash
+    set -e
     echo "✓ All tests passed!"
 
 # Test ADBC DuckDB via Docker (auto-detects host arch, skips cross-arch)

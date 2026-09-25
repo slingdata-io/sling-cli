@@ -34,7 +34,42 @@ var (
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
 	duckDbEOFMarker    = "___end_of_duckdb_result___"
 	DuckDbURISeparator = "|-|+|"
+	duckDbProcDiedMsg  = "duckdb process exited before query completed"
 )
+
+// IsDuckDbProcDeath reports whether err comes from a duckdb sidecar that died mid-query.
+func IsDuckDbProcDeath(err error) bool {
+	return err != nil && strings.Contains(err.Error(), duckDbProcDiedMsg)
+}
+
+// duckDbStderrTail keeps the last stderr lines of the sidecar, to explain a silent death.
+type duckDbStderrTail struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+const duckDbStderrTailSize = 20
+
+func (t *duckDbStderrTail) add(line string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = append(t.lines, line)
+	if len(t.lines) > duckDbStderrTailSize {
+		t.lines = t.lines[len(t.lines)-duckDbStderrTailSize:]
+	}
+}
+
+func (t *duckDbStderrTail) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = nil
+}
+
+func (t *duckDbStderrTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(strings.Join(t.lines, "\n"))
+}
 
 // DuckDb is a Duck DB compute layer
 type DuckDb struct {
@@ -46,6 +81,7 @@ type DuckDb struct {
 	queryMu     sync.RWMutex
 	query       *duckDbQuery // only one active query at a time
 	version     int
+	stderrTail  duckDbStderrTail
 }
 
 func (duck *DuckDb) getQuery() *duckDbQuery {
@@ -559,6 +595,8 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	}
 
 	duck.Proc.HideCmdInErr = true
+	duck.Proc.SysProcAttr = duckDbSysProcAttr()
+	duck.stderrTail.reset()
 	args := []string{"-csv", "-nullvalue", `\N\`}
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
 
@@ -603,6 +641,7 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	if err != nil {
 		return g.Error(err, "Failed to start duckDB process")
 	}
+	env.AddChildProc(duck.Proc.Cmd.Process)
 
 	// start the scanner
 	duck.initScanner()
@@ -622,7 +661,14 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 
 // Close closes the connection
 func (duck *DuckDb) Close() error {
-	if duck.Proc == nil || duck.Proc.Exited() {
+	if duck.Proc == nil {
+		return nil
+	}
+	if duck.Proc.Cmd != nil {
+		defer env.RemoveChildProc(duck.Proc.Cmd.Process)
+	}
+
+	if duck.Proc.Exited() {
 		return nil
 	}
 
@@ -667,6 +713,7 @@ func (duck *DuckDb) kill() {
 	duck.SetProp("connected", "false")
 	if duck.Proc != nil && duck.Proc.Cmd != nil && duck.Proc.Cmd.Process != nil {
 		duck.Proc.Cmd.Process.Kill()
+		env.RemoveChildProc(duck.Proc.Cmd.Process)
 	}
 }
 
@@ -871,6 +918,9 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 				return
 			case <-dq.Context.Ctx.Done():
 				err := g.Error(dq.Context.Ctx.Err(), "duckdb query context cancelled")
+				if duck.Proc != nil && duck.Proc.Exited() {
+					err = duck.procDeathErr() // it died first; the cancel is a consequence
+				}
 				dq.setErr(err)
 				dq.writer.CloseWithError(err)
 				dq.reader.CloseWithError(err)
@@ -907,6 +957,8 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 // mid-query. Capture is off for duckdb, so CmdErrorText is normally empty and
 // the exit status (e.g. "signal: killed") is the only clue on a silent death.
 func (duck *DuckDb) procDeathErr() error {
+	time.Sleep(100 * time.Millisecond) // let the stderr scanner drain the last lines
+
 	if scanErr := duck.Proc.GetScanErr(); scanErr != nil {
 		return g.Error(scanErr, "duckdb stdout scanner stopped before query completed")
 	}
@@ -924,7 +976,10 @@ func (duck *DuckDb) procDeathErr() error {
 	if strings.Contains(detail, "signal: killed") {
 		detail += " (process was killed, possibly by the OS out-of-memory killer)"
 	}
-	return g.Error("duckdb process exited before query completed: %s", detail)
+	if tail := duck.stderrTail.String(); tail != "" && !strings.Contains(detail, tail) {
+		detail += "\nlast duckdb stderr output:\n" + tail
+	}
+	return g.Error("%s: %s", duckDbProcDiedMsg, detail)
 }
 
 // waitForResult waits for the execution of a SQL query and returns the result
@@ -1387,6 +1442,10 @@ func (duck *DuckDb) initScanner() {
 	}
 
 	duck.Proc.SetScanner(func(stderr bool, line string) {
+		if stderr {
+			duck.stderrTail.add(line)
+		}
+
 		// snapshot once, newQuery can swap it concurrently
 		dq := duck.getQuery()
 		if dq == nil || dq.isDone() {

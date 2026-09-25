@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -412,6 +413,15 @@ func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool
 
 // BulkExportStream bulk Export
 func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// Arrow lane: read through ADBC when the gate marked this connection. A
+	// stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
+		ds, err = adbcConn.laneExportStream(table.Select())
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return ds, err
+		}
+	}
+
 	_, err = exec.LookPath("mysql")
 	if err != nil {
 		g.Trace("mysql not found in path. Using cursor...")

@@ -1,0 +1,54 @@
+# dBase / FoxPro template.
+#
+# `.dbf` files are read by a native reader, so schemata and row reads are
+# implemented in Go rather than by SQL: there is no query engine, and the
+# `metadata` / `analysis` blocks are therefore absent. Only the type mapping and
+# the quoting variables apply, plus the write-side mappings used when a dBase
+# table is described (writing to dBase is not supported).
+core:
+  # dBase has no query engine to explain a statement
+  explain: ""
+
+  # a table read is answered by the connector itself, which applies the limit
+  # and offset while walking the table
+  limit: select {fields} from {table}{where_clause} limit {limit} offset {offset}
+  limit_offset: select {fields} from {table}{where_clause} limit {limit} offset {offset}
+
+variable:
+  quote_char: '"'
+  bind_string: ${i}
+
+native_type_map:
+  character: text
+  varchar: text
+  memo: text
+  numeric: bigint
+  float: decimal
+  currency: decimal
+  double: decimal
+  integer: integer
+  date: date
+  datetime: datetime
+  logical: bool
+  blob: binary
+  general: binary
+  picture: binary
+  varbinary: binary
+
+general_type_map:
+  bigint: numeric
+  binary: varbinary
+  bool: logical
+  date: date
+  datetime: datetime
+  decimal: numeric
+  float: float
+  integer: integer
+  json: memo
+  smallint: integer
+  string: character
+  text: memo
+  timestamp: datetime
+  timestampz: datetime
+  time: character
+  uuid: character

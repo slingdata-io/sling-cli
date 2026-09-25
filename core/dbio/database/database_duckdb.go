@@ -118,7 +118,26 @@ func (conn *DuckDbConn) dbPath() (string, error) {
 	return dbPath, nil
 }
 
+// useADBC reports whether this connection runs on its ADBC handle alone.
+// DuckDB locks an instance file per process, so a CLI session and an ADBC
+// handle cannot both open the same file: the second open fails on the lock,
+// and holding one blocks the other. When use_adbc is on, the ADBC handle is
+// the engine and every query, read and import goes through it.
+func (conn *DuckDbConn) useADBC() bool {
+	return conn.BaseConn.UseADBC() && conn.adbc != nil
+}
+
 func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
+	if conn.useADBC() {
+		if err = conn.adbc.Connect(timeOut...); err != nil {
+			return g.Error(err, "could not connect via ADBC")
+		}
+		conn.SetProp("connected", "true")
+		conn.SetProp("connect_time", cast.ToString(time.Now()))
+		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+		return nil
+	}
+
 	connURL := conn.GetURL()
 
 	dbPath, err := conn.dbPath()
@@ -176,14 +195,25 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	if conn.useADBC() {
+		return conn.adbc.ExecMultiContext(ctx, sqls...)
+	}
 	return conn.duck.ExecMultiContext(ctx, sqls...)
 }
 
 func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+	if conn.useADBC() {
+		return conn.adbc.ExecContext(ctx, sql, args...)
+	}
 	return conn.duck.ExecContext(ctx, sql, args...)
 }
 
 func (conn *DuckDbConn) Close() (err error) {
+	// close both, so an ADBC error does not leave the duckdb process open
+	var adbcErr error
+	if conn.adbc != nil {
+		adbcErr = conn.adbc.Close()
+	}
 	if conn.duck != nil {
 		err = conn.duck.Close()
 		if err == nil && !cast.ToBool(conn.GetProp("silent")) &&
@@ -192,10 +222,16 @@ func (conn *DuckDbConn) Close() (err error) {
 		}
 	}
 	conn.SetProp("connected", "false")
+	if adbcErr != nil {
+		return adbcErr
+	}
 	return err
 }
 
 func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
+	if conn.useADBC() {
+		return conn.adbc.StreamRowsContext(ctx, sql, options...)
+	}
 	return conn.duck.StreamContext(ctx, sql, options...)
 }
 

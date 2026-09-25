@@ -111,10 +111,6 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			kvMap["type"] = strings.ToLower(t)
 		}
 
-		if err = connection.RejectLiteralSecrets(name, kvMap); err != nil {
-			return ok, err
-		}
-
 		err = ec.Set(name, kvMap)
 		if err != nil {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
@@ -198,7 +194,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot parse query")
 			}
 
-			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || (strings.Contains(strings.ToLower(query), "select") && !strings.Contains(strings.ToLower(query), "insert")) || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch)) {
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || (strings.Contains(strings.ToLower(query), "select") && !strings.Contains(strings.ToLower(query), "insert")) || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbDynamoDB)) {
 
 				// Limit handling:
 				//  - limit > 0: wrap the SQL with the dialect's limit_sql template via

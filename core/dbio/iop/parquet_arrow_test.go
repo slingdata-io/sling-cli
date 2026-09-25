@@ -1,16 +1,28 @@
 package iop
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/compress"
+	parquetfile "github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecimal(t *testing.T) {
@@ -310,13 +322,13 @@ func TestNewParquetWriter(t *testing.T) {
 						}
 						assert.Equal(t, expectedDecimal, read, "Row %d, Column %s mismatch", rowIdx, col.Name)
 					case TimestampType, DatetimeType:
-						// Compare timestamps with nanosecond precision
+						// The record path stores timestamps as timestamp(us)
+						// (the plan's matrix), so compare at microsecond
+						// precision and keep the instant exact.
 						origTime := original.(time.Time)
 						readTime := read.(time.Time)
-						// Truncate to nanoseconds to avoid floating point issues
-						origNanos := origTime.UnixNano()
-						readNanos := readTime.UnixNano()
-						assert.Equal(t, origNanos, readNanos, "Row %d, Column %s: timestamp mismatch (orig: %v, read: %v)",
+						assert.Equal(t, origTime.Truncate(time.Microsecond).UnixMicro(), readTime.UnixMicro(),
+							"Row %d, Column %s: timestamp mismatch (orig: %v, read: %v)",
 							rowIdx, col.Name, origTime, readTime)
 					case DateType:
 						// Compare dates (day precision)
@@ -421,6 +433,42 @@ func TestDecimal128ToString(t *testing.T) {
 // string builder while the schema declared time64/uuid. Building the record
 // then panicked on the type mismatch, making any parquet write with a time or
 // uuid column fail.
+// TestParquetArrowWriterSmallInt covers the int16 builder: a smallint column
+// maps to int16 in the arrow schema.
+func TestParquetArrowWriterSmallInt(t *testing.T) {
+	columns := NewColumns(Columns{
+		{Name: "c_int2", Type: SmallIntType},
+		{Name: "c_str", Type: StringType},
+	}...)
+
+	testFile := filepath.Join(t.TempDir(), "smallint.parquet")
+	f, err := os.Create(testFile)
+	require.NoError(t, err)
+	defer f.Close()
+
+	pw, err := NewParquetArrowWriter(f, columns, compress.Codecs.Snappy)
+	require.NoError(t, err)
+	require.NoError(t, pw.WriteRow([]any{int16(1), "a"}))
+	require.NoError(t, pw.WriteRow([]any{nil, "b"}))
+	require.NoError(t, pw.Close())
+
+	f2, err := os.Open(testFile)
+	require.NoError(t, err)
+	defer f2.Close()
+
+	reader, err := NewParquetArrowReader(f2, nil)
+	require.NoError(t, err)
+	table, err := reader.Reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer table.Release()
+
+	require.Equal(t, 2, int(table.NumRows()))
+	chunk := table.Column(0).Data().Chunk(0)
+	assert.Equal(t, arrow.INT16, chunk.DataType().ID())
+	assert.EqualValues(t, 1, GetValueFromArrowArray(chunk, 0))
+	assert.Nil(t, GetValueFromArrowArray(chunk, 1))
+}
+
 func TestParquetArrowWriterTimeAndUUID(t *testing.T) {
 	columns := NewColumns(
 		Columns{
@@ -493,4 +541,281 @@ func TestParquetArrowWriterTimeAndUUID(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ---- record path: NewParquetArrowWriterFromSchema / WriteRecord ----
+
+// dsArrowTestMatrixSchema is the type matrix the record-path round trip
+// covers: bool, int32, int64, float64, decimal128, date32, timestamp us,
+// string and binary. Every field is nullable so the nulls round trip too.
+func dsArrowTestMatrixSchema() *arrow.Schema {
+	return arrow.NewSchema([]arrow.Field{
+		{Name: "col_bool", Type: arrow.FixedWidthTypes.Boolean, Nullable: true},
+		{Name: "col_int32", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		{Name: "col_int64", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "col_float64", Type: arrow.PrimitiveTypes.Float64, Nullable: true},
+		{Name: "col_decimal", Type: &arrow.Decimal128Type{Precision: 20, Scale: 4}, Nullable: true},
+		{Name: "col_date32", Type: arrow.FixedWidthTypes.Date32, Nullable: true},
+		{Name: "col_ts", Type: &arrow.TimestampType{Unit: arrow.Microsecond}, Nullable: true},
+		{Name: "col_string", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "col_binary", Type: arrow.BinaryTypes.Binary, Nullable: true},
+	}, nil)
+}
+
+// dsArrowTestMatrixAppend appends one matrix value to its builder.
+func dsArrowTestMatrixAppend(t testing.TB, b array.Builder, v any) {
+	t.Helper()
+	if v == nil {
+		b.AppendNull()
+		return
+	}
+	switch f := b.(type) {
+	case *array.BooleanBuilder:
+		f.Append(v.(bool))
+	case *array.Int32Builder:
+		f.Append(v.(int32))
+	case *array.Int64Builder:
+		f.Append(v.(int64))
+	case *array.Float64Builder:
+		f.Append(v.(float64))
+	case *array.Decimal128Builder:
+		f.Append(v.(decimal128.Num))
+	case *array.Date32Builder:
+		f.Append(arrow.Date32FromTime(v.(time.Time)))
+	case *array.TimestampBuilder:
+		f.AppendTime(v.(time.Time))
+	case *array.StringBuilder:
+		f.Append(v.(string))
+	case *array.BinaryBuilder:
+		f.Append(v.([]byte))
+	default:
+		require.Failf(t, "unsupported builder", "%T", b)
+	}
+}
+
+// dsArrowTestMatrixRecord builds one record in schema; a nil value is null.
+func dsArrowTestMatrixRecord(t testing.TB, alloc memory.Allocator, schema *arrow.Schema, rows [][]any) arrow.RecordBatch {
+	t.Helper()
+	b := array.NewRecordBuilder(alloc, schema)
+	defer b.Release()
+	for _, row := range rows {
+		require.Len(t, row, schema.NumFields())
+		for i, v := range row {
+			dsArrowTestMatrixAppend(t, b.Field(i), v)
+		}
+	}
+	return b.NewRecordBatch()
+}
+
+// dsArrowTestChunkValue reads one value out of a possibly chunked column.
+func dsArrowTestChunkValue(chunks *arrow.Chunked, row int) (any, bool) {
+	for _, ch := range chunks.Chunks() {
+		if row < ch.Len() {
+			return GetValueFromArrowArray(ch, row), true
+		}
+		row -= ch.Len()
+	}
+	return nil, false
+}
+
+// dsArrowTestReadParquet reads a Parquet buffer back as an Arrow table on the
+// given allocator. The caller releases the table.
+func dsArrowTestReadParquet(t testing.TB, buf []byte, alloc memory.Allocator) arrow.Table {
+	t.Helper()
+	pf, err := parquetfile.NewParquetReader(bytes.NewReader(buf))
+	require.NoError(t, err)
+	t.Cleanup(func() { pf.Close() })
+
+	reader, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, alloc)
+	require.NoError(t, err)
+	table, err := reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	return table
+}
+
+// TestParquetArrowWriterFromSchema_RoundTrip covers the record path: whole
+// records go straight to pqarrow, and every type of the matrix (with its
+// nulls) reads back as it went in.
+func TestParquetArrowWriterFromSchema_RoundTrip(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(t, 0)
+
+	schema := dsArrowTestMatrixSchema()
+	ts := func(s string) time.Time {
+		t.Helper()
+		v, err := time.ParseInLocation("2006-01-02 15:04:05.999999", s, time.UTC)
+		require.NoError(t, err)
+		return v
+	}
+	dec := decimal128.FromI64
+
+	rows := [][]any{
+		{true, int32(11), int64(111), 1.5,
+			dec(1234567890), ts("2024-03-05 00:00:00"), ts("2024-03-05 06:07:08.123456"),
+			"alpha", []byte{1, 2, 3}},
+		{false, int32(-22), int64(-222), -2.25,
+			dec(-1234567890), ts("1999-12-31 00:00:00"), ts("1999-12-31 23:59:59.999999"),
+			"bêta", []byte{0xff, 0x00, 0x7f}},
+		{nil, nil, nil, nil, nil, nil, nil, nil, nil},
+	}
+
+	want := dsArrowTestMatrixRecord(t, alloc, schema, rows)
+	defer want.Release()
+
+	var buf bytes.Buffer
+	w, err := NewParquetArrowWriterFromSchema(&buf, schema, compress.Codecs.Snappy)
+	require.NoError(t, err)
+	require.NoError(t, w.WriteRecord(want))
+	require.NoError(t, w.Close())
+
+	table := dsArrowTestReadParquet(t, buf.Bytes(), alloc)
+	defer table.Release()
+
+	// the stored Arrow schema restores the field names and types
+	require.Equal(t, schema.NumFields(), int(table.NumCols()))
+	for i, field := range schema.Fields() {
+		assert.Equal(t, field.Name, table.Schema().Field(i).Name)
+		assert.Equal(t, field.Type.ID(), table.Schema().Field(i).Type.ID(), "type of %s", field.Name)
+	}
+	require.Equal(t, int64(len(rows)), table.NumRows())
+
+	for r := range rows {
+		for c, field := range schema.Fields() {
+			got, ok := dsArrowTestChunkValue(table.Column(c).Data(), r)
+			require.True(t, ok, "row %d, column %s", r, field.Name)
+			assert.Equal(t, GetValueFromArrowArray(want.Column(c), r), got, "row %d, column %s", r, field.Name)
+			assert.Equal(t, rows[r][c] == nil, got == nil, "row %d, column %s: null mismatch", r, field.Name)
+		}
+	}
+}
+
+// TestParquetArrowWriterFromSchema_RowGroupRollover covers the record path's
+// row-group break: once the bytes counted for the current row group pass
+// parquetArrowRowGroupBytes, a new row group starts. Each record carries 1 MiB
+// of incompressible data, so the mark takes about 130 records; skipped in
+// short mode.
+func TestParquetArrowWriterFromSchema_RowGroupRollover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes a full row group")
+	}
+
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(t, 0)
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "payload", Type: arrow.BinaryTypes.Binary, Nullable: true},
+	}, nil)
+
+	// incompressible, so the bytes counted per record are the bytes stored
+	payload := make([]byte, 1<<20)
+	_, err := rand.NewChaCha8([32]byte{1}).Read(payload)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w, err := NewParquetArrowWriterFromSchema(&buf, schema, compress.Codecs.Snappy)
+	require.NoError(t, err)
+
+	// write returns the bytes the writer counts for the record
+	write := func() int64 {
+		rec := dsArrowTestMatrixRecord(t, alloc, schema, [][]any{{payload}})
+		defer rec.Release()
+		require.NoError(t, w.WriteRecord(rec))
+		return TotalRecordSize(rec)
+	}
+
+	written := int64(0)
+	records := 0
+	for written <= int64(parquetArrowRowGroupBytes) {
+		written += write()
+		records++
+	}
+	// the record that passed the mark started a new row group, so the
+	// accounting of the current one restarted
+	assert.Less(t, w.RowGroupBytes(), int64(parquetArrowRowGroupBytes))
+
+	// two more records, so the row group the break started is not empty
+	for i := 0; i < 2; i++ {
+		write()
+		records++
+	}
+	require.NoError(t, w.Close())
+
+	pf, err := parquetfile.NewParquetReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer pf.Close()
+
+	assert.Greater(t, pf.NumRowGroups(), 1, "the mark started a new row group")
+	assert.Equal(t, int64(records), pf.NumRows())
+
+	total := int64(0)
+	for i := 0; i < pf.NumRowGroups(); i++ {
+		rgRows := pf.MetaData().RowGroup(i).NumRows()
+		assert.Greater(t, rgRows, int64(0), "row group %d holds rows", i)
+		total += rgRows
+	}
+	assert.Equal(t, int64(records), total, "every record landed in a row group")
+}
+
+// TestArrowWriter_WriteRecord covers the Arrow IPC record path: a record goes
+// to the file writer as it is and reads back through ipc.NewFileReader.
+func TestArrowWriter_WriteRecord(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(t, 0)
+
+	columns := NewColumns(Columns{
+		{Name: "col_id", Type: BigIntType},
+		{Name: "col_name", Type: StringType},
+		{Name: "col_flag", Type: BoolType},
+	}...)
+	schema := ColumnsToArrowSchema(columns)
+
+	rows := [][]any{
+		{int64(1), "alpha", true},
+		{int64(2), nil, false},
+		{nil, "gamma", nil},
+	}
+	recs := []arrow.RecordBatch{
+		dsArrowTestMatrixRecord(t, alloc, schema, rows[0:2]),
+		dsArrowTestMatrixRecord(t, alloc, schema, rows[2:]),
+	}
+	defer func() {
+		for _, rec := range recs {
+			rec.Release()
+		}
+	}()
+
+	var buf bytes.Buffer
+	w, err := NewArrowWriter(&buf, columns)
+	require.NoError(t, err)
+	for _, rec := range recs {
+		require.NoError(t, w.WriteRecord(rec))
+	}
+	require.NoError(t, w.Close())
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()), ipc.WithAllocator(alloc))
+	require.NoError(t, err)
+	defer reader.Close()
+
+	// the file schema is the one the writer built from the Sling columns
+	for i, field := range schema.Fields() {
+		assert.Equal(t, field.Name, reader.Schema().Field(i).Name)
+		assert.Equal(t, field.Type.ID(), reader.Schema().Field(i).Type.ID(), "type of %s", field.Name)
+	}
+
+	r := 0
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		for i := 0; i < int(rec.NumRows()); i++ {
+			for c := range columns {
+				assert.Equal(t, rows[r][c], GetValueFromArrowArray(rec.Column(c), i), "row %d, column %s", r, columns[c].Name)
+			}
+			r++
+		}
+		rec.Release()
+	}
+	assert.Equal(t, len(rows), r)
 }
