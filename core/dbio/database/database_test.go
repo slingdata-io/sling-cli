@@ -3726,6 +3726,12 @@ func TestArrowDBConn_MySQLAndClickhouseURI(t *testing.T) {
 	tmpTable := Table{Schema: "main", Name: "orders_sling_duckdb_tmp"}
 	assert.Equal(t, adbc.IngestStreamOptions{Temporary: true}, duck.ingestOptions(tmpTable))
 
+	// DuckDB gets microsecond timestamps; other targets keep the source unit
+	tsCols := iop.Columns{{Name: "ts", Type: iop.DatetimeType, Metadata: map[string]string{"timeUnit": "s"}}}
+	assert.Equal(t, arrow.Microsecond, duck.normalizeSchema(tsCols).Field(0).Type.(*arrow.TimestampType).Unit)
+	pgConn := &ArrowDBConn{driverType: dbio.TypeDbPostgres}
+	assert.Equal(t, arrow.Second, pgConn.normalizeSchema(tsCols).Field(0).Type.(*arrow.TimestampType).Unit)
+
 	// the native driver must not get the ADBC http_port as a setting
 	nativeCh, err := NewConn("clickhouse://u:p@ch:9000/db?http_port=18123&secure=false")
 	require.NoError(t, err)

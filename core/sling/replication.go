@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -247,15 +248,22 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *Repl
 }
 
 // GetStream returns the stream if the it exists
+var chunkPartSuffixRe = regexp.MustCompile(`\s*\(part-\d+\)$`)
+
 func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
 	streams = map[string]*ReplicationStreamConfig{}
 	gc, err := glob.Compile(strings.ToLower(pattern))
+	// tolerate a pinned chunk label: "name (part-001)" should still match
+	// the stream "name" after chunking is removed from the config
+	basePattern := chunkPartSuffixRe.ReplaceAllString(pattern, "")
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
 			streams[streamName] = streamCfg
 		} else if streamCfg != nil && streamCfg.ID == pattern {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
+			streams[streamName] = streamCfg
+		} else if basePattern != pattern && rd.Normalize(basePattern) == rd.Normalize(streamName) {
 			streams[streamName] = streamCfg
 		}
 	}
@@ -1302,6 +1310,12 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		cfg.IncrementalValStr = incrementalValStr
 
 		rd.Tasks = append(rd.Tasks, &cfg)
+	}
+
+	// fail loudly when an include-style selection matched nothing,
+	// instead of compiling zero tasks downstream
+	if len(selectStreams) > 0 && len(matchedStreams) == 0 && len(includeTags) == 0 && len(excludeTags) == 0 {
+		return g.Error("no streams matched the selection %s (available streams: %s)", g.Marshal(selectStreams), g.Marshal(lo.Keys(rd.Streams)))
 	}
 
 	// parse and validate replication level hooks

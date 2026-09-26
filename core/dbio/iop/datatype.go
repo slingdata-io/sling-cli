@@ -427,6 +427,27 @@ func (cols Columns) Sourced() (sourced bool) {
 	return sourced
 }
 
+// KeepSourcedTypes sets the types of described on cols, when the two have the
+// same column names. A described type (e.g. json, uuid, decimal precision) is
+// more exact than the type of an Arrow schema.
+func (cols Columns) KeepSourcedTypes(described Columns) Columns {
+	if len(described) != len(cols) {
+		return cols
+	}
+	for i, col := range described {
+		if !col.Sourced || col.Type == "" || !strings.EqualFold(col.Name, cols[i].Name) {
+			return cols
+		}
+	}
+	for i, col := range described {
+		cols[i].Type = col.Type
+		cols[i].DbType = col.DbType
+		cols[i].DbPrecision = col.DbPrecision
+		cols[i].DbScale = col.DbScale
+	}
+	return cols
+}
+
 // GetMissing returns the missing columns from newCols
 func (cols Columns) GetMissing(newCols ...Column) (missing Columns) {
 	fm := cols.FieldMap(true)

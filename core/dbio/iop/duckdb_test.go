@@ -2,12 +2,18 @@ package iop
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -45,7 +51,7 @@ func TestDuckDb(t *testing.T) {
 
 	t.Run("Stream", func(t *testing.T) {
 
-		duck := NewDuckDb(context.Background(), "instance=/tmp/test.duckdb")
+		duck := NewDuckDb(context.Background(), "instance="+filepath.Join(t.TempDir(), "test.duckdb"))
 
 		// Create a test table and insert some data
 		_, err := duck.ExecMultiContext(
@@ -88,7 +94,7 @@ func TestDuckDb(t *testing.T) {
 	})
 
 	t.Run("Query", func(t *testing.T) {
-		duck := NewDuckDb(context.Background(), "instance=/tmp/test.duckdb")
+		duck := NewDuckDb(context.Background(), "instance="+filepath.Join(t.TempDir(), "test.duckdb"))
 
 		// Create a test table and insert some data
 		_, err := duck.ExecMultiContext(
@@ -157,7 +163,7 @@ func TestDuckDbNoDeadlock(t *testing.T) {
 	}
 
 	t.Run("context cancellation unblocks reader", func(t *testing.T) {
-		duck := NewDuckDb(context.Background())
+		duck := NewDuckDb(context.Background(), "copy_format=csv")
 		defer duck.Close()
 
 		// prime the connection
@@ -187,17 +193,19 @@ func TestDuckDbNoDeadlock(t *testing.T) {
 	t.Run("oversized line does not hang", func(t *testing.T) {
 		// a ~200KB line exceeds the scan buffer, so the stdout scanner stops on
 		// bufio.ErrTooLong; the watcher must detect it and unblock the reader.
-		// Arrow mode pipes binary IPC from a separate process and never uses the
-		// line scanner, so there is no oversized line to trip on.
-		if cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) {
-			t.Skip("scanner-specific: arrow mode bypasses the stdout line scanner")
-		}
-
-		duck := NewDuckDb(context.Background(), "max_buffer_size=1024")
+		// Arrow mode does not use the line scanner, so use csv. On Windows, the
+		// csv output goes to a file, not through the scanner.
+		duck := NewDuckDb(context.Background(), "max_buffer_size=1024", "copy_format=csv")
 
 		runWithDeadline(t, 30*time.Second, func() {
-			_, err := duck.Query("select repeat('x', 200000) as big")
-			assert.Error(t, err)
+			data, err := duck.Query("select repeat('x', 200000) as big")
+			if runtime.GOOS == "windows" {
+				if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
+					assert.Len(t, cast.ToString(data.Rows[0][0]), 200000)
+				}
+			} else {
+				assert.Error(t, err)
+			}
 		})
 
 		// new connection with normal buffer must work fine (sanity)
@@ -355,10 +363,8 @@ func TestDuckDbStreamArrow(t *testing.T) {
 		assert.Equal(t, "Charlie", records[2]["name"])
 	})
 
-	t.Run("StreamContext with DUCKDB_USE_ARROW", func(t *testing.T) {
-		t.Setenv("DUCKDB_USE_ARROW", "true")
-
-		duck := NewDuckDb(context.Background())
+	t.Run("StreamContext with copy_format arrow", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "copy_format=arrow")
 
 		sql := "SELECT * FROM (VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35)) AS t(id, name, age) ORDER BY id"
 
@@ -925,4 +931,411 @@ func TestStripSQLComments(t *testing.T) {
 			assert.Equal(t, c.expected, result)
 		})
 	}
+}
+
+// duckStreamModes runs fn in the CSV and the Arrow read mode of StreamContext.
+func duckStreamModes(t *testing.T, fn func(t *testing.T, formatProp string)) {
+	for _, format := range []string{"csv", "arrow"} {
+		t.Run(format, func(t *testing.T) {
+			fn(t, "copy_format="+format)
+		})
+	}
+}
+
+// duckWithin fails the test when fn does not return in time.
+func duckWithin(t *testing.T, d time.Duration, fn func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("did not return in %s", d)
+	}
+}
+
+func TestDuckDbStreamTypes(t *testing.T) {
+	type typeCase struct {
+		name, expr string
+		colType    ColumnType
+		value      string // the value as duckValueString gives it
+		precision  int
+		scale      int
+	}
+	cases := []typeCase{
+		{name: "bool", expr: "true", colType: BoolType, value: "true"},
+		{name: "tinyint", expr: "(-128)::tinyint", colType: SmallIntType, value: "-128"},
+		{name: "smallint", expr: "(-32768)::smallint", colType: SmallIntType, value: "-32768"},
+		{name: "int", expr: "(-2147483648)::int", colType: IntegerType, value: "-2147483648"},
+		{name: "bigint", expr: "(-9223372036854775808)::bigint", colType: BigIntType, value: "-9223372036854775808"},
+		{name: "hugeint", expr: "170141183460469231731687303715884105727::hugeint", colType: DecimalType, value: "170141183460469231731687303715884105727", precision: 38},
+		{name: "utinyint", expr: "255::utinyint", colType: IntegerType, value: "255"},
+		{name: "usmallint", expr: "65535::usmallint", colType: IntegerType, value: "65535"},
+		{name: "uinteger", expr: "4294967295::uinteger", colType: BigIntType, value: "4294967295"},
+		{name: "ubigint", expr: "18446744073709551615::ubigint", colType: DecimalType, value: "18446744073709551615", precision: 20},
+		{name: "uhugeint", expr: "340282366920938463463374607431768211455::uhugeint", colType: TextType, value: "340282366920938463463374607431768211455"},
+		{name: "float", expr: "1.5::float", colType: FloatType, value: "1.5"},
+		{name: "double_inf", expr: "'inf'::double", colType: FloatType, value: "+Inf"},
+		{name: "dec4_2", expr: "(-12.34)::decimal(4,2)", colType: DecimalType, value: "-12.34", precision: 4, scale: 2},
+		{name: "dec38_10", expr: "(-1234567890123456789012345678.0123456789)::decimal(38,10)", colType: DecimalType, value: "-1234567890123456789012345678.0123456789", precision: 38, scale: 10},
+		{name: "varchar_unicode", expr: "'héllo 🚀 ünï'", colType: TextType, value: "héllo 🚀 ünï"},
+		{name: "varchar_csv", expr: `'a,b "q" x' || chr(10) || 'line2'`, colType: TextType, value: "a,b \"q\" x\nline2"},
+		{name: "varchar_empty", expr: "''", colType: TextType, value: ""},
+		{name: "varchar_null_lit", expr: "'NULL'", colType: TextType, value: "NULL"},
+		{name: "varchar_backslash_n", expr: `'\N'`, colType: TextType, value: `\N`},
+		{name: "date", expr: "'1969-07-20'::date", colType: DateType, value: "1969-07-20T00:00:00Z"},
+		{name: "date_old", expr: "'0001-01-01'::date", colType: DateType, value: "0001-01-01T00:00:00Z"},
+		{name: "date_inf", expr: "'infinity'::date", colType: DateType, value: "infinity"},
+		{name: "date_neg_inf", expr: "'-infinity'::date", colType: DateType, value: "-infinity"},
+		{name: "time", expr: "'23:59:59.123456'::time", colType: TimeType, value: "23:59:59.123456"},
+		{name: "timetz", expr: "'10:11:12+02:00'::timetz", colType: TimezType, value: "10:11:12+02"},
+		{name: "ts", expr: "'2026-09-25 10:11:12.123456'::timestamp", colType: TimestampType, value: "2026-09-25T10:11:12.123456Z"},
+		{name: "ts_pre1970", expr: "'1900-01-01 00:00:00.5'::timestamp", colType: TimestampType, value: "1900-01-01T00:00:00.5Z"},
+		{name: "ts_s", expr: "'2026-09-25 10:11:12'::timestamp_s", colType: TimestampType, value: "2026-09-25T10:11:12Z"},
+		{name: "ts_ms", expr: "'2026-09-25 10:11:12.123'::timestamp_ms", colType: TimestampType, value: "2026-09-25T10:11:12.123Z"},
+		{name: "ts_ns", expr: "'2026-09-25 10:11:12.123456789'::timestamp_ns", colType: TimestampType, value: "2026-09-25T10:11:12.123456789Z"},
+		{name: "ts_inf", expr: "'infinity'::timestamp", colType: TimestampType, value: "infinity"},
+		{name: "ts_neg_inf", expr: "'-infinity'::timestamp", colType: TimestampType, value: "-infinity"},
+		{name: "tstz", expr: "'2026-09-25 10:11:12.5+02:00'::timestamptz", colType: TimestampzType, value: "2026-09-25T08:11:12.5Z"},
+		{name: "interval", expr: "interval '1 month 2 days 03:04:05'", colType: StringType, value: "1 month 2 days 03:04:05"},
+		{name: "interval_year", expr: "interval '1 year'", colType: StringType, value: "1 year"},
+		{name: "uuid", expr: "'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid", colType: UUIDType, value: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"},
+		{name: "json", expr: `'{"a": [1, 2]}'::json`, colType: JsonType, value: `{"a": [1, 2]}`},
+		{name: "enum", expr: "'b'::enum('a','b')", colType: StringType, value: "b"},
+		{name: "bit", expr: "'10101'::bit", colType: BinaryType, value: "10101"},
+		{name: "varint", expr: "'123456789012345678901234567890123456789012'::varint", colType: TextType, value: "123456789012345678901234567890123456789012"},
+		{name: "null_int", expr: "null::int", colType: IntegerType, value: "<nil>"},
+		{name: "null_varchar", expr: "null::varchar", colType: TextType, value: "<nil>"},
+	}
+
+	exprs := make([]string, len(cases))
+	for i, c := range cases {
+		exprs[i] = c.expr + " as " + c.name
+	}
+	sql := "select " + strings.Join(exprs, ", ")
+
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		ds, err := duck.StreamContext(context.Background(), sql)
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+		require.Len(t, data.Columns, len(cases))
+
+		for i, c := range cases {
+			col := data.Columns[i]
+			assert.Equal(t, c.name, col.Name)
+			assert.Equal(t, c.colType, col.Type, c.name)
+			assert.Equal(t, c.value, duckValueString(data.Rows[0][i]), c.name)
+			if c.precision > 0 {
+				assert.Equal(t, c.precision, col.DbPrecision, c.name)
+				assert.Equal(t, c.scale, col.DbScale, c.name)
+			}
+		}
+	})
+}
+
+// duckValueString is a value in a form that does not depend on the read mode.
+func duckValueString(val any) string {
+	switch v := val.(type) {
+	case time.Time:
+		return v.UTC().Format(time.RFC3339Nano)
+	case []byte:
+		return string(v)
+	}
+	return fmt.Sprint(val)
+}
+
+func TestDuckDbStreamNested(t *testing.T) {
+	sql := `select [1, 2, null] as list_int, {'x': 1, 'y': 'z'} as struct_col,
+		map {'k1': 1} as map_col, ['a', 'b']::enum('a', 'b')[] as enum_list,
+		{'i': interval '1 day'} as interval_struct`
+
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		ds, err := duck.StreamContext(context.Background(), sql)
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+
+		// the values are text in both modes; only arrow mode gives JSON
+		for i, val := range data.Rows[0] {
+			assert.NotEmpty(t, duckValueString(val), data.Columns[i].Name)
+		}
+		assert.Equal(t, JsonType, data.Columns[1].Type)
+		assert.Equal(t, JsonType, data.Columns[2].Type)
+	})
+}
+
+func TestDuckDbStreamMidStreamError(t *testing.T) {
+	sql := `select i, case when i = 250000 then error('boom') else i end as v from range(300000) t(i)`
+
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		duckWithin(t, 60*time.Second, func() {
+			ds, err := duck.StreamContext(context.Background(), sql)
+			if err == nil {
+				_, err = ds.Collect(0)
+			}
+			// a short result with no error is data loss
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), "boom")
+			}
+
+			// the connection stays usable
+			data, err := duck.Query("select 42 as n")
+			if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
+				assert.EqualValues(t, 42, data.Rows[0][0])
+			}
+		})
+	})
+}
+
+func TestDuckDbStreamEarlyClose(t *testing.T) {
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		duckWithin(t, 60*time.Second, func() {
+			ds, err := duck.StreamContext(context.Background(), "select i, i::varchar as s from range(5000000) t(i)")
+			require.NoError(t, err)
+
+			count := 0
+			for range ds.Rows() {
+				count++
+				if count == 1000 {
+					break
+				}
+			}
+			ds.Close()
+			assert.Equal(t, 1000, count)
+
+			data, err := duck.Query("select 42 as n")
+			if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
+				assert.EqualValues(t, 42, data.Rows[0][0])
+			}
+		})
+	})
+}
+
+func TestDuckDbStreamCancel(t *testing.T) {
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		duckWithin(t, 60*time.Second, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ds, err := duck.StreamContext(ctx, "select i from range(10000000) t(i)")
+			require.NoError(t, err)
+
+			count := 0
+			for range ds.Rows() {
+				count++
+				if count == 1000 {
+					cancel()
+				}
+			}
+			assert.Less(t, count, 10000000)
+		})
+	})
+}
+
+func TestDuckDbStreamSQLForms(t *testing.T) {
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+
+		counts := map[string]int{
+			"select * from range(3) t(i);":                      3,
+			"select * from range(3) t(i) -- trailing comment":   3,
+			"with a as (select 1 as i) select * from a":         1,
+			"select * from range(3) t(i) where i > 5":           0,
+			"select 1 as a, 2 as a":                             1,
+			"select 'x' as \"we\"\"ird\", 'b'::enum('a','b') e": 1,
+		}
+		for sql, expected := range counts {
+			ds, err := duck.StreamContext(context.Background(), sql)
+			if !assert.NoError(t, err, sql) {
+				continue
+			}
+			data, err := ds.Collect(0)
+			assert.NoError(t, err, sql)
+			assert.Len(t, data.Rows, expected, sql)
+		}
+	})
+}
+
+func TestDuckDbStreamFileInstance(t *testing.T) {
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		dbPath := filepath.Join(t.TempDir(), "stream.duckdb")
+		duck := NewDuckDb(context.Background(), "instance="+dbPath, formatProp)
+		defer duck.Close()
+
+		_, err := duck.Exec("create table t as select i, 'v' || i as s from range(1000) t(i)")
+		require.NoError(t, err)
+
+		duckWithin(t, 60*time.Second, func() {
+			ds, err := duck.StreamContext(context.Background(), "select * from t")
+			require.NoError(t, err)
+			data, err := ds.Collect(0)
+			require.NoError(t, err)
+			assert.Len(t, data.Rows, 1000)
+		})
+	})
+}
+
+func TestDuckDbArrowSQL(t *testing.T) {
+	cols := Columns{
+		{Name: "id", DbType: "INTEGER"},
+		{Name: "e", DbType: "ENUM('a', 'b')"},
+		{Name: "u", DbType: "UBIGINT"},
+		{Name: `we"ird`, DbType: "INTERVAL"},
+		{Name: "l", DbType: "ENUM('a', 'b')[]"},
+		{Name: "s", DbType: "STRUCT(x INTEGER)"},
+	}
+	sql, ok := duckArrowSQL("select * from t;", cols)
+	assert.True(t, ok)
+	assert.Equal(t, "SELECT * REPLACE ("+
+		`CAST("e" AS VARCHAR) AS "e", `+
+		`CAST("u" AS DECIMAL(20,0)) AS "u", `+
+		`CAST("we""ird" AS VARCHAR) AS "we""ird", `+
+		`to_json("l")::VARCHAR AS "l"`+
+		") FROM (\nselect * from t\n)", sql)
+
+	// no cast: the query stays as it is
+	sql, ok = duckArrowSQL("select 1 as id", cols[:1])
+	assert.True(t, ok)
+	assert.Equal(t, "select 1 as id", sql)
+
+	// a cast of a repeated name is ambiguous
+	_, ok = duckArrowSQL("select * from t", Columns{{Name: "E", DbType: "INTEGER"}, {Name: "e", DbType: "BIT"}})
+	assert.False(t, ok)
+
+	assert.Equal(t, "COPY (\nselect 1 -- c\n) TO '/dev/stdout' (FORMAT ARROWS)",
+		duckCopySQL(" select 1 -- c\n", "/dev/stdout", "FORMAT ARROWS"))
+}
+
+func TestArrowSentinelValues(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	dates := array.NewDate32Builder(mem)
+	dates.AppendValues([]arrow.Date32{math.MaxInt32, -math.MaxInt32, 0}, nil)
+	dateArr := dates.NewArray()
+	defer dateArr.Release()
+	assert.Equal(t, "infinity", GetValueFromArrowArray(dateArr, 0))
+	assert.Equal(t, "-infinity", GetValueFromArrowArray(dateArr, 1))
+	assert.Equal(t, time.Unix(0, 0).UTC(), GetValueFromArrowArray(dateArr, 2))
+
+	stamps := array.NewTimestampBuilder(mem, &arrow.TimestampType{Unit: arrow.Microsecond})
+	stamps.AppendValues([]arrow.Timestamp{math.MaxInt64, -math.MaxInt64, 0}, nil)
+	stampArr := stamps.NewArray()
+	defer stampArr.Release()
+	assert.Equal(t, "infinity", GetValueFromArrowArray(stampArr, 0))
+	assert.Equal(t, "-infinity", GetValueFromArrowArray(stampArr, 1))
+	assert.Equal(t, time.UnixMicro(0).UTC(), GetValueFromArrowArray(stampArr, 2))
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "u32", Type: arrow.PrimitiveTypes.Uint32},
+		{Name: "u64", Type: arrow.PrimitiveTypes.Uint64},
+	}, nil)
+	cols := ArrowSchemaToColumns(schema)
+	assert.Equal(t, BigIntType, cols[0].Type)
+	assert.Equal(t, DecimalType, cols[1].Type)
+	assert.Equal(t, 20, cols[1].DbPrecision)
+}
+
+func TestColumnTypingKeepSourced(t *testing.T) {
+	arrowCols := Columns{
+		{Name: "id", Type: BigIntType, DbType: "INT64", Sourced: true, Metadata: map[string]string{"k": "v"}},
+		{Name: "doc", Type: StringType, DbType: "STRING", Sourced: true},
+	}
+	described := Columns{
+		{Name: "ID", Type: DecimalType, DbType: "HUGEINT", DbPrecision: 38, Sourced: true},
+		{Name: "doc", Type: JsonType, DbType: "JSON", Sourced: true},
+	}
+
+	cols := arrowCols.Clone().KeepSourcedTypes(described)
+	assert.Equal(t, DecimalType, cols[0].Type)
+	assert.Equal(t, 38, cols[0].DbPrecision)
+	assert.Equal(t, "id", cols[0].Name)
+	assert.Equal(t, "v", cols[0].Metadata["k"])
+	assert.Equal(t, JsonType, cols[1].Type)
+
+	// other names, count or unsourced columns keep the arrow types
+	for _, other := range []Columns{
+		{described[0]},
+		{described[0], {Name: "other", Type: JsonType, Sourced: true}},
+		{described[0], {Name: "doc", Type: JsonType}},
+	} {
+		cols = arrowCols.Clone().KeepSourcedTypes(other)
+		assert.Equal(t, BigIntType, cols[0].Type)
+	}
+}
+
+func TestDuckDbCopyFormat(t *testing.T) {
+	cases := []struct {
+		props    []string
+		format   dbio.FileType
+		explicit bool
+		err      bool
+	}{
+		{props: nil, format: dbio.FileTypeArrow},
+		{props: []string{"copy_format=csv"}, format: dbio.FileTypeCsv, explicit: true},
+		{props: []string{"copy_format=ARROW"}, format: dbio.FileTypeArrow, explicit: true},
+		{props: []string{"duckdb_copy_format=csv"}, format: dbio.FileTypeCsv, explicit: true},
+		{props: []string{"copy_format=parquet"}, err: true},
+		{props: []string{"copy_method=arrow_http"}, format: dbio.FileTypeArrow, explicit: true},
+		{props: []string{"copy_method=csv_http"}, format: dbio.FileTypeCsv, explicit: true},
+		{props: []string{"copy_method=named_pipes"}, format: dbio.FileTypeCsv, explicit: true},
+		{props: []string{"duckdb_copy_method=csv_files"}, format: dbio.FileTypeCsv, explicit: true},
+		{props: []string{"copy_format=arrow", "copy_method=csv_http"}, format: dbio.FileTypeArrow, explicit: true},
+	}
+	for _, c := range cases {
+		t.Run(strings.Join(c.props, ","), func(t *testing.T) {
+			duck := NewDuckDb(context.Background(), c.props...)
+			format, explicit, err := duck.CopyFormat()
+			if c.err {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.format, format)
+			assert.Equal(t, c.explicit, explicit)
+		})
+	}
+
+	t.Run("invalid format fails stream", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "copy_format=parquet")
+		defer duck.Close()
+		_, err := duck.Query("select 1 as n")
+		assert.Error(t, err)
+	})
+
+	t.Run("csv import format", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "copy_format=csv")
+		format, err := duck.ImportFormat()
+		require.NoError(t, err)
+		assert.Equal(t, dbio.FileTypeCsv, format)
+	})
+
+	t.Run("default read uses csv after arrow fails", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		defer duck.Close()
+		duck.arrowReadFail.Store(true)
+		data, err := duck.Query("select 42 as n")
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+		assert.EqualValues(t, 42, data.Rows[0][0])
+	})
 }

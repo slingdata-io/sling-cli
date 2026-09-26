@@ -1205,6 +1205,13 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 		return nil, g.Error(err, "could not set SQL query")
 	}
 
+	// the MySQL driver defaults to 1000-row batches, which costs about 2x CPU
+	if arrowRecords && conn.driverType == dbio.TypeDbMySQL {
+		if err := stmt.SetOption("adbc.statement.batch_size", "100000"); err != nil {
+			g.Debug("could not set the ADBC batch size: %s", err.Error())
+		}
+	}
+
 	// Execute query
 	reader, _, err := stmt.ExecuteQuery(ctx)
 	if err != nil {
@@ -1212,61 +1219,25 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 		return nil, g.Error(err, "could not execute query")
 	}
 
-	// Convert Arrow schema to columns
-	schema := reader.Schema()
-	columns := iop.ArrowSchemaToColumns(schema)
-
 	// Arrow lane: stage 2 of the gate runs on the real reader schema, before
 	// the datastream starts, so the stream mode never changes after Start.
-	lane := conn.lane
-	if lane != nil && conn.laneCheck == nil {
-		lane = nil
-	}
-	if lane != nil && (noArrowLane || limit > 0 || !arrowRecords) {
-		lane = nil
-	}
-
-	if lane != nil {
-		// the lane reads the driver's type labels; the row path keeps the
-		// plain columns and infers from the values, as before the lane
-		laneRead := newAdbcLaneRead(schema)
-		ok, reason, maxCol := conn.laneCheck(laneRead.schema, laneRead.columns)
-		if ok {
-			ds = conn.arrowDatastream(queryContext, laneRead, reader, stmt, maxCol)
-		} else {
-			_ = reason // the check logs its own decline line
-			lane = nil
+	if arrowRecords && !noArrowLane && limit == 0 {
+		ds, err = conn.laneReaderStream(queryContext, sql, reader, func() { stmt.Close() })
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return ds, err
 		}
 	}
 
-	if lane == nil && laneOnly {
+	if laneOnly {
 		reader.Release()
 		stmt.Close()
 		queryContext.Cancel()
 		return nil, ErrArrowLaneDeclined
 	}
 
-	if lane == nil {
-		ds = iop.NewDatastreamIt(queryContext.Ctx, columns, conn.makeRecordNextFunc(queryContext, reader, stmt, limit))
-	}
-
-	ds.NoDebug = strings.Contains(sql, noDebugKey)
-	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
-
-	if !ds.NoDebug {
-		ds.SetMetadata(conn.GetProp("METADATA"))
-		ds.SetConfig(conn.Props())
-	}
-
-	// the gate classified the transforms, so the lane evaluates them on
-	// records instead of rows. The sink still casts (Normalize) and renames
-	// (Project) the transformed records.
-	if lane != nil {
-		if err = conn.setArrowLaneTransforms(ds); err != nil {
-			queryContext.Cancel()
-			return ds, g.Error(err, "could not set the arrow lane transforms")
-		}
-	}
+	columns := iop.ArrowSchemaToColumns(reader.Schema())
+	ds = iop.NewDatastreamIt(queryContext.Ctx, columns, conn.makeRecordNextFunc(queryContext, reader, stmt, limit))
+	conn.setStreamProps(ds, sql)
 
 	err = ds.Start()
 	if err != nil {
@@ -1277,10 +1248,57 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	return ds, nil
 }
 
+// laneReaderStream is the lane's read over an Arrow record reader: the ADBC
+// driver's, or a native one. It runs stage 2 of the gate on the reader schema.
+// A decline returns ErrArrowLaneDeclined and keeps the reader open, so the
+// caller can read it on the row path or close it. Otherwise the stream owns
+// the reader, and closeReader runs after the last record.
+func (conn *ArrowDBConn) laneReaderStream(queryContext *g.Context, sql string, reader array.RecordReader, closeReader func()) (ds *iop.Datastream, err error) {
+	if conn.lane == nil || conn.laneCheck == nil {
+		return nil, ErrArrowLaneDeclined
+	}
+
+	// the lane reads the driver's type labels; the row path keeps the
+	// plain columns and infers from the values, as before the lane
+	laneRead := newAdbcLaneRead(reader.Schema())
+	ok, _, maxCol := conn.laneCheck(laneRead.schema, laneRead.columns) // the check logs its own decline line
+	if !ok {
+		return nil, ErrArrowLaneDeclined
+	}
+
+	ds = conn.arrowDatastream(queryContext, laneRead, reader, closeReader, maxCol)
+	conn.setStreamProps(ds, sql)
+
+	// the gate classified the transforms, so the lane evaluates them on
+	// records instead of rows. The sink still casts (Normalize) and renames
+	// (Project) the transformed records.
+	if err = conn.setArrowLaneTransforms(ds); err != nil {
+		queryContext.Cancel()
+		return ds, g.Error(err, "could not set the arrow lane transforms")
+	}
+
+	if err = ds.Start(); err != nil {
+		queryContext.Cancel()
+		return ds, g.Error(err, "could not start datastream")
+	}
+
+	return ds, nil
+}
+
+func (conn *ArrowDBConn) setStreamProps(ds *iop.Datastream, sql string) {
+	ds.NoDebug = strings.Contains(sql, noDebugKey)
+	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
+
+	if !ds.NoDebug {
+		ds.SetMetadata(conn.GetProp("METADATA"))
+		ds.SetConfig(conn.Props())
+	}
+}
+
 // arrowDatastream builds the Arrow-mode datastream: the reader goroutine
 // pushes records into a RecordStream and the sink pulls them. No []any row is
 // built and no string is cloned.
-func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbcLaneRead, reader array.RecordReader, stmt adbc.Statement, maxCol int) *iop.Datastream {
+func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbcLaneRead, reader array.RecordReader, closeReader func(), maxCol int) *iop.Datastream {
 	rs := iop.NewRecordStream(queryContext, conn.lane, laneRead.schema, iop.ArrowLaneBuffer)
 	rs.Columns = laneRead.columns // the labels, which the plain schema does not carry
 	if maxCol >= 0 {
@@ -1290,7 +1308,7 @@ func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbc
 	ds := iop.NewDatastreamArrow(queryContext.Ctx, laneRead.columns, rs)
 
 	go func() {
-		defer stmt.Close()
+		defer closeReader()
 		defer reader.Release()
 
 		for reader.Next() {
@@ -1655,7 +1673,7 @@ func (conn *ArrowDBConn) ingestRecordStream(tableFName string, ds *iop.Datastrea
 		return 0, g.Error(err, "could not parse table name: %s", tableFName)
 	}
 
-	rs, err := ds.RecordStream().Normalize(iop.ColumnsToArrowSchema(ds.Columns))
+	rs, err := ds.RecordStream().Normalize(conn.normalizeSchema(ds.Columns))
 	if err != nil {
 		return 0, g.Error(err, "could not normalize records for %s", tableFName)
 	}
@@ -2440,6 +2458,33 @@ func (conn *ArrowDBConn) ingestSchema(schema *arrow.Schema, cols iop.Columns) *a
 			continue
 		}
 		fields[i].Metadata = arrowJSONMetadata
+		changed = true
+	}
+	if !changed {
+		return schema
+	}
+
+	meta := schema.Metadata()
+	return arrow.NewSchema(fields, &meta)
+}
+
+// normalizeSchema is the schema the lane casts records to before the ingest.
+// DuckDB (driver v1.5.5) can crash when it converts a timestamp[s] or [ms]
+// array from a Go-allocated buffer, so those units widen to microseconds.
+func (conn *ArrowDBConn) normalizeSchema(cols iop.Columns) *arrow.Schema {
+	schema := iop.ColumnsToArrowSchema(cols)
+	if conn.driverType != dbio.TypeDbDuckDb {
+		return schema
+	}
+
+	fields := slices.Clone(schema.Fields())
+	changed := false
+	for i, field := range fields {
+		ts, ok := field.Type.(*arrow.TimestampType)
+		if !ok || (ts.Unit != arrow.Second && ts.Unit != arrow.Millisecond) {
+			continue
+		}
+		fields[i].Type = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: ts.TimeZone}
 		changed = true
 	}
 	if !changed {

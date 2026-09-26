@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -1581,12 +1582,8 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	duckSc.TargetType = sc.TargetType
 	duckSc.BinaryAsHex = sc.BinaryAsHex
 
-	switch fs.GetProp("duckdb_copy_method", "copy_method") {
-	case "csv_http":
-		duckSc.Format = dbio.FileTypeCsv
-	case "arrow_http":
-		duckSc.Format = dbio.FileTypeArrow
-		duck.AddExtension("arrow from community")
+	if duckSc.Format, err = duck.ImportFormat(); err != nil {
+		return bw, err
 	}
 
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
@@ -2495,4 +2492,72 @@ func CopyRecursive(fromFs, toFs FileSysClient, fromPath, toPath string) (totalBy
 	}
 
 	return totalBytes, nil
+}
+
+// ListFileNodes lists the files ReadDataflow reads for url: one node when the
+// config names a table or a query, the selected prefixes, or the recursive
+// listing of the path.
+func ListFileNodes(fs FileSysClient, url string, cfg iop.FileStreamConfig) (nodes FileNodes, err error) {
+	if g.In(cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || cfg.SQL != "" {
+		return FileNodes{FileNode{URI: url}}, nil
+	}
+
+	if prefixes := cfg.FileSelect; len(prefixes) > 0 {
+		// Check if any FileSelect entries are full URIs with scheme prefix.
+		// If so, they may reference different buckets (multi-bucket access).
+		fullURIPrefixes := []string{}
+		relativePrefixes := []string{}
+
+		for _, prefix := range prefixes {
+			if strings.Contains(prefix, "://") {
+				fullURIPrefixes = append(fullURIPrefixes, prefix)
+			} else {
+				relativePrefixes = append(relativePrefixes, prefix)
+			}
+		}
+
+		// Handle full URI prefixes (may be from different buckets)
+		for _, uri := range fullURIPrefixes {
+			g.Trace("listing path (full URI): %s", uri)
+			uriNodes, err := fs.Self().ListRecursive(uri)
+			if err != nil {
+				return nil, g.Error(err, "Error getting paths for %s", uri)
+			}
+			nodes = append(nodes, uriNodes...)
+		}
+
+		// Handle relative prefixes (original behavior)
+		if len(relativePrefixes) > 0 {
+			rootPath := GetDeepestPartitionParent(url)
+			g.Trace("listing path: %s", rootPath)
+			pathNodes, err := fs.Self().ListRecursive(rootPath)
+			if err != nil {
+				return nil, g.Error(err, "Error getting paths")
+			}
+			// select only prefixes
+			nodes = append(nodes, pathNodes.SelectWithPrefix(relativePrefixes...)...)
+		}
+
+		return nodes, nil
+	}
+
+	g.Trace("listing path: %s", url)
+	nodes, err = fs.Self().ListRecursive(url)
+	if err != nil {
+		return nil, g.Error(err, "Error getting paths")
+	}
+
+	return nodes, nil
+}
+
+// ArrowFileSet is the parquet or arrow files of one source stream, with the
+// footer schema they all share. A remote file is copied to a local temp file
+// once, so the up-front footer check and the read share one copy.
+type ArrowFileSet struct {
+	fs     FileSysClient
+	format dbio.FileType
+	uris   []string
+	paths  []string
+	temps  []string // the temp copy of each remote file, "" for a local file
+	schema *arrow.Schema
 }

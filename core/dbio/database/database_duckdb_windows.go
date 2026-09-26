@@ -3,7 +3,6 @@
 package database
 
 import (
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
 
@@ -13,14 +12,14 @@ func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		// which cannot share the instance file with the ADBC handle
 		return conn.adbc.BulkImportFlow(tableFName, df)
 	}
-	switch conn.GetProp("copy_method") {
-	case "csv_files":
+	// the deprecated copy_method value csv_files selects a csv transport of its own
+	if conn.GetProp("copy_format") == "" && conn.GetProp("copy_method") == "csv_files" {
 		return conn.importViaTempCSVs(tableFName, df)
-	case "csv_http":
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
-	case "arrow_http":
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
-	default:
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
 	}
+
+	format, err := conn.duck.ImportFormat()
+	if err != nil {
+		return 0, err
+	}
+	return conn.importViaHTTP(tableFName, df, format)
 }

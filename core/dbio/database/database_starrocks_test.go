@@ -1,12 +1,29 @@
 package database
 
 import (
+	"context"
 	"testing"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStarRocksNewTransactionFailSafe(t *testing.T) {
+	conn, err := NewConn("starrocks://root:@localhost:9030/sys")
+	require.NoError(t, err)
+
+	sr := conn.(*StarRocksConn)
+
+	// version 0 (detection failed) and >= 3.5 must not open a tx:
+	// 4.x rejects DDL in a tx (err 5305), breaking full-refresh prepareFinal
+	for _, version := range []int{0, 350, 414} {
+		sr.version = version
+		tx, err := sr.NewTransaction(context.Background())
+		require.NoError(t, err)
+		assert.Nil(t, tx, "version %d should disable transactions", version)
+	}
+}
 
 func TestStarRocksSchemaMigrationDDL(t *testing.T) {
 	t.Setenv("SLING_SCHEMA_MIGRATION", "all")

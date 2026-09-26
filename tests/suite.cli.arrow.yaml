@@ -530,24 +530,6 @@
   output_does_not_contain:
     - 'falling back to row-based'
 
-- id: 731
-  name: 'arrow lane: small record buffer'
-  group: arrow
-  env:
-    SOURCE: 'POSTGRES_ADBC'
-    TARGET: 'POSTGRES_ADBC'
-    SCHEMA: 'public'
-    SLING_ARROW_LANE_BUFFER: '1'
-  rows: 10000
-  run: |
-    SLING_ROW_CNT=10000 sling run -p tests/pipelines/arrow/seed.yaml
-    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_701" --mode full-refresh
-    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_701"
-  output_contains:
-    - 'arrow lane: enabled'
-  output_does_not_contain:
-    - 'falling back to row-based'
-
 - id: 732
   name: 'arrow lane: DuckDB ADBC to DuckDB ADBC'
   group: arrow
@@ -564,6 +546,32 @@
     - 'arrow lane: enabled'
   output_does_not_contain:
     - 'falling back to row-based'
+
+# A DuckDB target is on the lane only when it is opened in ADBC mode. Then the
+# ADBC handle is the one engine (DuckDbConn.useADBC), so the temp table and the
+# ingest share a handle. A plain duckdb:// declines at debug and uses the row
+# path. Both legs must load every row (SLING_ROW_CNT), with no "does not exist"
+# error from a temp table on a different handle.
+- id: 733
+  name: 'arrow lane: Postgres to plain duckdb:// (declines) and SLING_USE_ADBC duckdb:// (enabled)'
+  group: arrow
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    rm -f /tmp/arrow_dst_733.duckdb
+    sling run -p tests/pipelines/arrow/seed.yaml
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "duckdb:///tmp/arrow_dst_733.duckdb" --tgt-object "main.arrow_dst_733" --mode full-refresh
+    SLING_USE_ADBC=true sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "duckdb:///tmp/arrow_dst_733.duckdb" --tgt-object "main.arrow_dst_733" --mode full-refresh
+    SLING_USE_ADBC=true sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "duckdb:///tmp/arrow_dst_733.duckdb" --tgt-object "main.arrow_dst_733" --mode truncate
+    rm -f /tmp/arrow_dst_733.duckdb
+  output_contains:
+    - 'arrow lane: not used for stream "public.arrow_src". Reason: target driver duckdb is not in the arrow lane list'
+    - 'arrow lane: enabled (postgres -> duckdb/adbc)'
+  output_does_not_contain:
+    - 'falling back to row-based'
+    - 'does not exist'
 
 - id: 734
   name: 'arrow lane: lane and row paths agree (verify)'

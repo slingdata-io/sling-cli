@@ -411,12 +411,23 @@ func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool
 // mysql server needs to be launched with '--local-infile=1' flag
 // mysql --local-infile=1 -h {host} -P {port} -u {user} -p{password} mysql -e "LOAD DATA LOCAL INFILE '/dev/stdin' INTO TABLE {table} FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"' IGNORE 1 LINES;"
 
+// mysqlLaneExportHook is set by the closed database_mysql_arrow..go. The stub
+// reads through the ADBC driver.
+var mysqlLaneExportHook = func(conn *MySQLConn, adbcConn *ArrowDBConn, sql string) (*iop.Datastream, error) {
+	return adbcConn.laneExportStream(sql)
+}
+
+// laneExportStream is the lane's read.
+func (conn *MySQLConn) laneExportStream(adbcConn *ArrowDBConn, sql string) (*iop.Datastream, error) {
+	return mysqlLaneExportHook(conn, adbcConn, sql)
+}
+
 // BulkExportStream bulk Export
 func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
-	// Arrow lane: read through ADBC when the gate marked this connection. A
-	// stage 2 decline reads with the native driver.
+	// Arrow lane: read Arrow records when the gate marked this connection. A
+	// stage 2 decline reads rows with the native driver.
 	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
-		ds, err = adbcConn.laneExportStream(table.Select())
+		ds, err = conn.laneExportStream(adbcConn, table.Select())
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}

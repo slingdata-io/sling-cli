@@ -481,3 +481,20 @@ func TestUnwrapRecordExtensions(t *testing.T) {
 	_, err = unwrapRecordExtensions(rec, other)
 	require.Error(t, err)
 }
+
+// the writer raises the decimal size for its schema only; the columns give the target DDL
+func TestArrowWriterKeepsColumns(t *testing.T) {
+	columns := Columns{{Name: "d", Type: DecimalType, DbPrecision: 10, DbScale: 2}}
+	var buf bytes.Buffer
+	aw, err := NewArrowWriter(&buf, columns)
+	require.NoError(t, err)
+	require.NoError(t, aw.WriteRow([]any{decimal.RequireFromString("12.34")}))
+	require.NoError(t, aw.Close())
+
+	assert.Equal(t, 10, columns[0].DbPrecision)
+	assert.Equal(t, 2, columns[0].DbScale)
+
+	dt, ok := aw.arrowSchema.Field(0).Type.(*arrow.Decimal128Type)
+	require.True(t, ok)
+	assert.GreaterOrEqual(t, int(dt.Scale), 2)
+}

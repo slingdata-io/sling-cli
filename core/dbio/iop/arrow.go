@@ -3,6 +3,7 @@ package iop
 import (
 	"context"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"runtime/debug"
@@ -180,12 +181,16 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 		case arrow.INT64:
 			col.Type = BigIntType
 			col.DbType = "INT64"
-		case arrow.UINT8, arrow.UINT16, arrow.UINT32:
+		case arrow.UINT8, arrow.UINT16:
 			col.Type = IntegerType
 			col.DbType = field.Type.String()
-		case arrow.UINT64:
+		case arrow.UINT32:
 			col.Type = BigIntType
+			col.DbType = field.Type.String()
+		case arrow.UINT64:
+			col.Type = DecimalType // values above the int64 maximum
 			col.DbType = "UINT64"
+			col.DbPrecision = 20
 		case arrow.FLOAT32, arrow.FLOAT64:
 			col.Type = FloatType
 			col.DbType = field.Type.String()
@@ -288,11 +293,24 @@ func (a *ArrowReader) readRowsLoop() {
 				}
 			}
 
-			a.nextRow <- nextRow{row: row}
+			select {
+			case a.nextRow <- nextRow{row: row}:
+			case <-a.Context.Ctx.Done(): // the consumer stopped reading
+				record.Release()
+				return
+			}
 		}
 
 		// Release the record after processing
 		record.Release()
+	}
+
+	// a truncated or failed stream ends Next() like a clean one
+	if err := a.IpcReader.Err(); err != nil {
+		select {
+		case a.nextRow <- nextRow{err: err}:
+		case <-a.Context.Ctx.Done():
+		}
 	}
 }
 
@@ -392,7 +410,9 @@ type ArrowWriter struct {
 // ipc.NewFileWriter.
 func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowWriter, err error) {
 
-	// set minimum decimal precision/scale
+	// set minimum decimal precision/scale, on a copy: the caller's columns
+	// give the target DDL
+	columns = columns.Clone()
 	for i, col := range columns {
 		if col.IsDecimal() {
 			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
@@ -1188,6 +1208,12 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 		return a.Value(idx)
 	case *array.Date32:
 		days := a.Value(idx)
+		switch days { // the infinity values of DuckDB and Postgres
+		case math.MaxInt32:
+			return "infinity"
+		case -math.MaxInt32, math.MinInt32:
+			return "-infinity"
+		}
 		return time.Unix(int64(days)*86400, 0).UTC()
 	case *array.Date64:
 		ms := a.Value(idx)
@@ -1383,6 +1409,12 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 		}
 	case *array.Timestamp:
 		val := a.Value(idx)
+		switch val { // the infinity values of DuckDB and Postgres
+		case math.MaxInt64:
+			return "infinity"
+		case -math.MaxInt64, math.MinInt64:
+			return "-infinity"
+		}
 		tsType := a.DataType().(*arrow.TimestampType)
 		// Restore the schema's zone, not UTC. The instant is the same either
 		// way, but the label is written out with RFC3339Nano and becomes the

@@ -329,7 +329,7 @@ native_type_map:
   enum: string
   float: float
   geometry: geometry
-  hugeint: bigint
+  hugeint: decimal
   integer: integer
   interval: string
   json: json
@@ -343,7 +343,7 @@ native_type_map:
   "timestamp with time zone": timestampz
   tinyblob: text
   tinyint: smallint
-  ubigint: bigint
+  ubigint: decimal
   uinteger: bigint
   usmallint: integer
   utinyint: integer

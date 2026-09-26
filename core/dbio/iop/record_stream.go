@@ -1,8 +1,6 @@
 package iop
 
 import (
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,14 +75,8 @@ func NewArrowLane() (ArrowLane, string) {
 
 // ArrowLaneBuffer is the record channel depth of a RecordStream. It is the
 // lane's backpressure: the producer blocks once this many records wait for the
-// consumer. SLING_ARROW_LANE_BUFFER overrides it.
-var ArrowLaneBuffer = 8
-
-func init() {
-	if val, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE_BUFFER"))); err == nil && val > 0 {
-		ArrowLaneBuffer = val
-	}
-}
+// consumer.
+const ArrowLaneBuffer = 8
 
 // TotalRecordSize returns the in-memory size of a record's buffers.
 func TotalRecordSize(rec arrow.RecordBatch) int64 {

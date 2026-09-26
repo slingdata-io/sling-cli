@@ -2155,8 +2155,9 @@ func (ds *Datastream) ConsumeArrowReaderStream(reader io.Reader) (err error) {
 	if err != nil {
 		return g.Error(err, "could create arrow stream")
 	}
+	ds.Defer(func() { a.Context.Cancel() }) // stops the read loop
 
-	ds.Columns = a.Columns()
+	ds.Columns = a.Columns().KeepSourcedTypes(ds.Columns)
 	ds.Inferred = ds.Columns.Sourced()
 	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
 	ds.SetFileURI()

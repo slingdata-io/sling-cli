@@ -71,7 +71,7 @@ test-dbio-connection:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio connection"
-    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated')
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:
@@ -83,7 +83,7 @@ test-dbio-database:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio database"
-    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL')
+    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestMySQLArrow|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL|TestStarRocksNewTransactionFailSafe')
     (cd core/dbio/database && go test -run TestChunkByColumnRange)
 
 # Test dbio filesys

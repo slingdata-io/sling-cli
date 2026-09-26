@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -496,7 +497,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config, tgtConn database.Connection) (
 // readFsDataflow reads a source file system: on the arrow lane when the gate
 // allows it, on the row path otherwise.
 func (t *TaskExecution) readFsDataflow(fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (df *iop.Dataflow, err error) {
-	df, err = t.readArrowFileDataflow(fs, uri, fsCfg, tgtConn)
+	df, err = readArrowFileDataflowHook(t, fs, uri, fsCfg, tgtConn)
 	if err != nil || df != nil {
 		return df, err
 	}
@@ -504,94 +505,43 @@ func (t *TaskExecution) readFsDataflow(fs filesys.FileSysClient, uri string, fsC
 	return fs.ReadDataflow(uri, fsCfg)
 }
 
-// readArrowFileDataflow returns a dataflow of Arrow records for a parquet or
-// arrow file source, or nil when the stream takes the row path. The gate runs
-// first, so a decline costs nothing; the file footers are read only when the
-// lane is on.
-func (t *TaskExecution) readArrowFileDataflow(fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (df *iop.Dataflow, err error) {
-	cfg := t.Config
-	if cfg.SrcConn.Type.Kind() != dbio.KindFile {
-		return nil, nil
+// setArrowLane installs the arrow lane verdict on the source connection.
+func (t *TaskExecution) setArrowLane(src arrowLaneSource, tgtConn database.Connection) error {
+	return setArrowLaneHook(t, src, tgtConn)
+}
+
+// arrowLaneSource describes what the lane reads: an ADBC query, or a local
+// cache file (CDC Phase B), which brings its own schema.
+type arrowLaneSource struct {
+	conn   database.Connection // nil for a cache file
+	schema *arrow.Schema       // cache file schema; nil for a query (stage 2 reads it)
+	file   bool                // parquet/arrow file source: the footers are read later
+	stream string              // stream name for the log lines
+}
+
+// The closed task_run_arrow..go sets these hooks. The stubs keep every stream
+// on the row path.
+var (
+	setArrowLaneHook = func(t *TaskExecution, src arrowLaneSource, tgtConn database.Connection) error {
+		src.conn.SetProp("arrow_lane", "")
+		src.conn.SetArrowLane(nil, nil)
+		return arrowLaneStubErr()
 	}
-
-	stream := cfg.Source.Stream
-	if stream == "" {
-		stream = uri
-	}
-
-	decision := t.decideArrowLane(arrowLaneSource{file: true, stream: stream}, tgtConn)
-	decision.Log()
-
-	if err = decision.forcedErr(); err != nil {
-		return nil, err
-	} else if !decision.enabled() {
-		return nil, nil
-	}
-
-	// the lane reads the footers up front: every file must share one schema
-	set, reason, err := filesys.NewArrowFileSet(fs, uri, fsCfg)
-	if err != nil {
-		return nil, g.Error(err, "could not read the arrow files of %s", uri)
-	} else if reason != "" {
-		return nil, arrowLaneFileDecline(stream, reason)
-	}
-
-	// stage 2 on the footer schema: there is no query to read the real schema
-	// from later, so the verdict is final here
-	maxKey := ""
-	if decision.check != nil {
-		ok, _, maxCol := decision.check(set.Schema(), iop.ArrowSchemaToColumns(set.Schema()))
-		if !ok {
-			// the check logged its own decline line
-			set.RemoveTemps()
+	readArrowFileDataflowHook = func(t *TaskExecution, fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (*iop.Dataflow, error) {
+		if t.Config.SrcConn.Type.Kind() != dbio.KindFile {
 			return nil, nil
 		}
-		if maxCol >= 0 {
-			maxKey = set.Schema().Field(maxCol).Name
-			if !arrowSelectHas(fsCfg.Select, maxKey) {
-				// the row path still advances the incremental state
-				set.RemoveTemps()
-				return nil, arrowLaneFileDecline(stream, g.F("update_key column %q is not read", maxKey))
-			}
-		}
+		return nil, arrowLaneStubErr()
 	}
+)
 
-	df, err = set.Dataflow(decision.lane, fsCfg, maxKey)
-	if err != nil {
-		set.RemoveTemps()
-		return nil, g.Error(err, "could not read the arrow files of %s", uri)
+// arrowLaneStubErr fails a run with SLING_ARROW_LANE=force, since the open
+// build has no lane.
+func arrowLaneStubErr() error {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
+		return g.Error("arrow lane requires the official release of sling-cli")
 	}
-
-	// the temp copies outlive the streams: the datastreams read from them
-	df.Defer(set.RemoveTemps)
-	df.FsURL = uri
-
-	return df, nil
-}
-
-// arrowLaneFileDecline logs the one decline line of a file-source stream and
-// returns the error of a forced run.
-func arrowLaneFileDecline(stream, reason string) error {
-	d := arrowLaneDecline(getArrowLaneSwitch(), arrowLaneDebug, reason)
-	d.stream = stream
-	d.Log()
-	return d.forcedErr()
-}
-
-// arrowSelectHas reports whether a select list names the column. The files of
-// the lane are read by plain column names.
-func arrowSelectHas(selects []string, name string) bool {
-	if len(selects) == 0 {
-		return true
-	}
-
-	for _, sel := range selects {
-		if strings.EqualFold(strings.TrimSpace(sel), name) {
-			return true
-		}
-	}
-
-	return false
+	return nil
 }
 
 // ReadFromApi reads from a source api

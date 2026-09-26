@@ -76,6 +76,8 @@ func (conn *StarRocksConn) Connect(timeOut ...int) (err error) {
 			conn.version = major*100 + minor*10 + patch
 			g.Debug("starrocks version => %s (%d)", version, conn.version)
 		}
+	} else if err != nil {
+		g.Debug("could not detect starrocks version: %s", err.Error())
 	}
 
 	return nil
@@ -104,8 +106,9 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 // NewTransaction creates a new transaction
 func (conn *StarRocksConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
 	// transactions are BETA in 3.5. only inserts are supported in 3.5, let's disable for now
-	if conn.version >= 350 {
-		g.Debug("transactions are in BETA in starrocks 3.5, disabling")
+	// version 0 means detection failed. Fail-safe: disable as well, since 4.x rejects DDL in tx (err 5305).
+	if conn.version == 0 || conn.version >= 350 {
+		g.Debug("transactions disabled for starrocks (version %d)", conn.version)
 		return nil, nil
 	}
 	return conn.BaseConn.NewTransaction(ctx, options...)

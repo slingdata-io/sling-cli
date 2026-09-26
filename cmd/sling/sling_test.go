@@ -87,6 +87,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
+	dbio.Type("duckdb_csv"):      {name: "duckdb_csv", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckLake:          {name: "ducklake", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_az"):     {name: "ducklake_az", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
@@ -1176,12 +1177,18 @@ func TestSuiteDatabaseD1(t *testing.T) {
 func TestSuiteDatabaseDuckDb(t *testing.T) {
 	t.Parallel()
 
-	// DUCKDB
+	// DUCKDB, with the default arrow copy format and with csv
 	testSuite(t, dbio.TypeDbDuckDb)
-	if os.Getenv("DUCKDB_USE_ARROW") == "" {
-		os.Setenv("DUCKDB_USE_ARROW", "true")
-		testSuite(t, dbio.TypeDbDuckDb)
-		os.Setenv("DUCKDB_USE_ARROW", "false")
+	if c := connection.GetLocalConns().Get("DUCKDB"); c.Name != "" {
+		data := g.M("copy_format", "csv")
+		for k, v := range c.Connection.Data {
+			if k != "copy_format" {
+				data[k] = v
+			}
+		}
+		os.Setenv("DUCKDB_CSV", g.Marshal(data))
+		connection.GetLocalConns(true) // to load DUCKDB_CSV
+		testSuite(t, dbio.Type("duckdb_csv"))
 	}
 
 	// MOTHERDUCK

@@ -2211,12 +2211,10 @@
   output_does_not_contain:
     - 'char(400000)'
 
-# DuckDB Arrow IPC output: DUCKDB_USE_ARROW=true enables binary Arrow IPC streaming
-# from DuckDB instead of CSV text, for better performance on large datasets.
+# DuckDB Arrow IPC output: the default copy_format (arrow) streams binary Arrow IPC
+# from DuckDB instead of CSV text.
 - id: 228
   name: 'DuckDB Arrow IPC output for parquet reads'
-  env:
-    DUCKDB_USE_ARROW: 'true'
   run: 'sling run -d -p tests/pipelines/p.26.duckdb_arrow_ipc_output.yaml'
   output_contains:
     - 'SUCCESS: DuckDB Arrow IPC output produced correct row count'
