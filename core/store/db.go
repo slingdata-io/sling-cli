@@ -2,6 +2,7 @@ package store
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
@@ -119,30 +120,62 @@ func SaveQueryHistory(entry *QueryHistory) error {
 	return Db.Create(entry).Error
 }
 
-// GetQueryHistory retrieves query history entries filtered by workspace key
-func GetQueryHistory(workspaceKey *string, limit, offset int) (entries []QueryHistory, total int64, err error) {
+// QueryHistoryFilter narrows a query history page. The empty fields match
+// everything.
+type QueryHistoryFilter struct {
+	WorkspaceKey *string
+	Connection   string // case-insensitive equal
+	Search       string // case-insensitive substring of query
+	Status       string // optional
+	Limit        int
+	Offset       int
+}
+
+// GetQueryHistoryFiltered returns a page of query history and the total count
+// after the filters. The filters apply in SQL, before Count, LIMIT and OFFSET,
+// so a search sees every stored row, not only the current page.
+func GetQueryHistoryFiltered(f QueryHistoryFilter) (entries []QueryHistory, total int64, err error) {
 	if Db == nil {
 		return nil, 0, nil
 	}
 
 	q := Db.Model(&QueryHistory{})
-	if workspaceKey == nil {
+	if f.WorkspaceKey == nil {
 		q = q.Where("workspace_key IS NULL")
 	} else {
-		q = q.Where("workspace_key = ?", *workspaceKey)
+		q = q.Where("workspace_key = ?", *f.WorkspaceKey)
+	}
+	if f.Connection != "" {
+		q = q.Where("lower(connection) = lower(?)", f.Connection)
+	}
+	if f.Search != "" {
+		// Each term is its own filter: "users select" and "select users" both
+		// need every term somewhere in the query.
+		for _, term := range strings.Fields(strings.ToLower(f.Search)) {
+			q = q.Where("lower(query) LIKE ?", "%"+term+"%")
+		}
+	}
+	if f.Status != "" {
+		q = q.Where("status = ?", f.Status)
 	}
 
 	if err = q.Count(&total).Error; err != nil {
 		return nil, 0, g.Error(err, "could not count query history")
 	}
 
+	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
 	}
 
-	if err = q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&entries).Error; err != nil {
+	if err = q.Order("created_at DESC").Limit(limit).Offset(f.Offset).Find(&entries).Error; err != nil {
 		return nil, 0, g.Error(err, "could not get query history")
 	}
 
 	return entries, total, nil
+}
+
+// GetQueryHistory retrieves query history entries filtered by workspace key
+func GetQueryHistory(workspaceKey *string, limit, offset int) (entries []QueryHistory, total int64, err error) {
+	return GetQueryHistoryFiltered(QueryHistoryFilter{WorkspaceKey: workspaceKey, Limit: limit, Offset: offset})
 }

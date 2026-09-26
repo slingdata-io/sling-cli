@@ -1,0 +1,6 @@
+connections:
+  A:
+    type: postgres
+env:   # later
+  A_KEY: "1"
+  B_KEY: "2"

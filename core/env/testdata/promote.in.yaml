@@ -1,0 +1,5 @@
+connections:
+  # existing connection
+  PG:
+    type: postgres
+    host: db.example.com

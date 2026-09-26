@@ -1,0 +1,10 @@
+connections:
+    PG:
+        type: postgres
+        host: b     # aligned
+        tags:
+            - x
+            - "y"
+            - w
+env:
+    K: v

@@ -1373,12 +1373,9 @@ func ReadConnectionsEnv(env map[string]interface{}) (conns map[string]Connection
 
 		case map[string]interface{}:
 			if ct, ok := v["type"]; ok {
-				if connType, ok := dbio.ValidateType(cast.ToString(ct)); ok {
+				if _, ok := dbio.ValidateType(cast.ToString(ct)); ok {
 					connName := k
-					data := v
-					conn, err := NewConnectionFromMap(
-						g.M("name", connName, "data", data, "type", connType.String()),
-					)
+					conn, err := NewConnectionFromEntry(connName, v)
 					if err != nil {
 						err = g.Error(err, "error loading connection %s", connName)
 						return conns, err
@@ -1394,10 +1391,7 @@ func ReadConnectionsEnv(env map[string]interface{}) (conns map[string]Connection
 
 				if connType := SchemeType(U.String()); !connType.IsUnknown() {
 					connName := k
-					data := v
-					conn, err := NewConnectionFromMap(
-						g.M("name", connName, "data", data, "type", connType.String()),
-					)
+					conn, err := NewConnectionFromEntry(connName, v)
 					if err != nil {
 						err = g.Error(err, "error loading connection %s", connName)
 						return conns, err

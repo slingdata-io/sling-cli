@@ -355,6 +355,22 @@ func injectOAuthSecrets(connArr ConnEntries) ConnEntries {
 	return connArr
 }
 
+// NewConnectionFromEntry builds a connection from the raw props of one env.yaml
+// entry, the same way ReadConnectionsEnv does: refs expand with the env file
+// rules, and the type stays in the data.
+func NewConnectionFromEntry(name string, props map[string]any) (Connection, error) {
+	data := env.ExpandEntry(props)
+
+	Type := cast.ToString(data["type"])
+	if connType, ok := dbio.ValidateType(Type); ok {
+		Type = connType.String() // normalize, e.g. "POSTGRES" -> "postgres"
+	}
+
+	return NewConnectionFromMap(
+		g.M("name", name, "data", data, "type", Type),
+	)
+}
+
 func LocalFileConnEntry() ConnEntry {
 	c, _ := NewConnection("LOCAL", "file", nil)
 	return ConnEntry{
@@ -384,6 +400,11 @@ type SetOptions struct {
 	EnvUpdates map[string]any
 	// AllowEnvOverwrite permits replacing existing env: values.
 	AllowEnvOverwrite bool
+	// Replace treats props as the full entry: keys that props does not pass
+	// are removed from the stored entry. Without it the entry is merged, and
+	// omitted keys are kept (the CLI contract). Secret refs of stored fields
+	// are still preserved either way (PreserveRefs).
+	Replace bool
 }
 
 // Get returns the raw (unexpanded) props of one connection from the env file,
@@ -406,10 +427,11 @@ func (ec *EnvFileConns) Get(name string) (props map[string]any, found bool) {
 	return nil, false
 }
 
-// SetValidated is Set + validation/drop-guards, used by the GUI path. It
-// merges over the raw on-disk entry (not the expanded struct), validates the
-// name and type, and writes through EnvFile.SetConnectionNode so ${VAR} refs
-// are never expanded onto disk.
+// SetValidated is Set + validation/drop-guards, used by the GUI path and by
+// Set. It merges over the raw on-disk entry (not the expanded struct),
+// validates the name and type, and writes through env.EnvFileEditor: ${VAR}
+// refs are never expanded onto disk, and lines that do not change stay as
+// they are.
 func (ec *EnvFileConns) SetValidated(name string, props map[string]any, opts SetOptions) (err error) {
 	if ec.EnvFile == nil {
 		return g.Error("env file is not set")
@@ -430,7 +452,9 @@ func (ec *EnvFileConns) SetValidated(name string, props map[string]any, opts Set
 		if !opts.AllowOverwrite {
 			return g.Error("connection %s already exists", name)
 		}
-		props = MergeConnProps(existing, props)
+		if !opts.Replace {
+			props = MergeConnProps(existing, props)
+		}
 	} else if opts.RequireExisting {
 		return g.Error("did not find connection `%s`", name)
 	}
@@ -444,22 +468,8 @@ func (ec *EnvFileConns) SetValidated(name string, props map[string]any, opts Set
 		PreserveRefs(existing, props)
 	}
 
-	// parse url
-	if url := cast.ToString(props["url"]); url != "" {
-		conn, uErr := NewConnectionFromURL(name, url)
-		if uErr != nil {
-			return g.Error(uErr, "could not parse url")
-		}
-		if _, ok := props["type"]; !ok {
-			props["type"] = conn.Type.String()
-		}
-	}
-
-	t, found := props["type"]
-	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
-		return g.Error("invalid type (%s)", cast.ToString(t))
-	} else if !found {
-		return g.Error("need to specify valid `type` key or provide `url`")
+	if err = ValidateConnProps(name, props); err != nil {
+		return err
 	}
 
 	if opts.RejectLiteralSecrets {
@@ -474,7 +484,58 @@ func (ec *EnvFileConns) SetValidated(name string, props map[string]any, opts Set
 		}
 	}
 
-	if err = ec.EnvFile.SetConnectionNode(name, props, opts.EnvUpdates); err != nil {
+	// write through the node-level editor, so ${VAR} refs are never expanded
+	// onto disk. In Replace mode the entry is rebuilt from props (keys props
+	// does not pass are dropped); otherwise the entry is merged.
+	e, err := env.LoadEnvEditor(ec.EnvFile.Path)
+	if err != nil {
+		return err
+	}
+	if err = e.Set(name, props, env.EditOptions{
+		Replace:           opts.Replace,
+		AllowOverwrite:    true,
+		EnvUpdates:        opts.EnvUpdates,
+		AllowEnvOverwrite: opts.AllowEnvOverwrite,
+	}); err != nil {
+		return err
+	}
+	if err = e.Save(""); err != nil {
+		return g.Error(err, "could not write env file")
+	}
+	return nil
+}
+
+// RenameValidated renames one connection entry of the env file: the entry
+// keeps its position, its node and its comments, and the promoted `env:` keys
+// keep their names, so the ${VAR} refs of the entry stay valid.
+func (ec *EnvFileConns) RenameValidated(oldName, newName string) error {
+	if ec.EnvFile == nil {
+		return g.Error("env file is not set")
+	}
+	oldName = strings.ToUpper(strings.TrimSpace(oldName))
+	newName = strings.ToUpper(strings.TrimSpace(newName))
+	if oldName == "" || newName == "" {
+		return g.Error("name is blank")
+	}
+	if err := env.ValidateKey(newName); err != nil {
+		return err
+	}
+	if !strings.EqualFold(oldName, newName) {
+		if _, exists := ec.Get(newName); exists {
+			return g.Error("connection %s already exists", newName)
+		}
+		if _, found := ec.Get(oldName); !found {
+			return g.Error("did not find connection `%s`", oldName)
+		}
+	}
+	e, err := env.LoadEnvEditor(ec.EnvFile.Path)
+	if err != nil {
+		return err
+	}
+	if err = e.Rename(oldName, newName); err != nil {
+		return err
+	}
+	if err = e.Save(""); err != nil {
 		return g.Error(err, "could not write env file")
 	}
 	return nil
@@ -506,73 +567,51 @@ func (ec *EnvFileConns) checkEnvOverwrite(updates map[string]any, allowOverwrite
 	return nil
 }
 
+// Set merges kvMap into one connection entry (the `sling conns set` and MCP
+// path). It writes through SetValidated, so only the changed lines of the file
+// change, and then refreshes the entry in ec.EnvFile.Connections.
 func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
-
-	if name == "" {
-		return g.Error("name is blank")
-	}
-	name = strings.ToUpper(name)
-
 	if kvMap == nil {
 		kvMap = map[string]any{}
 	}
-	if err = NormalizeConnProps(kvMap); err != nil {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	if err = ec.SetValidated(name, kvMap, SetOptions{AllowOverwrite: true}); err != nil {
 		return err
 	}
-
-	ef := ec.EnvFile
-	if existing, ok := ef.Connections[name]; ok {
-		kvMap = MergeConnProps(existing, kvMap)
-	}
-
-	// parse url
-	if url := cast.ToString(kvMap["url"]); url != "" {
-		conn, err := NewConnectionFromURL(name, url)
-		if err != nil {
-			return g.Error(err, "could not parse url")
+	if raw, found := ec.Get(name); found {
+		if ec.EnvFile.Connections == nil {
+			ec.EnvFile.Connections = map[string]map[string]any{}
 		}
-		if _, ok := kvMap["type"]; !ok {
-			kvMap["type"] = conn.Type.String()
-		}
+		ec.EnvFile.Connections[name] = env.ExpandEntry(raw)
 	}
-
-	t, found := kvMap["type"]
-	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
-		return g.Error("invalid type (%s)", cast.ToString(t))
-	} else if !found {
-		return g.Error("need to specify valid `type` key or provide `url`")
-	}
-
-	ef.Connections[name] = kvMap
-	err = ef.WriteEnvFile()
-	if err != nil {
-		return g.Error(err, "could not write env file")
-	}
-
-	return
+	return nil
 }
 
+// Unset removes one connection entry and its head comment from the env file.
+// All other lines of the file stay as they are.
 func (ec *EnvFileConns) Unset(name string) (err error) {
 	if name == "" {
 		return g.Error("name is blank")
 	}
-
-	ef := ec.EnvFile
-	if err = ef.CheckFile(); err != nil {
+	if ec.EnvFile == nil {
+		return g.Error("env file is not set")
+	}
+	e, err := env.LoadEnvEditor(ec.EnvFile.Path)
+	if err != nil {
 		return err
 	}
-	_, ok := ef.Connections[name]
-	if !ok {
-		return g.Error("did not find connection `%s`", name)
+	if err = e.Delete(name); err != nil {
+		return err
 	}
-
-	delete(ef.Connections, name)
-	err = ef.WriteEnvFile()
-	if err != nil {
+	if err = e.Save(""); err != nil {
 		return g.Error(err, "could not write env file")
 	}
-
-	return
+	for k := range ec.EnvFile.Connections {
+		if strings.EqualFold(k, name) {
+			delete(ec.EnvFile.Connections, k)
+		}
+	}
+	return nil
 }
 
 func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {

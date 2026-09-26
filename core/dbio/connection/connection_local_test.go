@@ -3,9 +3,11 @@ package connection
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 )
 
@@ -40,6 +42,87 @@ func TestEnvVarRefRenders(t *testing.T) {
 		if got := EnvVarRef(parts[0], parts[1]); got != want {
 			t.Errorf("EnvVarRef(%q, %q) = %q, want %q", parts[0], parts[1], got, want)
 		}
+	}
+}
+
+// TestNewConnectionFromEntry is the one-path guarantee: the single-entry
+// builder and ReadConnectionsEnv produce the same Connection for the same
+// env.yaml entry. Refs expand with the env file rules (also inside strings)
+// and nested values survive into Data.
+func TestNewConnectionFromEntry(t *testing.T) {
+	t.Setenv("H", "myhost")
+	t.Setenv("P", "secretpw")
+
+	body := `
+connections:
+  MY_MSSQL:
+    type: sqlserver
+    host: ${H}.corp
+    password: ${P}
+    port: 1433
+    user: sa
+    database: mydb
+    bcp_extra_args:
+      - -b
+      - "5000"
+`
+
+	rawProps, err := env.ParseEnvFileConnections(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := rawProps["MY_MSSQL"]
+	if !ok {
+		t.Fatal("MY_MSSQL not parsed from body")
+	}
+
+	// the loader path
+	envMap := map[string]any{}
+	for name, props := range rawProps {
+		envMap[name] = props
+	}
+	conns, err := ReadConnectionsEnv(envMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaLoader, ok := conns["MY_MSSQL"]
+	if !ok {
+		t.Fatal("ReadConnectionsEnv did not load MY_MSSQL")
+	}
+
+	// the native single-entry path
+	conn, err := NewConnectionFromEntry("MY_MSSQL", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if conn.Type != viaLoader.Type {
+		t.Errorf("type mismatch: NewConnectionFromEntry gave %s, ReadConnectionsEnv gave %s", conn.Type, viaLoader.Type)
+	}
+	if !reflect.DeepEqual(conn.Data, viaLoader.Data) {
+		t.Errorf("Data mismatch:\nNewConnectionFromEntry: %s\nReadConnectionsEnv:    %s", g.Marshal(conn.Data), g.Marshal(viaLoader.Data))
+	}
+
+	// refs expanded, also inside strings
+	if conn.Data["host"] != "myhost.corp" {
+		t.Errorf(`host = %v, want "myhost.corp"`, conn.Data["host"])
+	}
+	if conn.Data["password"] != "secretpw" {
+		t.Errorf(`password = %v, want "secretpw"`, conn.Data["password"])
+	}
+
+	// nested list survived with item types intact
+	args, ok := conn.Data["bcp_extra_args"].([]any)
+	if !ok {
+		t.Fatalf("bcp_extra_args = %T, want []interface{}", conn.Data["bcp_extra_args"])
+	}
+	if len(args) != 2 || args[0] != "-b" || args[1] != "5000" {
+		t.Errorf("bcp_extra_args = %v, want [-b 5000]", args)
+	}
+
+	// the input entry is untouched: ExpandEntry returns a deep copy
+	if entry["host"] != "${H}.corp" || entry["password"] != "${P}" {
+		t.Errorf("input entry was mutated: %v", g.Marshal(entry))
 	}
 }
 
@@ -393,5 +476,181 @@ func TestSetValidatedKeepsQuotedAndBlockValues(t *testing.T) {
 	}
 	if strings.Contains(got, "host: one.example.com") {
 		t.Errorf("host not updated\n--- got ---\n%s", got)
+	}
+}
+
+// SetValidated with Replace treats props as the full entry: keys that props
+// does not pass are removed from the stored entry (plan 8.2). Without Replace
+// they are kept, the CLI contract.
+func TestSetValidatedReplace(t *testing.T) {
+	path, ec := writeEnvFile(t, `connections:
+  PG:
+    type: postgres
+    host: db.example.com
+    port: 5432
+    sslmode: require
+`)
+	// merge keeps the omitted keys
+	if err := ec.SetValidated("PG", g.M("type", "postgres", "host", "new.example.com"), SetOptions{AllowOverwrite: true}); err != nil {
+		t.Fatal(err)
+	}
+	merged := readFile(t, path)
+	if !strings.Contains(merged, "port: 5432") || !strings.Contains(merged, "sslmode: require") {
+		t.Errorf("merge lost the omitted keys:\n%s", merged)
+	}
+
+	// replace removes them
+	if err := ec.SetValidated("PG", g.M("type", "postgres", "host", "new.example.com"), SetOptions{Replace: true, AllowOverwrite: true}); err != nil {
+		t.Fatal(err)
+	}
+	replaced := readFile(t, path)
+	if strings.Contains(replaced, "port:") || strings.Contains(replaced, "sslmode:") {
+		t.Errorf("replace kept the dropped keys:\n%s", replaced)
+	}
+	if !strings.Contains(replaced, "host: new.example.com") {
+		t.Errorf("replace lost the passed keys:\n%s", replaced)
+	}
+
+	// a stored ${VAR} ref survives a Replace that passes its expansion back
+	refPath, ec := writeEnvFile(t, "connections:\n  PG:\n    type: postgres\n    host: h\n    password: ${PG_PASSWORD}\n")
+	t.Setenv("PG_PASSWORD", "hunter2")
+	if err := ec.SetValidated("PG", g.M("type", "postgres", "host", "h2", "password", "hunter2"), SetOptions{Replace: true, AllowOverwrite: true}); err != nil {
+		t.Fatal(err)
+	}
+	final := readFile(t, refPath)
+	if !strings.Contains(final, "password: ${PG_PASSWORD}") || strings.Contains(final, "hunter2") {
+		t.Errorf("replace expanded the stored ref:\n%s", final)
+	}
+}
+
+// RenameValidated re-keys an entry, keeping its position and comments, and
+// refuses an existing target (case-insensitively).
+func TestRenameValidated(t *testing.T) {
+	path, ec := writeEnvFile(t, `# the file
+connections:
+  # the production warehouse
+  PG_PROD:
+    type: postgres
+    host: db.example.com
+  PG_STAGE:
+    type: postgres
+    host: stage.example.com
+env:
+  K: v
+`)
+	if err := ec.RenameValidated("PG_PROD", "PG_MAIN"); err != nil {
+		t.Fatal(err)
+	}
+	renamed := readFile(t, path)
+	if !strings.Contains(renamed, "PG_MAIN:") || strings.Contains(renamed, "PG_PROD") {
+		t.Errorf("rename did not re-key the entry:\n%s", renamed)
+	}
+	if !strings.Contains(renamed, "# the production warehouse") {
+		t.Errorf("rename lost the entry comment:\n%s", renamed)
+	}
+	if !strings.Contains(renamed, "PG_STAGE:") {
+		t.Errorf("rename touched the other entries:\n%s", renamed)
+	}
+
+	// target exists -> error
+	if err := ec.RenameValidated("PG_MAIN", "pg_stage"); err == nil {
+		t.Error("expected an already-exists error")
+	} else if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %v", err)
+	}
+
+	// source missing -> error
+	if err := ec.RenameValidated("NOPE", "PG_X"); err == nil {
+		t.Error("expected a not-found error")
+	}
+
+	// case-only rename is allowed
+	if err := ec.RenameValidated("PG_MAIN", "pg_main"); err != nil {
+		t.Errorf("case-only rename: %v", err)
+	}
+	if !strings.Contains(readFile(t, path), "PG_MAIN:") {
+		t.Error("case-only rename did not apply")
+	}
+}
+
+// TestEnvFileConnsSetKeepsFile is the `sling conns set` / `conns unset` path:
+// each command changes only the lines of its entry, byte for byte.
+func TestEnvFileConnsSetKeepsFile(t *testing.T) {
+	t.Setenv("PG_PASS", "hunter2-LEAK-TEST")
+	original := `# Sling env file
+# maintained by hand
+
+connections:
+
+  # production postgres
+  PG_PROD:
+    type: postgres
+    host: "db.example.com"      # primary
+    port: 5432
+    password: ${PG_PASS}        # from vault
+
+  DUCK:
+    type: duckdb
+    instance: /tmp/a.db
+
+# shared variables
+env:
+  SLING_THREADS: 4     # inline
+`
+	path, ec := writeEnvFile(t, original)
+	ef := env.LoadEnvFile(path) // expands ${PG_PASS} in memory, as the CLI does
+	ec.EnvFile = &ef
+
+	// add: the new entry goes after DUCK, with the blank line style of the file
+	if err := ec.Set("new_pg", map[string]any{"type": "postgres", "host": "h2"}); err != nil {
+		t.Fatalf("Set new: %v", err)
+	}
+	added := strings.Replace(original, "    instance: /tmp/a.db\n", "    instance: /tmp/a.db\n\n  NEW_PG:\n    type: postgres\n    host: h2\n", 1)
+	if got := readFile(t, path); got != added {
+		t.Fatalf("add changed other lines\n--- got ---\n%s\n--- want ---\n%s", got, added)
+	}
+
+	// update: CLI values are strings; only the port line changes
+	if err := ec.Set("PG_PROD", map[string]any{"port": "5433", "host": "db.example.com"}); err != nil {
+		t.Fatalf("Set update: %v", err)
+	}
+	updated := strings.Replace(added, "    port: 5432\n", "    port: 5433\n", 1)
+	if got := readFile(t, path); got != updated {
+		t.Fatalf("update changed other lines\n--- got ---\n%s\n--- want ---\n%s", got, updated)
+	}
+
+	// the struct in memory follows the file, with refs expanded (MCP reads it)
+	if got := ec.EnvFile.Connections["PG_PROD"]["password"]; got != "hunter2-LEAK-TEST" {
+		t.Errorf("in-memory password = %v", got)
+	}
+	if got := ec.EnvFile.Connections["NEW_PG"]["host"]; got != "h2" {
+		t.Errorf("in-memory NEW_PG host = %v", got)
+	}
+
+	// unset: the file is back to the update state without NEW_PG
+	if err := ec.Unset("NEW_PG"); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+	want := strings.Replace(original, "    port: 5432\n", "    port: 5433\n", 1)
+	if got := readFile(t, path); got != want {
+		t.Fatalf("unset changed other lines\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if _, ok := ec.EnvFile.Connections["NEW_PG"]; ok {
+		t.Error("NEW_PG still in memory after Unset")
+	}
+	if strings.Contains(readFile(t, path), "hunter2-LEAK-TEST") {
+		t.Error("expanded secret written to disk")
+	}
+
+	// errors leave the file as it is
+	before := readFile(t, path)
+	if err := ec.Set("BAD", map[string]any{"type": "nope"}); err == nil {
+		t.Error("expected an invalid type error")
+	}
+	if err := ec.Unset("MISSING"); err == nil {
+		t.Error("expected a missing connection error")
+	}
+	if got := readFile(t, path); got != before {
+		t.Errorf("a failed command changed the file\n%s", got)
 	}
 }

@@ -370,6 +370,43 @@ func interpEnvMap(path string) map[string]any {
 	return envMap
 }
 
+// ExpandEntry expands ${VAR} refs in all string values of props, also inside
+// strings and nested lists and maps, with the same rules as loadEnvFile.
+// It returns a deep copy: the input map is not modified.
+func ExpandEntry(props map[string]any) map[string]any {
+	expanded, _ := expandValue(props, interpEnvMap("")).(map[string]any)
+	return expanded
+}
+
+// expandValue deep-copies val, running g.Rmd over every string with envMap,
+// the same interpolation loadEnvFile applies to the whole file body.
+func expandValue(val any, envMap map[string]any) any {
+	switch v := val.(type) {
+	case string:
+		return g.Rmd(v, envMap)
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = expandValue(item, envMap)
+		}
+		return out
+	case map[any]any:
+		out := make(map[any]any, len(v))
+		for key, item := range v {
+			out[key] = expandValue(item, envMap)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = expandValue(item, envMap)
+		}
+		return out
+	default:
+		return val
+	}
+}
+
 // keepOnDiskScalar is true when newVal is origVal or origVal after env expansion.
 // Load interpolates ${VAR}; write must keep the on-disk ref, not the secret.
 func keepOnDiskScalar(origVal, newVal string, envMap map[string]any) bool {
@@ -517,8 +554,7 @@ func (ef *EnvFile) CheckFile() error {
 const oddSpaces = "\u00a0\u2007\u202f"
 
 // checkEnvYAML returns an error when b does not parse into EnvFile, or when a
-// mapping key starts with a space character (an indentation error that
-// still parses).
+// mapping key starts with a space character (see checkEnvKeys).
 func checkEnvYAML(b []byte) error {
 	if err := yaml.Unmarshal(b, &EnvFile{}); err != nil {
 		return err
@@ -527,6 +563,12 @@ func checkEnvYAML(b []byte) error {
 	if err := yaml.Unmarshal(b, &root); err != nil {
 		return err
 	}
+	return checkEnvKeys(&root)
+}
+
+// checkEnvKeys returns an error when a mapping key starts with a space
+// character: an indentation error that still parses.
+func checkEnvKeys(root *yaml.Node) error {
 	var badKey *yaml.Node
 	var walk func(n *yaml.Node)
 	walk = func(n *yaml.Node) {
@@ -543,7 +585,7 @@ func checkEnvYAML(b []byte) error {
 			walk(c)
 		}
 	}
-	walk(&root)
+	walk(root)
 	if badKey != nil {
 		return g.Error("line %d: key %q starts with a space character", badKey.Line, badKey.Value)
 	}
@@ -944,162 +986,51 @@ func (ef *EnvFile) RawEnv() (map[string]any, error) {
 	return out, nil
 }
 
-// SetConnectionNode writes one connection's props into the YAML node tree at
-// ef.Path and saves. It never reads ef.Connections, so expanded ${VAR} values
-// held in the struct cannot leak to disk. Existing scalars under the entry that
-// are ${VAR} refs are kept as refs when the incoming value is identical.
+// SetConnectionNode merges props into one connection entry of the file at
+// ef.Path and saves, through EnvFileEditor: only the changed lines change. It
+// never reads ef.Connections, so expanded ${VAR} values held in the struct
+// cannot leak to disk.
 //
 // envUpdates, when non-empty, are written under `env:` in the same save (one
 // atomic write; used for secret promotion). Existing env values are replaced:
 // callers that must protect hand-set values (EnvFileConns.SetValidated) check
 // first.
 func (ef *EnvFile) SetConnectionNode(name string, props map[string]any, envUpdates map[string]any) error {
-	root, err := ef.loadRootNode()
+	e, err := LoadEnvEditor(ef.Path)
 	if err != nil {
 		return err
 	}
-
-	conns := ensureMappingChild(root, "connections")
-	valNode, err := anyToNode(props)
-	if err != nil {
-		return g.Error(err, "could not render connection %s", name)
+	if err := e.Set(name, props, EditOptions{AllowOverwrite: true, EnvUpdates: envUpdates, AllowEnvOverwrite: true}); err != nil {
+		return err
 	}
-
-	keyNode, existingVal := mappingChildFold(conns, name)
-	if keyNode == nil {
-		key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}
-		conns.Content = append(conns.Content, key, valNode)
-	} else {
-		// mergeNode (nil envMap) keeps identical on-disk scalars — including
-		// ${VAR} refs — and otherwise takes the incoming value verbatim. Do not
-		// pass interpEnvMap here: the write must not depend on the writer's
-		// process environment.
-		merged := mergeNode(existingVal, valNode, nil)
-		for i := 0; i < len(conns.Content)-1; i += 2 {
-			if conns.Content[i] == keyNode {
-				conns.Content[i+1] = merged
-				break
-			}
-		}
-	}
-
-	if len(envUpdates) > 0 {
-		if err := setEnvNodes(root, envUpdates, true); err != nil {
-			return err
-		}
-	}
-
-	annotateEnvVarRefComments(root)
-	return ef.saveRootNode(root)
+	return e.Save("")
 }
 
-// DeleteConnectionNode removes one connection entry (and the comments attached
-// to it) from the node tree at ef.Path and saves. A trailing comment that is
-// attached to the last entry of the `connections:` block is kept: it is moved
-// onto the preceding entry (or the block itself when there is none), so
-// deleting the last connection does not silently eat it.
+// DeleteConnectionNode removes one connection entry and its head comment from
+// the file at ef.Path and saves. Comments after the entry stay.
 func (ef *EnvFile) DeleteConnectionNode(name string) error {
-	root, err := ef.loadRootNode()
+	e, err := LoadEnvEditor(ef.Path)
 	if err != nil {
 		return err
 	}
-
-	conns := mappingChild(root, "connections")
-	if conns == nil {
-		return g.Error("connections block not found in %s", ef.Path)
+	if err := e.Delete(name); err != nil {
+		return err
 	}
-
-	idx := -1
-	for i := 0; i < len(conns.Content)-1; i += 2 {
-		if strings.EqualFold(conns.Content[i].Value, name) {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return g.Error("did not find connection `%s`", name)
-	}
-
-	keyNode, valNode := conns.Content[idx], conns.Content[idx+1]
-	if idx == len(conns.Content)-2 {
-		// last entry: comments attached as FootComment inside its subtree
-		// describe the end of the block, not the entry
-		notes := collectFootComments(keyNode, valNode)
-		if len(notes) > 0 {
-			if idx == 0 {
-				// no neighbor to carry it: keep it on the block header
-				connsKey, _ := mappingChildFold(mappingRoot(root), "connections")
-				if connsKey != nil {
-					connsKey.FootComment = joinComment(connsKey.FootComment, notes)
-				}
-			} else {
-				target := deepestLastNode(conns.Content[idx-1])
-				if target != nil {
-					target.FootComment = joinComment(target.FootComment, notes)
-				}
-			}
-		}
-	}
-
-	conns.Content = append(conns.Content[:idx], conns.Content[idx+2:]...)
-	return ef.saveRootNode(root)
+	return e.Save("")
 }
 
 // SetEnvNodes sets keys under the `env:` block (legacy `variables:` when `env:`
-// is absent) in the node tree at ef.Path and saves. Existing keys are only
+// is absent) of the file at ef.Path and saves. Existing keys are only
 // replaced when allowOverwrite is true or the value is unchanged.
 func (ef *EnvFile) SetEnvNodes(updates map[string]any, allowOverwrite bool) error {
-	root, err := ef.loadRootNode()
+	e, err := LoadEnvEditor(ef.Path)
 	if err != nil {
 		return err
 	}
-	if err := setEnvNodes(root, updates, allowOverwrite); err != nil {
+	if err := e.SetEnv(updates, allowOverwrite); err != nil {
 		return err
 	}
-	return ef.saveRootNode(root)
-}
-
-// setEnvNodes splices updates into the effective env block of root.
-func setEnvNodes(root *yaml.Node, updates map[string]any, allowOverwrite bool) error {
-	if len(updates) == 0 {
-		return nil
-	}
-
-	blockKey := effectiveEnvKey(root)
-	block := ensureMappingChild(root, blockKey)
-
-	existing := map[string]*yaml.Node{}
-	for i := 0; i < len(block.Content)-1; i += 2 {
-		existing[block.Content[i].Value] = block.Content[i]
-	}
-
-	keys := make([]string, 0, len(updates))
-	for k := range updates {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		if err := ValidateEnvKey(k); err != nil {
-			return err
-		}
-		valNode, err := anyToNode(updates[k])
-		if err != nil {
-			return g.Error(err, "could not render env var %s", k)
-		}
-		if keyNode, ok := existing[k]; ok {
-			cur := block.Content[indexOfNode(block, keyNode)+1]
-			if !allowOverwrite && !nodesEqualScalar(cur, valNode) {
-				return g.Error("env var %s already exists in env.yaml; pass allow_overwrite to update it", k)
-			}
-			block.Content[indexOfNode(block, keyNode)+1] = valNode
-			continue
-		}
-		key := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k}
-		block.Content = append(block.Content, key, valNode)
-		existing[k] = key
-	}
-	return nil
+	return e.Save("")
 }
 
 // effectiveEnvKey returns the block that holds env vars: `env:` when present,
@@ -1112,28 +1043,6 @@ func effectiveEnvKey(root *yaml.Node) string {
 		return "variables"
 	}
 	return "env"
-}
-
-// ensureMappingChild returns the mapping value for key, creating it when
-// absent.
-func ensureMappingChild(root *yaml.Node, key string) *yaml.Node {
-	root = mappingRoot(root)
-	if root == nil {
-		return nil
-	}
-	if n := mappingChild(root, key); n != nil {
-		if n.Kind != yaml.MappingNode {
-			n.Kind = yaml.MappingNode
-			n.Tag = "!!map"
-			n.Value = ""
-			n.Content = nil
-		}
-		return n
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	valNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	root.Content = append(root.Content, keyNode, valNode)
-	return valNode
 }
 
 // anyToNode renders any value as a yaml.Node.
@@ -1150,91 +1059,6 @@ func anyToNode(v any) (*yaml.Node, error) {
 		return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, nil
 	}
 	return doc.Content[0], nil
-}
-
-// saveRootNode encodes root and writes it to ef.Path.
-func (ef *EnvFile) saveRootNode(root *yaml.Node) error {
-	if ef.Path == "" {
-		return g.Error("env file path is not set")
-	}
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(root); err != nil {
-		_ = enc.Close()
-		return g.Error(err, "could not marshal into YAML")
-	}
-	if err := enc.Close(); err != nil {
-		return g.Error(err, "could not finalize YAML encoder")
-	}
-	ef.Path = strings.ReplaceAll(ef.Path, `\`, `/`)
-	if err := os.WriteFile(ef.Path, buf.Bytes(), 0644); err != nil {
-		return g.Error(err, "could not write YAML file")
-	}
-	return nil
-}
-
-// collectFootComments gathers FootComment text from the key node and the value
-// subtree, in document order.
-func collectFootComments(keyNode, valNode *yaml.Node) []string {
-	var out []string
-	var walk func(*yaml.Node)
-	walk = func(n *yaml.Node) {
-		if n == nil {
-			return
-		}
-		if n.FootComment != "" {
-			out = append(out, n.FootComment)
-		}
-		for _, c := range n.Content {
-			walk(c)
-		}
-	}
-	walk(keyNode)
-	walk(valNode)
-	return out
-}
-
-// deepestLastNode returns the last node in document order under n.
-func deepestLastNode(n *yaml.Node) *yaml.Node {
-	if n == nil {
-		return nil
-	}
-	for n.Kind == yaml.MappingNode || n.Kind == yaml.SequenceNode || n.Kind == yaml.DocumentNode {
-		if len(n.Content) == 0 {
-			return n
-		}
-		n = n.Content[len(n.Content)-1]
-	}
-	return n
-}
-
-func joinComment(existing string, notes []string) string {
-	out := existing
-	for _, n := range notes {
-		if n == "" {
-			continue
-		}
-		if out == "" {
-			out = n
-		} else {
-			out = out + "\n" + n
-		}
-	}
-	return out
-}
-
-func indexOfNode(m *yaml.Node, key *yaml.Node) int {
-	for i := 0; i < len(m.Content)-1; i += 2 {
-		if m.Content[i] == key {
-			return i
-		}
-	}
-	return -1
-}
-
-func nodesEqualScalar(a, b *yaml.Node) bool {
-	return a.Kind == b.Kind && a.Tag == b.Tag && a.Value == b.Value
 }
 
 func mappingChildFold(n *yaml.Node, key string) (keyNode, valNode *yaml.Node) {
@@ -1293,7 +1117,7 @@ func collectMissingRefs(n *yaml.Node, prefix string, out *[]MissingRef) {
 	}
 }
 
-// annotateEnvVarRefComments writes EnvVarRefComment on connection ${VAR}
+// annotateEnvVarRefComments writes envVarRefComment on connection ${VAR}
 // scalars that have no trailing comment. Original comments stay.
 func annotateEnvVarRefComments(root *yaml.Node) {
 	conns := mappingChild(root, "connections")
@@ -1304,10 +1128,6 @@ func annotateEnvVarRefComments(root *yaml.Node) {
 }
 
 func annotateMappingRefs(n *yaml.Node) {
-
-	// EnvVarRefComment is the trailing comment written next to scaffolded ${VAR} refs.
-	const EnvVarRefComment = "replace with the value, or set the env var (CI)"
-
 	n = mappingRoot(n)
 	if n == nil {
 		return
@@ -1317,7 +1137,7 @@ func annotateMappingRefs(n *yaml.Node) {
 		switch val.Kind {
 		case yaml.ScalarNode:
 			if IsEnvVarRef(val.Value) && strings.TrimSpace(val.LineComment) == "" {
-				val.LineComment = EnvVarRefComment
+				val.LineComment = envVarRefComment
 			}
 		case yaml.MappingNode:
 			annotateMappingRefs(val)

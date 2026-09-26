@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flarco/g"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -883,6 +885,322 @@ env:
 	if !strings.Contains(got, "A: b") {
 		t.Errorf("env block lost\n--- got ---\n%s", got)
 	}
+}
+
+// --- EnvFileEditor golden tests (plan 8.9) ---
+//
+// Every case under testdata is `<case>.in.yaml` fed through one
+// edit operation and compared byte-for-byte with `<case>.out.yaml`. Cases
+// without an .out.yaml must fail without touching the file.
+
+// editTestPath materializes body at env.yaml inside a temp dir and loads it.
+func editTestPath(t *testing.T, body []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	if len(body) > 0 {
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+func TestEnvFileEditorGolden(t *testing.T) {
+	// templateOrder fakes the registration core/dbio/connection does at init:
+	// type first, then the template property order of the type.
+	savedOrder := TemplateKeyOrder
+	TemplateKeyOrder = func(props map[string]any) []string {
+		if cast.ToString(props["type"]) == "sqlite" {
+			return []string{"instance", "database"}
+		}
+		return nil
+	}
+	defer func() { TemplateKeyOrder = savedOrder }()
+
+	cases := map[string]func(e *EnvFileEditor) error{
+		"update": func(e *EnvFileEditor) error {
+			return e.Set("PG_PROD", g.M("type", "postgres", "host", "db2.example.com"), EditOptions{AllowOverwrite: true})
+		},
+		"replace": func(e *EnvFileEditor) error {
+			return e.Set("PG_STAGE", g.M("type", "postgres", "host", "stage.db.example.com", "tls", false),
+				EditOptions{Replace: true, AllowOverwrite: true})
+		},
+		"new-entry": func(e *EnvFileEditor) error {
+			return e.Set("SQLITE_MAIN", g.M("type", "sqlite", "port", 1235, "instance", "main.db", "extra", "x"), EditOptions{})
+		},
+		"rename": func(e *EnvFileEditor) error {
+			return e.Rename("PG_STAGE", "PG_STAGING")
+		},
+		"delete-first": func(e *EnvFileEditor) error {
+			return e.Delete("A")
+		},
+		"delete-middle": func(e *EnvFileEditor) error {
+			return e.Delete("B")
+		},
+		"delete-last": func(e *EnvFileEditor) error {
+			return e.Delete("C")
+		},
+		"delete-only": func(e *EnvFileEditor) error {
+			return e.Delete("ONLY")
+		},
+		"empty": func(e *EnvFileEditor) error {
+			return e.Set("FIRST", g.M("type", "duckdb", "instance", "a.db"), EditOptions{})
+		},
+		"crlf": func(e *EnvFileEditor) error {
+			return e.Set("A", g.M("type", "postgres", "host", "changed.example.com"), EditOptions{AllowOverwrite: true})
+		},
+		"url-entry": func(e *EnvFileEditor) error {
+			return e.Set("PG_URL", g.M("url", "postgres://user:pass@db.example.com:5432/mydb"), EditOptions{AllowOverwrite: true})
+		},
+		"setenv": func(e *EnvFileEditor) error {
+			return e.SetEnv(g.M("SLING_BUCKET", "s3://acme-bucket"), true)
+		},
+		"setenv-legacy": func(e *EnvFileEditor) error {
+			return e.SetEnv(g.M("NEW_VAR", "x"), true)
+		},
+		"promote": func(e *EnvFileEditor) error {
+			// the shape PromoteLiteralSecrets leaves behind: the prop holds
+			// the ref, the literal travels in EnvUpdates
+			return e.Set("PG_NEW", g.M("type", "postgres", "host", "h", "password", "${PG_NEW_PASSWORD}"),
+				EditOptions{EnvUpdates: g.M("PG_NEW_PASSWORD", "hunter3")})
+		},
+	}
+
+	for name, op := range cases {
+		t.Run(name, func(t *testing.T) {
+			inPath := filepath.Join("testdata", name+".in.yaml")
+			outPath := filepath.Join("testdata", name+".out.yaml")
+
+			in, inErr := os.ReadFile(inPath)
+			if inErr != nil && !os.IsNotExist(inErr) {
+				t.Fatal(inErr)
+			}
+			path := editTestPath(t, in)
+
+			e, err := LoadEnvEditor(path)
+			if err != nil {
+				t.Fatalf("LoadEnvEditor: %v", err)
+			}
+			if err := op(e); err != nil {
+				t.Fatalf("op: %v", err)
+			}
+			if err := e.Save(""); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if os.Getenv("WRITE_GOLDEN") != "" {
+				if err := os.WriteFile(outPath, got, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			want, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("missing golden %s: %v", outPath, err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("golden mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestEnvFileEditorRefusals covers the cases where the editor must fail
+// without changing the file: YAML anchors in Replace mode and a multi-doc file.
+func TestEnvFileEditorRefusals(t *testing.T) {
+	t.Run("anchors refused in replace mode", func(t *testing.T) {
+		path := editTestPath(t, []byte(`connections:
+  BASE: &base
+    type: postgres
+    host: base.example.com
+  PG_COPY:
+    <<: *base
+    port: 5433
+`))
+		before, _ := os.ReadFile(path)
+		e, err := LoadEnvEditor(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Set("PG_COPY", g.M("type", "postgres", "port", 5434), EditOptions{Replace: true, AllowOverwrite: true}); err == nil {
+			t.Fatal("expected an anchor error")
+		} else if !strings.Contains(err.Error(), "anchors") {
+			t.Errorf("error should mention anchors: %v", err)
+		}
+		after, _ := os.ReadFile(path)
+		if string(before) != string(after) {
+			t.Errorf("the file changed on a refused edit\n--- before ---\n%s\n--- after ---\n%s", before, after)
+		}
+
+		// merge mode keeps today's behavior: the entry is merged in place
+		if err := e.Set("PG_COPY", g.M("port", 5434), EditOptions{AllowOverwrite: true}); err != nil {
+			t.Fatalf("merge set: %v", err)
+		}
+	})
+
+	t.Run("multi-document refused", func(t *testing.T) {
+		path := editTestPath(t, []byte("connections:\n  A:\n    type: postgres\n---\nenv:\n  K: v\n"))
+		if _, err := LoadEnvEditor(path); err == nil {
+			t.Fatal("expected a multi-document error")
+		}
+	})
+}
+
+// TestEnvFileEditorSave covers the sha guard and the atomic write of Save.
+func TestEnvFileEditorSave(t *testing.T) {
+	body := "connections:\n  A:\n    type: postgres\n    host: a\n"
+
+	t.Run("sha mismatch keeps the file", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		e, _ := LoadEnvEditor(path)
+		if err := e.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save("not-the-sha"); err == nil {
+			t.Fatal("expected ErrStaleEnvFile")
+		} else if err != ErrStaleEnvFile {
+			t.Errorf("got %v, want ErrStaleEnvFile", err)
+		}
+		after, _ := os.ReadFile(path)
+		if string(after) != body {
+			t.Errorf("a refused save changed the file:\n%s", after)
+		}
+		// saving against the loaded sha works
+		if err := e.Save(e.Sha()); err != nil {
+			t.Fatalf("Save(sha): %v", err)
+		}
+	})
+
+	t.Run("two editors: the second save fails", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		e1, _ := LoadEnvEditor(path)
+		e2, _ := LoadEnvEditor(path)
+		if err := e1.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e1.Save(e1.Sha()); err != nil {
+			t.Fatalf("first save: %v", err)
+		}
+		if err := e2.Set("C", g.M("type", "sqlite", "instance", "c.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e2.Save(e2.Sha()); err != ErrStaleEnvFile {
+			t.Errorf("second save: %v, want ErrStaleEnvFile", err)
+		}
+		// C must not be on disk: the stale save wrote nothing
+		final, _ := os.ReadFile(path)
+		if strings.Contains(string(final), "C:") {
+			t.Errorf("the stale save landed:\n%s", final)
+		}
+	})
+
+	t.Run("atomic save keeps the file mode", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e, _ := LoadEnvEditor(path)
+		if err := e.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save(""); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+		}
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			names := []string{}
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			t.Errorf("temp files left behind: %v", names)
+		}
+	})
+
+	t.Run("save to a missing file creates it", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "sub", "env.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		e, err := LoadEnvEditor(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Set("FIRST", g.M("type", "duckdb", "instance", "a.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save(""); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "type: duckdb") {
+			t.Errorf("the created file is not a valid env file:\n%s", got)
+		}
+	})
+}
+
+// TestEnvFileEditorGet covers Names and the raw Get of the editor: refs stay
+// refs, a URL entry reports its url, and the location carries the line.
+func TestEnvFileEditorGet(t *testing.T) {
+	path := editTestPath(t, []byte(`# head
+connections:
+  # the production warehouse
+  PG_PROD:
+    type: postgres
+    host: db.example.com
+    password: ${PG_PROD_PASSWORD}
+  PG_URL: postgres://u:p@h:5432/d
+`))
+	e, err := LoadEnvEditor(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := e.Names()
+	if len(names) != 2 || names[0] != "PG_PROD" || names[1] != "PG_URL" {
+		t.Errorf("Names() = %v", names)
+	}
+
+	props, loc, found := e.Get("pg_prod") // case-insensitive
+	if !found {
+		t.Fatal("PG_PROD not found")
+	}
+	if props["password"] != "${PG_PROD_PASSWORD}" {
+		t.Errorf("password = %v, want the raw ref", props["password"])
+	}
+	if loc.Line != 4 {
+		t.Errorf("line = %d, want 4", loc.Line)
+	}
+	if len(loc.Missing) != 1 || loc.Missing[0].Var != "PG_PROD_PASSWORD" {
+		t.Errorf("missing = %+v", loc.Missing)
+	}
+
+	props, loc, found = e.Get("PG_URL")
+	if !found {
+		t.Fatal("PG_URL not found")
+	}
+	if props["url"] != "postgres://u:p@h:5432/d" {
+		t.Errorf("url props = %v", props)
+	}
+	if _, _, notFound := e.Get("NOPE"); notFound {
+		t.Error("NOPE should not be found")
+	}
+	_ = loc
 }
 
 func TestWriteRefusesInvalidEnvFile(t *testing.T) {

@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v3"
@@ -228,6 +230,31 @@ func isLiteralSecret(v any) bool {
 	return !env.IsEnvVarRef(s)
 }
 
+// ValidateConnProps checks that props can be written as a connection entry:
+// a `url` parses (and implies the type when absent), or a valid `type` is
+// present. SetValidated applies it before the write; the GUI save path, which
+// writes through its own env editor, calls it directly.
+func ValidateConnProps(name string, props map[string]any) error {
+	// parse url
+	if url := cast.ToString(props["url"]); url != "" {
+		conn, uErr := NewConnectionFromURL(name, url)
+		if uErr != nil {
+			return g.Error(uErr, "could not parse url")
+		}
+		if _, ok := props["type"]; !ok {
+			props["type"] = conn.Type.String()
+		}
+	}
+
+	t, found := props["type"]
+	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
+		return g.Error("invalid type (%s)", cast.ToString(t))
+	} else if !found {
+		return g.Error("need to specify valid `type` key or provide `url`")
+	}
+	return nil
+}
+
 // UnsetEnvRef is a ${VAR} value that g.Rmd did not substitute (var not set).
 type UnsetEnvRef struct {
 	Key string
@@ -388,5 +415,70 @@ func asAnyMap(v any) map[string]any {
 		return out
 	default:
 		return nil
+	}
+}
+
+// The canonical key order of new connection entries written to env.yaml:
+// `type` first, then the property order of core/dbio/templates/_properties.yaml
+// for the entry's type, then the remaining keys (alphabetically, applied by the
+// env package when this registration is absent). The hook lives in core/env,
+// which cannot import core/dbio; registering it here means every binary that
+// reads connections (the CLI, the platform agent, the workbench) writes new
+// entries in the order the templates define.
+func init() {
+	env.TemplateKeyOrder = templateKeyOrder
+}
+
+var (
+	templateOrderOnce sync.Once
+	templateOrder     map[string][]string
+)
+
+// templateKeyOrder returns the template property order of props["type"], or
+// nil when the type is unknown.
+func templateKeyOrder(props map[string]any) []string {
+	connType := strings.ToLower(cast.ToString(props["type"]))
+	if connType == "" {
+		return nil
+	}
+	templateOrderOnce.Do(loadTemplateOrder)
+	return templateOrder[connType]
+}
+
+// loadTemplateOrder reads the property order of every type in
+// _properties.yaml once. Order matters: the file is parsed as a node tree,
+// because a map parse would lose it.
+func loadTemplateOrder() {
+	templateOrder = map[string][]string{}
+	body, err := dbio.ReadTemplateFile("_properties.yaml")
+	if err != nil {
+		return
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(body, &root); err != nil {
+		return
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return
+	}
+	types := root.Content[0]
+	for i := 0; i < len(types.Content)-1; i += 2 {
+		name := strings.ToLower(types.Content[i].Value)
+		typeNode := types.Content[i+1]
+		if typeNode.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j < len(typeNode.Content)-1; j += 2 {
+			if typeNode.Content[j].Value != "properties" || typeNode.Content[j+1].Kind != yaml.MappingNode {
+				continue
+			}
+			props := typeNode.Content[j+1]
+			order := make([]string, 0, len(props.Content)/2)
+			for k := 0; k < len(props.Content)-1; k += 2 {
+				order = append(order, props.Content[k].Value)
+			}
+			templateOrder[name] = order
+			break
+		}
 	}
 }

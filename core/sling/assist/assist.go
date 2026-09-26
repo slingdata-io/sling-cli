@@ -195,23 +195,25 @@ func castToStringMap(v any) (map[string]any, error) {
 	}
 }
 
-// SaveProfile writes env.SLING_ASSIST via EnvFile (preserves other keys/comments).
+// SaveProfile writes env.SLING_ASSIST through env.EnvFileEditor: only the
+// lines of that key change.
 func SaveProfile(p Profile) error {
 	path := envFilePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return g.Error(err, "could not create %s", filepath.Dir(path))
 	}
-	ef := env.LoadEnvFile(path)
-	ef.Path = path
 	m, err := profileToMap(p)
 	if err != nil {
 		return err
 	}
-	if ef.Env == nil {
-		ef.Env = map[string]any{}
+	e, err := env.LoadEnvEditor(path)
+	if err != nil {
+		return err
 	}
-	ef.Env[assistEnvKey] = m
-	return ef.WriteEnvFile()
+	if err = e.SetEnv(map[string]any{assistEnvKey: m}, true); err != nil {
+		return err
+	}
+	return e.Save("")
 }
 
 func profileToMap(p Profile) (map[string]any, error) {

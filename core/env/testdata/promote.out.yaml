@@ -1,0 +1,11 @@
+connections:
+  # existing connection
+  PG:
+    type: postgres
+    host: db.example.com
+  PG_NEW:
+    type: postgres
+    host: h
+    password: ${PG_NEW_PASSWORD} # replace with the value, or set the env var (CI)
+env:
+  PG_NEW_PASSWORD: hunter3

@@ -1,0 +1,14 @@
+# header
+connections:
+
+  # the entry
+  A:
+    type: postgres
+    host: a.example.com
+  B:
+    type: duckdb
+    instance: b.db
+
+env:
+  K: v
+  NEW_K: w

@@ -1,0 +1,7 @@
+connections:
+  A:
+    type: postgres
+    host: a
+  B:
+    type: duckdb
+    instance: b.db

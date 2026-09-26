@@ -1,0 +1,14 @@
+connections:
+    PG:
+        type: postgres
+        host: a     # aligned
+        tags:
+        - x
+        - y
+    NEW:
+        type: sqlite
+        instance: a.db
+        tags:
+            - z
+env:
+    K: v
