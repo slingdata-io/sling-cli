@@ -136,7 +136,7 @@ var (
 	localConns        ConnEntries
 	localConnsTs      time.Time
 	localConnsExclude string
-	invalidEnvWarned  sync.Map // env file paths already warned as invalid
+	envFileWarned     sync.Map // env file paths already warned as invalid or repaired
 )
 
 type LocalConnsExclude string
@@ -190,9 +190,13 @@ func GetLocalConns(options ...any) ConnEntries {
 
 	if envFilePath := env.GetEnvFilePath(env.HomeDir); g.PathExists(envFilePath) {
 		ef := env.LoadEnvFile(envFilePath)
-		if err := ef.CheckFile(); err != nil {
-			if _, warned := invalidEnvWarned.LoadOrStore(envFilePath, true); !warned {
+		if _, warned := envFileWarned.Load(envFilePath); !warned {
+			if err := ef.CheckFile(); err != nil {
+				envFileWarned.Store(envFilePath, true)
 				g.Warn("ignoring connections in env file: %s", g.ErrMsgSimple(err))
+			} else if ef.Repaired {
+				envFileWarned.Store(envFilePath, true)
+				g.Warn("%s has tab or non-breaking-space indentation. sling reads it as spaces. The next `sling conns set` saves the fix.", envFilePath)
 			}
 		}
 		m := g.M()

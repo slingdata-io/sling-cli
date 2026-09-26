@@ -953,3 +953,38 @@ func TestWriteRepairsEnvFile(t *testing.T) {
 	assert.Equal(t, "h", reloaded.Connections["KEEP"]["host"])
 	assert.Equal(t, "n", reloaded.Connections["NEW"]["host"])
 }
+
+// TestRepairKeepsValues breaks MSSQL with NBSP indentation, so a repair runs
+// over the whole file, and checks that the OTHER password is never changed.
+func TestRepairKeepsValues(t *testing.T) {
+	const nb = " "
+	broken := "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type: sqlserver\n"
+	cases := []struct {
+		name, other, password string
+		repaired              bool
+	}{
+		{"quoted colon nbsp", "    password: 'ab:" + nb + "cd'\n", "ab:" + nb + "cd", true},
+		{"plain colon nbsp", "    password: ab:" + nb + "cd\n", "ab:" + nb + "cd", true},
+		{"leading nbsp in value", "    password: \"" + nb + "abc\"\n", nb + "abc", true},
+		{"tab in block scalar", "    password: |\n      line1\n      \tline2\n", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := broken + "  OTHER:\n    type: postgres\n" + c.other
+			ef, err := loadEnvFile(body, "")
+			assert.Equal(t, c.repaired, ef.Repaired)
+			if !c.repaired {
+				assert.Error(t, err)
+				assert.Equal(t, body, string(repairEnvYAML([]byte(body))))
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, "sqlserver", ef.Connections["MSSQL"]["type"])
+			assert.Equal(t, c.password, ef.Connections["OTHER"]["password"])
+		})
+	}
+
+	ef, err := loadEnvFile("connections:\n  PG:\n    password: 'a"+nb+"b'\n", "")
+	assert.NoError(t, err)
+	assert.False(t, ef.Repaired)
+}

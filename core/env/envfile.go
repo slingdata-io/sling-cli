@@ -33,6 +33,7 @@ type EnvFile struct {
 	Workbench   *WorkbenchConfig          `json:"workbench,omitempty" yaml:"workbench,omitempty"`
 
 	Path       string `json:"-" yaml:"-"`
+	Repaired   bool   `json:"-" yaml:"-"` // indentation was repaired on read
 	TopComment string `json:"-" yaml:"-"`
 	Body       string `json:"-" yaml:"-"`
 }
@@ -284,7 +285,9 @@ func LoadEnvFile(path string) (ef EnvFile) {
 // when a path is provided), and exports scalar entries from `env:` into
 // os.Environ. `path` is recorded on the returned EnvFile when non-empty.
 func loadEnvFile(body, path string) (ef EnvFile, err error) {
-	body = string(repairEnvYAML([]byte(body)))
+	repaired := string(repairEnvYAML([]byte(body)))
+	ef.Repaired = repaired != body
+	body = repaired
 	ef.Body = body
 	ef.Path = path
 
@@ -549,22 +552,52 @@ func checkEnvYAML(b []byte) error {
 
 // repairEnvYAML turns tab and non-breaking-space indentation into spaces when
 // b does not pass checkEnvYAML and the repaired body does. Tab widths 2, 4 and
-// 8 are tried in order. Otherwise b is returned unchanged.
+// 8 are tried in order. A repair that changes a value is refused. Otherwise b
+// is returned unchanged.
 func repairEnvYAML(b []byte) []byte {
 	if !bytes.ContainsAny(b, "\t"+oddSpaces) || checkEnvYAML(b) == nil {
 		return b
 	}
 	for _, width := range []int{2, 4, 8} {
-		if fixed := respaceIndent(b, width); checkEnvYAML(fixed) == nil {
+		if fixed := respaceIndent(b, width); checkEnvYAML(fixed) == nil && valuesKept(b, fixed) {
 			return fixed
 		}
 	}
 	return b
 }
 
+// valuesKept is true when each line of each scalar in fixed is also in orig,
+// so a repair only moved indentation. Escaped or folded scalars fail it.
+func valuesKept(orig, fixed []byte) bool {
+	var root yaml.Node
+	if err := yaml.Unmarshal(fixed, &root); err != nil {
+		return false
+	}
+	var walk func(n *yaml.Node) bool
+	walk = func(n *yaml.Node) bool {
+		if n.Kind == yaml.ScalarNode {
+			for _, line := range strings.Split(n.Value, "\n") {
+				if line != "" && !bytes.Contains(orig, []byte(line)) {
+					return false
+				}
+			}
+		}
+		for _, c := range n.Content {
+			if !walk(c) {
+				return false
+			}
+		}
+		return true
+	}
+	return walk(&root)
+}
+
+// keyOddSpaceRe matches a plain key colon followed by an odd space.
+var keyOddSpaceRe = regexp.MustCompile(`^((?:- )?[A-Za-z0-9_.-]+:)[\x{00a0}\x{2007}\x{202f}]`)
+
 // respaceIndent rewrites the leading whitespace of each line as spaces, with
-// tabs expanded to tabWidth stops. An odd space after a key colon becomes a
-// space.
+// tabs expanded to tabWidth stops. An odd space after a plain key colon
+// becomes a space.
 func respaceIndent(b []byte, tabWidth int) []byte {
 	var sb strings.Builder
 	for _, line := range strings.SplitAfter(string(b), "\n") {
@@ -582,10 +615,7 @@ func respaceIndent(b []byte, tabWidth int) []byte {
 			}
 			i += size
 		}
-		rest := line[i:]
-		for _, r := range oddSpaces {
-			rest = strings.ReplaceAll(rest, ":"+string(r), ": ")
-		}
+		rest := keyOddSpaceRe.ReplaceAllString(line[i:], "$1 ")
 		sb.WriteString(strings.Repeat(" ", col))
 		sb.WriteString(rest)
 	}
