@@ -17,7 +17,7 @@ func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		return conn.importViaTempCSVs(tableFName, df)
 	}
 
-	format, err := conn.duck.ImportFormat()
+	format, err := conn.duck.SessionFormat()
 	if err != nil {
 		return 0, err
 	}

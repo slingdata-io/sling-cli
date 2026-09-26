@@ -1582,7 +1582,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	duckSc.TargetType = sc.TargetType
 	duckSc.BinaryAsHex = sc.BinaryAsHex
 
-	if duckSc.Format, err = duck.ImportFormat(); err != nil {
+	if duckSc.Format, err = duck.SessionFormat(); err != nil {
 		return bw, err
 	}
 
@@ -1624,6 +1624,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			FileSizeBytes: sc.FileMaxBytes,
 			GeometryCRS:   fs.GetProp("geometry_crs"),
 			Columns:       streamPart.Columns,
+			HexBinary:     duckSc.Format == dbio.FileTypeCsv,
 		}
 
 		// if * is specified, set default FileSizeBytes,

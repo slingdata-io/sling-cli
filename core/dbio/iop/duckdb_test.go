@@ -191,21 +191,18 @@ func TestDuckDbNoDeadlock(t *testing.T) {
 	})
 
 	t.Run("oversized line does not hang", func(t *testing.T) {
-		// a ~200KB line exceeds the scan buffer, so the stdout scanner stops on
+		// a ~200KB line exceeds the scan buffer. The stdout scanner stops on
 		// bufio.ErrTooLong; the watcher must detect it and unblock the reader.
-		// Arrow mode does not use the line scanner, so use csv. On Windows, the
-		// csv output goes to a file, not through the scanner.
+		// A SELECT does not use the scanner, a describe does.
 		duck := NewDuckDb(context.Background(), "max_buffer_size=1024", "copy_format=csv")
 
 		runWithDeadline(t, 30*time.Second, func() {
 			data, err := duck.Query("select repeat('x', 200000) as big")
-			if runtime.GOOS == "windows" {
-				if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
-					assert.Len(t, cast.ToString(data.Rows[0][0]), 200000)
-				}
-			} else {
-				assert.Error(t, err)
+			if assert.NoError(t, err) && assert.Len(t, data.Rows, 1) {
+				assert.Len(t, cast.ToString(data.Rows[0][0]), 200000)
 			}
+			_, err = duck.Query("pragma version; select repeat('x', 200000) as big")
+			assert.Error(t, err)
 		})
 
 		// new connection with normal buffer must work fine (sanity)
@@ -319,48 +316,23 @@ func TestDuckDbKillChildProcs(t *testing.T) {
 }
 
 func TestDuckDbStreamArrow(t *testing.T) {
-	t.Run("StreamArrow basic query", func(t *testing.T) {
-		duck := NewDuckDb(context.Background())
-
-		// Ensure arrow extension is added and connection is open
-		duck.AddExtension("arrow from community")
-		err := duck.Open()
-		if !assert.NoError(t, err) {
-			return
-		}
+	t.Run("arrow read keeps session state", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "copy_format=arrow")
 		defer duck.Close()
 
-		// Use inline VALUES — the Arrow process is separate and has no access to in-memory tables
-		sql := "SELECT * FROM (VALUES (1, 'Alice', 10.5, true), (2, 'Bob', 20.7, false), (3, 'Charlie', 30.9, true)) AS t(id, name, value, flag) ORDER BY id"
+		dbPath := filepath.Join(t.TempDir(), "attached.duckdb")
+		_, err := duck.ExecMultiContext(context.Background(),
+			"create temp table tmp_state as select 1 as id",
+			g.F("attach '%s' as att", dbPath),
+			"create table att.t as select 2 as id",
+		)
+		require.NoError(t, err)
 
-		reader, cleanup, _, err := duck.StreamArrow(context.Background(), sql)
-		if !assert.NoError(t, err) {
-			return
-		}
-		defer cleanup()
-
-		// Consume the Arrow stream into a Datastream
-		ds := NewDatastreamContext(context.Background(), nil)
-		err = ds.ConsumeArrowReaderStream(reader)
-		if !assert.NoError(t, err) {
-			return
-		}
-
-		data, err := ds.Collect(0)
-		if !assert.NoError(t, err) {
-			return
-		}
-
-		records := data.Records()
-		if !assert.Equal(t, 3, len(records)) {
-			return
-		}
-
-		// Verify data (Arrow may return different Go types depending on DuckDB inference)
-		assert.EqualValues(t, 1, records[0]["id"])
-		assert.Equal(t, "Alice", records[0]["name"])
-		assert.EqualValues(t, 3, records[2]["id"])
-		assert.Equal(t, "Charlie", records[2]["name"])
+		data, err := duck.Query("select a.id, b.id as id2 from tmp_state a, att.t b")
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+		assert.EqualValues(t, 1, data.Rows[0][0])
+		assert.EqualValues(t, 2, data.Rows[0][1])
 	})
 
 	t.Run("StreamContext with copy_format arrow", func(t *testing.T) {
@@ -393,53 +365,6 @@ func TestDuckDbStreamArrow(t *testing.T) {
 		assert.EqualValues(t, 35, records[2]["age"])
 
 		ds.Close()
-	})
-
-	t.Run("StreamArrow with file-based instance", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		instancePath := tmpDir + "/test_arrow.duckdb"
-
-		// Create and populate a file-based database, then close to release lock
-		setupDuck := NewDuckDb(context.Background(), "instance="+instancePath)
-		_, err := setupDuck.ExecMultiContext(
-			context.Background(),
-			"CREATE TABLE arrow_file_test (id INT, name VARCHAR, amount DECIMAL(10,2))",
-			"INSERT INTO arrow_file_test VALUES (1, 'Alice', 100.50),(2, 'Bob', 200.75),(3, 'Charlie', 300.25)",
-		)
-		if !assert.NoError(t, err) {
-			return
-		}
-		setupDuck.Close()
-		time.Sleep(200 * time.Millisecond) // ensure lock is fully released
-
-		// StreamArrow on the file-based instance (no interactive process needed)
-		duck := NewDuckDb(context.Background(), "instance="+instancePath)
-		duck.AddExtension("arrow from community")
-
-		reader, cleanup, _, err := duck.StreamArrow(context.Background(), "SELECT * FROM arrow_file_test ORDER BY id")
-		if !assert.NoError(t, err) {
-			return
-		}
-		defer cleanup()
-
-		ds := NewDatastreamContext(context.Background(), nil)
-		err = ds.ConsumeArrowReaderStream(reader)
-		if !assert.NoError(t, err) {
-			return
-		}
-
-		data, err := ds.Collect(0)
-		if !assert.NoError(t, err) {
-			return
-		}
-
-		records := data.Records()
-		if !assert.Equal(t, 3, len(records)) {
-			return
-		}
-
-		assert.EqualValues(t, 1, records[0]["id"])
-		assert.Equal(t, "Alice", records[0]["name"])
 	})
 }
 
@@ -1204,23 +1129,22 @@ func TestDuckDbArrowSQL(t *testing.T) {
 		{Name: "l", DbType: "ENUM('a', 'b')[]"},
 		{Name: "s", DbType: "STRUCT(x INTEGER)"},
 	}
-	sql, ok := duckArrowSQL("select * from t;", cols)
-	assert.True(t, ok)
-	assert.Equal(t, "SELECT * REPLACE ("+
-		`CAST("e" AS VARCHAR) AS "e", `+
-		`CAST("u" AS DECIMAL(20,0)) AS "u", `+
-		`CAST("we""ird" AS VARCHAR) AS "we""ird", `+
-		`to_json("l")::VARCHAR AS "l"`+
-		") FROM (\nselect * from t\n)", sql)
+	names := []string{"id", "e", "u", "we_ird", "l", "s"}
+	sql := duckArrowSQL("select * from t;", cols, names)
+	assert.Equal(t, "SELECT #1 AS \"id\", "+
+		`CAST(#2 AS VARCHAR) AS "e", `+
+		`CAST(#3 AS DECIMAL(20,0)) AS "u", `+
+		`CAST(#4 AS VARCHAR) AS "we_ird", `+
+		`to_json(#5)::VARCHAR AS "l", `+
+		`#6 AS "s"`+
+		" FROM (\nselect * from t\n)", sql)
 
-	// no cast: the query stays as it is
-	sql, ok = duckArrowSQL("select 1 as id", cols[:1])
-	assert.True(t, ok)
-	assert.Equal(t, "select 1 as id", sql)
+	// no change: the query stays as it is
+	assert.Equal(t, "select 1 as id", duckArrowSQL("select 1 as id", cols[:1], names[:1]))
 
-	// a cast of a repeated name is ambiguous
-	_, ok = duckArrowSQL("select * from t", Columns{{Name: "E", DbType: "INTEGER"}, {Name: "e", DbType: "BIT"}})
-	assert.False(t, ok)
+	// a new name only
+	assert.Equal(t, "SELECT #1 AS \"count_star\" FROM (\nselect count(*)\n)",
+		duckArrowSQL("select count(*)", Columns{{Name: "count_star()", DbType: "BIGINT"}}, []string{"count_star"}))
 
 	assert.Equal(t, "COPY (\nselect 1 -- c\n) TO '/dev/stdout' (FORMAT ARROWS)",
 		duckCopySQL(" select 1 -- c\n", "/dev/stdout", "FORMAT ARROWS"))
@@ -1324,18 +1248,34 @@ func TestDuckDbCopyFormat(t *testing.T) {
 
 	t.Run("csv import format", func(t *testing.T) {
 		duck := NewDuckDb(context.Background(), "copy_format=csv")
-		format, err := duck.ImportFormat()
+		format, err := duck.SessionFormat()
 		require.NoError(t, err)
 		assert.Equal(t, dbio.FileTypeCsv, format)
 	})
+}
 
-	t.Run("default read uses csv after arrow fails", func(t *testing.T) {
-		duck := NewDuckDb(context.Background())
-		defer duck.Close()
-		duck.arrowReadFail.Store(true)
-		data, err := duck.Query("select 42 as n")
+// Parallel threads write the ARROWS batches of a multi-file scan. The stream
+// must stay valid (case: test 67).
+func TestDuckDbStreamParallelScan(t *testing.T) {
+	dir := t.TempDir()
+	setup := NewDuckDb(context.Background())
+	for i := 0; i < 8; i++ {
+		_, err := setup.Exec(g.F("copy (select i as id, 'name_' || i || repeat('x', i %% 50) as name from range(%d, %d) t(i)) to '%s' (format parquet)",
+			i*20000, (i+1)*20000, filepath.ToSlash(filepath.Join(dir, g.F("f%d.parquet", i)))))
 		require.NoError(t, err)
-		require.Len(t, data.Rows, 1)
-		assert.EqualValues(t, 42, data.Rows[0][0])
+	}
+	setup.Close()
+
+	duckStreamModes(t, func(t *testing.T, formatProp string) {
+		duck := NewDuckDb(context.Background(), formatProp)
+		defer duck.Close()
+		_, err := duck.Exec("set preserve_insertion_order = false")
+		require.NoError(t, err)
+
+		ds, err := duck.Stream(g.F("select * from read_parquet('%s/*.parquet')", filepath.ToSlash(dir)))
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, 160000)
 	})
 }

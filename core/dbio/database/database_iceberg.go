@@ -1395,11 +1395,17 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			rec.Release()
 		}
 
-		// Create a new transaction for this batch
-		tx := tbl.NewTransaction()
-
-		// Append the Arrow table to the Iceberg table
-		err = tx.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(fileMaxRows), snapshotProps)
+		// iceberg-go v0.6.0 cancels the writer context before the last data file
+		// uploads, so a slow upload can fail with "context canceled". Retry then.
+		var tx *table.Transaction
+		for attempt := 1; attempt <= 3; attempt++ {
+			tx = tbl.NewTransaction()
+			err = tx.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(fileMaxRows), snapshotProps)
+			if err == nil || conn.Context().Ctx.Err() != nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
+				break
+			}
+			g.Debug("iceberg append attempt %d failed with canceled upload, retrying", attempt)
+		}
 		if err != nil {
 			return count, g.Error(err, "Failed to append data to Iceberg table %s", tableFName)
 		}

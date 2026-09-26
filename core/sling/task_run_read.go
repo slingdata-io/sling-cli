@@ -525,22 +525,24 @@ var (
 	setArrowLaneHook = func(t *TaskExecution, src arrowLaneSource, tgtConn database.Connection) error {
 		src.conn.SetProp("arrow_lane", "")
 		src.conn.SetArrowLane(nil, nil)
-		return arrowLaneStubErr()
+		return arrowLaneStub(src.stream)
 	}
 	readArrowFileDataflowHook = func(t *TaskExecution, fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (*iop.Dataflow, error) {
 		if t.Config.SrcConn.Type.Kind() != dbio.KindFile {
 			return nil, nil
 		}
-		return nil, arrowLaneStubErr()
+		return nil, arrowLaneStub(uri)
 	}
 )
 
-// arrowLaneStubErr fails a run with SLING_ARROW_LANE=force, since the open
-// build has no lane.
-func arrowLaneStubErr() error {
+// arrowLaneStub declines the lane, since the open build has none. It fails a
+// run with SLING_ARROW_LANE=force.
+func arrowLaneStub(stream string) error {
+	reason := "the arrow lane requires the official release of sling-cli"
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
-		return g.Error("arrow lane requires the official release of sling-cli")
+		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, reason)
 	}
+	g.Debug("arrow lane: not used for stream %q. Reason: %s", stream, reason)
 	return nil
 }
 

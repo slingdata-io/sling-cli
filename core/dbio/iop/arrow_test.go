@@ -3,6 +3,7 @@ package iop
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -497,4 +499,16 @@ func TestArrowWriterKeepsColumns(t *testing.T) {
 	dt, ok := aw.arrowSchema.Field(0).Type.(*arrow.Decimal128Type)
 	require.True(t, ok)
 	assert.GreaterOrEqual(t, int(dt.Scale), 2)
+}
+
+func TestArrowWriterTimeColumn(t *testing.T) {
+	columns := Columns{{Name: "t", Type: TimeType}}
+	for _, newWriter := range []func(io.Writer, Columns, ...ipc.Option) (*ArrowWriter, error){NewArrowWriter, NewArrowStreamWriter} {
+		var buf bytes.Buffer
+		aw, err := newWriter(&buf, columns)
+		require.NoError(t, err)
+		require.NoError(t, aw.WriteRow([]any{"08:30:00"}))
+		require.NoError(t, aw.WriteRow([]any{nil}))
+		require.NoError(t, aw.Close())
+	}
 }

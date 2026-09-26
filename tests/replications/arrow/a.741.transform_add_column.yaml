@@ -23,7 +23,7 @@ streams:
   '{SCHEMA}.arrow_src':
     object: 'file:///tmp/arrow_lane_741.parquet'
     transforms:
-      new_col: ['1']
+      - new_col: '1'
 
 env:
   SOURCE: ${SOURCE}

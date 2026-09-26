@@ -618,14 +618,19 @@
 
 - id: 80
   name: Prometheus buffer fix test
-  run: sling run -d -r tests/replications/r.25.prometheus_buffer.yaml
+  group: duckdb
+  run: |
+    sling run -d -r tests/replications/r.25.prometheus_buffer.yaml
+    sling conns exec duckdb "select name || '=' || type as col_type from parquet_schema('/tmp/output/prometheus_test.parquet/*.parquet') where name in ('timestamp', 'value')"
   streams: 1
   min_rows: 1
   output_contains:
     - 'using range'
     - "changing column type via transform for 'timestamp': bigint => string"
     - "changing column type via transform for 'value': decimal => string"
-    - "'timestamp':'text', 'value':'text'" # the timestamp & value columns were successfully casted to string
+    # the timestamp & value columns were successfully casted to string
+    - 'timestamp=BYTE_ARRAY'
+    - 'value=BYTE_ARRAY'
 
 - id: 81
   name: Prometheus issue 551 (https://github.com/slingdata-io/sling-cli/issues/551)
@@ -677,6 +682,7 @@
 
 - id: 86
   name: MSSQL to parquet overwrite fix (https://github.com/slingdata-io/sling-cli/issues/588)
+  group: duckdb
   run: sling run -r tests/replications/r.29.mssql_parquet_overwrite.yaml
   output_contains:
     - 'execution succeeded'
@@ -746,6 +752,7 @@
 
 - id: 93
   name: Test transform functions
+  group: duckdb
   run: sling run -d -r tests/replications/r.35.transform_functions_test.yaml
   output_contains:
     - 'Transform Functions Test Results'
@@ -802,6 +809,7 @@
 
 - id: 100
   name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
+  group: duckdb
   run: |
     sling run -d -r tests/replications/r.42.mssql_exclude_column_issue607.yaml
   output_contains:
@@ -1402,6 +1410,7 @@
 
 - id: 156
   name: Test mixed-case record key references in transforms (MySQL to local parquet)
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.86.record_key_casing.yaml'
   streams: 1
   rows: 3
@@ -1468,6 +1477,7 @@
 
 - id: 160
   name: 'Test definition-only mode creates parquet file without data'
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.90.definition_only_file.yaml'
   streams: 1
   rows: 0
@@ -1809,7 +1819,7 @@
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
   run: 'sling run -d tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
-  group: duckdb
+  group: duckdb,schema_migration
   output_contains:
     - 'PK constraints found'
     - 'execution succeeded'
@@ -1891,7 +1901,7 @@
   name: 'Schema migration DuckDB indexes fix'
   run: 'sling run -d tests/pipelines/schema_migration/p.28.sm_duckdb_fk_indexes_fix.yaml'
   streams: 1
-  group: schema_migration
+  group: schema_migration,duckdb
   output_contains:
     - 'PK constraints found'
     - 'Indexes found'
@@ -1985,6 +1995,7 @@
 
 - id: 205
   name: CDC merge_cdc strategy - SQLite target
+  group: sqlite
   run: 'sling run -d -p tests/pipelines/cdc/p.39.cdc_merge_sqlite.yaml'
   output_contains:
     - 'CDC merge_cdc SQLite test PASSED'
@@ -2279,7 +2290,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'Target geom column data_type=USER-DEFINED, udt_name=geometry'
     - 'Target row count: 6'
@@ -2384,6 +2395,7 @@
 # description landed correctly (each engine asserts only what it natively emits).
 - id: 246
   name: 'Test column DDL per-engine (master pipeline)'
+  group: duckdb,sqlite
   run: 'sling run -p tests/pipelines/column_ddl/p.columns_ddl.00.master.yaml'
   output_contains:
     - 'SUCCESS: postgres column DDL verified'
@@ -2624,6 +2636,7 @@
 # Requires the ADBC drivers for each database (sling installs them via dbc)
 - id: 316
   name: 'SLING_USE_ADBC routes supported databases through ADBC'
+  group: duckdb
   run: 'sling run -d -p tests/pipelines/p.48.adbc_use_adbc_env.yaml'
   env:
     SLING_USE_ADBC: 'true'
@@ -2636,6 +2649,7 @@
 # issue #787: rows larger than duckdb's 2MB read_csv max_line_size failed the stream
 - id: 317
   name: 'rows larger than the duckdb 2MB max_line_size replicate intact (text + json)'
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.101.duckdb_max_line_size.yaml'
   output_contains:
     - 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'
@@ -2696,6 +2710,7 @@
 # replication path when a pro feature needs it.
 - id: 322
   name: 'ad-hoc CLI flags trigger chunking'
+  group: duckdb
   run: |
     sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
     sling conns exec POSTGRES --limit 0 "create table public.cli_chunk_test as select g as id, 'v'||g as val from generate_series(1,1000) g"
@@ -2721,6 +2736,7 @@
 
 - id: 324
   name: 'pipeline query state.result + process env fallback'
+  group: duckdb
   env:
     EVAL_ENV_PROBE: eval-ok
   run: sling run -p tests/pipelines/p.50.query_state_and_env.yaml
@@ -2777,7 +2793,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'Parquet geom column type=GEOMETRY, with geometry_crs type=GEOMETRY'
     - 'WKB matches expected plain WKB (no SRID flag)'
@@ -2806,7 +2822,7 @@
 - id: 591
   name: 'BigQuery geography exports to Parquet as native geometry with CRS84 geo metadata (issue 794)'
   run: sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
-  group: geometry
+  group: geometry,duckdb
   output_contains:
     - 'BQ geography column type=GEOMETRY'
     - 'BQ WKB matches expected plain WKB (lon-lat)'
@@ -2821,7 +2837,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'duckdb table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
     - 'ducklake table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
@@ -2849,6 +2865,7 @@
 
 - id: 594
   name: 'DuckDB sql on file keeps its own last column when _sling_stream_url is on (issue 796)'
+  group: duckdb
   run: 'sling run -r tests/replications/r.100.duckdb_sql_stream_url_rename.yaml'
   rows: 5
 
@@ -3132,10 +3149,10 @@
 # rows are gone, so sling runs the task again with a new sidecar.
 - id: 622
   name: 'duckdb sidecar killed during parquet write recovers'
-  rows: 200000
+  rows: 1000000
   run: |
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 200000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""
@@ -3165,7 +3182,7 @@
   run: |
     set -m
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 200000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""
@@ -3245,6 +3262,7 @@
 # The second run soft-deletes the row that is missing in the source.
 - id: 628
   name: 'StarRocks delete_missing soft'
+  group: starrocks_dm
   run: |
     set -e
     sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01'),(2,'bob',20.00,'2024-01-02'),(3,'carol',30.25,'2024-01-03')"
@@ -3269,6 +3287,7 @@
 # "No partitions have data available for loading" (empty_load_as_error).
 - id: 629
   name: 'StarRocks incremental with no new rows'
+  group: starrocks_dm
   run: |
     set -e
     sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01')"

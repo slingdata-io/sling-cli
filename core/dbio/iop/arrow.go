@@ -496,6 +496,8 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 		return array.NewDate32Builder(a.mem)
 	case arrow.TIMESTAMP:
 		return array.NewTimestampBuilder(a.mem, dtype.(*arrow.TimestampType))
+	case arrow.TIME64:
+		return array.NewTime64Builder(a.mem, dtype.(*arrow.Time64Type))
 	case arrow.STRING:
 		return array.NewStringBuilder(a.mem)
 	case arrow.BINARY:
