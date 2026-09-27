@@ -92,7 +92,7 @@ require (
 	github.com/slingdata-io/godbc v0.0.9
 	github.com/slingdata-io/golyglot v1.0.20
 	github.com/slingdata-io/sling v0.0.0-00010101000000-000000000000
-	github.com/snowflakedb/gosnowflake v1.17.1
+	github.com/snowflakedb/gosnowflake v1.19.1
 	github.com/spf13/cast v1.7.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tidwall/gjson v1.18.0

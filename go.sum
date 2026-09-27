@@ -1026,6 +1026,8 @@ github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV
 github.com/slingdata-io/pocketbase v0.22.136/go.mod h1:RYAdoMZtW+3OIgKqg+YhgWGIiwjtcBHGxRcVF2+1klA=
 github.com/snowflakedb/gosnowflake v1.17.1 h1:sBYExPDRv6hHF7fCqeXMT745L326Byw/cROxvCiEJzo=
 github.com/snowflakedb/gosnowflake v1.17.1/go.mod h1:TaHvQGh9MA2lopZZMm1AvvENDfwcnKtuskIr1e6Fpic=
+github.com/snowflakedb/gosnowflake v1.19.1 h1:NZMErtdZMu6kooehbONNQmu/W5BPsaX8hYdlBBEHgxs=
+github.com/snowflakedb/gosnowflake v1.19.1/go.mod h1:9vGW6LYbUD1UqfjpuNN5a5vtha+u4n1AlsR1BqhHwPA=
 github.com/sourcegraph/annotate v0.0.0-20160123013949-f4cad6c6324d/go.mod h1:UdhH50NIW0fCiwBSr0co2m7BnFLdv4fQTgdqdJTHFeE=
 github.com/sourcegraph/syntaxhighlight v0.0.0-20170531221838-bd320f5d308e/go.mod h1:HuIsMU8RRBOtsCgI77wP899iHVBQpCmg4ErYMZB+2IA=
 github.com/spf13/cast v1.7.1 h1:cuNEagBQEHWN1FnbGEjCXL2szYEXqfJPbP2HNUaca9Y=
