@@ -1698,6 +1698,8 @@ func icebergColumnIsPK(col iop.Column) bool {
 // table. All timestamp fields get a zone because iopTypeToIcebergPrimitiveType
 // declares every timestamp column as iceberg `timestamptz`. A zone-less arrow
 // timestamp reads back as iceberg `timestamp`, which iceberg refuses to promote.
+// Other zones (e.g. from a DuckDB session) become UTC too: iceberg-go accepts only
+// UTC, and the stored epoch values do not change.
 func (conn *IcebergConn) icebergArrowSchema(columns iop.Columns) *arrow.Schema {
 	schema := iop.ColumnsToArrowSchema(columns)
 
@@ -1709,7 +1711,7 @@ func (conn *IcebergConn) icebergArrowSchema(columns iop.Columns) *arrow.Schema {
 			changed = true
 		}
 		tsType, ok := field.Type.(*arrow.TimestampType)
-		if !ok || tsType.TimeZone != "" {
+		if !ok || tsType.TimeZone == "UTC" {
 			continue
 		}
 		fields[i].Type = &arrow.TimestampType{Unit: tsType.Unit, TimeZone: "UTC"}

@@ -286,7 +286,7 @@ function:
   # Inherited from DuckDB
   sleep: select sqlite3_sleep({seconds}*1000)
   checksum_datetime: CAST((epoch({field}) || substr(strftime({field}, '%f'),4) ) as bigint)
-  checksum_decimal: 'abs(cast({field} as bigint))'
+  checksum_decimal: 'abs(cast(trunc({field}) as bigint))'
   checksum_boolean: 'length({field}::string)'
   cast_to_text: 'cast({field} as text)'
 

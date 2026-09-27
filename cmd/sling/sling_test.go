@@ -628,10 +628,12 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 	if taskCfg.Target.Options.MergeStrategy != nil {
 		strategy := *taskCfg.Target.Options.MergeStrategy
 		templatePath := g.F("core.merge_%s", strategy)
-		templateValue := connType.GetTemplateValue(templatePath)
+		// the real target type, since connType can be an alias (e.g. duckdb_csv)
+		tgtType := taskCfg.TgtConn.Type
+		templateValue := tgtType.GetTemplateValue(templatePath)
 		if templateValue == "" {
 			t.Skipf("skipping test: merge strategy '%s' not supported by %s (template %s is null)",
-				strategy, connType, templatePath)
+				strategy, tgtType, templatePath)
 			return
 		}
 	}
@@ -661,6 +663,9 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 	// process PostSQL for different drop_view syntax
 	if taskCfg.TgtConn.Type.IsDb() {
 		dbConn, err := taskCfg.TgtConn.AsDatabase()
+		if !g.AssertNoError(t, err) {
+			return
+		}
 		tgtType = dbConn.GetType()
 		if err == nil {
 			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
@@ -1243,9 +1248,11 @@ func TestSuiteDatabaseIceberg(t *testing.T) {
 // (`[table]_pg_vw`), and 22 drops `[table]_vw_pg`. The lance extension keeps
 // views in the session only (CREATE VIEW succeeds but the view is not written
 // into the namespace), so those five cannot pass for any LanceDB target.
+// 18 and 21 (delete_missing) are also excluded: Lance UPDATE and DELETE
+// reject subqueries.
 func TestSuiteDatabaseLanceDb(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbLanceDB, "1-9,12,14-18,20-21,23-29")
+	testSuite(t, dbio.TypeDbLanceDB, "1-9,12,14-17,20,23-29")
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {
@@ -1781,7 +1788,8 @@ func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbi
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, endpoints, err := conns.Discover(conn.name, &opt)
+	// not the package-level conns: tests can add connections later (e.g. DUCKDB_CSV)
+	files, schemata, endpoints, err := connection.GetLocalConns().Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}
