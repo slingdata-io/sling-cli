@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flarco/g"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -441,4 +443,866 @@ func TestMergeDeclaredEnv(t *testing.T) {
 	empty := MergeDeclaredEnv(nil)
 	assert.Equal(t, "from-process", empty["MERGE_DECLARED_PROBE"])
 	assert.NotContains(t, empty, "MERGE_DECLARED_ONLY")
+}
+
+func TestValidateKeyAndEnvKey(t *testing.T) {
+	for _, key := range []string{"MY_PG", "my-pg", "_PRIVATE", "PG1"} {
+		if err := ValidateKey(key); err != nil {
+			t.Errorf("ValidateKey(%q) unexpected error: %v", key, err)
+		}
+	}
+	for _, key := range []string{"", " MY_PG", "MY_PG ", "MY PG", "1PG", "MY.PG"} {
+		if err := ValidateKey(key); err == nil {
+			t.Errorf("ValidateKey(%q) expected error", key)
+		}
+	}
+
+	for _, key := range []string{"MY_PG_PASSWORD", "_X", "A1"} {
+		if err := ValidateEnvKey(key); err != nil {
+			t.Errorf("ValidateEnvKey(%q) unexpected error: %v", key, err)
+		}
+	}
+	for _, key := range []string{"", "my_var", "MY-VAR", "MY.VAR", "1VAR"} {
+		if err := ValidateEnvKey(key); err == nil {
+			t.Errorf("ValidateEnvKey(%q) expected error", key)
+		}
+	}
+}
+
+func TestSetConnectionNodePreservesRestOfFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `# Sling environment file — managed by you.
+
+connections:
+  # Production warehouse
+  PG_PROD:
+    type: postgres
+    host: db.example.com
+    user: app
+  PG_STAGE:
+    type: postgres
+    host: stage.db.example.com
+
+# Variables shared across runs
+env:
+  region: us-west-2
+
+# Custom block — must survive untouched.
+custom_section:
+  retain: yes
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	err := ef.SetConnectionNode("PG_PROD", map[string]any{
+		"type": "postgres",
+		"host": "new.db.example.com",
+		"user": "app",
+		"port": 5432,
+	}, map[string]any{"PG_PROD_TOKEN": "tok"})
+	if err != nil {
+		t.Fatalf("SetConnectionNode: %v", err)
+	}
+
+	out, _ := os.ReadFile(path)
+	got := string(out)
+
+	for _, sub := range []string{
+		"# Sling environment file — managed by you.",
+		"# Production warehouse",
+		"PG_STAGE:",
+		"stage.db.example.com",
+		"# Variables shared across runs",
+		"region: us-west-2",
+		"# Custom block — must survive untouched.",
+		"custom_section:",
+		"host: new.db.example.com",
+		"port: 5432",
+		"PG_PROD_TOKEN: tok",
+	} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("expected output to contain %q\n--- got ---\n%s", sub, got)
+		}
+	}
+	if strings.Contains(got, "host: db.example.com") {
+		t.Errorf("old host value survived\n--- got ---\n%s", got)
+	}
+
+	// every original line except the edited field must survive verbatim, in order
+	j := 0
+	outLines := strings.Split(got, "\n")
+	for _, line := range strings.Split(original, "\n") {
+		if strings.TrimSpace(line) == "" || strings.Contains(line, "host: db.example.com") {
+			continue
+		}
+		found := false
+		for ; j < len(outLines); j++ {
+			if outLines[j] == line {
+				found = true
+				j++
+				break
+			}
+		}
+		if !found {
+			t.Errorf("original line did not survive in order: %q\n--- got ---\n%s", line, got)
+		}
+	}
+
+	// a brand-new connection appends under connections:
+	if err := ef.SetConnectionNode("PG_NEW", map[string]any{"type": "postgres", "host": "n"}, nil); err != nil {
+		t.Fatalf("SetConnectionNode: %v", err)
+	}
+	out, _ = os.ReadFile(path)
+	got = string(out)
+	if !strings.Contains(got, "PG_NEW:") || !strings.Contains(got, "PG_STAGE:") {
+		t.Errorf("new connection missing or staging dropped\n--- got ---\n%s", got)
+	}
+	// the unmanaged block must be after connections: (order preserved)
+	if strings.Index(got, "custom_section:") < strings.Index(got, "PG_NEW:") {
+		t.Errorf("custom block moved before connections\n--- got ---\n%s", got)
+	}
+}
+
+// TestSetConnectionNodeNeverExpandsRefs is the regression guard for the GUI
+// write path: the file on disk keeps ${VAR}, and the resolved value is never
+// written, whatever the writing process's environment looks like.
+func TestSetConnectionNodeNeverExpandsRefs(t *testing.T) {
+	const leak = "hunter2-LEAK-TEST"
+
+	cases := []struct {
+		name    string
+		mutate  func(t *testing.T)
+		writeAt func(t *testing.T)
+	}{
+		{
+			name:    "var still set at write",
+			mutate:  func(t *testing.T) { t.Setenv("MY_PG_PASSWORD", leak) },
+			writeAt: func(t *testing.T) { t.Setenv("MY_PG_PASSWORD", leak) },
+		},
+		{
+			name:    "var unset before write",
+			mutate:  func(t *testing.T) { t.Setenv("MY_PG_PASSWORD", leak) },
+			writeAt: func(t *testing.T) { os.Unsetenv("MY_PG_PASSWORD") },
+		},
+		{
+			name:    "process env differs from load time",
+			mutate:  func(t *testing.T) { t.Setenv("MY_PG_PASSWORD", leak) },
+			writeAt: func(t *testing.T) { t.Setenv("MY_PG_PASSWORD", "other-value") },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "env.yaml")
+			original := `connections:
+  MY_PG:
+    type: postgres
+    host: localhost
+    password: ${MY_PG_PASSWORD}
+    port: 5432
+`
+			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			tc.mutate(t)
+			ef := LoadEnvFile(path) // expands in memory, as the CLI does
+			tc.writeAt(t)
+
+			// the GUI payload carries the on-disk ref, not the resolved value
+			err := ef.SetConnectionNode("MY_PG", map[string]any{
+				"type":     "postgres",
+				"host":     "localhost",
+				"password": "${MY_PG_PASSWORD}",
+				"port":     5433,
+			}, nil)
+			if err != nil {
+				t.Fatalf("SetConnectionNode: %v", err)
+			}
+
+			out, _ := os.ReadFile(path)
+			got := string(out)
+			if !strings.Contains(got, "${MY_PG_PASSWORD}") {
+				t.Errorf("expected on-disk ${MY_PG_PASSWORD} ref\n--- got ---\n%s", got)
+			}
+			if strings.Contains(got, leak) {
+				t.Errorf("resolved secret written to disk\n--- got ---\n%s", got)
+			}
+			if !strings.Contains(got, "5433") {
+				t.Errorf("expected updated port\n--- got ---\n%s", got)
+			}
+		})
+	}
+}
+
+// TestSetConnectionNodeKeepsUnchangedRefs verifies that an untouched ref field
+// stays a ref (the incoming value is identical, so no expansion is involved).
+func TestSetConnectionNodeKeepsUnchangedRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  MY_PG:
+    type: postgres
+    password: ${MY_PG_PASSWORD}
+    ssh_private_key: ${MY_PG_SSH_PRIVATE_KEY}
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	err := ef.SetConnectionNode("MY_PG", map[string]any{
+		"type":            "postgres",
+		"password":        "${MY_PG_PASSWORD}",
+		"ssh_private_key": "${MY_PG_SSH_PRIVATE_KEY}",
+	}, nil)
+	if err != nil {
+		t.Fatalf("SetConnectionNode: %v", err)
+	}
+
+	out, _ := os.ReadFile(path)
+	got := string(out)
+	if !strings.Contains(got, "${MY_PG_PASSWORD}") || !strings.Contains(got, "${MY_PG_SSH_PRIVATE_KEY}") {
+		t.Errorf("refs were not kept\n--- got ---\n%s", got)
+	}
+}
+
+func TestDeleteConnectionNodePreservesNeighborsAndTrailingComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `# top
+connections:
+  PG_A:
+    type: postgres
+  # keep me (block trailing)
+  PG_B:
+    type: mysql
+    # deeper trailing
+
+env:
+  region: us-west-2
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	if err := ef.DeleteConnectionNode("PG_A"); err != nil {
+		t.Fatalf("DeleteConnectionNode: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	got := string(out)
+	if strings.Contains(got, "PG_A") {
+		t.Errorf("PG_A not removed\n--- got ---\n%s", got)
+	}
+	for _, sub := range []string{"PG_B:", "# keep me (block trailing)", "region: us-west-2"} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("expected %q to survive\n--- got ---\n%s", sub, got)
+		}
+	}
+
+	// deleting the LAST entry keeps the block trailing comment
+	if err := ef.DeleteConnectionNode("PG_B"); err != nil {
+		t.Fatalf("DeleteConnectionNode: %v", err)
+	}
+	out, _ = os.ReadFile(path)
+	got = string(out)
+	if strings.Contains(got, "PG_B") {
+		t.Errorf("PG_B not removed\n--- got ---\n%s", got)
+	}
+	for _, sub := range []string{"connections:", "env:", "region: us-west-2"} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("expected %q to survive\n--- got ---\n%s", sub, got)
+		}
+	}
+	if !strings.Contains(got, "deeper trailing") {
+		t.Errorf("block trailing comment was eaten\n--- got ---\n%s", got)
+	}
+
+	// missing connection is an error
+	if err := ef.DeleteConnectionNode("NOPE"); err == nil {
+		t.Error("expected error for missing connection")
+	}
+}
+
+func TestConnectionNamesAndEnvKeysRaw(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  MY_PG:
+    type: postgres
+    password: ${SOME_UNSET_REF}
+  my_mongo:
+    type: mongodb
+variables:
+  LEGACY_VAR: ${SOME_UNSET_REF}
+  OTHER: x
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	names, err := ef.ConnectionNames()
+	if err != nil {
+		t.Fatalf("ConnectionNames: %v", err)
+	}
+	assert.Equal(t, []string{"MY_PG", "my_mongo"}, names)
+
+	keys, err := ef.EnvKeys()
+	if err != nil {
+		t.Fatalf("EnvKeys: %v", err)
+	}
+	assert.Equal(t, []string{"LEGACY_VAR", "OTHER"}, keys)
+
+	// raw parse must not expand ${VAR}
+	raw, err := ef.RawConnections()
+	if err != nil {
+		t.Fatalf("RawConnections: %v", err)
+	}
+	assert.Equal(t, "${SOME_UNSET_REF}", raw["MY_PG"]["password"])
+}
+
+func TestParseEnvFileConnectionsKeepsRefs(t *testing.T) {
+	t.Setenv("PARSE_TEST_PASSWORD", "hunter2-PARSE-TEST")
+	raw, err := ParseEnvFileConnections(`connections:
+  MY_PG:
+    type: postgres
+    password: ${PARSE_TEST_PASSWORD}
+`)
+	if err != nil {
+		t.Fatalf("ParseEnvFileConnections: %v", err)
+	}
+	if got := raw["MY_PG"]["password"]; got != "${PARSE_TEST_PASSWORD}" {
+		t.Fatalf("expected raw ref, got %v", got)
+	}
+}
+
+func TestSetEnvNodes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  MY_PG:
+    type: postgres
+env:
+  EXISTING: one
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	// new key + unchanged existing value: allowed
+	err := ef.SetEnvNodes(map[string]any{"EXISTING": "one", "NEW_KEY": "two"}, false)
+	if err != nil {
+		t.Fatalf("SetEnvNodes: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	got := string(out)
+	if !strings.Contains(got, "NEW_KEY: two") || !strings.Contains(got, "EXISTING: one") {
+		t.Errorf("env updates missing\n--- got ---\n%s", got)
+	}
+
+	// changing an existing value requires allowOverwrite
+	err = ef.SetEnvNodes(map[string]any{"EXISTING": "changed"}, false)
+	if err == nil {
+		t.Fatal("expected refusal to overwrite existing env var")
+	}
+	if err = ef.SetEnvNodes(map[string]any{"EXISTING": "changed"}, true); err != nil {
+		t.Fatalf("SetEnvNodes with overwrite: %v", err)
+	}
+	out, _ = os.ReadFile(path)
+	got = string(out)
+	if !strings.Contains(got, "EXISTING: changed") {
+		t.Errorf("env var not updated\n--- got ---\n%s", got)
+	}
+	if !strings.Contains(got, "MY_PG:") {
+		t.Errorf("connections block lost\n--- got ---\n%s", got)
+	}
+
+	// invalid env var name
+	if err = ef.SetEnvNodes(map[string]any{"lower": "x"}, true); err == nil {
+		t.Error("expected error for lowercase env var name")
+	}
+}
+
+func TestSetEnvNodesLegacyVariablesBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  MY_PG:
+    type: postgres
+variables:
+  LEGACY: one
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := EnvFile{Path: path}
+	if err := ef.SetEnvNodes(map[string]any{"NEW_ONE": "x"}, false); err != nil {
+		t.Fatalf("SetEnvNodes: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	got := string(out)
+	if !strings.Contains(got, "variables:") || !strings.Contains(got, "NEW_ONE: x") {
+		t.Errorf("expected writes to land in the legacy variables block\n--- got ---\n%s", got)
+	}
+	if strings.Contains(got, "\nenv:") {
+		t.Errorf("should not create a second env block\n--- got ---\n%s", got)
+	}
+}
+
+func TestDeleteConnectionNodeOnlyEntryKeepsComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env.yaml")
+	original := `connections:
+  ONLY:
+    type: postgres
+  # block trailing
+env:
+  A: b
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ef := EnvFile{Path: path}
+	if err := ef.DeleteConnectionNode("ONLY"); err != nil {
+		t.Fatalf("DeleteConnectionNode: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	got := string(out)
+	if strings.Contains(got, "ONLY") {
+		t.Errorf("entry not removed\n--- got ---\n%s", got)
+	}
+	if !strings.Contains(got, "# block trailing") {
+		t.Errorf("trailing comment was eaten\n--- got ---\n%s", got)
+	}
+	if !strings.Contains(got, "A: b") {
+		t.Errorf("env block lost\n--- got ---\n%s", got)
+	}
+}
+
+// --- EnvFileEditor golden tests (plan 8.9) ---
+//
+// Every case under testdata is `<case>.in.yaml` fed through one
+// edit operation and compared byte-for-byte with `<case>.out.yaml`. Cases
+// without an .out.yaml must fail without touching the file.
+
+// editTestPath materializes body at env.yaml inside a temp dir and loads it.
+func editTestPath(t *testing.T, body []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	if len(body) > 0 {
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+func TestEnvFileEditorGolden(t *testing.T) {
+	// templateOrder fakes the registration core/dbio/connection does at init:
+	// type first, then the template property order of the type.
+	savedOrder := TemplateKeyOrder
+	TemplateKeyOrder = func(props map[string]any) []string {
+		if cast.ToString(props["type"]) == "sqlite" {
+			return []string{"instance", "database"}
+		}
+		return nil
+	}
+	defer func() { TemplateKeyOrder = savedOrder }()
+
+	cases := map[string]func(e *EnvFileEditor) error{
+		"update": func(e *EnvFileEditor) error {
+			return e.Set("PG_PROD", g.M("type", "postgres", "host", "db2.example.com"), EditOptions{AllowOverwrite: true})
+		},
+		"replace": func(e *EnvFileEditor) error {
+			return e.Set("PG_STAGE", g.M("type", "postgres", "host", "stage.db.example.com", "tls", false),
+				EditOptions{Replace: true, AllowOverwrite: true})
+		},
+		"new-entry": func(e *EnvFileEditor) error {
+			return e.Set("SQLITE_MAIN", g.M("type", "sqlite", "port", 1235, "instance", "main.db", "extra", "x"), EditOptions{})
+		},
+		"rename": func(e *EnvFileEditor) error {
+			return e.Rename("PG_STAGE", "PG_STAGING")
+		},
+		"delete-first": func(e *EnvFileEditor) error {
+			return e.Delete("A")
+		},
+		"delete-middle": func(e *EnvFileEditor) error {
+			return e.Delete("B")
+		},
+		"delete-last": func(e *EnvFileEditor) error {
+			return e.Delete("C")
+		},
+		"delete-only": func(e *EnvFileEditor) error {
+			return e.Delete("ONLY")
+		},
+		"empty": func(e *EnvFileEditor) error {
+			return e.Set("FIRST", g.M("type", "duckdb", "instance", "a.db"), EditOptions{})
+		},
+		"crlf": func(e *EnvFileEditor) error {
+			return e.Set("A", g.M("type", "postgres", "host", "changed.example.com"), EditOptions{AllowOverwrite: true})
+		},
+		"url-entry": func(e *EnvFileEditor) error {
+			return e.Set("PG_URL", g.M("url", "postgres://user:pass@db.example.com:5432/mydb"), EditOptions{AllowOverwrite: true})
+		},
+		"setenv": func(e *EnvFileEditor) error {
+			return e.SetEnv(g.M("SLING_BUCKET", "s3://acme-bucket"), true)
+		},
+		"setenv-legacy": func(e *EnvFileEditor) error {
+			return e.SetEnv(g.M("NEW_VAR", "x"), true)
+		},
+		"promote": func(e *EnvFileEditor) error {
+			// the shape PromoteLiteralSecrets leaves behind: the prop holds
+			// the ref, the literal travels in EnvUpdates
+			return e.Set("PG_NEW", g.M("type", "postgres", "host", "h", "password", "${PG_NEW_PASSWORD}"),
+				EditOptions{EnvUpdates: g.M("PG_NEW_PASSWORD", "hunter3")})
+		},
+	}
+
+	for name, op := range cases {
+		t.Run(name, func(t *testing.T) {
+			inPath := filepath.Join("testdata", name+".in.yaml")
+			outPath := filepath.Join("testdata", name+".out.yaml")
+
+			in, inErr := os.ReadFile(inPath)
+			if inErr != nil && !os.IsNotExist(inErr) {
+				t.Fatal(inErr)
+			}
+			path := editTestPath(t, in)
+
+			e, err := LoadEnvEditor(path)
+			if err != nil {
+				t.Fatalf("LoadEnvEditor: %v", err)
+			}
+			if err := op(e); err != nil {
+				t.Fatalf("op: %v", err)
+			}
+			if err := e.Save(""); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if os.Getenv("WRITE_GOLDEN") != "" {
+				if err := os.WriteFile(outPath, got, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			want, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("missing golden %s: %v", outPath, err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("golden mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestEnvFileEditorRefusals covers the cases where the editor must fail
+// without changing the file: YAML anchors in Replace mode and a multi-doc file.
+func TestEnvFileEditorRefusals(t *testing.T) {
+	t.Run("anchors refused in replace mode", func(t *testing.T) {
+		path := editTestPath(t, []byte(`connections:
+  BASE: &base
+    type: postgres
+    host: base.example.com
+  PG_COPY:
+    <<: *base
+    port: 5433
+`))
+		before, _ := os.ReadFile(path)
+		e, err := LoadEnvEditor(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Set("PG_COPY", g.M("type", "postgres", "port", 5434), EditOptions{Replace: true, AllowOverwrite: true}); err == nil {
+			t.Fatal("expected an anchor error")
+		} else if !strings.Contains(err.Error(), "anchors") {
+			t.Errorf("error should mention anchors: %v", err)
+		}
+		after, _ := os.ReadFile(path)
+		if string(before) != string(after) {
+			t.Errorf("the file changed on a refused edit\n--- before ---\n%s\n--- after ---\n%s", before, after)
+		}
+
+		// merge mode keeps today's behavior: the entry is merged in place
+		if err := e.Set("PG_COPY", g.M("port", 5434), EditOptions{AllowOverwrite: true}); err != nil {
+			t.Fatalf("merge set: %v", err)
+		}
+	})
+
+	t.Run("multi-document refused", func(t *testing.T) {
+		path := editTestPath(t, []byte("connections:\n  A:\n    type: postgres\n---\nenv:\n  K: v\n"))
+		if _, err := LoadEnvEditor(path); err == nil {
+			t.Fatal("expected a multi-document error")
+		}
+	})
+}
+
+// TestEnvFileEditorSave covers the sha guard and the atomic write of Save.
+func TestEnvFileEditorSave(t *testing.T) {
+	body := "connections:\n  A:\n    type: postgres\n    host: a\n"
+
+	t.Run("sha mismatch keeps the file", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		e, _ := LoadEnvEditor(path)
+		if err := e.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save("not-the-sha"); err == nil {
+			t.Fatal("expected ErrStaleEnvFile")
+		} else if err != ErrStaleEnvFile {
+			t.Errorf("got %v, want ErrStaleEnvFile", err)
+		}
+		after, _ := os.ReadFile(path)
+		if string(after) != body {
+			t.Errorf("a refused save changed the file:\n%s", after)
+		}
+		// saving against the loaded sha works
+		if err := e.Save(e.Sha()); err != nil {
+			t.Fatalf("Save(sha): %v", err)
+		}
+	})
+
+	t.Run("two editors: the second save fails", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		e1, _ := LoadEnvEditor(path)
+		e2, _ := LoadEnvEditor(path)
+		if err := e1.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e1.Save(e1.Sha()); err != nil {
+			t.Fatalf("first save: %v", err)
+		}
+		if err := e2.Set("C", g.M("type", "sqlite", "instance", "c.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e2.Save(e2.Sha()); err != ErrStaleEnvFile {
+			t.Errorf("second save: %v, want ErrStaleEnvFile", err)
+		}
+		// C must not be on disk: the stale save wrote nothing
+		final, _ := os.ReadFile(path)
+		if strings.Contains(string(final), "C:") {
+			t.Errorf("the stale save landed:\n%s", final)
+		}
+	})
+
+	t.Run("atomic save keeps the file mode", func(t *testing.T) {
+		path := editTestPath(t, []byte(body))
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e, _ := LoadEnvEditor(path)
+		if err := e.Set("B", g.M("type", "duckdb", "instance", "b.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save(""); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+		}
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			names := []string{}
+			for _, entry := range entries {
+				names = append(names, entry.Name())
+			}
+			t.Errorf("temp files left behind: %v", names)
+		}
+	})
+
+	t.Run("save to a missing file creates it", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "sub", "env.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		e, err := LoadEnvEditor(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Set("FIRST", g.M("type", "duckdb", "instance", "a.db"), EditOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Save(""); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "type: duckdb") {
+			t.Errorf("the created file is not a valid env file:\n%s", got)
+		}
+	})
+}
+
+// TestEnvFileEditorGet covers Names and the raw Get of the editor: refs stay
+// refs, a URL entry reports its url, and the location carries the line.
+func TestEnvFileEditorGet(t *testing.T) {
+	path := editTestPath(t, []byte(`# head
+connections:
+  # the production warehouse
+  PG_PROD:
+    type: postgres
+    host: db.example.com
+    password: ${PG_PROD_PASSWORD}
+  PG_URL: postgres://u:p@h:5432/d
+`))
+	e, err := LoadEnvEditor(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := e.Names()
+	if len(names) != 2 || names[0] != "PG_PROD" || names[1] != "PG_URL" {
+		t.Errorf("Names() = %v", names)
+	}
+
+	props, loc, found := e.Get("pg_prod") // case-insensitive
+	if !found {
+		t.Fatal("PG_PROD not found")
+	}
+	if props["password"] != "${PG_PROD_PASSWORD}" {
+		t.Errorf("password = %v, want the raw ref", props["password"])
+	}
+	if loc.Line != 4 {
+		t.Errorf("line = %d, want 4", loc.Line)
+	}
+	if len(loc.Missing) != 1 || loc.Missing[0].Var != "PG_PROD_PASSWORD" {
+		t.Errorf("missing = %+v", loc.Missing)
+	}
+
+	props, loc, found = e.Get("PG_URL")
+	if !found {
+		t.Fatal("PG_URL not found")
+	}
+	if props["url"] != "postgres://u:p@h:5432/d" {
+		t.Errorf("url props = %v", props)
+	}
+	if _, _, notFound := e.Get("NOPE"); notFound {
+		t.Error("NOPE should not be found")
+	}
+	_ = loc
+}
+
+func TestWriteRefusesInvalidEnvFile(t *testing.T) {
+	cases := map[string]string{
+		"tab":        "connections:\n  PG1:\n\t host: h\n    type: postgres\n",
+		"bad conn":   "connections:\n  PG1:\n    type: postgres\n  PG2: [bad]\n",
+		"conns list": "connections:\n  - PG1\nenv:\n  KEEP: me\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "env.yaml")
+			assert.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+			ef := LoadEnvFile(path)
+			ef.Connections["PG3"] = map[string]any{"type": "postgres"}
+			assert.ErrorContains(t, ef.WriteEnvFile(), "Fix it before sling changes the file")
+			assert.ErrorContains(t, ef.CheckFile(), "Fix it before sling changes the file")
+
+			after, _ := os.ReadFile(path)
+			assert.Equal(t, body, string(after))
+		})
+	}
+}
+
+func TestRepairEnvYAML(t *testing.T) {
+	const nb = " "
+	cases := []struct {
+		name, body string
+		repaired   bool
+	}{
+		{"nbsp everywhere", "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type:" + nb + "sqlserver\n" + nb + nb + nb + nb + "host:" + nb + "TEST101\n", true},
+		{"nbsp indent only", "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type: sqlserver\n" + nb + nb + nb + nb + "host: TEST101\n", true},
+		{"tabs only", "connections:\n\tMSSQL:\n\t\ttype: sqlserver\n\t\thost: TEST101\n", true},
+		{"spaces then tab", "connections:\r\n  MSSQL:\r\n\ttype: sqlserver\r\n\thost: TEST101\r\n", true},
+		{"valid with nbsp in value", "connections:\n  MSSQL:\n    type: sqlserver\n    host: TEST101\n    password: 'a" + nb + "b'\n", false},
+		{"unrepairable", "connections:\n  MSSQL:\n\t host: TEST101\n    type: sqlserver\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := string(repairEnvYAML([]byte(c.body)))
+			if !c.repaired {
+				assert.Equal(t, c.body, got)
+				return
+			}
+			ef, err := loadEnvFile(c.body, "")
+			assert.NoError(t, err)
+			assert.Equal(t, "sqlserver", ef.Connections["MSSQL"]["type"])
+			assert.Equal(t, "TEST101", ef.Connections["MSSQL"]["host"])
+			assert.NotContains(t, got, nb)
+			assert.NotContains(t, got, "\t")
+		})
+	}
+}
+
+func TestWriteRepairsEnvFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	body := "connections:\n  KEEP:\n    type: postgres\n    host: h\n"
+	assert.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+	ef := LoadEnvFile(path)
+	assert.NoError(t, ef.CheckFile())
+	ef.Connections["NEW"] = map[string]any{"type": "postgres", "host": "n"}
+	assert.NoError(t, ef.WriteEnvFile())
+
+	after, _ := os.ReadFile(path)
+	assert.NotContains(t, string(after), " ")
+	reloaded := LoadEnvFile(path)
+	assert.Equal(t, "h", reloaded.Connections["KEEP"]["host"])
+	assert.Equal(t, "n", reloaded.Connections["NEW"]["host"])
+}
+
+// TestRepairKeepsValues breaks MSSQL with NBSP indentation, so a repair runs
+// over the whole file, and checks that the OTHER password is never changed.
+func TestRepairKeepsValues(t *testing.T) {
+	const nb = " "
+	broken := "connections:\n" + nb + nb + "MSSQL:\n" + nb + nb + nb + nb + "type: sqlserver\n"
+	cases := []struct {
+		name, other, password string
+		repaired              bool
+	}{
+		{"quoted colon nbsp", "    password: 'ab:" + nb + "cd'\n", "ab:" + nb + "cd", true},
+		{"plain colon nbsp", "    password: ab:" + nb + "cd\n", "ab:" + nb + "cd", true},
+		{"leading nbsp in value", "    password: \"" + nb + "abc\"\n", nb + "abc", true},
+		{"tab in block scalar", "    password: |\n      line1\n      \tline2\n", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := broken + "  OTHER:\n    type: postgres\n" + c.other
+			ef, err := loadEnvFile(body, "")
+			assert.Equal(t, c.repaired, ef.Repaired)
+			if !c.repaired {
+				assert.Error(t, err)
+				assert.Equal(t, body, string(repairEnvYAML([]byte(body))))
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, "sqlserver", ef.Connections["MSSQL"]["type"])
+			assert.Equal(t, c.password, ef.Connections["OTHER"]["password"])
+		})
+	}
+
+	ef, err := loadEnvFile("connections:\n  PG:\n    password: 'a"+nb+"b'\n", "")
+	assert.NoError(t, err)
+	assert.False(t, ef.Repaired)
 }

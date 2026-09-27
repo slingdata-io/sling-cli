@@ -34,7 +34,42 @@ var (
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
 	duckDbEOFMarker    = "___end_of_duckdb_result___"
 	DuckDbURISeparator = "|-|+|"
+	duckDbProcDiedMsg  = "duckdb process exited before query completed"
 )
+
+// IsDuckDbProcDeath reports whether err comes from a duckdb sidecar that died mid-query.
+func IsDuckDbProcDeath(err error) bool {
+	return err != nil && strings.Contains(err.Error(), duckDbProcDiedMsg)
+}
+
+// duckDbStderrTail keeps the last stderr lines of the sidecar, to explain a silent death.
+type duckDbStderrTail struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+const duckDbStderrTailSize = 20
+
+func (t *duckDbStderrTail) add(line string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = append(t.lines, line)
+	if len(t.lines) > duckDbStderrTailSize {
+		t.lines = t.lines[len(t.lines)-duckDbStderrTailSize:]
+	}
+}
+
+func (t *duckDbStderrTail) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lines = nil
+}
+
+func (t *duckDbStderrTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(strings.Join(t.lines, "\n"))
+}
 
 // DuckDb is a Duck DB compute layer
 type DuckDb struct {
@@ -46,6 +81,10 @@ type DuckDb struct {
 	queryMu     sync.RWMutex
 	query       *duckDbQuery // only one active query at a time
 	version     int
+	stderrTail  duckDbStderrTail
+
+	arrowOnce    sync.Once
+	arrowLoadErr error // the CLI session could not load the arrow extension
 }
 
 func (duck *DuckDb) getQuery() *duckDbQuery {
@@ -179,6 +218,70 @@ func (duck *DuckDb) Props() map[string]string {
 		props[k] = cast.ToString(v)
 	}
 	return props
+}
+
+// copyMethodOnce shows the copy_method deprecation warning one time.
+var copyMethodOnce sync.Once
+
+// CopyFormat returns the format that moves data between sling and the DuckDB
+// CLI: arrow (the default) or csv. explicit is false when the default applies.
+func (duck *DuckDb) CopyFormat() (format dbio.FileType, explicit bool, err error) {
+	for _, key := range []string{"copy_format", "duckdb_copy_format"} {
+		switch val := strings.ToLower(duck.GetProp(key)); val {
+		case "":
+		case "arrow":
+			return dbio.FileTypeArrow, true, nil
+		case "csv":
+			return dbio.FileTypeCsv, true, nil
+		default:
+			return "", false, g.Error("invalid %s value %q: use csv or arrow", key, val)
+		}
+	}
+
+	for _, key := range []string{"copy_method", "duckdb_copy_method"} {
+		val := strings.ToLower(duck.GetProp(key))
+		if val == "" {
+			continue
+		}
+		copyMethodOnce.Do(func() {
+			g.Warn("the %s property is deprecated, use copy_format (csv or arrow)", key)
+		})
+		if val == "arrow_http" {
+			return dbio.FileTypeArrow, true, nil
+		}
+		return dbio.FileTypeCsv, true, nil // csv_http, csv_files, named_pipes
+	}
+
+	return dbio.FileTypeArrow, false, nil
+}
+
+// SessionFormat returns the format that moves data in and out of the CLI
+// session. The default arrow format changes to csv when the session cannot
+// load the arrow extension (e.g. with no internet access to download it).
+func (duck *DuckDb) SessionFormat() (format dbio.FileType, err error) {
+	format, explicit, err := duck.CopyFormat()
+	if err != nil || format != dbio.FileTypeArrow {
+		return format, err
+	}
+
+	duck.arrowOnce.Do(func() {
+		_, duck.arrowLoadErr = duck.Exec(duckExtensionSQL(duckArrowExtension) + env.NoDebugKey)
+		if duck.arrowLoadErr != nil {
+			if !explicit {
+				g.Warn("duckdb could not load the arrow extension, using csv to move data (set copy_format: csv to skip this check): %s", duck.arrowLoadErr)
+			}
+			return
+		}
+		duck.AddExtension(duckArrowExtension) // to load it again in a new session
+	})
+
+	if duck.arrowLoadErr != nil {
+		if explicit {
+			return format, g.Error(duck.arrowLoadErr, "copy_format is arrow, but duckdb could not load the arrow extension")
+		}
+		return dbio.FileTypeCsv, nil
+	}
+	return format, nil
 }
 
 // AddExtension adds an extension to the DuckDb instance if it's not already present
@@ -492,14 +595,21 @@ func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
 // getLoadExtensionSQL generates SQL statements to load extensions
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
-		name := strings.TrimSpace(strings.TrimSuffix(extension, "from community"))
-		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
-			sql += fmt.Sprintf("LOAD %s;", name)
-		} else {
-			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, name)
-		}
+		sql += duckExtensionSQL(extension)
 	}
 	return
+}
+
+// duckArrowExtension gives the ARROWS copy format and the arrow stream reader.
+const duckArrowExtension = "arrow from community"
+
+// duckExtensionSQL installs and loads an extension.
+func duckExtensionSQL(extension string) string {
+	name := strings.TrimSpace(strings.TrimSuffix(extension, "from community"))
+	if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
+		return fmt.Sprintf("LOAD %s;", name)
+	}
+	return fmt.Sprintf("INSTALL %s; LOAD %s;", extension, name)
 }
 
 // getSessionSettingsSQL returns SET statements applied on every DuckDB session.
@@ -559,6 +669,9 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	}
 
 	duck.Proc.HideCmdInErr = true
+	duck.Proc.SysProcAttr = duckDbSysProcAttr()
+	duck.stderrTail.reset()
+	duck.initialized = false // a new session loads extensions and secrets again
 	args := []string{"-csv", "-nullvalue", `\N\`}
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
 
@@ -603,6 +716,7 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	if err != nil {
 		return g.Error(err, "Failed to start duckDB process")
 	}
+	env.AddChildProc(duck.Proc.Cmd.Process)
 
 	// start the scanner
 	duck.initScanner()
@@ -622,7 +736,14 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 
 // Close closes the connection
 func (duck *DuckDb) Close() error {
-	if duck.Proc == nil || duck.Proc.Exited() {
+	if duck.Proc == nil {
+		return nil
+	}
+	if duck.Proc.Cmd != nil {
+		defer env.RemoveChildProc(duck.Proc.Cmd.Process)
+	}
+
+	if duck.Proc.Exited() {
 		return nil
 	}
 
@@ -667,6 +788,7 @@ func (duck *DuckDb) kill() {
 	duck.SetProp("connected", "false")
 	if duck.Proc != nil && duck.Proc.Cmd != nil && duck.Proc.Cmd.Process != nil {
 		duck.Proc.Cmd.Process.Kill()
+		env.RemoveChildProc(duck.Proc.Cmd.Process)
 	}
 }
 
@@ -726,6 +848,9 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	queryID := g.RandSuffix("", 3) // for debugging
 
+	// the newline before the ";" ends a trailing line comment
+	statement := strings.TrimRight(strings.TrimSpace(sql), ";") + "\n;"
+
 	// submit sql to stdin
 	sqlLines := []string{
 		extensionSecretSQL,
@@ -734,7 +859,7 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 		"set preserve_insertion_order = false;",
 		g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 		".changes on",
-		sql + ";",
+		statement,
 		".changes off",
 		g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
 	}
@@ -743,11 +868,15 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 		sqlLines = []string{
 			extensionSecretSQL,
 			g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
-			sql + ";",
+			statement,
 			g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
 		}
 	}
-	env.LogSQL(propsCombined, sql)
+	logSQL := sql
+	if dq := duck.getQuery(); dq != nil {
+		logSQL = dq.SQL // sql can be a COPY that wraps the query
+	}
+	env.LogSQL(propsCombined, logSQL)
 
 	sqls := strings.Join(sqlLines, "\n")
 	// g.Warn(sqls)
@@ -871,29 +1000,23 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 				return
 			case <-dq.Context.Ctx.Done():
 				err := g.Error(dq.Context.Ctx.Err(), "duckdb query context cancelled")
-				dq.setErr(err)
-				dq.writer.CloseWithError(err)
-				dq.reader.CloseWithError(err)
-				duck.kill() // kill the proc so it won't block subsequent queries
+				if duck.Proc != nil && duck.Proc.Exited() {
+					err = duck.procDeathErr() // it died first; the cancel is a consequence
+				}
+				duck.abortQuery(dq, err)
 				return
 			case <-ticker.C:
 				// Check the stall first: it needs no Proc lock, so it still fires
 				// if the scanner is wedged holding the process mutex.
 				if !dq.isDone() && stallTimeout > 0 && time.Since(dq.lastActivity()) > stallTimeout {
 					err := g.Error("duckdb query stalled: no output for %s", stallTimeout)
-					dq.setErr(err)
-					dq.writer.CloseWithError(err)
-					dq.reader.CloseWithError(err)
-					duck.kill() // unresponsive; kill so it won't block subsequent queries
+					duck.abortQuery(dq, err) // unresponsive
 					return
 				}
 
 				if duck.Proc != nil && !dq.isDone() && (duck.Proc.Exited() || duck.Proc.GetScanErr() != nil) {
 					err := duck.procDeathErr()
-					dq.setErr(err)
-					dq.writer.CloseWithError(err)
-					dq.reader.CloseWithError(err)
-					duck.kill() // dead or unreadable; mark disconnected so the next query reopens
+					duck.abortQuery(dq, err) // dead or unreadable
 					return
 				}
 			}
@@ -903,10 +1026,21 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 	return dq
 }
 
+// abortQuery fails a query and kills the process, so it cannot block the
+// next query. The next query reopens the process.
+func (duck *DuckDb) abortQuery(dq *duckDbQuery, err error) {
+	dq.setErr(err)
+	dq.writer.CloseWithError(err)
+	dq.reader.CloseWithError(err)
+	duck.kill()
+}
+
 // procDeathErr describes a process that died or lost its stdout scanner
 // mid-query. Capture is off for duckdb, so CmdErrorText is normally empty and
 // the exit status (e.g. "signal: killed") is the only clue on a silent death.
 func (duck *DuckDb) procDeathErr() error {
+	time.Sleep(100 * time.Millisecond) // let the stderr scanner drain the last lines
+
 	if scanErr := duck.Proc.GetScanErr(); scanErr != nil {
 		return g.Error(scanErr, "duckdb stdout scanner stopped before query completed")
 	}
@@ -924,7 +1058,10 @@ func (duck *DuckDb) procDeathErr() error {
 	if strings.Contains(detail, "signal: killed") {
 		detail += " (process was killed, possibly by the OS out-of-memory killer)"
 	}
-	return g.Error("duckdb process exited before query completed: %s", detail)
+	if tail := duck.stderrTail.String(); tail != "" && !strings.Contains(detail, tail) {
+		detail += "\nlast duckdb stderr output:\n" + tail
+	}
+	return g.Error("%s: %s", duckDbProcDiedMsg, detail)
 }
 
 // waitForResult waits for the execution of a SQL query and returns the result
@@ -1064,86 +1201,77 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		}
 	}
 
-	// Arrow IPC output mode: uses a separate DuckDB process to pipe binary Arrow data.
-	// Only applies to SELECT/WITH queries — describe, pragma, etc. must use CSV mode.
+	// A SELECT goes through COPY into the output of the session, as arrow or
+	// csv. Other statements (describe, pragma) print csv to stdout.
 	sqlStripped, _ := StripSQLComments(sql)
 	sqlLower := strings.TrimSpace(strings.ToLower(sqlStripped))
 	isSelectQuery := strings.HasPrefix(sqlLower, "select") || strings.HasPrefix(sqlLower, "with")
-	useArrow := cast.ToBool(os.Getenv("DUCKDB_USE_ARROW")) && isSelectQuery
 
-	// the interactive process locks a file instance exclusively, so a second
-	// process can't attach, not even read-only
-	if useArrow && duck.GetProp("instance") != "" && duck.Proc != nil && !duck.Proc.Exited() {
-		g.Debug("arrow mode unavailable: duckdb instance is locked by the interactive process, using csv mode")
-		useArrow = false
+	useArrow := false
+	if isSelectQuery {
+		format, err := duck.SessionFormat()
+		if err != nil {
+			return nil, err
+		}
+		useArrow = format == dbio.FileTypeArrow
 	}
 
+	statement := sql
 	if useArrow {
-		// duck.AddExtension("nanoarrow from community")
-		duck.AddExtension("arrow from community")
-
-		arrowReader, arrowCleanup, arrowErr, err := duck.StreamArrow(queryCtx.Ctx, sql)
-		if err != nil {
-			return nil, g.Error(err, "Failed to start Arrow stream")
+		// the names that the csv reader gives
+		names := CleanHeaderRow(columns.Names())
+		statement = duckArrowSQL(sql, columns, names)
+		for i := range columns {
+			columns[i].Name = names[i]
 		}
-
-		ds = NewDatastreamContext(queryCtx.Ctx, columns)
-		ds.Defer(func() { arrowCleanup() })
-
-		if cds, ok := opts["datastream"]; ok {
-			ds = cds.(*Datastream)
-			ds.Columns = columns
-		}
-
-		ds.Inferred = true
-		ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
-		ds.SetConfig(duck.Props())
-		if len(transforms) > 0 {
-			ds.SetConfig(map[string]string{"transforms": g.Marshal(transforms)})
-		}
-
-		err = ds.ConsumeArrowReaderStream(arrowReader)
-		if err != nil {
-			// the subprocess error beats a bare EOF from a truncated stream
-			if procErr := arrowErr(); procErr != nil {
-				err = g.Error(procErr, err.Error())
-			}
-			// cancel before Close, which drains readyChn instead of signaling
-			// it, leaving WaitReady blocked forever
-			ds.Context.CaptureErr(err)
-			ds.Context.Cancel()
-			ds.Close()
-			return ds, g.Error(err, "could not read Arrow output stream")
-		}
-
-		// handle filename, always last column (after Arrow columns are set)
-		if cast.ToBool(opts["filename"]) {
-			ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
-			ds.Metadata.StreamURL.Key = "" // so it is not added again
-		}
-
-		if describeErr != nil {
-			g.LogError(describeErr)
-		}
-
-		return ds, nil
 	}
 
-	// CSV mode: one query at a time on the interactive process
+	// one query at a time on the session
 	duck.Context.Lock()
 
-	// new datastream
 	ds = NewDatastreamContext(queryCtx.Ctx, columns)
-
-	// Create a pipe for stdout, stderr handling
 	dq := duck.newQuery(queryCtx.Ctx, sql)
 
-	// start and submit sql
-	err = duck.SubmitSQL(sql, false)
+	var out *duckOutput
+	if isSelectQuery {
+		if out, err = newDuckOutput(); err != nil {
+			dq.finish()
+			duck.Context.Unlock()
+			return nil, err
+		}
+		if useArrow {
+			// without insertion order, the ARROWS writer mixes the batches of
+			// parallel threads in a pipe
+			statement = "SET preserve_insertion_order = true;\n" +
+				duckCopySQL(statement, out.path, "FORMAT ARROWS") +
+				";\nSET preserve_insertion_order = false"
+		} else {
+			statement = duckCopySQL(statement, out.path, `FORMAT CSV, HEADER, NULLSTR '\N\'`)
+		}
+	}
+
+	err = duck.SubmitSQL(statement, false)
 	if err != nil {
 		dq.finish()
-		duck.Context.Unlock() // release lock
+		duck.Context.Unlock()
+		out.Close()
 		return nil, g.Error(err, "Failed to submit SQL")
+	}
+
+	reader := io.Reader(dq.reader)
+	if out != nil {
+		// the end marker or the error closes the stdout pipe
+		reader, err = out.open(func() { io.Copy(io.Discard, dq.reader) })
+		if qErr := dq.getErr(); qErr != nil {
+			err = qErr // the cause of a missing output file
+		}
+		if err != nil {
+			dq.finish()
+			duck.Context.Unlock()
+			out.Close()
+			return nil, g.Error(err, "could not read duckdb output")
+		}
+		reader = &duckOutputReader{Reader: reader, dq: dq}
 	}
 
 	if cds, ok := opts["datastream"]; ok {
@@ -1152,28 +1280,60 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		ds.Columns = columns
 	}
 
-	// handle filename, always last column
-	if cast.ToBool(opts["filename"]) {
-		// rename to _sling_stream_url
-		ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
-		ds.Metadata.StreamURL.Key = "" // so it is not added again
-	}
-
 	ds.Inferred = true
 	ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
 	ds.SetConfig(duck.Props())
-	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
+	ds.SetConfig(map[string]string{"transforms": g.Marshal(transforms)})
+	if !useArrow {
+		ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "null_if": `\N\`})
+	}
 
 	ds.Defer(func() {
+		if out != nil && !dq.isDone() {
+			// the arrow reader stops at the end-of-stream marker, before the
+			// query ends
+			drained := make(chan struct{})
+			go func() {
+				io.Copy(io.Discard, reader)
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(2 * time.Second):
+			}
+		}
+		if !dq.isDone() {
+			// the consumer stopped before the end; the process would block on
+			// output that nobody reads
+			duck.abortQuery(dq, g.Error("duckdb query closed before its end"))
+		}
 		dq.finish()
 		duck.Context.Mux.TryLock()
 		duck.Context.Unlock() // release lock
+		out.Close()
 	})
 
-	err = ds.ConsumeCsvReader(dq.reader)
+	if useArrow {
+		err = ds.ConsumeArrowReaderStream(reader)
+	} else {
+		err = ds.ConsumeCsvReader(reader)
+	}
 	if err != nil {
+		if qErr := dq.getErr(); qErr != nil {
+			err = g.Error(qErr, err.Error())
+		}
+		// cancel before Close, which drains readyChn instead of signaling
+		// it, leaving WaitReady blocked forever
+		ds.Context.CaptureErr(err)
+		ds.Context.Cancel()
 		ds.Close()
 		return ds, g.Error(err, "could not read output stream")
+	}
+
+	// handle filename, always last column (after the columns are set)
+	if cast.ToBool(opts["filename"]) {
+		ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
+		ds.Metadata.StreamURL.Key = "" // so it is not added again
 	}
 
 	if err := dq.getErr(); err != nil {
@@ -1187,182 +1347,100 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	return
 }
 
-// StreamArrow launches a separate DuckDB CLI process that outputs Arrow IPC binary data to stdout.
-// This bypasses the interactive CSV process entirely, avoiding line-based scanning issues with binary data.
-// procErr reports what the subprocess wrote to stderr, once the stream ends.
-func (duck *DuckDb) StreamArrow(ctx context.Context, sql string) (reader io.ReadCloser, cleanup func(), procErr func() error, err error) {
-	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
-	if err != nil {
-		return nil, nil, nil, g.Error(err, "could not get duckdb binary")
+// duckOutput is the file that a COPY of the session writes to. The platform
+// files define newDuckOutput and open.
+type duckOutput struct {
+	dir    string
+	path   string
+	reader *os.File
+	hold   *os.File // a spare write end of the named pipe
+}
+
+func (out *duckOutput) Close() {
+	if out == nil {
+		return
 	}
-
-	// Build args (no -csv or -nullvalue flags for Arrow mode)
-	args := []string{}
-	instance := duck.GetProp("instance")
-	if instance != "" {
-		// Always open file-based instances read-only to avoid lock conflicts
-		// with the interactive process that already holds a write lock
-		args = append(args, "-readonly")
-		args = append(args, instance)
-	} else if cast.ToBool(duck.GetProp("read_only")) {
-		args = append(args, "-readonly")
-	}
-
-	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
-		dsn := "md:" + duck.GetProp("database")
-		if motherduckAttachMode := duck.GetProp("motherduck_attach_mode"); motherduckAttachMode != "" {
-			dsn = g.F("%s?attach_mode=%s", dsn, motherduckAttachMode)
-		}
-		args = append(args, dsn)
-	}
-
-	// Build SQL script
-	scriptParts := []string{}
-	if extSQL := duck.getLoadExtensionSQL(); extSQL != "" {
-		scriptParts = append(scriptParts, extSQL)
-	}
-	if secretSQL := duck.getCreateSecretSQL(); secretSQL != "" {
-		scriptParts = append(scriptParts, secretSQL)
-	}
-	if settingsSQL := duck.getSessionSettingsSQL(); settingsSQL != "" {
-		scriptParts = append(scriptParts, settingsSQL)
-	}
-	scriptParts = append(scriptParts, "SET preserve_insertion_order = false;")
-
-	if runtime.GOOS == "windows" {
-		// Windows: use temp file since /dev/stdout doesn't exist
-		tmpFile, tmpErr := os.CreateTemp("", "sling-arrow-*.ipc")
-		if tmpErr != nil {
-			return nil, nil, nil, g.Error(tmpErr, "could not create temp file for Arrow output")
-		}
-		tmpPath := tmpFile.Name()
-		tmpFile.Close()
-
-		scriptParts = append(scriptParts, g.F("COPY (%s) TO '%s' (FORMAT ARROWS);", sql, tmpPath))
-		script := strings.Join(scriptParts, "\n")
-
-		cmd := exec.CommandContext(ctx, bin, args...)
-		cmd.Stdin = strings.NewReader(script)
-		if duck.Proc != nil {
-			cmd.Dir = duck.Proc.WorkDir
-			cmd.Env = g.MapToKVArr(duck.Proc.Env)
-		} else if workDir := duck.GetProp("working_dir"); workDir != "" {
-			cmd.Dir = workDir
-			cmd.Env = os.Environ()
-		}
-
-		// MotherDuck token
-		if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
-			cmd.Env = append(cmd.Env, "motherduck_token="+motherduckToken)
-		}
-
-		var stderrBuf strings.Builder
-		cmd.Stderr = &stderrBuf
-
-		if runErr := cmd.Run(); runErr != nil {
-			os.Remove(tmpPath)
-			errMsg := stderrBuf.String()
-			if errMsg != "" {
-				return nil, nil, nil, g.Error("Arrow DuckDB process failed: %s\n%s", runErr, errMsg)
-			}
-			return nil, nil, nil, g.Error(runErr, "Arrow DuckDB process failed")
-		}
-
-		file, openErr := os.Open(tmpPath)
-		if openErr != nil {
-			os.Remove(tmpPath)
-			return nil, nil, nil, g.Error(openErr, "could not open Arrow temp file")
-		}
-
-		cleanup = func() {
+	for _, file := range []*os.File{out.reader, out.hold} {
+		if file != nil {
 			file.Close()
-			os.Remove(tmpPath)
-		}
-		return file, cleanup, func() error { return nil }, nil
-	}
-
-	// Unix: pipe Arrow IPC directly through /dev/stdout
-	scriptParts = append(scriptParts, g.F("COPY (%s) TO '/dev/stdout' (FORMAT ARROWS);", sql))
-	script := strings.Join(scriptParts, "\n")
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdin = strings.NewReader(script)
-	if duck.Proc != nil {
-		cmd.Dir = duck.Proc.WorkDir
-		cmd.Env = g.MapToKVArr(duck.Proc.Env)
-	} else if workDir := duck.GetProp("working_dir"); workDir != "" {
-		cmd.Dir = workDir
-		cmd.Env = os.Environ()
-	}
-
-	// MotherDuck token
-	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
-		cmd.Env = append(cmd.Env, "motherduck_token="+motherduckToken)
-	}
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, nil, g.Error(err, "could not get stdout pipe for Arrow DuckDB process")
-	}
-
-	var stderrMux sync.Mutex
-	var stderrBuf strings.Builder
-	stderrDone := make(chan struct{})
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, nil, nil, g.Error(err, "could not get stderr pipe for Arrow DuckDB process")
-	}
-
-	// capture stderr in background
-	go func() {
-		defer close(stderrDone)
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stderrPipe.Read(buf)
-			if n > 0 {
-				stderrMux.Lock()
-				stderrBuf.Write(buf[:n])
-				stderrMux.Unlock()
-			}
-			if readErr != nil {
-				break
-			}
-		}
-	}()
-
-	if err = cmd.Start(); err != nil {
-		return nil, nil, nil, g.Error(err, "could not start Arrow DuckDB process")
-	}
-
-	// on a truncated stream, stderr holds the real cause
-	procErr = func() error {
-		select {
-		case <-stderrDone:
-		case <-time.After(2 * time.Second): // in case the pipe is stuck
-		}
-		stderrMux.Lock()
-		defer stderrMux.Unlock()
-		if msg := strings.TrimSpace(stderrBuf.String()); msg != "" {
-			return g.Error(msg)
-		}
-		return nil
-	}
-
-	cleanup = func() {
-		waitErr := cmd.Wait()
-		if waitErr != nil {
-			stderrMux.Lock()
-			errMsg := stderrBuf.String()
-			stderrMux.Unlock()
-			if errMsg != "" {
-				g.Warn("Arrow DuckDB process error: %s\n%s", waitErr, errMsg)
-			} else {
-				g.Warn("Arrow DuckDB process error: %s", waitErr)
-			}
 		}
 	}
+	os.RemoveAll(out.dir)
+}
 
-	return stdoutPipe, cleanup, procErr, nil
+// duckOutputReader reads the output of a query. At the end it gives the query
+// error, so a query that fails mid-stream is an error and not a short result.
+type duckOutputReader struct {
+	io.Reader
+	dq   *duckDbQuery
+	last time.Time
+}
+
+func (r *duckOutputReader) Read(p []byte) (n int, err error) {
+	n, err = r.Reader.Read(p)
+	if n > 0 && time.Since(r.last) > time.Second { // throttle lock churn
+		r.dq.touch()
+		r.last = time.Now()
+	}
+	if err == io.EOF {
+		if qErr := r.dq.getErr(); qErr != nil {
+			return n, qErr
+		}
+	}
+	return n, err
+}
+
+// duckCopySQL wraps a query in a COPY statement. The newline before the
+// parenthesis ends a trailing line comment.
+func duckCopySQL(sql, target, options string) string {
+	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
+	target = strings.ReplaceAll(target, "'", "''")
+	return g.F("COPY (\n%s\n) TO '%s' (%s)", sql, target, options)
+}
+
+// duckArrowCast is the cast of a column that DuckDB cannot write to Arrow
+// without loss. An empty value means no cast.
+func duckArrowCast(dbType string) string {
+	t := strings.ToUpper(dbType)
+	lossy := false
+	for _, token := range []string{"ENUM(", "BIGNUM", "VARINT", "INTERVAL", "TIME WITH TIME ZONE", "BIT", "UHUGEINT", "UBIGINT"} {
+		lossy = lossy || strings.Contains(t, token)
+	}
+	nested := strings.Contains(t, "[") || strings.HasPrefix(t, "STRUCT(") ||
+		strings.HasPrefix(t, "MAP(") || strings.HasPrefix(t, "UNION(")
+
+	switch {
+	case !lossy:
+		return ""
+	case nested:
+		return "to_json(%s)::VARCHAR"
+	case t == "UBIGINT":
+		return "CAST(%s AS DECIMAL(20,0))"
+	}
+	return "CAST(%s AS VARCHAR)"
+}
+
+// duckArrowSQL selects the columns of a query by position, with the casts of
+// duckArrowCast and the given names. The query stays as it is when no column
+// changes.
+func duckArrowSQL(sql string, columns Columns, names []string) string {
+	changed := false
+	exprs := make([]string, len(columns))
+	for i, col := range columns {
+		expr := g.F("#%d", i+1)
+		if cast := duckArrowCast(col.DbType); cast != "" {
+			expr = g.F(cast, expr)
+			changed = true
+		}
+		changed = changed || names[i] != col.Name
+		exprs[i] = expr + " AS " + `"` + strings.ReplaceAll(names[i], `"`, `""`) + `"`
+	}
+
+	if !changed {
+		return sql
+	}
+	sql = strings.TrimRight(strings.TrimSpace(sql), ";")
+	return g.F("SELECT %s FROM (\n%s\n)", strings.Join(exprs, ", "), sql)
 }
 
 // initScanner is set only once
@@ -1376,17 +1454,21 @@ func (duck *DuckDb) initScanner() {
 	var stdOutWriter *io.PipeWriter
 
 	// call with mu held
-	resetWriter := func(dq *duckDbQuery) {
-		if stdOutWriter != nil {
-			stdOutWriter.Close()
-		}
-		stdOutWriter = nil // set as nil until next query start
-		if dq != nil {
-			dq.setDone()
+	// err, when set, reaches the reader instead of a clean EOF. A late timer
+	// of an earlier query must not close the writer of the next query.
+	resetWriter := func(dq *duckDbQuery, err error) {
+		dq.setDone()                  // before the close, so a reader at EOF sees a done query
+		dq.writer.CloseWithError(err) // nil err is a plain Close
+		if stdOutWriter == dq.writer {
+			stdOutWriter = nil // set as nil until next query start
 		}
 	}
 
 	duck.Proc.SetScanner(func(stderr bool, line string) {
+		if stderr {
+			duck.stderrTail.add(line)
+		}
+
 		// snapshot once, newQuery can swap it concurrently
 		dq := duck.getQuery()
 		if dq == nil || dq.isDone() {
@@ -1400,7 +1482,7 @@ func (duck *DuckDb) initScanner() {
 
 		select {
 		case <-dq.Context.Ctx.Done():
-			resetWriter(dq)
+			resetWriter(dq, dq.Context.Ctx.Err())
 			return
 		default:
 		}
@@ -1423,17 +1505,28 @@ func (duck *DuckDb) initScanner() {
 				mu.Lock()
 				defer mu.Unlock()
 				suffix := g.F("For query => %s", dq.SQL)
-				dq.setErr(g.Error(errString.String() + "\n" + suffix))
+				qErr := g.Error(errString.String() + "\n" + suffix)
+				dq.setErr(qErr)
 				errString.Reset()
-				resetWriter(dq) // in case writer is active
+				resetWriter(dq, qErr) // a stream that is being read ends with the error
 			})
 		} else {
 			if strings.Contains(line, duckDbEOFMarker) {
+				if !dq.isStarted() {
+					// the marker of an earlier query that failed before its output ended
+					return
+				}
 				g.Trace("duckdb scanner: EOF marker seen")
+				if errString.Len() > 0 {
+					return // the error timer ends the query with the error
+				}
+				if eofTimer != nil {
+					eofTimer.Stop()
+				}
 				eofTimer = time.AfterFunc(25*time.Millisecond, func() {
 					mu.Lock()
 					defer mu.Unlock()
-					resetWriter(dq) // since result set ended
+					resetWriter(dq, nil) // since result set ended
 				})
 			} else if strings.Contains(line, duckDbSOFMarker) {
 				g.Trace("duckdb scanner: SOF marker seen")
@@ -1443,7 +1536,7 @@ func (duck *DuckDb) initScanner() {
 				_, err := stdOutWriter.Write([]byte(line + "\n"))
 				if err != nil {
 					dq.setErr(g.Error(err, "Failed to write to stdout pipe"))
-					resetWriter(dq) // since we errored
+					resetWriter(dq, nil) // since we errored
 				}
 			}
 		}
@@ -1460,11 +1553,12 @@ type DuckDbCopyOptions struct {
 	FileSizeBytes      int64
 	GeometryCRS        string  // optional, stamps exported geometry columns with this CRS
 	Columns            Columns // optional, used to decode hex-encoded binary and geometry
+	HexBinary          bool    // binary columns come as hex text (csv), not as blob (arrow)
 }
 
-// buildSelectProjection returns the SELECT list for export. Binary columns
-// (which are streamed through CSV as hex-encoded varchar), it emits
-// `unhex(col)::BLOB AS col` so parquet output preserves true binary type.
+// buildSelectProjection returns the SELECT list for export. For binary columns
+// that come as hex text (HexBinary), it emits `unhex(col)::BLOB AS col` so
+// parquet output preserves true binary type.
 // Geometry columns (hex WKB varchar) are parsed into native geometry so
 // parquet output carries GeoParquet metadata. If neither is present,
 // returns `*`.
@@ -1474,7 +1568,7 @@ func (opts DuckDbCopyOptions) buildSelectProjection() string {
 	}
 	hasConversion := false
 	for _, c := range opts.Columns {
-		if c.IsBinary() || c.Type.IsGeometry() {
+		if (c.IsBinary() && opts.HexBinary) || c.Type.IsGeometry() {
 			hasConversion = true
 			break
 		}
@@ -1493,7 +1587,7 @@ func (opts DuckDbCopyOptions) buildSelectProjection() string {
 				expr = g.F("st_setcrs(%s, '%s')", expr, strings.ReplaceAll(opts.GeometryCRS, "'", "''"))
 			}
 			parts[i] = g.F("%s AS %s", expr, qName)
-		case c.IsBinary():
+		case c.IsBinary() && opts.HexBinary:
 			parts[i] = g.F("unhex(%s)::BLOB AS %s", qName, qName)
 		default:
 			parts[i] = qName
@@ -1811,7 +1905,12 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 		col.Sourced = true
 
 		// fill in precision/scale if decimal
-		if dbType := strings.ToLower(col.DbType); strings.HasPrefix(dbType, "decimal(") {
+		switch dbType := strings.ToLower(col.DbType); {
+		case dbType == "hugeint":
+			col.DbPrecision = 38
+		case dbType == "ubigint":
+			col.DbPrecision = 20
+		case strings.HasPrefix(dbType, "decimal("):
 			dbType = strings.ReplaceAll(dbType, " ", "")
 			precScale := strings.ReplaceAll(dbType, "decimal", "")
 			precScale = strings.Trim(precScale, "()")
@@ -1908,16 +2007,8 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	contentType := "text/csv"
 	format := dbio.FileTypeCsv // default to CSV
 	if sc.Format == dbio.FileTypeArrow {
-		useArrow := true
-		if val := os.Getenv("SLING_DUCKDB_ARROW"); val != "" {
-			useArrow = cast.ToBool(val)
-		}
-		if useArrow {
-			contentType = "application/vnd.apache.arrow.stream"
-			format = dbio.FileTypeArrow
-		} else {
-			g.Debug("duckdb arrow streaming is disabled via SLING_DUCKDB_ARROW, using csv")
-		}
+		contentType = "application/vnd.apache.arrow.stream"
+		format = dbio.FileTypeArrow
 	}
 
 	// create http server to serve data
@@ -1994,8 +2085,29 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		sc.BinaryAsHex = true
 	}
 
+	// the arrow writer buffers rows before it sends bytes, so new rows also
+	// show progress
+	streamDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		last := df.Count()
+		for {
+			select {
+			case <-streamDone:
+				return
+			case <-ticker.C:
+				if count := df.Count(); count != last {
+					last = count
+					duck.TouchQueryActivity()
+				}
+			}
+		}
+	}()
+
 	go func() {
 		defer close(streamPartChn)
+		defer close(streamDone)
 		defer func() {
 			// Shut down HTTP server immediately after all batches are processed
 			// to prevent interference with subsequent DuckDB queries. Use a fresh

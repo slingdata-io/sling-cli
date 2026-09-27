@@ -239,6 +239,7 @@ type ColumnStats struct {
 	UniqCnt      int64  `json:"uniq_cnt,omitempty"`
 	Checksum     uint64 `json:"checksum,omitempty"`
 	LastVal      any    `json:"-"` // last non-empty value. useful for state incremental
+	MaxStr       string `json:"-"` // maximum of a string update key, tracked by the arrow lane
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -373,6 +374,17 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 	return keys
 }
 
+// PrimaryKeyNames returns the names of the columns with the primary key constraint
+// (from schema migration metadata or the columns DSL)
+func (cols Columns) PrimaryKeyNames() (names []string) {
+	for _, col := range cols {
+		if col.IsPrimaryKey() {
+			names = append(names, col.Name)
+		}
+	}
+	return names
+}
+
 // SetKeys sets key columns
 func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 	for _, colName := range colNames {
@@ -413,6 +425,27 @@ func (cols Columns) Sourced() (sourced bool) {
 		}
 	}
 	return sourced
+}
+
+// KeepSourcedTypes sets the types of described on cols, when the two have the
+// same column names. A described type (e.g. json, uuid, decimal precision) is
+// more exact than the type of an Arrow schema.
+func (cols Columns) KeepSourcedTypes(described Columns) Columns {
+	if len(described) != len(cols) {
+		return cols
+	}
+	for i, col := range described {
+		if !col.Sourced || col.Type == "" || !strings.EqualFold(col.Name, cols[i].Name) {
+			return cols
+		}
+	}
+	for i, col := range described {
+		cols[i].Type = col.Type
+		cols[i].DbType = col.DbType
+		cols[i].DbPrecision = col.DbPrecision
+		cols[i].DbScale = col.DbScale
+	}
+	return cols
 }
 
 // GetMissing returns the missing columns from newCols

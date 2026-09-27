@@ -1,0 +1,6 @@
+# nothing here yet
+# add connections below
+connections:
+  FIRST:
+    type: duckdb
+    instance: a.db

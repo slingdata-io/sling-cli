@@ -42,6 +42,13 @@ type SessionOptions struct {
 	ResumeID       string
 	ResumeSet      bool // --resume present (empty id → picker already resolved)
 	NonInteractive map[string]string
+	OnLaunch       func(agent string) // called just before the agent process starts
+}
+
+func (o SessionOptions) notifyLaunch(agent string) {
+	if o.OnLaunch != nil {
+		o.OnLaunch(agent)
+	}
 }
 
 // NestedLaunch reports an already-running CLI agent (or non-TTY stdin).
@@ -170,6 +177,7 @@ func Session(opts SessionOptions) (string, error) {
 	g.Info("submitting prompt to agent %s: %s",
 		env.CyanString(resolvedAgent), env.DarkGrayString(collapseHome(promptPath)))
 	snap := snapshotHarnessFiles(resolvedAgent)
+	opts.notifyLaunch(resolvedAgent)
 	err = LaunchAgent(LaunchOptions{
 		Agent:      resolvedAgent,
 		Prompt:     prompt,
@@ -245,6 +253,7 @@ func resumeSession(opts SessionOptions) (string, error) {
 		return "", g.Error("session %q has no harness session id; cannot resume", e.ID)
 	}
 
+	opts.notifyLaunch(agent)
 	if err := LaunchResume(agent, hid, opts.Model); err != nil {
 		var ae *AgentExitError
 		if errors.As(err, &ae) {
@@ -429,11 +438,8 @@ func isTTY(f *os.File) bool {
 	if f == nil {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	// Not ModeCharDevice: /dev/null is a char device, and agents often attach it as stdin.
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // ResolveAgent picks the agent to launch, in order:

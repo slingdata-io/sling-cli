@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -150,6 +151,8 @@ type Connection interface {
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 	UseADBC() bool
+	SetArrowLane(lane iop.ArrowLane, check LaneSchemaCheck)
+	HasArrowLane() bool
 }
 
 type ConnInfo struct {
@@ -257,7 +260,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		// issue with some drivers not parsing special characters in go escaped format
 		if u.Password() != "" {
 			passwordEncOld := strings.Replace(u.U.User.String(), u.Username()+":", "", 1)
-			passwordEncNew := url.QueryEscape(u.Password())
+			// userinfo does not decode "+" as a space
+			passwordEncNew := strings.ReplaceAll(url.QueryEscape(u.Password()), "+", "%20")
 			URL = strings.Replace(URL, ":"+passwordEncOld+"@", ":"+passwordEncNew+"@", 1)
 		}
 	} else {
@@ -289,6 +293,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &MongoDBConn{URL: URL}
 	} else if strings.HasPrefix(URL, "elasticsearch") {
 		conn = &ElasticsearchConn{URL: URL}
+	} else if strings.HasPrefix(URL, "opensearch") {
+		conn = &OpenSearchConn{URL: URL}
 	} else if strings.HasPrefix(URL, "prometheus") {
 		conn = &PrometheusConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {
@@ -314,12 +320,16 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &D1Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
 		conn = &SQLiteConn{URL: URL}
+	} else if strings.HasPrefix(URL, "dbase:") || strings.HasPrefix(URL, "dbf:") {
+		conn = &DbaseConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
 		conn = &DuckDbConn{URL: URL}
 	} else if strings.HasPrefix(URL, "ducklake:") {
 		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "iceberg:") {
 		conn = &IcebergConn{URL: URL}
+	} else if strings.HasPrefix(URL, "lancedb:") {
+		conn = &LanceDBConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
@@ -328,6 +338,10 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ODBCConn{URL: URL}
 	} else if strings.HasPrefix(URL, "scylladb:") {
 		conn = &ScyllaDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "dynamodb:") {
+		conn = &DynamoDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "firebolt:") {
+		conn = &FireboltConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -382,7 +396,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "databricks"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB:
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer:
 		driverName = "sqlserver"
@@ -553,6 +567,33 @@ func (conn *BaseConn) Template() dbio.Template {
 // UseADBC returns if connection should use ADBC
 func (conn *BaseConn) UseADBC() bool {
 	return cast.ToBool(conn.GetProp("use_adbc"))
+}
+
+// SetArrowLane sets the arrow lane engine on the ADBC sub-connection. It is a
+// no-op for a connection that has no ADBC sub-connection, which keeps the row
+// path in place. The eligibility gate calls it before the read.
+func (conn *BaseConn) SetArrowLane(lane iop.ArrowLane, check LaneSchemaCheck) {
+	if adbcConn, ok := conn.Self().(*ArrowDBConn); ok {
+		adbcConn.SetArrowLane(lane, check)
+		return
+	}
+	if conn.adbc == nil {
+		return
+	}
+	if adbcConn, ok := conn.adbc.(*ArrowDBConn); ok {
+		adbcConn.SetArrowLane(lane, check)
+	}
+}
+
+// HasArrowLane reports whether the connection carries an arrow lane engine.
+func (conn *BaseConn) HasArrowLane() bool {
+	if adbcConn, ok := conn.Self().(*ArrowDBConn); ok {
+		return adbcConn.lane != nil
+	}
+	if adbcConn, ok := conn.adbc.(*ArrowDBConn); ok {
+		return adbcConn.lane != nil
+	}
+	return false
 }
 
 // GetProp returns the value of a property
@@ -896,13 +937,21 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
-	// letting the native drive handle export, which is fast enough generally
+	// letting the native driver handle export, which is fast enough generally
 	// some ADBC drivers do not handle time zones like sling does.
 	// for example, SQL server datetimeoffset is exported as timestamp (looses time zone)
 	// Also, arrow would need to be serialized, just as via driver, so we loose advantage
-	// if conn.UseADBC() {
-	// 	return conn.adbc.BulkExportStream(table)
-	// }
+	//
+	// The arrow lane is the exception: when the eligibility gate marked this
+	// connection as a candidate, the records go straight to the target and no
+	// row is built. The fidelity reason above still holds for the row path,
+	// so a stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.arrowLaneReader(); ok {
+		ds, err = adbcConn.laneExportStream(table.Select())
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return ds, err
+		}
+	}
 
 	g.Trace("BulkExportStream not implemented for %s", conn.GetType())
 	ds, err = conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
@@ -2619,6 +2668,16 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		// time regardless of schema-migration
 		colExplicit := col.IsDDLExplicit() && !temporary
 
+		// NOT NULL for non-nullable columns (schema-migration nullable gate OR explicit modifier).
+		dialectNoNotNull := g.In(conn.Self().GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton)
+		notNull := !temporary && !col.IsNullable() && !dialectNoNotNull && (sm.HasNullableEnabled() || colExplicit)
+
+		// StarRocks requires NOT NULL before AUTO_INCREMENT and DEFAULT
+		notNullFirst := conn.Self().GetType() == dbio.TypeDbStarRocks
+		if notNull && notNullFirst {
+			columnDDL += " NOT NULL"
+		}
+
 		// Add schema migration attributes when enabled and not temporary
 		if sm.IsEnabled() && !temporary {
 			// Auto-increment (before NOT NULL)
@@ -2641,14 +2700,13 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			}
 		}
 
-		// NOT NULL for non-nullable columns (schema-migration nullable gate OR explicit modifier).
-		dialectNoNotNull := g.In(conn.Self().GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton)
-		if !temporary && !col.IsNullable() && !dialectNoNotNull && (sm.HasNullableEnabled() || colExplicit) {
+		if notNull && !notNullFirst {
 			columnDDL += " NOT NULL"
 		}
 
 		// UNIQUE column constraint (explicit modifier, or schema-migration unique gate)
-		if !temporary && col.HasUniqueConstraint() && (colExplicit || sm.HasUniqueEnabled()) {
+		dialectNoUnique := g.In(conn.Self().GetType(), dbio.TypeDbStarRocks)
+		if !temporary && col.HasUniqueConstraint() && !dialectNoUnique && (colExplicit || sm.HasUniqueEnabled()) {
 			columnDDL += " UNIQUE"
 		}
 
@@ -2703,7 +2761,8 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			}
 		}
 
-		if len(pkCols) > 0 {
+		// StarRocks declares keys after the column list (see StarRocksConn.GenerateDDL)
+		if len(pkCols) > 0 && conn.Self().GetType() != dbio.TypeDbStarRocks {
 			pkConstraint := g.F("PRIMARY KEY (%s)", strings.Join(pkCols, ", "))
 			// BigQuery requires NOT ENFORCED for primary keys
 			if conn.Self().GetType() == dbio.TypeDbBigQuery {
@@ -4260,4 +4319,28 @@ type ODBCConn struct {
 	URL          string
 	templateType dbio.Type // Underlying database type for templates
 	templateConn Connection
+}
+
+// stageFileFormat returns the file format a staged loader writes.
+//
+// The Arrow lane always writes Parquet: its staged COPY runs with a parquet
+// file format, and the records go straight to the parquet writer (D9). The
+// row path keeps its base format, defaulting to CSV, so the CSV bytes are
+// unchanged. base is the loader's own default: the `format` conn prop for
+// Snowflake and Databricks, and CSV for Redshift's S3 import.
+func stageFileFormat(df *iop.Dataflow, base dbio.FileType) dbio.FileType {
+	if df.ArrowOnly() {
+		return dbio.FileTypeParquet
+	}
+	if g.In(base, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		return base
+	}
+	return dbio.FileTypeCsv
+}
+
+// stageDuckDbCompute reports whether a Parquet staged write should merge the
+// dataflow into DuckDB first. The Arrow lane writes records straight to
+// Parquet, so it never merges (D10).
+func stageDuckDbCompute(df *iop.Dataflow) bool {
+	return env.UseDuckDbCompute() && !df.ArrowOnly()
 }

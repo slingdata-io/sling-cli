@@ -115,6 +115,7 @@
 
 - id: 561
   name: 'sling run -j applies the job streams and mode'
+  group: sqlite
   run: |
     DIR=$(mktemp -d)
     cd "$DIR"
@@ -137,6 +138,7 @@
 
 - id: 562
   name: 'sling run <key> resolves a bare manifest key'
+  group: sqlite
   run: |
     DIR=$(mktemp -d)
     cd "$DIR"
@@ -154,6 +156,7 @@
 
 - id: 563
   name: 'a file path shadowing a job key wins over the key'
+  group: sqlite
   run: |
     DIR=$(mktemp -d)
     cd "$DIR"

@@ -11,6 +11,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -100,10 +101,12 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 		if err != nil {
 			return g.Error(err, "No Google credentials provided or could not find Application Default Credentials.")
 		}
-		// Do NOT use option.WithCredentials — storage.NewClient appends
-		// WithAuthCredentials internally (google.golang.org/api >= v0.258.0) and
-		// collides with "multiple credential options provided".
-		authOption = option.WithTokenSource(creds.TokenSource)
+		// Do NOT pass any credential option (WithCredentials / WithCredentialsFile /
+		// WithTokenSource): storage.NewClient calls AuthCreds internally and appends
+		// WithAuthCredentials, which google.golang.org/api v0.258.0 counts as a second
+		// credential option, yielding "multiple credential options provided".
+		// An authenticated HTTP client is not counted as a credential option.
+		authOption = option.WithHTTPClient(oauth2.NewClient(fs.Context().Ctx, creds.TokenSource))
 	}
 
 	fs.bucket = fs.GetProp("BUCKET")

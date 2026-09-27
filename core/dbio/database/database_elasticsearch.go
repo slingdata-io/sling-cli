@@ -436,9 +436,14 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 		return io.EOF
 	}
 
-	// Get next batch if needed
-	if d.searchResponse == nil || (d.hits == nil || d.currentHit >= len(d.hits)) {
-		if d.searchResponse == nil {
+	// Fetch a new page only when the current batch is exhausted.
+	// The initial search response is page 1; subsequent pages come from scroll.
+	if d.hits == nil || d.currentHit >= len(d.hits) {
+		var resp map[string]any
+		if d.searchResponse != nil {
+			resp = d.searchResponse
+			d.searchResponse = nil
+		} else {
 			// Get the next batch of results using the scroll ID
 			res, err := d.conn.Client.Scroll(
 				d.conn.Client.Scroll.WithContext(d.ctx),
@@ -449,22 +454,20 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 				return g.Error(err, "error scrolling results")
 			}
 
-			if err := json.NewDecoder(res.Body).Decode(&d.searchResponse); err != nil {
+			if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 				res.Body.Close()
 				return g.Error(err, "error decoding scroll response")
 			}
 			res.Body.Close()
 
 			// Update scroll ID for next batch
-			newScrollID, ok := d.searchResponse["_scroll_id"].(string)
-			if !ok {
-				return io.EOF
+			if newScrollID, ok := resp["_scroll_id"].(string); ok {
+				d.scrollID = newScrollID
 			}
-			d.scrollID = newScrollID
 		}
 
 		// Get hits from response
-		hits, ok := d.searchResponse["hits"].(map[string]any)
+		hits, ok := resp["hits"].(map[string]any)
 		if !ok {
 			return g.Error("hits not found in response")
 		}
@@ -480,7 +483,6 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 
 		d.hits = hitsArray
 		d.currentHit = 0
-		d.searchResponse = nil
 	}
 
 	// Get next hit

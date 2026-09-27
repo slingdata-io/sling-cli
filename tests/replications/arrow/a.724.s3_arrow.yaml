@@ -1,0 +1,24 @@
+# arrow lane CLI suite case 724: database -> S3 Arrow file.
+#
+# env: SOURCE, SCHEMA, KEEP_TARGET (set by the suite entry). Needs AWS_S3.
+source: '{SOURCE}'
+target: AWS_S3
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: arrow
+
+hooks:
+  end:
+    - type: delete
+      if: 'env.KEEP_TARGET == "false"'
+      location: 'aws_s3/temp/arrow_lane_724.arrow'
+
+streams:
+  '{SCHEMA}.arrow_src':
+    object: 's3://ocral-data-1/temp/arrow_lane_724.arrow'
+
+env:
+  SOURCE: ${SOURCE}
+  SCHEMA: ${SCHEMA}

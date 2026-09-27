@@ -1,0 +1,28 @@
+# arrow lane CLI suite case 726: CDC group phase B (phase 3).
+#
+# env: SCHEMA, KEEP_TARGET (set by the suite entry). Synthetic change-capture
+# events from MySQL into Postgres ADBC: the shared reader caches the batches
+# to an Arrow file and phase B replays it through the lane. Needs MYSQL and
+# POSTGRES_ADBC.
+source: MYSQL
+target: POSTGRES_ADBC
+
+defaults:
+  mode: incremental
+  primary_key: [id]
+  target_options:
+    merge_strategy: change_capture
+
+hooks:
+  end:
+    - type: query
+      if: 'env.KEEP_TARGET == "false"'
+      connection: '{target.name}'
+      query: 'drop table if exists {SCHEMA}.arrow_dst_726'
+
+streams:
+  'select 1 as id, cast(100 as signed) as amount, ''I'' as _sling_synced_op, 1 as _sling_cdc_seq':
+    object: '{SCHEMA}.arrow_dst_726'
+
+env:
+  SCHEMA: ${SCHEMA}

@@ -1,0 +1,106 @@
+# Synthetic CDC against Iceberg: events in _sling_synced_op / _sling_cdc_seq
+# applied via MergeStream (change_capture), not a live binlog.
+source: postgres
+target: '{target}'
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.iceberg_cdc_merge_src;
+        CREATE TABLE public.iceberg_cdc_merge_src (
+          id int primary key,
+          name text,
+          amount int,
+          updated_at timestamp
+        );
+        INSERT INTO public.iceberg_cdc_merge_src (id, name, amount, updated_at) VALUES
+          (1, 'Alice', 100, '2020-01-01 00:00:00'),
+          (2, 'Bob', 200, '2020-01-01 00:00:00'),
+          (3, 'Charlie', 300, '2020-01-01 00:00:00');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: check
+      id: target_check
+      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql" && lower(target.name) != "iceberg_glue"
+      failure_message: skipping duckdb verify for {target.name}
+      on_failure: break
+
+    - type: query
+      connection: '{target}'
+      query: |
+        select count(*) as cnt, count(distinct id) as did from iceberg_catalog.public.iceberg_cdc_merge
+      into: counts
+
+    - type: log
+      message: 'iceberg cdc counts => { store.counts[0] }'
+
+    - type: check
+      check: int_parse(store.counts[0].cnt) == 3
+      message: 'expected 3 rows (1 updated, 1 deleted, 1 inserted, 1 unchanged), got {store.counts[0].cnt}'
+
+    - type: check
+      check: int_parse(store.counts[0].did) == 3
+      message: 'duplicate PKs after CDC merge'
+
+    - type: query
+      connection: '{target}'
+      query: select name, amount from iceberg_catalog.public.iceberg_cdc_merge where id = 1
+      into: row_1
+
+    - type: check
+      check: store.row_1[0].name == "Alice Final"
+      message: "id=1 should be Alice Final, got '{store.row_1[0].name}'"
+
+    - type: query
+      connection: '{target}'
+      query: select count(*) as cnt from iceberg_catalog.public.iceberg_cdc_merge where id = 2
+      into: row_2
+
+    - type: check
+      check: int_parse(store.row_2[0].cnt) == 0
+      message: 'id=2 should be hard-deleted'
+
+    - type: query
+      connection: '{target}'
+      query: select name from iceberg_catalog.public.iceberg_cdc_merge where id = 4
+      into: row_4
+
+    - type: check
+      check: store.row_4[0].name == "Diana"
+      message: "id=4 should be inserted as Diana"
+
+streams:
+  seed:
+    sql: |
+      select id, name, amount, updated_at,
+             'S' as _sling_synced_op,
+             0::bigint as _sling_cdc_seq
+      from public.iceberg_cdc_merge_src
+    object: public.iceberg_cdc_merge
+    mode: full-refresh
+    primary_key: [id]
+
+  cdc_events:
+    sql: |
+      SELECT * FROM (
+        SELECT 1 as id, 'Alice Updated' as name, 150 as amount, now() as updated_at, 'U' as _sling_synced_op, 1::bigint as _sling_cdc_seq
+        UNION ALL SELECT 2, 'Bob', 200, now(), 'D', 2
+        UNION ALL SELECT 4, 'Diana', 400, now(), 'I', 3
+        UNION ALL SELECT 1, 'Alice Final', 175, now(), 'U', 4
+      ) e
+      where {incremental_where_cond}
+    object: public.iceberg_cdc_merge
+    mode: incremental
+    primary_key: [id]
+    update_key: updated_at
+    target_options:
+      merge_strategy: change_capture
+
+env:
+  target: ${TARGET}

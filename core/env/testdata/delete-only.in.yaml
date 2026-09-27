@@ -1,0 +1,8 @@
+# only entry file
+connections:
+  # the one
+  ONLY:
+    type: postgres
+    host: one.example.com
+env:
+  K: v

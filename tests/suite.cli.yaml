@@ -618,14 +618,19 @@
 
 - id: 80
   name: Prometheus buffer fix test
-  run: sling run -d -r tests/replications/r.25.prometheus_buffer.yaml
+  group: duckdb
+  run: |
+    sling run -d -r tests/replications/r.25.prometheus_buffer.yaml
+    sling conns exec duckdb "select name || '=' || type as col_type from parquet_schema('/tmp/output/prometheus_test.parquet/*.parquet') where name in ('timestamp', 'value')"
   streams: 1
   min_rows: 1
   output_contains:
     - 'using range'
     - "changing column type via transform for 'timestamp': bigint => string"
     - "changing column type via transform for 'value': decimal => string"
-    - "'timestamp':'text', 'value':'text'" # the timestamp & value columns were successfully casted to string
+    # the timestamp & value columns were successfully casted to string
+    - 'timestamp=BYTE_ARRAY'
+    - 'value=BYTE_ARRAY'
 
 - id: 81
   name: Prometheus issue 551 (https://github.com/slingdata-io/sling-cli/issues/551)
@@ -677,6 +682,7 @@
 
 - id: 86
   name: MSSQL to parquet overwrite fix (https://github.com/slingdata-io/sling-cli/issues/588)
+  group: duckdb
   run: sling run -r tests/replications/r.29.mssql_parquet_overwrite.yaml
   output_contains:
     - 'execution succeeded'
@@ -746,6 +752,7 @@
 
 - id: 93
   name: Test transform functions
+  group: duckdb
   run: sling run -d -r tests/replications/r.35.transform_functions_test.yaml
   output_contains:
     - 'Transform Functions Test Results'
@@ -802,6 +809,7 @@
 
 - id: 100
   name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
+  group: duckdb
   run: |
     sling run -d -r tests/replications/r.42.mssql_exclude_column_issue607.yaml
   output_contains:
@@ -1402,6 +1410,7 @@
 
 - id: 156
   name: Test mixed-case record key references in transforms (MySQL to local parquet)
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.86.record_key_casing.yaml'
   streams: 1
   rows: 3
@@ -1468,6 +1477,7 @@
 
 - id: 160
   name: 'Test definition-only mode creates parquet file without data'
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.90.definition_only_file.yaml'
   streams: 1
   rows: 0
@@ -1809,7 +1819,7 @@
   name: 'Schema migration comprehensive (Postgres to DuckDB)'
   run: 'sling run -d tests/pipelines/schema_migration/p.21.sm_pg_duckdb.yaml'
   streams: 5
-  group: duckdb
+  group: duckdb,schema_migration
   output_contains:
     - 'PK constraints found'
     - 'execution succeeded'
@@ -1891,7 +1901,7 @@
   name: 'Schema migration DuckDB indexes fix'
   run: 'sling run -d tests/pipelines/schema_migration/p.28.sm_duckdb_fk_indexes_fix.yaml'
   streams: 1
-  group: schema_migration
+  group: schema_migration,duckdb
   output_contains:
     - 'PK constraints found'
     - 'Indexes found'
@@ -1985,6 +1995,7 @@
 
 - id: 205
   name: CDC merge_cdc strategy - SQLite target
+  group: sqlite
   run: 'sling run -d -p tests/pipelines/cdc/p.39.cdc_merge_sqlite.yaml'
   output_contains:
     - 'CDC merge_cdc SQLite test PASSED'
@@ -2211,12 +2222,10 @@
   output_does_not_contain:
     - 'char(400000)'
 
-# DuckDB Arrow IPC output: DUCKDB_USE_ARROW=true enables binary Arrow IPC streaming
-# from DuckDB instead of CSV text, for better performance on large datasets.
+# DuckDB Arrow IPC output: the default copy_format (arrow) streams binary Arrow IPC
+# from DuckDB instead of CSV text.
 - id: 228
   name: 'DuckDB Arrow IPC output for parquet reads'
-  env:
-    DUCKDB_USE_ARROW: 'true'
   run: 'sling run -d -p tests/pipelines/p.26.duckdb_arrow_ipc_output.yaml'
   output_contains:
     - 'SUCCESS: DuckDB Arrow IPC output produced correct row count'
@@ -2281,7 +2290,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'Target geom column data_type=USER-DEFINED, udt_name=geometry'
     - 'Target row count: 6'
@@ -2386,6 +2395,7 @@
 # description landed correctly (each engine asserts only what it natively emits).
 - id: 246
   name: 'Test column DDL per-engine (master pipeline)'
+  group: duckdb,sqlite
   run: 'sling run -p tests/pipelines/column_ddl/p.columns_ddl.00.master.yaml'
   output_contains:
     - 'SUCCESS: postgres column DDL verified'
@@ -2626,6 +2636,7 @@
 # Requires the ADBC drivers for each database (sling installs them via dbc)
 - id: 316
   name: 'SLING_USE_ADBC routes supported databases through ADBC'
+  group: duckdb
   run: 'sling run -d -p tests/pipelines/p.48.adbc_use_adbc_env.yaml'
   env:
     SLING_USE_ADBC: 'true'
@@ -2638,6 +2649,7 @@
 # issue #787: rows larger than duckdb's 2MB read_csv max_line_size failed the stream
 - id: 317
   name: 'rows larger than the duckdb 2MB max_line_size replicate intact (text + json)'
+  group: duckdb
   run: 'sling run -d -r tests/replications/r.101.duckdb_max_line_size.yaml'
   output_contains:
     - 'SUCCESS: rows larger than the 2MB max_line_size replicated intact'
@@ -2698,6 +2710,7 @@
 # replication path when a pro feature needs it.
 - id: 322
   name: 'ad-hoc CLI flags trigger chunking'
+  group: duckdb
   run: |
     sling conns exec POSTGRES --limit 0 "drop table if exists public.cli_chunk_test"
     sling conns exec POSTGRES --limit 0 "create table public.cli_chunk_test as select g as id, 'v'||g as val from generate_series(1,1000) g"
@@ -2723,6 +2736,7 @@
 
 - id: 324
   name: 'pipeline query state.result + process env fallback'
+  group: duckdb
   env:
     EVAL_ENV_PROBE: eval-ok
   run: sling run -p tests/pipelines/p.50.query_state_and_env.yaml
@@ -2779,7 +2793,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'Parquet geom column type=GEOMETRY, with geometry_crs type=GEOMETRY'
     - 'WKB matches expected plain WKB (no SRID flag)'
@@ -2808,7 +2822,7 @@
 - id: 591
   name: 'BigQuery geography exports to Parquet as native geometry with CRS84 geo metadata (issue 794)'
   run: sling run -d -p tests/pipelines/geom_wkb/p.53.bigquery_geometry_parquet.yaml
-  group: geometry
+  group: geometry,duckdb
   output_contains:
     - 'BQ geography column type=GEOMETRY'
     - 'BQ WKB matches expected plain WKB (lon-lat)'
@@ -2823,7 +2837,7 @@
   run: |
     cd tests/pipelines/postgis
     bash run_docker_test.sh
-  group: postgis
+  group: postgis,duckdb
   output_contains:
     - 'duckdb table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
     - 'ducklake table: geom_type=GEOMETRY point=1 polygon=1 null=1 total=3'
@@ -2851,6 +2865,7 @@
 
 - id: 594
   name: 'DuckDB sql on file keeps its own last column when _sling_stream_url is on (issue 796)'
+  group: duckdb
   run: 'sling run -r tests/replications/r.100.duckdb_sql_stream_url_rename.yaml'
   rows: 5
 
@@ -2940,9 +2955,412 @@
     - 'STEP 1 OK - snapshot loaded 2 rows'
     - 'CDC UUID test PASSED'
 
+# Databricks Unity Catalog Volume file target. Needs DATABRICKS_VOLUME conn.
+# - id: 602
+#   name: 'Postgres to Databricks Volume parquet'
+#   run: 'sling run -d -r tests/replications/r.125.databricks_volume.yaml'
+#   output_contains:
+#     - 'execution succeeded'
+
+# SQL Server BCP rejects `-d` together with a 3-part db.schema.table name.
+# FullName() prefixes the connection database; BCP also always passed `-d`.
+# Same failure as the AEG NCC bulk load (bcp: "The -d database name option
+# is not supported when a 3 part dbtable name is specified").
+- id: 602
+  name: 'SQL Server BCP 3-part name with -d'
+  group: mssql
+  run: 'sling run -d -r tests/replications/r.125.sqlserver_bcp_3part.yaml'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: SQL Server BCP loaded a 3-part target name'
+  output_does_not_contain:
+    - 'The -d database name option is not supported when a 3 part'
+
+# MongoDB date filters, issue #802: the incremental checkpoint was sent as the
+# string ISODate("...") rather than a Date, and `where` ignored Extended JSON
+# {"$date": "..."}. Both fixed in database_mongo.go.
+- id: 603
+  name: 'MongoDB date filters: incremental ISODate() and where $date (issue 802)'
+  group: mongodb
+  run: 'sling run -p tests/pipelines/p.53.mongo_date_filters.yaml'
+  output_contains:
+    - 'control 1 - where + ISODate() => 448 rows'
+    - 'control 2 - where + plain ISO string => 448 rows'
+    - 'OK bug 2 fixed: Extended JSON $date matched all 448 documents'
+    - 'OK bug 1 fixed: incremental checkpoint matched 445 documents'
+    - 'SUCCESS: both issue 802 MongoDB date filter bugs are fixed'
+
+- id: 604
+  name: Run sling iceberg_r2 incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_r2
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - iceberg merge counts
+    - execution succeeded
+
+- id: 605
+  name: Run sling iceberg_s3 incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_s3
+  after: [604]
+  output_contains:
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 606
+  name: Run sling iceberg_sql incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_sql
+  after: [605]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 607
+  name: Run sling iceberg_glue incremental merge
+  run: |
+    sling run -d -r tests/replications/r.126.iceberg_incremental_merge.yaml
+  env:
+    TARGET: iceberg_glue
+  after: [606]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - execution succeeded
+
+- id: 608
+  name: Run sling iceberg_r2 synthetic CDC merge
+  run: |
+    sling run -d -r tests/replications/r.127.iceberg_cdc.yaml
+  env:
+    TARGET: iceberg_r2
+  after: [604]
+  output_contains:
+    - iceberg merge engine=go
+    - committed iceberg snapshot
+    - iceberg cdc counts
+    - execution succeeded
+
+# LanceDB: fully local (path-backed namespace), so the test sets up its own
+# connection in a temp home dir and needs no external credentials.
+- id: 617
+  name: 'Run sling lancedb full refresh, merge and CDC'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    NAMESPACE_DIR=$(mktemp -d)/nested/lancedb
+    sling conns set --home-dir "$HOME_DIR" LANCEDB_TEST --type lancedb path="$NAMESPACE_DIR"
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.128.lancedb_full_refresh.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.129.lancedb_merge.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.130.lancedb_cdc_seed.yaml
+    sling run --home-dir "$HOME_DIR" -r tests/replications/r.131.lancedb_cdc.yaml
+    sling run --home-dir "$HOME_DIR" --src-conn LANCEDB_TEST --src-stream "select 'cdc_counts' as marker, count(*) as cnt, count(distinct id) as did from main.lancedb_cdc_test" --stdout
+    sling run --home-dir "$HOME_DIR" --src-conn LANCEDB_TEST --src-stream "select id, name from main.lancedb_cdc_test order by id" --stdout
+  output_contains:
+    - 'cdc_counts,3,3'
+    - '1,Alice Final'
+    - '5,Eve'
+    - execution succeeded
+
+# DynamoDB: needs a DynamoDB Local endpoint. The CI step starts one and sets the
+# DYNAMODB connection (type dynamodb, endpoint, region and dummy credentials).
+# The pipeline seeds its own sources and asserts every scenario with checks:
+# full refresh, upsert, composite key, limited read, incremental, and
+# delete_missing soft/hard.
+- id: 618
+  name: 'Run sling dynamodb pipeline'
+  group: dynamodb
+  run: sling run -p tests/pipelines/p.54.dynamodb.yaml
+  output_contains:
+    - 'upsert: 18 rows, 18 distinct ids (expect 18, 18)'
+    - 'composite key slice: 3 rows (expect 3)'
+    - 'incremental: 20 rows, 20 distinct ids, max code 20 (expect 20, 20, 20)'
+    - 'soft delete: 3 rows, 1 flagged, row 3 flagged 1'
+    - 'hard delete: 2 rows, row 3 present 0'
+    - 'SUCCESS: DynamoDB full refresh, upsert, composite key, incremental and delete_missing all verified'
+    - execution succeeded
+
+# dBase (.dbf): read-only tables backed by plain files, so the test sets up its
+# own connection in a temp home dir and needs no external credentials.
+- id: 619
+  name: 'Read dBase (.dbf) tables'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    sling conns set --home-dir "$HOME_DIR" DBF_TEST --type dbase path=core/dbio/database/test/dbf
+    SLING_ROW_CNT= sling conns exec --home-dir "$HOME_DIR" DBF_TEST 'select "Point_ID", "Max_PDOP" from "dbase_03" limit 3'
+    SLING_ROW_CNT= sling conns exec --home-dir "$HOME_DIR" DBF_TEST 'select "EXPENSECAT", "EXPENSECA2" from "expense categories" limit 2'
+    sling run --home-dir "$HOME_DIR" --src-conn DBF_TEST --src-stream dbase_03 --tgt-conn LOCAL --tgt-object "file://$(mktemp -d)/dbase_03.csv" --mode full-refresh
+    SLING_ROW_CNT= sling run --home-dir "$HOME_DIR" --src-conn DBF_TEST --src-stream 'select "PRODNAME", "DESC" from "TEST"' --stdout
+  rows: 14
+  streams: 1
+  output_contains:
+    - '0507121'
+    - 'Meals'
+    - 'PRODUCT DESCRIPTION'
+    - execution succeeded
+
+# The workbench server (plan 6.17, 3.15): the command's help, and a smoke test
+# that starts it on a free port, asks /healthz and stops it. The temp home keeps
+# the run out of the real ~/.sling.
+- id: 620
+  name: 'Serve workbench help'
+  run: sling serve workbench --help
+  output_contains:
+    - 'Run the Sling workbench'
+    - '--token'
+
+- id: 621
+  name: 'Serve workbench starts, answers healthz and stops'
+  run: |
+    HOME_DIR=$(mktemp -d)
+    LOG=$(mktemp)
+    SLING_HOME_DIR="$HOME_DIR" sling serve workbench --no-browser --port 0 > "$LOG" 2>&1 &
+    PID=$!
+    PORT=""
+    for _ in $(seq 1 60); do
+      PORT=$(sed -n 's|.*workbench listening on http://127.0.0.1:\([0-9]*\).*|\1|p' "$LOG" | head -1)
+      [ -n "$PORT" ] && break
+      sleep 0.5
+    done
+    if [ -z "$PORT" ]; then
+      cat "$LOG"
+      kill "$PID" 2>/dev/null || true
+      exit 1
+    fi
+    BODY=$(curl -fsS "http://127.0.0.1:$PORT/healthz")
+    kill "$PID" 2>/dev/null || true
+    wait "$PID" 2>/dev/null || true
+    echo "healthz=$BODY"
+  output_contains:
+    - 'healthz=ok'
+
+# Bug d694bc25d2138b6e: the DuckDB sidecar dies during the parquet COPY and
+# procDeathErr (duckdb.go) fails the task with no retry. The test kills the
+# sidecar once with SIGKILL (OOM killer, external kill). The streamed source
+# rows are gone, so sling runs the task again with a new sidecar.
+- id: 622
+  name: 'duckdb sidecar killed during parquet write recovers'
+  rows: 1000000
+  run: |
+    mkdir -p temp/duck_death
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
+    PID=$!
+    # sling starts short-lived duckdb processes first; wait for one that lives 2s
+    DUCK=""
+    SEEN=0
+    for _ in $(seq 1 600); do
+      CUR=$(pgrep -P "$PID" duckdb | head -1 || true)
+      if [ -n "$CUR" ] && [ "$CUR" = "$DUCK" ]; then SEEN=$((SEEN + 1)); else DUCK=$CUR; SEEN=0; fi
+      [ "$SEEN" -ge 20 ] && break
+      sleep 0.1
+    done
+    [ "$SEEN" -ge 20 ] || { echo 'FAIL: duckdb sidecar not found' >&2; exit 1; }
+    kill -9 "$DUCK"
+    echo "killed duckdb sidecar $DUCK" >&2
+    wait "$PID"
+  output_contains:
+    - 'duckdb process died, retrying the task once'
+    - 'execution succeeded'
+
+# Bug d694bc25d2138b6e: a console interrupt (Ctrl-C, Windows exit status
+# 0xc000013a) reaches sling and the sidecar together. The sidecar exits first,
+# and sling reported a duckdb failure, not a cancellation. The sidecar now runs
+# in its own process group. The test sends SIGINT to sling's process group.
+# Expected: the run fails as interrupted.
+- id: 623
+  name: 'console interrupt during duckdb parquet write is a cancellation'
+  err: true
+  run: |
+    set -m
+    mkdir -p temp/duck_death
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
+    PID=$!
+    # sling starts short-lived duckdb processes first; wait for one that lives 2s
+    DUCK=""
+    SEEN=0
+    for _ in $(seq 1 600); do
+      CUR=$(pgrep -P "$PID" duckdb | head -1 || true)
+      if [ -n "$CUR" ] && [ "$CUR" = "$DUCK" ]; then SEEN=$((SEEN + 1)); else DUCK=$CUR; SEEN=0; fi
+      [ "$SEEN" -ge 20 ] && break
+      sleep 0.1
+    done
+    [ "$SEEN" -ge 20 ] || { echo 'FAIL: duckdb sidecar not found' >&2; exit 1; }
+    kill -INT -- "-$PID"
+    echo "sent SIGINT to process group $PID" >&2
+    wait "$PID"
+  output_contains:
+    - 'sent SIGINT to process group'
+    - 'interrupting...'
+  output_does_not_contain:
+    - 'duckdb process exited before query completed'
+
+# ADBC MySQL target: use_adbc routes the bulk load through the ADBC ingest.
+# Requires MYSQL_ADBC (type mysql, use_adbc: true) and the mysql ADBC driver.
+- id: 624
+  name: 'ADBC MySQL write, type matrix and incremental merge'
+  run: |
+    TARGET=MYSQL_ADBC SCHEMA=mysql sling run -d -r tests/replications/r.79.adbc_write.yaml
+    TARGET=MYSQL_ADBC SCHEMA=mysql sling run -d -r tests/replications/r.132.adbc_mysql_clickhouse_types.yaml
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'ADBC types test completed successfully for MYSQL_ADBC'
+    - 'mysql_adbc-adbc-'
+
+# ADBC ClickHouse target: the driver speaks the HTTP interface and supports
+# only append ingest, into the table that sling creates.
+# Requires CLICKHOUSE_ADBC (type clickhouse, use_adbc: true) and the clickhouse ADBC driver.
+- id: 625
+  name: 'ADBC ClickHouse write, type matrix and incremental merge'
+  run: |
+    TARGET=CLICKHOUSE_ADBC SCHEMA=default sling run -d -r tests/replications/r.79.adbc_write.yaml
+    TARGET=CLICKHOUSE_ADBC SCHEMA=default sling run -d -r tests/replications/r.132.adbc_mysql_clickhouse_types.yaml
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'ADBC types test completed successfully for CLICKHOUSE_ADBC'
+    - 'clickhouse_adbc-adbc-'
+
+# ADBC ClickHouse source (type adbc) into an ADBC MySQL target.
+# Requires ADBC_CLICKHOUSE (type adbc, driver_name clickhouse) and MYSQL_ADBC.
+- id: 626
+  name: 'ADBC ClickHouse source to ADBC MySQL target'
+  run: |
+    sling run -d --src-conn ADBC_CLICKHOUSE --src-stream "select number as id, concat('row_', toString(number)) as name, toDateTime64('2024-01-15 10:30:45', 6, 'UTC') + number as ts from numbers(50000)" --tgt-conn MYSQL_ADBC --tgt-object mysql.adbc_ch_to_my_626 --mode full-refresh
+    sling conns exec MYSQL_ADBC "select concat('count=', count(*), ' max_ts=', max(ts)) as res from mysql.adbc_ch_to_my_626"
+    sling conns exec MYSQL_ADBC "drop table mysql.adbc_ch_to_my_626"
+  output_contains:
+    - 'inserted 50000 rows'
+    - 'count=50000 max_ts=2024-01-16 00:24:04'
+
+# StarRocks target: SLING_SCHEMA_MIGRATION=primary_key without a stream primary_key.
+# User report (v1.6.3): sling added _sling_row_id as hash key and an inline
+# PRIMARY KEY clause, which StarRocks rejects (Error 1064). The source primary
+# key must make a Primary Key table.
+- id: 627
+  name: 'StarRocks schema migration primary_key DDL'
+  run: 'sling run -d -r tests/replications/r.133.starrocks_schema_migration_pk.yaml'
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'StarRocks schema migration PK test passed'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'Error 1064'
+
+# StarRocks target: incremental + primary_key + delete_missing: soft.
+# Repro (user report, v1.6.3): the first run into a new table failed with
+# "could not find column id in table". Fixed in cf5430c8 (column refresh).
+# The second run soft-deletes the row that is missing in the source.
+- id: 628
+  name: 'StarRocks delete_missing soft'
+  group: starrocks_dm
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01'),(2,'bob',20.00,'2024-01-02'),(3,'carol',30.25,'2024-01-03')"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec postgres "DELETE FROM public.sr_dm_orders WHERE id = 2; UPDATE public.sr_dm_orders SET updated_at = '2024-02-01', amount = 99 WHERE id = 3"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "select concat('soft_deleted=', count(*)) as res from public.sr_dm_orders where _sling_deleted_at is not null and id = 2"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders"
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'soft_deleted=1'
+  output_does_not_contain:
+    - 'could not find column'
+    - 'could not delete missing records'
+
+# StarRocks target: incremental run with zero new rows (with fe_url / Stream Load).
+# Stream Load of an empty batch must not fail with
+# "No partitions have data available for loading" (empty_load_as_error).
+- id: 629
+  name: 'StarRocks incremental with no new rows'
+  group: starrocks_dm
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01')"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling run -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling run -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders"
+  conns:
+    - postgres
+    - starrocks
+  output_does_not_contain:
+    - 'No partitions have data available for loading'
+    - 'execution failed'
+
+# Schema migration - PostgreSQL to StarRocks (all attributes)
+- id: 630
+  name: 'Schema migration comprehensive (Postgres to StarRocks)'
+  run: 'sling run -d tests/pipelines/schema_migration/p.32.sm_pg_starrocks.yaml'
+  streams: 5
+  group: schema_migration
+  output_contains:
+    - 'PK constraints found: 5'
+    - 'Identity columns found'
+    - 'Non-nullable columns found'
+    - 'Default values found'
+    - 'Indexes found'
+    - 'FK constraints found: 3'
+    - 'Column descriptions found'
+    - 'Table descriptions found'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'could not apply'
+    - 'Error 1064 (HY000): Getting syntax error'
+
+# Bug 203eb1e47c4a161a: a cancel during a SQL Server BCP load ran the cleanup
+# while bcp still wrote. The cleanup dropped the _tmp table under bcp, and the
+# run failed with "Invalid object name ..._tmp", not as interrupted.
+# The test sends SIGINT to sling only, so bcp gets no signal from the shell.
+# Expected: the run is interrupted, and the _tmp table is dropped.
+- id: 792
+  name: 'cancel during SQL Server bcp load is an interrupt, not a tmp table failure'
+  err: true
+  run: |
+    sling conns exec MSSQL "IF OBJECT_ID(N'dbo.cancel_792',N'U') IS NOT NULL DROP TABLE dbo.cancel_792"
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 3000000) g' --tgt-conn MSSQL --tgt-object dbo.cancel_792 --mode full-refresh &
+    PID=$!
+    BCP=""
+    for _ in $(seq 1 600); do
+      BCP=$(pgrep -P "$PID" bcp | head -1 || true)
+      [ -n "$BCP" ] && break
+      sleep 0.1
+    done
+    [ -n "$BCP" ] || { echo 'FAIL: bcp process not found' >&2; exit 1; }
+    sleep 3
+    kill -INT "$PID"
+    echo "sent SIGINT to sling $PID" >&2
+    RC=0
+    wait "$PID" || RC=$?
+    sling conns exec MSSQL "select concat('tmp_left=', count(*)) as res from sys.tables where name = 'cancel_792_tmp'"
+    exit $RC
+  output_contains:
+    - 'sent SIGINT to sling'
+    - 'Execution interrupted'
+    - 'tmp_left=0'
+  output_does_not_contain:
+    - 'Invalid object name'
+    - 'SQL Server BCP Import Error'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml
 - suite: suite.cli.conns.yaml
+- suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml

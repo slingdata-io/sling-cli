@@ -1,0 +1,7 @@
+connections:
+  # add entries here
+  FIRST:
+    type: duckdb
+    instance: a.db
+env:
+  K: v

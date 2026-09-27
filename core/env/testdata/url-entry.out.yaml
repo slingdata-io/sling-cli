@@ -1,0 +1,6 @@
+# url-style connection
+connections:
+  # kept as one line
+  PG_URL: postgres://user:pass@db.example.com:5432/mydb
+env:
+  K: v

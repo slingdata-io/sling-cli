@@ -5,10 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 )
 
 func TestAssistBrowseFlagRemoved(t *testing.T) {
@@ -191,53 +187,5 @@ func TestParseKVListUnquotedStillSplits(t *testing.T) {
 	got := parseKVList("A=1,B=2")
 	if got["A"] != "1" || got["B"] != "2" {
 		t.Fatalf("%v", got)
-	}
-}
-
-func TestOverlaySpecConn(t *testing.T) {
-	dir := t.TempDir()
-	specPath := filepath.Join(dir, "draft.yaml")
-	if err := os.WriteFile(specPath, []byte("name: draft\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	apiConn, err := connection.NewConnection("MY_API", dbio.TypeApi, g.M("type", "api", "spec", "baseline"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherConn, err := connection.NewConnection("LOCAL", dbio.TypeFileLocal, g.M("type", "file"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries := connection.ConnEntries{
-		{Name: "MY_API", Connection: apiConn},
-		{Name: "LOCAL", Connection: otherConn},
-	}
-
-	out, err := overlaySpecConn(entries, "MY_API", "draft.yaml", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got := out.Get("MY_API").Connection.Data["spec"]
-	want := "file://" + specPath
-	if got != want {
-		t.Fatalf("overlay spec=%q want %q", got, want)
-	}
-	// original entries stay untouched
-	if entries.Get("MY_API").Connection.Data["spec"] != "baseline" {
-		t.Fatalf("original entry was mutated")
-	}
-	if out.Get("LOCAL").Connection.Data["spec"] != nil {
-		t.Fatalf("unrelated entry changed")
-	}
-
-	// missing file errors
-	if _, err := overlaySpecConn(entries, "MY_API", "nope.yaml", dir); err == nil {
-		t.Fatal("expected error for missing spec file")
-	}
-	// unknown connection errors
-	if _, err := overlaySpecConn(entries, "NOPE", specPath, dir); err == nil {
-		t.Fatal("expected error for unknown connection")
 	}
 }

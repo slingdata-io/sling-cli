@@ -1,0 +1,59 @@
+# Repro: SLING_SCHEMA_MIGRATION=primary_key with a StarRocks target.
+# No primary_key on the stream, so sling adds _sling_row_id as the hash key
+# and then appends an inline PRIMARY KEY clause that StarRocks rejects.
+source: postgres
+target: starrocks
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sr_sm_orders;
+        CREATE TABLE public.sr_sm_orders (
+          id BIGINT PRIMARY KEY,
+          customer VARCHAR(100) NOT NULL,
+          amount DECIMAL(10,2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO public.sr_sm_orders (id, customer, amount) VALUES
+          (1, 'alice', 10.50), (2, 'bob', 20.00), (3, 'carol', 30.25);
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.sr_sm_orders
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from public.sr_sm_orders
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].cnt) == 3
+      failure_message: 'expected 3 rows, got {store.result[0].cnt}'
+
+    - type: log
+      message: 'StarRocks schema migration PK test passed'
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.sr_sm_orders
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.sr_sm_orders
+
+defaults:
+  mode: full-refresh
+
+streams:
+  public.sr_sm_orders:
+    object: public.sr_sm_orders
+
+env:
+  SLING_SCHEMA_MIGRATION: primary_key

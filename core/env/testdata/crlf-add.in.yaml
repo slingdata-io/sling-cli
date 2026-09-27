@@ -1,0 +1,10 @@
+# header
+connections:
+
+  # the entry
+  A:
+    type: postgres
+    host: a.example.com
+
+env:
+  K: v

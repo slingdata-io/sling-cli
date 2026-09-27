@@ -55,3 +55,10 @@ brews:
 
     homepage: https://slingdata.io/
     description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."
+    service: |
+      run [opt_bin/"sling", "serve", "workbench", "--no-browser"]
+      keep_alive true
+      working_dir Dir.home
+      log_path var/"log/sling-workbench.log"
+      error_log_path var/"log/sling-workbench.log"
+      environment_variables PATH: std_service_path_env

@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v3"
@@ -32,11 +34,127 @@ func MergeConnProps(existing, incoming map[string]any) map[string]any {
 	return out
 }
 
+// EnvVarNameOf builds the canonical env var name for a connection field.
+func EnvVarNameOf(connName, key string) string {
+	name := sanitizeEnvVarPart(connName)
+	prop := sanitizeEnvVarPart(key)
+	return name + "_" + prop
+}
+
+func sanitizeEnvVarPart(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
 // EnvVarRef builds ${<NAME>_<PROP>} for a connection field.
 func EnvVarRef(connName, key string) string {
-	name := strings.ToUpper(strings.TrimSpace(connName))
-	prop := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
-	return "${" + name + "_" + prop + "}"
+	return "${" + EnvVarNameOf(connName, key) + "}"
+}
+
+// PromoteLiteralSecrets replaces literal secret values in props with ${VAR}
+// refs, recording the values to write under `env:` in envUpdates. It returns
+// the promoted prop paths, e.g. []string{"password", "secrets.client_id"}.
+//
+// Secret fields are: top-level keys in env.SecretKeys, and every leaf under a
+// nested `secrets` map (same rule RejectLiteralSecrets applies when refusing).
+// Values that are already ${VAR} refs are left alone, and so are values that
+// equal the expansion of the ref already on disk for that field (existing),
+// so retyping an unchanged secret does not add a plaintext copy to env:.
+func PromoteLiteralSecrets(connName string, props, existing map[string]any, envUpdates map[string]any) (promoted []string) {
+	if props == nil || envUpdates == nil {
+		return nil
+	}
+
+	for _, k := range env.SecretKeys {
+		v, ok := props[k]
+		if !ok || !isLiteralSecret(v) {
+			continue
+		}
+		if ref, ok := existingRefFor(existing[k], cast.ToString(v)); ok {
+			props[k] = ref
+			continue
+		}
+		envUpdates[EnvVarNameOf(connName, k)] = cast.ToString(v)
+		props[k] = EnvVarRef(connName, k)
+		promoted = append(promoted, k)
+	}
+
+	secrets := asAnyMap(props["secrets"])
+	if secrets == nil {
+		return promoted
+	}
+	existingSecrets := asAnyMap(existing["secrets"])
+	keys := lo.Keys(secrets)
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !isLiteralSecret(secrets[k]) {
+			continue
+		}
+		if ref, ok := existingRefFor(existingSecrets[k], cast.ToString(secrets[k])); ok {
+			secrets[k] = ref
+			continue
+		}
+		envKey := EnvVarNameOf(connName, k)
+		if _, taken := envUpdates[envKey]; taken {
+			// leaf name collides with another promoted secret; use the path
+			envKey = EnvVarNameOf(connName, "secrets."+k)
+		}
+		envUpdates[envKey] = cast.ToString(secrets[k])
+		secrets[k] = "${" + envKey + "}"
+		promoted = append(promoted, "secrets."+k)
+	}
+	return promoted
+}
+
+// existingRefFor returns the on-disk ref for a field when literal equals that
+// ref's expansion.
+func existingRefFor(existing any, literal string) (string, bool) {
+	ref, ok := existing.(string)
+	if !ok || !env.IsEnvVarRef(ref) {
+		return "", false
+	}
+	if literal == "" || env.ExpandRef(ref) != literal {
+		return "", false
+	}
+	return ref, true
+}
+
+// PreserveRefs keeps an on-disk ${VAR} ref for any incoming literal value that
+// equals that ref's expansion. The GUI never receives expanded values, but the
+// CLI contract does allow setting a props map with resolved values; keeping the
+// ref keeps the file free of plaintext secrets.
+func PreserveRefs(existing, incoming map[string]any) {
+	if existing == nil || incoming == nil {
+		return
+	}
+	keys := lo.Keys(incoming)
+	sort.Strings(keys)
+	for _, k := range keys {
+		if nested := asAnyMap(incoming[k]); nested != nil {
+			PreserveRefs(asAnyMap(existing[k]), nested)
+			continue
+		}
+		oldRef, ok := existing[k].(string)
+		if !ok || !env.IsEnvVarRef(oldRef) {
+			continue
+		}
+		val, ok := incoming[k].(string)
+		if !ok || env.IsEnvVarRef(val) {
+			continue
+		}
+		if env.ExpandRef(oldRef) == val {
+			incoming[k] = oldRef
+		}
+	}
 }
 
 // NormalizeConnProps parses secrets/inputs YAML strings into maps.
@@ -110,6 +228,31 @@ func isLiteralSecret(v any) bool {
 		return false
 	}
 	return !env.IsEnvVarRef(s)
+}
+
+// ValidateConnProps checks that props can be written as a connection entry:
+// a `url` parses (and implies the type when absent), or a valid `type` is
+// present. SetValidated applies it before the write; the GUI save path, which
+// writes through its own env editor, calls it directly.
+func ValidateConnProps(name string, props map[string]any) error {
+	// parse url
+	if url := cast.ToString(props["url"]); url != "" {
+		conn, uErr := NewConnectionFromURL(name, url)
+		if uErr != nil {
+			return g.Error(uErr, "could not parse url")
+		}
+		if _, ok := props["type"]; !ok {
+			props["type"] = conn.Type.String()
+		}
+	}
+
+	t, found := props["type"]
+	if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
+		return g.Error("invalid type (%s)", cast.ToString(t))
+	} else if !found {
+		return g.Error("need to specify valid `type` key or provide `url`")
+	}
+	return nil
 }
 
 // UnsetEnvRef is a ${VAR} value that g.Rmd did not substitute (var not set).
@@ -272,5 +415,70 @@ func asAnyMap(v any) map[string]any {
 		return out
 	default:
 		return nil
+	}
+}
+
+// The canonical key order of new connection entries written to env.yaml:
+// `type` first, then the property order of core/dbio/templates/_properties.yaml
+// for the entry's type, then the remaining keys (alphabetically, applied by the
+// env package when this registration is absent). The hook lives in core/env,
+// which cannot import core/dbio; registering it here means every binary that
+// reads connections (the CLI, the platform agent, the workbench) writes new
+// entries in the order the templates define.
+func init() {
+	env.TemplateKeyOrder = templateKeyOrder
+}
+
+var (
+	templateOrderOnce sync.Once
+	templateOrder     map[string][]string
+)
+
+// templateKeyOrder returns the template property order of props["type"], or
+// nil when the type is unknown.
+func templateKeyOrder(props map[string]any) []string {
+	connType := strings.ToLower(cast.ToString(props["type"]))
+	if connType == "" {
+		return nil
+	}
+	templateOrderOnce.Do(loadTemplateOrder)
+	return templateOrder[connType]
+}
+
+// loadTemplateOrder reads the property order of every type in
+// _properties.yaml once. Order matters: the file is parsed as a node tree,
+// because a map parse would lose it.
+func loadTemplateOrder() {
+	templateOrder = map[string][]string{}
+	body, err := dbio.ReadTemplateFile("_properties.yaml")
+	if err != nil {
+		return
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(body, &root); err != nil {
+		return
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return
+	}
+	types := root.Content[0]
+	for i := 0; i < len(types.Content)-1; i += 2 {
+		name := strings.ToLower(types.Content[i].Value)
+		typeNode := types.Content[i+1]
+		if typeNode.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j < len(typeNode.Content)-1; j += 2 {
+			if typeNode.Content[j].Value != "properties" || typeNode.Content[j+1].Kind != yaml.MappingNode {
+				continue
+			}
+			props := typeNode.Content[j+1]
+			order := make([]string, 0, len(props.Content)/2)
+			for k := 0; k < len(props.Content)-1; k += 2 {
+				order = append(order, props.Content[k].Value)
+			}
+			templateOrder[name] = order
+			break
+		}
 	}
 }

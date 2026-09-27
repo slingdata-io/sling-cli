@@ -1,0 +1,8 @@
+connections:
+  # the entry
+  A:
+    type: postgres
+    host: changed.example.com
+  B:
+    type: duckdb
+    instance: b.db

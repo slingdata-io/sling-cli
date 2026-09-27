@@ -1,0 +1,59 @@
+# DynamoDB template. DynamoDB is a key-value store with no SQL engine, so this
+# template carries only what sling renders around a run: the incremental and
+# backfill conditions (which the connector turns into the scan's filter
+# expression), the quoting and error-matching values, and the type maps. The
+# `select` is rendered into a JSON scan descriptor that the connector executes
+# through the AWS SDK.
+core:
+  explain: ""
+  # DynamoDB has no views: sling renders `drop view` around target runs, so the
+  # template must render it away instead of emitting unsupported SQL
+  drop_view: ""
+  incremental_select: '{incremental_where_cond}'
+  incremental_where: '{ "update_key": "{update_key}", "value": "{value}" }'
+  backfill_where: '{ "update_key": "{update_key}", "start_value": "{start_value}", "end_value": "{end_value}" }'
+
+variable:
+  quote_char: ''
+  error_filter_table_exists: already
+  error_ignore_drop_table: not found
+  date_layout_str: '{value}'
+  date_layout: '2006-01-02'
+  timestamp_layout_str: '{value}'
+  timestamp_layout: '2006-01-02T15:04:05.000Z'
+  timestampz_layout_str: '{value}'
+  timestampz_layout: '2006-01-02T15:04:05.000Z'
+
+# DynamoDB attribute types (as reported by the connector) to general types
+native_type_map:
+  BOOL: bool
+  B: binary
+  N: decimal
+  S: text
+  NULL: text
+  L: json
+  M: json
+  BS: json
+  NS: json
+  SS: json
+
+# general types to the DDL types the connector parses back out of a CREATE
+# statement (only key columns carry real typing in DynamoDB)
+general_type_map:
+  bigint: number
+  binary: binary
+  bool: bool
+  date: string
+  datetime: string
+  decimal: number
+  float: number
+  integer: number
+  json: json
+  smallint: number
+  string: string
+  text: string
+  time: string
+  timestamp: string
+  timestampz: string
+  timez: string
+  uuid: string

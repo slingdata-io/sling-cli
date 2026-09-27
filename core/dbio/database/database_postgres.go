@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -355,6 +356,15 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 // BulkExportStream uses the bulk dumping (COPY)
 func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// Arrow lane: read through ADBC when the gate marked this connection. A
+	// stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
+		ds, err = adbcConn.laneExportStream(table.Select())
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return ds, err
+		}
+	}
+
 	_, err = exec.LookPath("psql")
 	if err != nil {
 		g.Trace("psql not found in path. Using cursor...")

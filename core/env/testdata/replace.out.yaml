@@ -1,0 +1,29 @@
+# Sling environment file — managed by you.
+# Edits by hand are fine: sling keeps comments and refs.
+connections:
+  # Production warehouse: do not drop without telling data-team
+  PG_PROD:
+    type: postgres
+    # the host of the primary
+    host: db.example.com
+    port: 5432
+    password: ${PG_PROD_PASSWORD}  # set in CI
+    sslmode: require
+  # Staging copy
+  PG_STAGE:
+    type: postgres
+    # the staging host
+    host: stage.db.example.com
+    tls: false
+  # block scalars, flow maps and quoted strings survive
+  DUCK:
+    type: duckdb
+    private_key: |
+      -----BEGIN PRIVATE KEY-----
+      abc123
+      -----END PRIVATE KEY-----
+    tags: {env: dev, tier: "2"}
+    debug: false
+# shared variables
+env:
+  PG_PROD_PASSWORD: hunter2

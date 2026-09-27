@@ -1,0 +1,16 @@
+# LanceDB seed for the synthetic CDC test: a SQL stream from the LanceDB
+# connection itself, so the test needs no other connection.
+source: LANCEDB_TEST
+target: LANCEDB_TEST
+
+defaults:
+  mode: full-refresh
+
+streams:
+  seed:
+    sql: |
+      SELECT 1 as id, 'Alice' as name, 100 as amount, '2020-01-01 00:00:00'::timestamp as updated_at, 'S' as _sling_synced_op, 0::bigint as _sling_cdc_seq
+      UNION ALL SELECT 2, 'Bob', 200, '2020-01-01 00:00:00'::timestamp, 'S', 0
+      UNION ALL SELECT 3, 'Charlie', 300, '2020-01-01 00:00:00'::timestamp, 'S', 0
+    object: main.lancedb_cdc_test
+    primary_key: [id]

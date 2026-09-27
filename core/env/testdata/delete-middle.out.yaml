@@ -1,0 +1,11 @@
+connections:
+  # first
+  A:
+    type: postgres
+    host: a.example.com
+  # last
+  C:
+    type: sqlite
+    instance: c.db
+env:
+  K: v

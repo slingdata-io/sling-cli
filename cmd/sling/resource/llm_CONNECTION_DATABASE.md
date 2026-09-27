@@ -30,7 +30,7 @@ Database operations in Sling provide comprehensive functionality for interacting
 
 ### Supported Database Types
 
-- **Relational**: PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite
+- **Relational**: PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite, dBase
 - **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks
 - **Analytics**: ClickHouse, DuckDB, MotherDuck, StarRocks, Trino, Proton
 - **NoSQL**: MongoDB, ElasticSearch, Prometheus

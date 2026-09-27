@@ -87,6 +87,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
+	dbio.Type("duckdb_csv"):      {name: "duckdb_csv", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckLake:          {name: "ducklake", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_az"):     {name: "ducklake_az", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
@@ -96,6 +97,10 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
+	dbio.TypeDbLanceDB:           {name: "lancedb", schema: "main", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_glue"):    {name: "iceberg_glue", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_s3"):      {name: "iceberg_s3", adjustCol: g.Bool(false)},
+	dbio.Type("iceberg_sql"):     {name: "iceberg_sql", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
@@ -113,11 +118,14 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbDynamoDB:          {name: "dynamodb", schema: "default"},
 	dbio.TypeDbAzureTable:        {name: "azure_table", schema: "default"},
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
+	dbio.TypeDbOpenSearch:        {name: "opensearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbScyllaDB:          {name: "scylladb", schema: "sling"},
+	dbio.TypeDbFirebolt:          {name: "firebolt", schema: "sling_test"},
 
 	dbio.TypeFileLocal:       {name: "local"},
 	dbio.TypeFileSftp:        {name: "sftp"},
@@ -620,10 +628,12 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 	if taskCfg.Target.Options.MergeStrategy != nil {
 		strategy := *taskCfg.Target.Options.MergeStrategy
 		templatePath := g.F("core.merge_%s", strategy)
-		templateValue := connType.GetTemplateValue(templatePath)
+		// the real target type, since connType can be an alias (e.g. duckdb_csv)
+		tgtType := taskCfg.TgtConn.Type
+		templateValue := tgtType.GetTemplateValue(templatePath)
 		if templateValue == "" {
 			t.Skipf("skipping test: merge strategy '%s' not supported by %s (template %s is null)",
-				strategy, connType, templatePath)
+				strategy, tgtType, templatePath)
 			return
 		}
 	}
@@ -653,6 +663,9 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 	// process PostSQL for different drop_view syntax
 	if taskCfg.TgtConn.Type.IsDb() {
 		dbConn, err := taskCfg.TgtConn.AsDatabase()
+		if !g.AssertNoError(t, err) {
+			return
+		}
 		tgtType = dbConn.GetType()
 		if err == nil {
 			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
@@ -669,7 +682,7 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
-			if g.In(connType, dbio.TypeDbIceberg) {
+			if tgtType == dbio.TypeDbIceberg {
 				dropViewSQL = "" // iceberg does not support views
 			}
 
@@ -873,9 +886,11 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 		failed := false
 
 		for colName, correctType := range correctTypeMap {
-			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB) ||
-				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+			// skip those: schemaless stores infer column types from sampled
+			// values, so logical types (decimal/bigint, date/timestamp, tz) are
+			// not preserved end to end
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbScyllaDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbDynamoDB) ||
+				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable, dbio.TypeDbDynamoDB) ||
 				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() ||
 				taskCfg.TgtConn.Type == dbio.TypeDbODBC ||
 				taskCfg.SrcConn.Type == dbio.TypeDbODBC {
@@ -941,6 +956,14 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case tgtType == dbio.TypeDbLanceDB:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // lance stores json as varchar
+				}
+			case srcType == dbio.TypeDbLanceDB && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // lance stores json as varchar
 				}
 			case tgtType == dbio.TypeDbRedshift:
 				if correctType == iop.JsonType {
@@ -1159,23 +1182,28 @@ func TestSuiteDatabaseD1(t *testing.T) {
 func TestSuiteDatabaseDuckDb(t *testing.T) {
 	t.Parallel()
 
-	// DUCKDB
+	// DUCKDB, with the default arrow copy format and with csv
 	testSuite(t, dbio.TypeDbDuckDb)
-	if os.Getenv("DUCKDB_USE_ARROW") == "" {
-		os.Setenv("DUCKDB_USE_ARROW", "true")
-		testSuite(t, dbio.TypeDbDuckDb)
-		os.Setenv("DUCKDB_USE_ARROW", "false")
+	if c := connection.GetLocalConns().Get("DUCKDB"); c.Name != "" {
+		data := g.M("copy_format", "csv")
+		for k, v := range c.Connection.Data {
+			if k != "copy_format" {
+				data[k] = v
+			}
+		}
+		os.Setenv("DUCKDB_CSV", g.Marshal(data))
+		connection.GetLocalConns(true) // to load DUCKDB_CSV
+		testSuite(t, dbio.Type("duckdb_csv"))
 	}
 
 	// MOTHERDUCK
 	testSuite(t, dbio.TypeDbMotherDuck)
 
 	// DUCKLAKE
-	tests := "1-17,19+" // soft-delete is not supported
-	testSuite(t, dbio.TypeDbDuckLake, tests)
-	// testSuite(t, dbio.Type("ducklake_az"), tests)
-	testSuite(t, dbio.Type("ducklake_r2"), tests)
-	testSuite(t, dbio.Type("ducklake_s3"), tests)
+	testSuite(t, dbio.TypeDbDuckLake)
+	testSuite(t, dbio.Type("ducklake_az"))
+	testSuite(t, dbio.Type("ducklake_r2"))
+	testSuite(t, dbio.Type("ducklake_s3"))
 }
 
 func TestSuiteDatabaseExasol(t *testing.T) {
@@ -1201,8 +1229,30 @@ func TestSuiteDatabaseAthena(t *testing.T) {
 
 func TestSuiteDatabaseIceberg(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8")
-	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
+	// 5 = truncate (not supported). 9-12 = incremental with views / extra tables.
+	// 18 = delete_missing, needs a SQL UPDATE; IcebergConn.NewTransaction is nil.
+	// 26-29 = merge strategies (insert / update / update_insert / delete_insert),
+	// which now route through MergeStream (equality deletes + row delta).
+	// Incremental-merge and change-capture coverage lives in the CLI suite
+	// (suite.cli.yaml 604-608, r.126 / r.127), not in the numbered db template.
+	tests := "1-4,6-8,26-29"
+	testSuite(t, dbio.TypeDbIceberg, tests)
+	testSuite(t, dbio.Type("iceberg_glue"), tests)
+	testSuite(t, dbio.Type("iceberg_s3"), tests)
+	testSuite(t, dbio.Type("iceberg_sql"), tests)
+}
+
+// TestSuiteDatabaseLanceDb runs the shared DB suite against a LanceDB
+// namespace. Every excluded case depends on the `[table]_vw` view that test 9
+// creates: 10 and 11 discover it, 13 reads it, 19 reads the postgres copy of it
+// (`[table]_pg_vw`), and 22 drops `[table]_vw_pg`. The lance extension keeps
+// views in the session only (CREATE VIEW succeeds but the view is not written
+// into the namespace), so those five cannot pass for any LanceDB target.
+// 18 and 21 (delete_missing) are also excluded: Lance UPDATE and DELETE
+// reject subqueries.
+func TestSuiteDatabaseLanceDb(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbLanceDB, "1-9,12,14-17,20,23-29")
 }
 
 func TestSuiteDatabaseDB2(t *testing.T) {
@@ -1265,6 +1315,90 @@ func TestSuiteDatabaseMongo(t *testing.T) {
 	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
 }
 
+func TestSuiteDatabaseOpenSearch(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbOpenSearch, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+func TestSuiteDatabaseElasticsearch(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbElasticsearch, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+// testSearchConnectorCaps exercises the read capabilities of the ES-family
+// (Elasticsearch / OpenSearch) connectors directly against a live instance:
+// full scroll read (regression guard for multi-page scrolling), limit,
+// incremental (update_key gt), backfill (update_key gte/lte range), and
+// schema/column discovery via the index mapping. The index is expected to hold
+// 1000 docs with a numeric `id` field 1..1000 (seeded from tests/files/test1.csv).
+func testSearchConnectorCaps(t *testing.T, connType dbio.Type, connName, index string) {
+	c := connection.GetLocalConns().Get(connName)
+	if c.Name == "" {
+		t.Skipf("no connection found for %s", connName)
+		return
+	}
+
+	conn, err := c.Connection.AsDatabase()
+	if !g.AssertNoError(t, err) {
+		return
+	}
+	if err = conn.Connect(); !g.AssertNoError(t, err) {
+		return
+	}
+	defer conn.Close()
+
+	streamCount := func(opts map[string]interface{}) int {
+		ds, err := conn.StreamRows(index, opts)
+		if !g.AssertNoError(t, err) {
+			return -1
+		}
+		data, err := ds.Collect(0)
+		if !g.AssertNoError(t, err) {
+			return -1
+		}
+		return len(data.Rows)
+	}
+
+	// full read: must return every doc across all scroll pages (guards the
+	// scroll-pagination bug where only ~1 doc per page was yielded)
+	assert.Equal(t, 1000, streamCount(map[string]interface{}{}), "full scroll read (%s)", connType)
+
+	// limit: caps the number of returned rows
+	assert.Equal(t, 50, streamCount(map[string]interface{}{"limit": 50}), "limited read (%s)", connType)
+
+	// incremental: update_key range gt -> ids 501..1000
+	assert.Equal(t, 500, streamCount(map[string]interface{}{"update_key": "id", "value": "500"}), "incremental read (%s)", connType)
+
+	// backfill: update_key range gte/lte -> ids 200..400 inclusive
+	assert.Equal(t, 201, streamCount(map[string]interface{}{"update_key": "id", "start_value": "200", "end_value": "400"}), "backfill read (%s)", connType)
+
+	// schema discovery: the index shows up as a schema/table
+	schemas, err := conn.GetSchemas()
+	if g.AssertNoError(t, err) {
+		assert.Contains(t, schemas.ColValuesStr(0), index, "GetSchemas should contain index (%s)", connType)
+	}
+
+	// column discovery: the index mapping is parsed into typed columns
+	schemata, err := conn.GetSchemata(database.SchemataLevelColumn, index)
+	if g.AssertNoError(t, err) {
+		cols := iop.Columns(lo.Values(schemata.Columns()))
+		assert.Greater(t, len(cols), 5, "column discovery from mapping (%s)", connType)
+		names := strings.Join(cols.Names(), ",")
+		assert.Contains(t, strings.ToLower(names), "id", "columns should include id (%s)", connType)
+		assert.Contains(t, strings.ToLower(names), "email", "columns should include email (%s)", connType)
+	}
+}
+
+func TestOpenSearchConnectorCaps(t *testing.T) {
+	t.Parallel()
+	testSearchConnectorCaps(t, dbio.TypeDbOpenSearch, "opensearch", "test1k_opensearch")
+}
+
+func TestElasticsearchConnectorCaps(t *testing.T) {
+	t.Parallel()
+	testSearchConnectorCaps(t, dbio.TypeDbElasticsearch, "elasticsearch", "test1k_elasticsearch")
+}
+
 func TestSuiteDatabaseAzureTable(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbAzureTable, "table_full_refresh_into_postgres,discover_schemas")
@@ -1279,6 +1413,27 @@ func TestSuiteDatabaseScylladb(t *testing.T) {
 	t.Parallel()
 	// skip SQL views/joins/range/delete_missing/merge update-delete (not CQL-compatible)
 	testSuite(t, dbio.TypeDbScyllaDB, "1,3-9,17,20,23-26")
+}
+
+// TestSuiteDatabaseDynamoDB runs the shared DB suite against DynamoDB
+// (DynamoDB Local works: `docker run -p 8000:8000 amazon/dynamodb-local`).
+//
+// DynamoDB has no SQL engine and no views, so the cases that create or read the
+// `[table]_vw` view are out: 9 creates it, 10 and 11 discover it, 13 reads it
+// into postgres and 19 reads the postgres copy of it. Tests 12, 14, 15, 18 and
+// 21 validate against test1.result.csv, which only holds after test 9's upsert,
+// so they depend on that view chain too (18 and 21 also need the rows that test
+// 12 then writes into postgres). Test 22 backfills the range 2020-01-01 to
+// 2021-01-01 while the suite's rows hold `create_dt` values from 2019, so it can
+// never read a row.
+func TestSuiteDatabaseDynamoDB(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbDynamoDB, "1-8,16-17,20,23-29")
+}
+
+func TestSuiteDatabaseFirebolt(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbFirebolt)
 }
 
 // rewriteScyllaDropSQL: add IF EXISTS and quote identifiers
@@ -1633,7 +1788,8 @@ func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbi
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, endpoints, err := conns.Discover(conn.name, &opt)
+	// not the package-level conns: tests can add connections later (e.g. DUCKDB_CSV)
+	files, schemata, endpoints, err := connection.GetLocalConns().Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}

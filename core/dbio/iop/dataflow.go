@@ -2,9 +2,12 @@ package iop
 
 import (
 	"context"
+
+	"github.com/apache/arrow-go/v18/arrow"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flarco/g"
@@ -96,6 +99,23 @@ func (df *Dataflow) SyncedSeqValue() (value int64) {
 // IsClosed is true is ds is closed
 func (df *Dataflow) IsClosed() bool {
 	return df.closed
+}
+
+// ArrowOnly returns true when every stream of the dataflow is an Arrow
+// stream. A dataflow with no streams is not ArrowOnly.
+func (df *Dataflow) ArrowOnly() bool {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+
+	if len(df.Streams) == 0 {
+		return false
+	}
+	for _, ds := range df.Streams {
+		if ds == nil || !ds.ArrowOnly {
+			return false
+		}
+	}
+	return true
 }
 
 // CleanUp refers the defer functions
@@ -534,6 +554,39 @@ func (df *Dataflow) SyncStats() {
 
 			colStats, ok := ds.Sp.colStats[j]
 			if !ok {
+				// Arrow streams never run the cast pass, so they have no
+				// stream-processor stats. Fill the count, the nulls and the
+				// update-key max from the record stream instead.
+				if ds.ArrowOnly {
+					if rs := ds.RecordStream(); rs != nil {
+						dfCols[i].Stats.TotalCnt = dfCols[i].Stats.TotalCnt + int64(atomic.LoadUint64(&ds.Count))
+						if nulls := rs.NullCounts(); j < len(nulls) {
+							dfCols[i].Stats.NullCnt = dfCols[i].Stats.NullCnt + nulls[j]
+						}
+						if idx, val, ok := rs.TrackedMaxString(); ok && idx == j {
+							// a string update key has no int64 form
+							if val > dfCols[i].Stats.MaxStr {
+								dfCols[i].Stats.MaxStr = val
+							}
+						}
+						if idx, val, ok := rs.TrackedMax(); ok && idx == j {
+							dfCols[i].Stats.Max = val
+							dfCols[i].Stats.LastVal = val
+							// Max is in epoch micros for the time types. The
+							// state serializer takes the zone of LastVal, so a
+							// raw int64 there lands the value in Local and
+							// shifts the watermark. Hand it a typed time.
+							if rs.Schema != nil && idx < rs.Schema.NumFields() {
+								switch ts := rs.Schema.Field(idx).Type.(type) {
+								case *arrow.TimestampType:
+									dfCols[i].Stats.LastVal = time.UnixMicro(val).In(arrowTimestampLocation(ts))
+								case *arrow.Date32Type:
+									dfCols[i].Stats.LastVal = time.UnixMicro(val).UTC()
+								}
+							}
+						}
+					}
+				}
 				continue
 			}
 
@@ -607,7 +660,7 @@ func (df *Dataflow) Count() (cnt uint64) {
 	if df != nil && df.Ready {
 		for _, ds := range df.Streams {
 			if ds.Ready {
-				cnt += ds.Count
+				cnt += atomic.LoadUint64(&ds.Count)
 			}
 		}
 	}

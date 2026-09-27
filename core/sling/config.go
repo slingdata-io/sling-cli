@@ -139,8 +139,11 @@ func (cfg *Config) SetDefault() {
 			}
 		}
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
-		cfg.Source.Options.MaxDecimals = g.Int(11)
-		cfg.Target.Options.MaxDecimals = g.Int(11)
+		// the ADBC driver writes typed decimals, the cap is for the native driver
+		if !cast.ToBool(cfg.TgtConn.Data["use_adbc"]) {
+			cfg.Source.Options.MaxDecimals = g.Int(11)
+			cfg.Target.Options.MaxDecimals = g.Int(11)
+		}
 		if cfg.Target.Options.BatchLimit == nil {
 			// set default batch_limit to limit memory usage. Bug in clickhouse driver?
 			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
@@ -737,18 +740,20 @@ func (cfg *Config) Prepare() (err error) {
 
 	// validate capability to write
 	switch cfg.Target.Type {
-	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable, dbio.TypeDbAzureTable:
+	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbBigTable, dbio.TypeDbAzureTable:
 		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
 	case dbio.TypeDbIceberg:
 		switch cfg.Mode {
 		case TruncateMode, BackfillMode:
 			return g.Error("mode '%s' not yet supported for iceberg target.", cfg.Mode)
 		case IncrementalMode:
-			if !cfg.Source.HasUpdateKey() {
-				return g.Error("for mode '%s' with iceberg target, must provided update-key", cfg.Mode)
-			} else if cfg.Source.HasPrimaryKey() {
-				g.Warn("for mode '%s' with iceberg target, primary-key is ineffective, incremental merge is not yet supported (only appends)", cfg.Mode)
-				cfg.Source.PrimaryKeyI = nil // delete PK
+			if !cfg.Source.HasUpdateKey() && !cfg.Source.HasPrimaryKey() {
+				return g.Error("for mode '%s' with iceberg target, must provide update-key and/or primary-key", cfg.Mode)
+			}
+			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
+		case ChangeCaptureMode:
+			if !cfg.Source.HasPrimaryKey() {
+				return g.Error("for mode '%s' with iceberg target, must provide primary-key", cfg.Mode)
 			}
 		}
 	}
@@ -1025,8 +1030,8 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
 				tgtOpts.TableTmp = tableTmp.FullName()
-			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
-				// for duckdb and ducklake, we'll use a temp table, which uses the 'main' schema
+			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
+				// for duckdb, ducklake and lancedb, we'll use a temp table, which uses the 'main' schema
 				tableTmp := makeTempTableName(dbType, table, "_sling_duckdb_tmp")
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
@@ -1571,6 +1576,16 @@ func (cfg *Config) CDCChangeFeed() string {
 		return g.PtrVal(cfg.ReplicationStream.CDCOptions.ChangeFeed)
 	}
 	return ""
+}
+
+func (cfg *Config) icebergNeedsMerge(tgtConn database.Connection) bool {
+	if tgtConn.GetType() != dbio.TypeDbIceberg {
+		return false
+	}
+	if cfg.Mode == ChangeCaptureMode {
+		return true
+	}
+	return cfg.Mode == IncrementalMode && len(cfg.Source.PrimaryKey()) > 0
 }
 
 // CDCSlotLevel returns the effective slot level after applying defaults
