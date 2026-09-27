@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -15,7 +16,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -3739,4 +3742,107 @@ func TestArrowDBConn_MySQLAndClickhouseURI(t *testing.T) {
 	assert.Contains(t, nativeCh.ConnString(), "secure=false")
 
 	assert.Equal(t, dbio.TypeDbClickhouse, GetArrowDBCDriverType("clickhouse"))
+}
+
+// fakeD1 serves a table of `total` rows, and fails like D1 does
+// when one response holds more than `maxRows` rows.
+type fakeD1 struct {
+	total   int
+	maxRows int
+	mux     sync.Mutex
+	queries []string
+}
+
+var fakeD1PageRe = regexp.MustCompile(`limit (\d+) offset (\d+)$`)
+
+func (f *fakeD1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		fmt.Fprint(w, `{"result":[{"uuid":"uuid1","name":"db1"}],"success":true}`)
+		return
+	}
+
+	var payload struct {
+		SQL string `json:"sql"`
+	}
+	body, _ := io.ReadAll(r.Body)
+	json.Unmarshal(body, &payload)
+
+	f.mux.Lock()
+	f.queries = append(f.queries, payload.SQL)
+	f.mux.Unlock()
+
+	start, end := 0, f.total
+	if m := fakeD1PageRe.FindStringSubmatch(payload.SQL); m != nil {
+		limit, _ := strconv.Atoi(m[1])
+		start, _ = strconv.Atoi(m[2])
+		end = min(start+limit, f.total)
+	}
+
+	if end-start > f.maxRows {
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"result":null,"success":false,"errors":[{"code":7429,"message":"D1 DB's isolate exceeded its memory limit and was reset."}]}`)
+		return
+	}
+
+	rows := [][]any{}
+	for i := start; i < end; i++ {
+		rows = append(rows, []any{i, fmt.Sprintf("name_%d", i)})
+	}
+	resp := map[string]any{
+		"result": []any{map[string]any{
+			"results": map[string]any{"columns": []string{"id", "name"}, "rows": rows},
+			"success": true,
+		}},
+		"errors":  []any{},
+		"success": true,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+func TestD1StreamRowsPaged(t *testing.T) {
+	cases := []struct {
+		name      string
+		query     string
+		pageSize  string
+		total     int
+		maxRows   int
+		wantPaged bool
+	}{
+		{name: "several pages", query: "select * from t order by id;", pageSize: "40", total: 130, maxRows: 1000, wantPaged: true},
+		{name: "exact multiple of page size", query: "select * from t", pageSize: "50", total: 100, maxRows: 1000, wantPaged: true},
+		{name: "halves page size when too large", query: "with x as (select 1) select * from t", pageSize: "1000", total: 700, maxRows: 300, wantPaged: true},
+		{name: "not a select, no pages", query: "pragma table_info(t)", total: 20, maxRows: 1000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeD1{total: tc.total, maxRows: tc.maxRows}
+			srv := httptest.NewServer(fake)
+			defer srv.Close()
+
+			props := []string{"account_id=acct1", "database=db1", "api_token=token"}
+			if tc.pageSize != "" {
+				props = append(props, "page_size="+tc.pageSize)
+			}
+			c, err := NewConn("d1://user:token@acct1/db1", props...)
+			require.NoError(t, err)
+			conn := c.(*D1Conn)
+			conn.apiURL = srv.URL
+
+			ds, err := conn.StreamRows(tc.query)
+			require.NoError(t, err)
+			data, err := ds.Collect(0)
+			require.NoError(t, err)
+
+			require.Len(t, data.Rows, tc.total)
+			for i, row := range data.Rows {
+				assert.EqualValues(t, i, row[0], "row order")
+			}
+			assert.Equal(t, []string{"id", "name"}, data.Columns.Names())
+
+			for _, q := range fake.queries {
+				assert.Equal(t, tc.wantPaged, strings.HasPrefix(q, "select * from (\n"), q)
+			}
+		})
+	}
 }

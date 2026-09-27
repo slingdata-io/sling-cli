@@ -28,6 +28,7 @@ type D1Conn struct {
 	UUID      string
 	APIToken  string
 	client    http.Client
+	apiURL    string
 }
 
 // Init initiates the object
@@ -40,6 +41,7 @@ func (conn *D1Conn) Init() error {
 	conn.Database = conn.GetProp("database")
 	conn.APIToken = conn.GetProp("api_token")
 	conn.client = http.Client{}
+	conn.apiURL = "https://api.cloudflare.com/client/v4/accounts"
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
@@ -50,7 +52,7 @@ func (conn *D1Conn) Init() error {
 
 func (conn *D1Conn) makeRequest(ctx context.Context, method, route string, body io.Reader) (resp *http.Response, err error) {
 	tries := 0
-	urlBase := "https://api.cloudflare.com/client/v4/accounts"
+	urlBase := conn.apiURL
 	headers := map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": "Bearer " + conn.APIToken,
@@ -94,24 +96,20 @@ retry:
 		return
 	}
 
-	// retry logic for transient server errors / rate limits
-	if (resp.StatusCode >= 502 || resp.StatusCode == 429) && tries <= 4 {
-		delay := tries * 5
-		g.Debug("d1 request failed %d: %s. Retrying in %d seconds.", resp.StatusCode, resp.Status, delay)
-		// drain and close body before retry to avoid leaks
-		if resp.Body != nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-		time.Sleep(time.Duration(delay * int(time.Second)))
-		goto retry
-	}
-
 	if resp.StatusCode >= 400 || resp.StatusCode < 200 {
 		respBytes, _ := io.ReadAll(resp.Body)
-		if resp.Body != nil {
-			resp.Body.Close()
+		resp.Body.Close()
+
+		// retry logic for transient server errors / rate limits.
+		// a memory limit reset (code 7429 with status 429) fails again with the same query.
+		retryable := resp.StatusCode >= 502 || resp.StatusCode == 429
+		if retryable && tries <= 4 && !strings.Contains(string(respBytes), d1MemoryLimitMsg) {
+			delay := tries * 5
+			g.Debug("d1 request failed %d: %s. Retrying in %d seconds.", resp.StatusCode, resp.Status, delay)
+			time.Sleep(time.Duration(delay * int(time.Second)))
+			goto retry
 		}
+
 		err = g.Error("Unexpected Response %d: %s (%s) => %s", resp.StatusCode, resp.Status, URL, string(respBytes))
 		return
 	}
@@ -300,10 +298,8 @@ func (conn *D1Conn) StreamRowsContext(ctx context.Context, query string, options
 
 	conn.LogSQL(query)
 
-	payload := g.M("sql", query, "params", []string{})
-
-	resp, err := conn.makeRequest(queryContext.Ctx, "POST", "/raw", strings.NewReader(g.Marshal(payload)))
-	if err != nil {
+	pager := newD1Pager(conn, queryContext.Ctx, query)
+	if err = pager.fetch(); err != nil {
 		return ds, g.Error(err, "could not make request")
 	}
 
@@ -311,158 +307,238 @@ func (conn *D1Conn) StreamRowsContext(ctx context.Context, query string, options
 	conn.Data.Duration = time.Since(start).Seconds()
 	conn.Data.NoDebug = !strings.Contains(query, noDebugKey)
 
-	// respBytes, _ := io.ReadAll(resp.Body)
-	// g.Warn(string(respBytes))
-	// return nil, g.Error("stopping")
-
-	respBody := resp.Body
-	decoder := json.NewDecoder(respBody)
-
-	// Read opening object
-	if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
-		if respBody != nil {
-			respBody.Close()
-		}
-		return nil, g.Error(err, "invalid JSON structure: expected opening brace")
+	if g.Marshal(fetchedColumns.Names()) != g.Marshal(pager.columns) {
+		fetchedColumns = iop.NewColumnsFromFields(pager.columns...)
 	}
 
-	// this is to parse the response as it comes (it will not put all of it in memory)
-	makeNextFunc := func() (F func(it *iop.Iterator) bool, err error) {
-		// Find the "result" array
-		for decoder.More() {
-			t, err := decoder.Token()
-			if err != nil {
-				return nil, g.Error(err, "error reading JSON token")
-			}
-
-			// Example:
-			// {"result":[{"results":{"columns":["schema_name","table_name","is_view"],"rows":[["main","_cf_KV","false"],["main","table_name","false"]]},"success":true,"meta":{"served_by":"v3-prod","duration":0.2294,"changes":0,"last_row_id":0,"changed_db":false,"size_after":16384,"rows_read":4,"rows_written":0}}],"errors":[],"messages":[],"success":true}
-			if cast.ToString(t) == "result" {
-				// Read the opening bracket of result array
-				if t, err := decoder.Token(); err != nil || t != json.Delim('[') {
-					return nil, g.Error(err, "invalid JSON structure: expected result array")
-				}
-
-				// Read the first result object
-				if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
-					return nil, g.Error(err, "invalid JSON structure: expected result object")
-				}
-
-				// Process the result object to find "results"
-				for decoder.More() {
-					t, err := decoder.Token()
-					if err != nil {
-						return nil, g.Error(err, "error reading result object")
-					}
-
-					if cast.ToString(t) == "results" {
-						// Read the opening bracket of result array
-						if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
-							return nil, g.Error(err, "invalid JSON structure: expected result object inside results")
-						}
-
-						// Read the opening bracket of columns array
-						t, err = decoder.Token()
-						if err != nil {
-							return nil, g.Error(err, "invalid JSON structure: expected columns array")
-						} else if cast.ToString(t) != "columns" {
-							return nil, g.Error("invalid JSON structure: expected columns array inside results")
-						}
-
-						var columns []string
-						// Decode just the columns
-						if err := decoder.Decode(&columns); err != nil {
-							return nil, g.Error(err, "error decoding columns")
-						}
-
-						// Set up columns in datastream
-						if g.Marshal(fetchedColumns.Names()) != g.Marshal(columns) {
-							fetchedColumns = iop.NewColumnsFromFields(columns...)
-						}
-
-						// Read the opening bracket of rows array
-						t, err = decoder.Token()
-						if err != nil || cast.ToString(t) != "rows" {
-							return nil, g.Error(err, "invalid JSON structure: expected rows array inside results")
-						}
-
-						// Read opening bracket of rows array
-						t, err := decoder.Token()
-						if err != nil {
-							return nil, g.Error(err, "invalid JSON structure: expected rows array")
-						} else if t != json.Delim('[') {
-							return nil, g.Error("invalid JSON structure: expected bracket inside rows array")
-						}
-
-						// Start streaming rows in a goroutine
-						nextFunc := func(it *iop.Iterator) bool {
-							if limit > 0 && it.Counter >= limit {
-								return false
-							}
-							if decoder.More() {
-								var row []any
-								if err := decoder.Decode(&row); err != nil {
-									it.Context.CaptureErr(g.Error(err, "error decoding row"))
-									return false
-								}
-								it.Row = row
-								return true
-							}
-							return false
-						}
-						return nextFunc, nil
-					}
-				}
-			}
-
-			// Example:
-			// {"errors":[{"code":7500,"message":"SQLITE_ERROR"}],"success":false,"messages":[],"result":[]}
-			if cast.ToString(t) == "errors" {
-				var errResp struct {
-					Errors []struct {
-						Code    int    `json:"code"`
-						Message string `json:"message"`
-					} `json:"errors"`
-				}
-				if err := decoder.Decode(&errResp); err != nil {
-					return nil, g.Error(err, "error decoding error response")
-				}
-				if len(errResp.Errors) > 0 {
-					return nil, g.Error(fmt.Sprintf("D1 error %d: %s", errResp.Errors[0].Code, errResp.Errors[0].Message))
-				}
-			}
-
+	nextFunc := func(it *iop.Iterator) bool {
+		if limit > 0 && it.Counter >= limit {
+			return false
 		}
-
-		return nil, g.Error("unable to create iterator. End of stream?")
-	}
-
-	nextFunc, err := makeNextFunc()
-	if err != nil {
-		if respBody != nil {
-			respBody.Close()
+		row, err := pager.next()
+		if err != nil {
+			it.Context.CaptureErr(err)
+			return false
+		} else if row == nil {
+			return false
 		}
-		return ds, err
+		it.Row = row
+		return true
 	}
 
 	ds = iop.NewDatastreamIt(queryContext.Ctx, fetchedColumns, nextFunc)
 	ds.NoDebug = strings.Contains(query, noDebugKey)
 	ds.SetMetadata(conn.GetProp("METADATA"))
 	ds.SetConfig(conn.Props())
-	if respBody != nil {
-		ds.Defer(func() { respBody.Close() })
-	}
+	ds.Defer(pager.close)
 
 	err = ds.Start()
 	if err != nil {
 		queryContext.Cancel()
-		if respBody != nil {
-			respBody.Close()
-		}
+		pager.close()
 		return ds, g.Error(err, "could start datastream")
 	}
 
 	return
+}
+
+const (
+	d1DefaultPageSize = 5000
+	d1MinPageSize     = 50
+	d1MemoryLimitMsg  = "exceeded its memory limit"
+)
+
+// d1Pager reads a query result in pages. When one response is too large
+// (e.g. rows with large BLOBs), D1 runs out of memory. It then fails with
+// error 7429, 7500 (status 500) or a status 504. When a page fails
+// this way, the pager halves the page size and tries again.
+type d1Pager struct {
+	conn     *D1Conn
+	ctx      context.Context
+	query    string
+	pageSize int // 0 means one request, no pages
+	offset   int
+	pageRows int
+	columns  []string
+	body     io.ReadCloser
+	decoder  *json.Decoder
+}
+
+func newD1Pager(conn *D1Conn, ctx context.Context, query string) *d1Pager {
+	p := &d1Pager{conn: conn, ctx: ctx, query: strings.TrimRight(strings.TrimSpace(query), "; \n\t")}
+
+	// only a select can be wrapped in a subquery
+	lower := strings.ToLower(p.query)
+	if strings.HasPrefix(lower, "select") || strings.HasPrefix(lower, "with") {
+		p.pageSize = d1DefaultPageSize
+		if val := cast.ToInt(conn.GetProp("page_size")); val > 0 {
+			p.pageSize = val
+		}
+	}
+	return p
+}
+
+// fetch requests the page at the current offset and moves the decoder to the first row
+func (p *d1Pager) fetch() (err error) {
+	p.close()
+	p.pageRows = 0
+
+	for {
+		sql := p.query
+		if p.pageSize > 0 {
+			sql = g.F("select * from (\n%s\n) limit %d offset %d", p.query, p.pageSize, p.offset)
+		}
+
+		payload := g.M("sql", sql, "params", []string{})
+		resp, err := p.conn.makeRequest(p.ctx, "POST", "/raw", strings.NewReader(g.Marshal(payload)))
+		if err == nil {
+			p.body = resp.Body
+			break
+		}
+
+		if p.pageSize > d1MinPageSize && isD1ResponseTooLarge(err) {
+			p.pageSize = max(p.pageSize/2, d1MinPageSize)
+			g.Debug("d1 request failed at offset %d, retrying with page size %d", p.offset, p.pageSize)
+			continue
+		}
+		return err
+	}
+
+	p.decoder = json.NewDecoder(p.body)
+	if err = p.readHeader(); err != nil {
+		p.close()
+		return err
+	}
+	return nil
+}
+
+// next returns the next row, or nil at the end of the result
+func (p *d1Pager) next() (row []any, err error) {
+	for {
+		if p.decoder.More() {
+			if err = p.decoder.Decode(&row); err != nil {
+				return nil, g.Error(err, "error decoding row")
+			}
+			p.pageRows++
+			return row, nil
+		}
+
+		// a page that is not full is the last one
+		if p.pageSize == 0 || p.pageRows < p.pageSize {
+			p.close()
+			return nil, nil
+		}
+
+		p.offset += p.pageRows
+		if err = p.fetch(); err != nil {
+			return nil, g.Error(err, "could not fetch rows at offset %d", p.offset)
+		}
+	}
+}
+
+func isD1ResponseTooLarge(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "Unexpected Response 500") ||
+		strings.Contains(msg, "Unexpected Response 504") ||
+		strings.Contains(msg, d1MemoryLimitMsg)
+}
+
+func (p *d1Pager) close() {
+	if p.body != nil {
+		p.body.Close()
+		p.body = nil
+	}
+}
+
+// readHeader parses the response up to the rows array, as it comes (not all in memory).
+// Example:
+// {"result":[{"results":{"columns":["schema_name","table_name","is_view"],"rows":[["main","_cf_KV","false"],["main","table_name","false"]]},"success":true,"meta":{...}}],"errors":[],"messages":[],"success":true}
+func (p *d1Pager) readHeader() error {
+	decoder := p.decoder
+
+	if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
+		return g.Error(err, "invalid JSON structure: expected opening brace")
+	}
+
+	for decoder.More() {
+		t, err := decoder.Token()
+		if err != nil {
+			return g.Error(err, "error reading JSON token")
+		}
+
+		if cast.ToString(t) == "result" {
+			// Read the opening bracket of result array
+			if t, err := decoder.Token(); err != nil || t != json.Delim('[') {
+				return g.Error(err, "invalid JSON structure: expected result array")
+			}
+
+			// Read the first result object
+			if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
+				return g.Error(err, "invalid JSON structure: expected result object")
+			}
+
+			// Process the result object to find "results"
+			for decoder.More() {
+				t, err := decoder.Token()
+				if err != nil {
+					return g.Error(err, "error reading result object")
+				}
+
+				if cast.ToString(t) != "results" {
+					continue
+				}
+
+				if t, err := decoder.Token(); err != nil || t != json.Delim('{') {
+					return g.Error(err, "invalid JSON structure: expected result object inside results")
+				}
+
+				t, err = decoder.Token()
+				if err != nil {
+					return g.Error(err, "invalid JSON structure: expected columns array")
+				} else if cast.ToString(t) != "columns" {
+					return g.Error("invalid JSON structure: expected columns array inside results")
+				}
+
+				var columns []string
+				if err := decoder.Decode(&columns); err != nil {
+					return g.Error(err, "error decoding columns")
+				}
+				if p.columns == nil {
+					p.columns = columns
+				}
+
+				t, err = decoder.Token()
+				if err != nil || cast.ToString(t) != "rows" {
+					return g.Error(err, "invalid JSON structure: expected rows array inside results")
+				}
+
+				t, err = decoder.Token()
+				if err != nil {
+					return g.Error(err, "invalid JSON structure: expected rows array")
+				} else if t != json.Delim('[') {
+					return g.Error("invalid JSON structure: expected bracket inside rows array")
+				}
+				return nil
+			}
+		}
+
+		// Example:
+		// {"errors":[{"code":7500,"message":"SQLITE_ERROR"}],"success":false,"messages":[],"result":[]}
+		if cast.ToString(t) == "errors" {
+			var errs []struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := decoder.Decode(&errs); err != nil {
+				return g.Error(err, "error decoding error response")
+			}
+			if len(errs) > 0 {
+				return g.Error(fmt.Sprintf("D1 error %d: %s", errs[0].Code, errs[0].Message))
+			}
+		}
+	}
+
+	return g.Error("unable to create iterator. End of stream?")
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
