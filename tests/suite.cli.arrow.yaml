@@ -11,8 +11,8 @@
 #                `arrow lane: enabled`, no `falling back to row-based`, rows.
 #   arrow-off    729, 740-760, 775        the stream must fall back at info:
 #                `falling back to row-based` plus the reason, no `enabled`.
-#   arrow-quiet  726, 770-773             the stream must fall back at debug:
-#                no info line; `arrow lane: not used` with -d.
+#   arrow-quiet  726, 770-773             the stream must fall back quietly:
+#                no `falling back to row-based`, no `enabled`.
 #   arrow-force  780-783                  SLING_ARROW_LANE=force turns the
 #                decline into an error (`forced but not eligible` + reason).
 #   row-guard    784-791                  the row path and the column types
@@ -434,10 +434,9 @@
   run: |
     bash tests/pipelines/arrow/seed.sh
     sling run -d -r tests/replications/arrow/a.726.cdc_group.yaml
-  output_contains:
-    - 'arrow lane: not used'
   output_does_not_contain:
     - 'falling back to row-based'
+    - 'arrow lane: enabled'
 
 - id: 727
   name: 'arrow lane: Tier A transform'
@@ -539,7 +538,6 @@
     SLING_USE_ADBC=true sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "duckdb:///tmp/arrow_dst_733.duckdb" --tgt-object "main.arrow_dst_733" --mode truncate
     rm -f /tmp/arrow_dst_733.duckdb
   output_contains:
-    - 'arrow lane: not used for stream "public.arrow_src". Reason: target driver duckdb is not in the arrow lane list'
     - 'arrow lane: enabled (postgres -> duckdb/adbc)'
   output_does_not_contain:
     - 'falling back to row-based'
@@ -562,10 +560,11 @@
     TABLE_A=public.arrow_dst_734 TABLE_B=public.arrow_dst_734_row sling run -d -p tests/pipelines/arrow/verify.yaml
   output_contains:
     - 'arrow lane: enabled'
-    # the row leg turns the lane off through the env switch, which logs at
-    # debug; a gate decline would log "falling back to row-based" instead
-    - 'Reason: SLING_ARROW_LANE=false'
     - 'arrow lane verify'
+  # the row leg turns the lane off through the env switch, which does not log;
+  # a gate decline would log "falling back to row-based" instead
+  output_does_not_contain:
+    - 'falling back to row-based'
 
 - id: 735
   name: 'arrow lane: lane and row paths agree (verify)'
@@ -583,10 +582,11 @@
     TABLE_A=main.arrow_dst_735 TABLE_B=main.arrow_dst_735_row sling run -d -p tests/pipelines/arrow/verify.yaml
   output_contains:
     - 'arrow lane: enabled'
-    # the row leg turns the lane off through the env switch, which logs at
-    # debug; a gate decline would log "falling back to row-based" instead
-    - 'Reason: SLING_ARROW_LANE=false'
     - 'arrow lane verify'
+  # the row leg turns the lane off through the env switch, which does not log;
+  # a gate decline would log "falling back to row-based" instead
+  output_does_not_contain:
+    - 'falling back to row-based'
 
 - id: 740
   name: 'arrow lane declines: transform that reads record.'
@@ -917,9 +917,8 @@
   # then completes the load, which is why this case is not forced.
   run: |
     sling run -d -r tests/replications/arrow/a.759.mssql_datetimeoffset.yaml
-  output_contains:
-    - 'not used for stream'
-    - 'sqlserver is not in the arrow lane list'
+  output_does_not_contain:
+    - 'arrow lane: enabled'
 
 - id: 760
   name: 'arrow lane declines: Databricks copy_method zerobus'
@@ -952,10 +951,9 @@
     bash tests/pipelines/arrow/seed.sh
     sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_770" --mode full-refresh
     SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_770"
-  output_contains:
-    - 'arrow lane: not used'
   output_does_not_contain:
     - 'falling back to row-based'
+    - 'arrow lane: enabled'
 
 - id: 771
   name: 'arrow lane quiet: CSV file target (format inferred)'
@@ -968,10 +966,9 @@
     bash tests/pipelines/arrow/seed.sh
     sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_771.csv --mode full-refresh
     rm -f /tmp/arrow_lane_771.csv
-  output_contains:
-    - 'arrow lane: not used'
   output_does_not_contain:
     - 'falling back to row-based'
+    - 'arrow lane: enabled'
 
 - id: 772
   name: 'arrow lane quiet: MySQL target (not in the lane list)'
@@ -983,10 +980,9 @@
     bash tests/pipelines/arrow/seed.sh
     sling run -d --src-conn "$SOURCE" --src-stream public.arrow_src --tgt-conn MYSQL --tgt-object mysql.arrow_dst_772 --mode full-refresh
     SLING_ROW_CNT= sling conns exec MYSQL "drop table if exists mysql.arrow_dst_772"
-  output_contains:
-    - 'arrow lane: not used'
   output_does_not_contain:
     - 'falling back to row-based'
+    - 'arrow lane: enabled'
 
 - id: 773
   name: 'arrow lane quiet: SLING_ARROW_LANE=false'
@@ -1001,10 +997,9 @@
   run: |
     bash tests/pipelines/arrow/seed.sh
     sling run -d -r tests/replications/arrow/a.742.transform_plain.yaml
-  output_contains:
-    - 'arrow lane: not used'
   output_does_not_contain:
     - 'falling back to row-based'
+    - 'arrow lane: enabled'
 
 - id: 775
   name: 'arrow lane declines: source with a uuid column (stage 2)'

@@ -542,7 +542,6 @@ func arrowLaneStub(stream string) error {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
 		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, reason)
 	}
-	g.Debug("arrow lane: not used for stream %q. Reason: %s", stream, reason)
 	return nil
 }
 

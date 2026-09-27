@@ -99,7 +99,7 @@ require (
 	github.com/tidwall/jsonc v0.3.3
 	github.com/tidwall/sjson v1.2.5
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.19
-	github.com/trebi-ai/agent-wire v0.2.1
+	github.com/trebi-ai/agent-wire v0.4.0
 	github.com/trinodb/trino-go-client v0.328.0
 	github.com/twpayne/go-geom v1.6.1
 	github.com/valentin-kaiser/go-dbase v1.14.4
