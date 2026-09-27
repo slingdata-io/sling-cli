@@ -285,6 +285,7 @@ func (conn *D1Conn) StreamRowsContext(ctx context.Context, query string, options
 	}
 
 	opts := getQueryOptions(options)
+	limit := cast.ToUint64(opts["limit"])
 	fetchedColumns := iop.Columns{}
 	if val, ok := opts["columns"].(iop.Columns); ok {
 		fetchedColumns = val
@@ -395,7 +396,9 @@ func (conn *D1Conn) StreamRowsContext(ctx context.Context, query string, options
 
 						// Start streaming rows in a goroutine
 						nextFunc := func(it *iop.Iterator) bool {
-							// Stream each row
+							if limit > 0 && it.Counter >= limit {
+								return false
+							}
 							if decoder.More() {
 								var row []any
 								if err := decoder.Decode(&row); err != nil {
