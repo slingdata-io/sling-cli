@@ -820,7 +820,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		// delete csv
 		defer func() { env.RemoveLocalTempFile(filePath) }()
 
-		_, err := conn.BcpImportFile(tableFName, filePath)
+		_, err := conn.BcpImportFile(ds.Context.Ctx, tableFName, filePath)
 		ds.Context.CaptureErr(err)
 	}
 
@@ -1019,7 +1019,7 @@ func (conn *MsSQLServerConn) writeBcpTokenFile(token string) (string, error) {
 // bcp dbo.test1 in '/tmp/LargeDataset.csv' -S tcp:sqlserver.host,51433 -d master -U sa -P 'password' -c -t ',' -b 5000
 // Limitation: if comma or delimite is in field, it will error.
 // need to use delimiter not in field, or do some other transformation
-func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count uint64, err error) {
+func (conn *MsSQLServerConn) BcpImportFile(ctx context.Context, tableFName, filePath string) (count uint64, err error) {
 	var stderr, stdout bytes.Buffer
 
 	connURL := conn.URL
@@ -1194,7 +1194,8 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 
 retry:
-	proc := exec.Command(conn.bcpPath(), bcpArgs...)
+	// bound to ctx, so a cancel kills bcp before cleanup drops the table
+	proc := exec.CommandContext(ctx, conn.bcpPath(), bcpArgs...)
 	proc.Stderr = &stderr
 	proc.Stdout = &stdout
 
@@ -1230,6 +1231,9 @@ retry:
 	}
 
 	if err != nil {
+		if ctx.Err() != nil {
+			return count, ctx.Err()
+		}
 		if strings.Contains(err.Error(), "text file busy") {
 			g.Warn("could not start bcp (%s), retrying...", err.Error())
 			time.Sleep(1 * time.Second)

@@ -151,16 +151,21 @@ func (t *TaskExecution) Execute() error {
 	case <-done:
 		t.Cleanup()
 	case <-t.Context.Ctx.Done():
-		go t.Cleanup()
-
+		// let the writer stop first, so cleanup does not drop a temp table
+		// that is still in use. Clean up anyway if the writer hangs.
 		select {
 		case <-done:
+			t.Cleanup()
 		case <-time.After(5 * time.Second):
+			go t.Cleanup()
 		}
-		if t.Err == nil {
-			newStatus = ExecStatusTerminated
-			t.Err = g.Error("Execution interrupted")
+
+		// an error from the writer after the cancel is a result of the cancel
+		if t.Err != nil {
+			g.Debug("error after interrupt: %s", t.Err.Error())
 		}
+		newStatus = ExecStatusTerminated
+		t.Err = g.Error("Execution interrupted")
 	}
 
 	if t.Err == nil {

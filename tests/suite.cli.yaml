@@ -3323,6 +3323,40 @@
     - 'could not apply'
     - 'Error 1064 (HY000): Getting syntax error'
 
+# Bug 203eb1e47c4a161a: a cancel during a SQL Server BCP load ran the cleanup
+# while bcp still wrote. The cleanup dropped the _tmp table under bcp, and the
+# run failed with "Invalid object name ..._tmp", not as interrupted.
+# The test sends SIGINT to sling only, so bcp gets no signal from the shell.
+# Expected: the run is interrupted, and the _tmp table is dropped.
+- id: 792
+  name: 'cancel during SQL Server bcp load is an interrupt, not a tmp table failure'
+  err: true
+  run: |
+    sling conns exec MSSQL "IF OBJECT_ID(N'dbo.cancel_792',N'U') IS NOT NULL DROP TABLE dbo.cancel_792"
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 3000000) g' --tgt-conn MSSQL --tgt-object dbo.cancel_792 --mode full-refresh &
+    PID=$!
+    BCP=""
+    for _ in $(seq 1 600); do
+      BCP=$(pgrep -P "$PID" bcp | head -1 || true)
+      [ -n "$BCP" ] && break
+      sleep 0.1
+    done
+    [ -n "$BCP" ] || { echo 'FAIL: bcp process not found' >&2; exit 1; }
+    sleep 3
+    kill -INT "$PID"
+    echo "sent SIGINT to sling $PID" >&2
+    RC=0
+    wait "$PID" || RC=$?
+    sling conns exec MSSQL "select concat('tmp_left=', count(*)) as res from sys.tables where name = 'cancel_792_tmp'"
+    exit $RC
+  output_contains:
+    - 'sent SIGINT to sling'
+    - 'Execution interrupted'
+    - 'tmp_left=0'
+  output_does_not_contain:
+    - 'Invalid object name'
+    - 'SQL Server BCP Import Error'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
