@@ -774,3 +774,16 @@ func TestEnsureAssistReadyRequiresProfile(t *testing.T) {
 		t.Fatalf("error should point at setup: %v", err)
 	}
 }
+
+func TestSetupFormsNeedTTY(t *testing.T) {
+	prev := ttyCheck
+	t.Cleanup(func() { ttyCheck = prev })
+	ttyCheck = func(*os.File) bool { return false }
+
+	if _, err := RunSetupActionForm(&DoctorReport{OK: true}); err != ErrNoTTY {
+		t.Fatalf("RunSetupActionForm: got %v, want ErrNoTTY", err)
+	}
+	if err := confirmInstallOpenCode(); err != ErrNoTTY {
+		t.Fatalf("confirmInstallOpenCode: got %v, want ErrNoTTY", err)
+	}
+}

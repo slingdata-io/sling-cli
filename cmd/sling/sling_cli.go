@@ -489,9 +489,11 @@ func Track(event string, props ...map[string]interface{}) {
 		properties[k] = v
 	}
 
+	env.TelMux.Lock()
 	for k, v := range env.TelMap {
 		properties[k] = v
 	}
+	env.TelMux.Unlock()
 
 	if len(props) > 0 {
 		for k, v := range props[0] {

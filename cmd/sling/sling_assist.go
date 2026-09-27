@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
@@ -106,13 +107,16 @@ func processAssist(c *g.CliSC) (ok bool, err error) {
 
 	switch c.UsedSC() {
 	case "setup":
-		return ok, runAssistSetup(c)
+		err = runAssistSetup(c)
 	case "error":
-		return ok, runAssistError(c)
+		err = runAssistError(c)
 	case "report":
-		return ok, runAssistReport(c)
+		err = runAssistReport(c)
+	default:
+		err = runAssistFlags(c)
 	}
-	return ok, runAssistFlags(c)
+	assistTelProps.setOutcome(err)
+	return ok, err
 }
 
 // runAssistFlags is the flags-only path: --resume, else first-run
@@ -151,8 +155,32 @@ func runAssistSession(c *g.CliSC) error {
 		Headless: cast.ToBool(vals["non-interactive"]),
 	}
 	applyAssistOut(&opts, cast.ToString(vals["out"]))
+	return launchAssist(opts)
+}
+
+// launchAssist runs the session and records launch, duration and agent exit code.
+// A non-zero agent exit calls os.Exit, so the event is sent here first.
+func launchAssist(opts assist.SessionOptions) error {
+	start := time.Now()
+	launched := false
+	opts.OnLaunch = func(agent string) {
+		launched = true
+		assistTelProps.set("agent", agent)
+		assistTelProps.set("launched", true)
+		go Track("assist_launch") // survives a closed terminal (SIGHUP)
+	}
 	_, err := assist.Session(opts)
+	if !launched {
+		if err == nil {
+			assistTelProps.set("outcome", "not_launched")
+		}
+		return err
+	}
+	assistTelProps.set("duration_s", int(time.Since(start).Seconds()))
 	if code, ok := assist.ExitCodeOf(err); ok {
+		assistTelProps.set("exit_code", code)
+		assistTelProps.set("outcome", "agent_exit")
+		Track(g.CliObj.Name)
 		os.Exit(code)
 	}
 	return err
@@ -177,6 +205,7 @@ func runAssistResume(c *g.CliSC, id string) error {
 		e, err := assist.PickHistoryEntry()
 		if err != nil {
 			if errors.Is(err, assist.ErrUserAborted) {
+				assistTelProps.set("outcome", "cancelled")
 				return nil
 			}
 			return err
@@ -191,11 +220,7 @@ func runAssistResume(c *g.CliSC, id string) error {
 		Headless:  cast.ToBool(vals["non-interactive"]),
 	}
 	applyAssistOut(&opts, cast.ToString(vals["out"]))
-	_, err := assist.Session(opts)
-	if code, ok := assist.ExitCodeOf(err); ok {
-		os.Exit(code)
-	}
-	return err
+	return launchAssist(opts)
 }
 
 // padAssistResumeFlag lets flaggy accept a bare `--resume` (picker) as `--resume=`.
@@ -310,6 +335,10 @@ func runAssistSetup(c *g.CliSC) error {
 		fmt.Fprintln(os.Stdout, "")
 		action, err := assist.RunSetupActionForm(report)
 		if err != nil {
+			if errors.Is(err, assist.ErrUserAborted) {
+				assistTelProps.set("outcome", "cancelled")
+				return nil
+			}
 			return err
 		}
 		switch action {
@@ -327,6 +356,7 @@ func runAssistSetup(c *g.CliSC) error {
 			vals["reconfigure"] = true
 			return runSetupInstall(vals, allComponents(), profileExists, report)
 		case assist.SetupActionExit:
+			assistTelProps.set("outcome", "cancelled")
 			return nil
 		}
 		return nil
@@ -341,6 +371,7 @@ func runAssistSetup(c *g.CliSC) error {
 	result, err := assist.RunHarnessConfirmForm(prefill)
 	if err != nil {
 		if errors.Is(err, assist.ErrUserAborted) {
+			assistTelProps.set("outcome", "cancelled")
 			return nil
 		}
 		return err
@@ -391,6 +422,7 @@ func runSetupInstall(vals map[string]any, components []string, _ bool, _ *assist
 			result, err := assist.RunInstallForm(prefill)
 			if err != nil {
 				if errors.Is(err, assist.ErrUserAborted) {
+					assistTelProps.set("outcome", "cancelled")
 					return nil
 				}
 				return err
@@ -584,7 +616,37 @@ func setAssistTel(c *g.CliSC) {
 		}
 		tel["channel"] = channel
 	}
-	env.SetTelVal("assist", g.Marshal(tel))
+	assistTelProps = assistTel(tel)
+	assistTelProps.publish()
+}
+
+// assistTel is the `assist` telemetry prop, sent as one JSON string.
+type assistTel map[string]any
+
+var assistTelProps = assistTel{}
+
+func (t assistTel) publish() {
+	env.SetTelVal("assist", g.Marshal(map[string]any(t)))
+}
+
+func (t assistTel) set(key string, val any) {
+	t[key] = val
+	t.publish()
+}
+
+// setOutcome records how the command ended, unless a path already set it.
+func (t assistTel) setOutcome(err error) {
+	if _, ok := t["outcome"]; ok {
+		return
+	}
+	switch {
+	case errors.Is(err, assist.ErrNoTTY):
+		t.set("outcome", "no_tty")
+	case err != nil:
+		t.set("outcome", "error")
+	default:
+		t.set("outcome", "completed")
+	}
 }
 
 // flatVals returns the val map from the active subcommand. CliSC stores per-

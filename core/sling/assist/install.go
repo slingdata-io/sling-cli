@@ -471,6 +471,24 @@ const (
 // ErrUserAborted is returned by interactive forms when the user declines.
 var ErrUserAborted = errors.New("user aborted")
 
+// ErrNoTTY is returned when a setup form runs without a terminal.
+var ErrNoTTY = errors.New("sling assist setup needs an interactive terminal; run `sling assist setup --non-interactive` instead")
+
+// runSetupForm runs form. Esc/Ctrl+C returns ErrUserAborted, not huh's own sentinel.
+// Sentinels are returned unwrapped: g.Error does not support errors.Is.
+func runSetupForm(form *huh.Form, what string) error {
+	if !ttyCheck(os.Stdin) {
+		return ErrNoTTY
+	}
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return ErrUserAborted
+		}
+		return g.Error(err, "%s aborted", what)
+	}
+	return nil
+}
+
 // RunSetupActionForm runs after doctor has printed its report.
 func RunSetupActionForm(report *DoctorReport) (SetupAction, error) {
 	missingLabel := "Install missing components"
@@ -498,8 +516,8 @@ func RunSetupActionForm(report *DoctorReport) (SetupAction, error) {
 				Value(&chosen),
 		),
 	).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		return SetupActionExit, g.Error(err, "setup form aborted")
+	if err := runSetupForm(form, "setup form"); err != nil {
+		return SetupActionExit, err
 	}
 	return SetupAction(chosen), nil
 }
@@ -600,8 +618,8 @@ func RunHarnessConfirmForm(prefill Profile) (*HarnessConfirmResult, error) {
 	}
 
 	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		return nil, g.Error(err, "setup form aborted")
+	if err := runSetupForm(form, "setup form"); err != nil {
+		return nil, err
 	}
 	if len(res.Components) == 0 {
 		return nil, g.Error("no components selected")
@@ -659,8 +677,8 @@ func RunInstallForm(prefill Profile) (*InstallFormResult, error) {
 	}
 
 	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		return nil, g.Error(err, "install form aborted")
+	if err := runSetupForm(form, "install form"); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
@@ -721,8 +739,8 @@ func confirmInstallOpenCode() error {
 				Value(&ok),
 		),
 	).WithTheme(huh.ThemeCharm())
-	if err := form.Run(); err != nil {
-		return g.Error(err, "setup form aborted")
+	if err := runSetupForm(form, "setup form"); err != nil {
+		return err
 	}
 	if !ok {
 		return ErrUserAborted
