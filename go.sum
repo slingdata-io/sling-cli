@@ -1024,8 +1024,6 @@ github.com/slingdata-io/golyglot v1.0.20 h1:qZry5N4xKEOcJWdRStuH7W9zH/Xu5f6YH/rI
 github.com/slingdata-io/golyglot v1.0.20/go.mod h1:Gw0MF6BgUt9XUWAxYahbTsfWzaTdQQoSccUXbOxlGUs=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
 github.com/slingdata-io/pocketbase v0.22.136/go.mod h1:RYAdoMZtW+3OIgKqg+YhgWGIiwjtcBHGxRcVF2+1klA=
-github.com/snowflakedb/gosnowflake v1.17.1 h1:sBYExPDRv6hHF7fCqeXMT745L326Byw/cROxvCiEJzo=
-github.com/snowflakedb/gosnowflake v1.17.1/go.mod h1:TaHvQGh9MA2lopZZMm1AvvENDfwcnKtuskIr1e6Fpic=
 github.com/snowflakedb/gosnowflake v1.19.1 h1:NZMErtdZMu6kooehbONNQmu/W5BPsaX8hYdlBBEHgxs=
 github.com/snowflakedb/gosnowflake v1.19.1/go.mod h1:9vGW6LYbUD1UqfjpuNN5a5vtha+u4n1AlsR1BqhHwPA=
 github.com/sourcegraph/annotate v0.0.0-20160123013949-f4cad6c6324d/go.mod h1:UdhH50NIW0fCiwBSr0co2m7BnFLdv4fQTgdqdJTHFeE=
@@ -1107,10 +1105,6 @@ github.com/tonistiigi/units v0.0.0-20180711220420-6950e57a87ea h1:SXhTLE6pb6eld/
 github.com/tonistiigi/units v0.0.0-20180711220420-6950e57a87ea/go.mod h1:WPnis/6cRcDZSUvVmezrxJPkiO87ThFYsoUiMwWNDJk=
 github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab h1:H6aJ0yKQ0gF49Qb2z5hI1UHxSQt4JMyxebFR15KnApw=
 github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab/go.mod h1:ulncasL3N9uLrVann0m+CDlJKWsIAP34MPcOJF6VRvc=
-github.com/trebi-ai/agent-wire v0.1.0 h1:iEVwL8Ns8eAk0+pum9JR3fBt7jEBNiLDXNSnkASRwIg=
-github.com/trebi-ai/agent-wire v0.1.0/go.mod h1:K0WMWYNBepCzwbhnVZf6p5PNpkmnH0q4t1mM3FRcYJc=
-github.com/trebi-ai/agent-wire v0.2.1 h1:qcQ+atPGAltkRg7qJQayEurPkmq0QNxmgWYtBorUCs4=
-github.com/trebi-ai/agent-wire v0.2.1/go.mod h1:K0WMWYNBepCzwbhnVZf6p5PNpkmnH0q4t1mM3FRcYJc=
 github.com/trebi-ai/agent-wire v0.4.0 h1:bgHgRleam2HVJb+uareGM81XDt9/awQIamZhuJXVumU=
 github.com/trebi-ai/agent-wire v0.4.0/go.mod h1:K0WMWYNBepCzwbhnVZf6p5PNpkmnH0q4t1mM3FRcYJc=
 github.com/trinodb/trino-go-client v0.328.0 h1:X6hrGGysA3nvyVcz8kJbBS98srLNTNsnNYwRkMC1atA=
