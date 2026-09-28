@@ -1,0 +1,15 @@
+# Repro: incremental + primary_key + delete_missing: soft into Postgres (update_insert merge).
+# Setup and runs are in suite.cli.yaml (test 632).
+source: postgres
+target: postgres
+
+defaults:
+  mode: incremental
+  primary_key: [id]
+  update_key: updated_at
+  target_options:
+    delete_missing: soft
+
+streams:
+  public.pg_dm_orders_src:
+    object: public.pg_dm_orders

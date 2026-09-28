@@ -3274,6 +3274,24 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 	// cast into the correct type
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
+	// a row from the source is not deleted: clear a soft-delete mark (delete_missing: soft).
+	// Use a literal NULL, not src.col: some databases type a NULL in a derived table as text.
+	deletedAt := env.ReservedFields.DeletedAt
+	if deletedAt != env.ReservedFields.SyncedAt && srcColumns.GetColumn(deletedAt) == nil {
+		if col := tgtColumns.GetColumn(deletedAt); col != nil {
+			colQ := conn.Quote(col.Name)
+			tgtFields = append(tgtFields, colQ)
+			insertFields = append(insertFields, colQ)
+			srcFields = append(srcFields, "NULL as "+colQ)
+			srcInsertFields = append(srcInsertFields, "NULL")
+			srcInsertFieldsCasted = append(srcInsertFieldsCasted, "NULL")
+			placeholderFields = append(placeholderFields, "NULL")
+			setFields = append(setFields, colQ+" = NULL")
+			setFieldsCasted = append(setFieldsCasted, colQ+" = NULL")
+			setFieldsValues = append(setFieldsValues, colQ+" = NULL")
+		}
+	}
+
 	// Determine the merge strategy: use provided strategy if not nil, otherwise use database default
 	var mergeStrategy MergeStrategy
 	if strategy != nil {
