@@ -79,7 +79,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 	if err != nil {
 		errorFilterTableExists := conn.GetTemplateValue("variable.error_filter_table_exists")
 		if errorFilterTableExists != "" && strings.Contains(err.Error(), errorFilterTableExists) {
-			return false, g.Error(err, "Error creating table %s as it already exists", table.FullName())
+			return false, g.Error(err, "Error creating table %s as it already exists. A concurrent process created it, possibly another run of this stream (check for overlapping schedules)", table.FullName())
 		}
 		return false, g.Error(err, "Error creating table "+table.FullName())
 	}

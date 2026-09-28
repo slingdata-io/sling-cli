@@ -3405,6 +3405,24 @@
     - 'Invalid object name'
     - 'SQL Server BCP Import Error'
 
+# Concurrent runs of one stream into a new table: the loser of the create race must fail with a clear message.
+# BigQuery DDL/metadata calls are slow, so the window between TableExists and CREATE is wide.
+# The race is not deterministic, but 6 runs hit it reliably.
+- id: 799
+  name: 'concurrent runs to a new BigQuery table fail with a concurrent-process message'
+  run: |
+    sling conns exec BIGQUERY --limit 0 "drop table if exists public.toctou_799"
+    PIDS=""
+    for i in $(seq 1 6); do
+      sling run -d --src-conn POSTGRES --src-stream "select $i as run_id, g as id from generate_series(1, 10) g" --tgt-conn BIGQUERY --tgt-object public.toctou_799 --mode snapshot --tgt-options "{table_tmp: public.toctou_799_tmp_$i}" > /tmp/toctou_799_$i.log 2>&1 &
+      PIDS="$PIDS $!"
+    done
+    for p in $PIDS; do wait $p || true; done
+    cat /tmp/toctou_799_*.log
+    sling conns exec BIGQUERY --limit 0 "drop table if exists public.toctou_799"
+  output_contains:
+    - 'as it already exists. A concurrent process created it'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
