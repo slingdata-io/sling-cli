@@ -975,7 +975,11 @@ func (rd *ReplicationConfig) GetSourceConnection() (conn connection.ConnEntry, e
 
 	var ok bool
 	conn, ok = connsMap[strings.ToLower(rd.Source)]
-	if !ok {
+	if ok {
+		if err = conn.Connection.ResolveType(context.Background()); err != nil {
+			return conn, g.Error(err, "could not init source connection")
+		}
+	} else {
 		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
 			conn = connection.LocalFileConnEntry()
 		} else if strings.Contains(rd.Source, "://") {
@@ -1691,6 +1695,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	// replace variables across the yaml file
 	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
+	if Env, err = env.ResolveSecretEnv(context.Background(), Env); err != nil {
+		return
+	}
 	replicYAML = g.Rm(replicYAML, Env)
 
 	// parse again

@@ -17,6 +17,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/secrets"
 	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/g"
@@ -114,7 +115,8 @@ func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
 		g.AsMap(m["data"]),
 	)
 
-	if c.Type == "" {
+	// when the URL is a reference, ResolveType sets the type at run time
+	if c.Type == "" && !secrets.IsRef(c.URL()) {
 		c.Type = SchemeType(c.URL())
 	}
 
@@ -354,6 +356,9 @@ func (c *Connection) AsDatabase(options ...AsConnOptions) (dc database.Connectio
 }
 
 func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOptions) (dc database.Connection, err error) {
+	if err = c.ResolveType(ctx); err != nil {
+		return nil, err
+	}
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
@@ -372,9 +377,13 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 		}
 	}
 
-	data := c.DataSWithExtra(opt.Extra)
+	rc, err := c.Resolved(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data := rc.DataSWithExtra(opt.Extra)
 	c.Database, err = database.NewConnContext(
-		ctx, c.URL(), g.MapToKVArr(data)...,
+		ctx, rc.URL(), g.MapToKVArr(data)...,
 	)
 	if err != nil {
 		return
@@ -395,6 +404,9 @@ func (c *Connection) AsFile(options ...AsConnOptions) (fc filesys.FileSysClient,
 }
 
 func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
+	if err = c.ResolveType(ctx); err != nil {
+		return nil, err
+	}
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
@@ -416,9 +428,13 @@ func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions
 	}
 
 	// build input data
-	data := c.DataSWithExtra(opt.Extra)
+	rc, err := c.Resolved(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data := rc.DataSWithExtra(opt.Extra)
 	c.File, err = filesys.NewFileSysClientFromURLContext(
-		ctx, c.URL(), g.MapToKVArr(data)...,
+		ctx, rc.URL(), g.MapToKVArr(data)...,
 	)
 	if err != nil {
 		return
@@ -441,6 +457,9 @@ func (c *Connection) AsAPI(options ...AsConnOptions) (ac *api.APIConnection, err
 }
 
 func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions) (ac *api.APIConnection, err error) {
+	if err = c.ResolveType(ctx); err != nil {
+		return nil, err
+	}
 	if !c.Type.IsAPI() {
 		return nil, g.Error("not a api connection type: %s", c.Type)
 	}
@@ -449,13 +468,6 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 	opt := AsConnOptions{UseCache: true, Extra: g.M()}
 	if len(options) > 0 {
 		opt = options[0]
-	}
-
-	// add connection name
-	data := maps.Clone(c.Data)
-	data["name"] = strings.ToLower(c.Name)
-	for k, v := range opt.Extra {
-		data[k] = v
 	}
 
 	// default cache to true
@@ -471,6 +483,17 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 		return nil, g.Error(err, "could not load spec")
 	}
 
+	rc, err := c.Resolved(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// add connection name
+	data := maps.Clone(rc.Data)
+	data["name"] = strings.ToLower(c.Name)
+	for k, v := range opt.Extra {
+		data[k] = v
+	}
 	c.API, err = api.NewAPIConnection(ctx, spec, data)
 	if err != nil {
 		return
@@ -570,6 +593,18 @@ func splitSQLServerHostInstance(host string) (hostNew, instance string) {
 func (c *Connection) setURL() (err error) {
 	c.setFromEnv()
 	c.setUseADBC()
+
+	// references resolve at open (Resolved), which calls setURL again
+	if _, ok := c.Data["from"]; ok {
+		return nil
+	} else if u := c.URL(); secrets.IsRef(u) {
+		return nil
+	} else if secrets.ContainsRef(u) {
+		if c.Type == "" {
+			c.Type = SchemeType(u)
+		}
+		return nil
+	}
 
 	// setIfMissing sets a default value if key is not present
 	setIfMissing := func(key string, val interface{}) {

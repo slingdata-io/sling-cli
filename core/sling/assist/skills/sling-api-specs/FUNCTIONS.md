@@ -172,6 +172,7 @@ chunk(queue.ids, 50)
 | `parse_ms_uuid(string)` | Parse MS UUID timestamp | Extracts time from MS-style UUID |
 | `pretty_table(rows)` | Format rows as table | Debug / log helper |
 | `conn_property(connection, key)` | Connection property | `conn_property("my_db", "host")` → host value |
+| `secret(reference)` | Secret manager value | `secret("op://Data/stripe/api_key")`; logs show `***` |
 | `machine_stats()` | Host stats object | Runtime diagnostics |
 
 ## Common Patterns

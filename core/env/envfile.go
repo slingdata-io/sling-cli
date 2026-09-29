@@ -2,18 +2,24 @@ package env
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/slingdata-io/sling-cli/core/secrets"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +37,10 @@ type EnvFile struct {
 	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
 	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
 	Workbench   *WorkbenchConfig          `json:"workbench,omitempty" yaml:"workbench,omitempty"`
+
+	// SecretProviders holds named secret manager instances (see core/secrets).
+	// Connection values that are secret references use them.
+	SecretProviders map[string]map[string]any `json:"secret_providers,omitempty" yaml:"secret_providers,omitempty"`
 
 	Path       string `json:"-" yaml:"-"`
 	Repaired   bool   `json:"-" yaml:"-"` // indentation was repaired on read
@@ -153,7 +163,7 @@ func (ef *EnvFile) structToRootNode(original *yaml.Node) (*yaml.Node, error) {
 	}
 
 	managed := map[string]struct{}{
-		"connections": {}, "variables": {}, "env": {}, "workbench": {},
+		"connections": {}, "variables": {}, "env": {}, "workbench": {}, "secret_providers": {},
 	}
 	if original != nil && len(original.Content) > 0 && original.Content[0].Kind == yaml.MappingNode {
 		newMap := doc.Content[0]
@@ -1143,4 +1153,142 @@ func annotateMappingRefs(n *yaml.Node) {
 			annotateMappingRefs(val)
 		}
 	}
+}
+
+// minSecretValueLen skips short values, so "on" or "5432" do not redact log text.
+const minSecretValueLen = 4
+
+// secretValues is the set of resolved secret values (from secret references).
+// Log output replaces each value with ***, whatever key holds it.
+type secretValues struct {
+	mu   sync.RWMutex
+	set  map[string]struct{}
+	vals []string // longest first
+}
+
+// resolvedSecrets holds the values that the secret resolver returned.
+var resolvedSecrets = &secretValues{set: map[string]struct{}{}}
+
+// AddSecretValue records a resolved secret value for redaction.
+func AddSecretValue(v string) { resolvedSecrets.Add(v) }
+
+func (s *secretValues) Add(v string) {
+	v = strings.TrimSpace(v)
+	if len(v) < minSecretValueLen {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.set[v]; ok {
+		return
+	}
+	s.set[v] = struct{}{}
+	s.vals = append(s.vals, v)
+	// longest first, so a value that contains another is replaced whole
+	sort.Slice(s.vals, func(i, j int) bool { return len(s.vals[i]) > len(s.vals[j]) })
+}
+
+func (s *secretValues) Empty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.vals) == 0
+}
+
+// Redact replaces each value in line with ***.
+func (s *secretValues) Redact(line string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.vals {
+		if strings.Contains(line, v) {
+			line = strings.ReplaceAll(line, v, "***")
+		}
+	}
+	return line
+}
+
+// RedactLogLine returns ll, or a copy with the format args applied and the
+// values redacted. Map args and caller markers stay: formatters skip them.
+func (s *secretValues) RedactLogLine(ll *g.LogLine) *g.LogLine {
+	if ll == nil || s.Empty() {
+		return ll
+	}
+	out := *ll
+	var formatArgs, keep []any
+	for _, arg := range ll.Args {
+		switch a := arg.(type) {
+		case map[string]any:
+			keep = append(keep, arg)
+		case string:
+			if strings.HasPrefix(a, "_DEBUG_CALLER_START=") {
+				keep = append(keep, arg)
+				continue
+			}
+			formatArgs = append(formatArgs, arg)
+		default:
+			formatArgs = append(formatArgs, arg)
+		}
+	}
+	text := g.F(ll.Text, formatArgs...)
+	redacted := s.Redact(text)
+	if redacted == text {
+		return ll
+	}
+	out.Text = redacted
+	out.Args = keep
+	return &out
+}
+
+// fromKeyAliases maps key names of common secret layouts (AWS RDS rotation
+// secrets) to connection keys, for `from:`.
+var fromKeyAliases = map[string]string{
+	"username": "user",
+	"dbname":   "database",
+}
+
+// SecretResolver returns the process resolver for secret references. It is
+// built once from the secret_providers of the home env.yaml and ENV_YAML.
+var SecretResolver = sync.OnceValues(func() (*secrets.Resolver, error) {
+	raw := map[string]map[string]any{}
+	baseDir := ""
+	if path := GetEnvFilePath(HomeDir); g.PathExists(path) {
+		ef := LoadEnvFile(path)
+		maps.Copy(raw, ef.SecretProviders)
+		baseDir = filepath.Dir(path)
+	}
+	if content := os.Getenv("ENV_YAML"); content != "" {
+		if ef, err := LoadSlingEnvFileBody(content); err == nil {
+			maps.Copy(raw, ef.SecretProviders)
+		}
+	}
+
+	opts := secrets.Options{
+		CacheTTL:   5 * time.Minute,
+		OnValue:    AddSecretValue,
+		BaseDir:    baseDir,
+		KeyAliases: fromKeyAliases,
+	}
+
+	cfg, err := secrets.ParseConfig(raw)
+	if err != nil {
+		return nil, g.Error(err, "invalid secret_providers")
+	}
+	opts.Config = cfg
+	return secrets.NewResolver(opts), nil
+})
+
+// ResolveSecretEnv returns envMap with its secret references resolved. It is
+// for the env: block of a replication or pipeline.
+func ResolveSecretEnv(ctx context.Context, envMap map[string]any) (map[string]any, error) {
+	if !secrets.HasRef(envMap) {
+		return envMap, nil
+	}
+	r, err := SecretResolver()
+	if err != nil {
+		return nil, err
+	}
+	v, err := r.ResolveValue(ctx, envMap)
+	if err != nil {
+		return nil, g.Error(err, "could not resolve env")
+	}
+	return v.(map[string]any), nil
 }

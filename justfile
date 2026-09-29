@@ -58,6 +58,7 @@ test-core:
     (cd core/sling && go test -run 'TestCheck')
     (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines')
     (cd core/env && go test -v)
+    (cd core/secrets && go test -v)
     (cd core/sling/assist && go test -v)
     (cd core/sling/project && go test -v)
     (cd core/sling/validate && go test -v)
@@ -71,7 +72,7 @@ test-dbio-connection:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio connection"
-    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile')
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:

@@ -355,3 +355,24 @@ func lineDiff(a, b string) (removed, added []string) {
 	}
 	return removed, added
 }
+
+// TestEnvFileEditorKeepsSecretProviders makes sure that a connection edit
+// does not touch the secret_providers block.
+func TestEnvFileEditorKeepsSecretProviders(t *testing.T) {
+	body := "secret_providers:\n  default:\n    type: vault   # prod\n    address: https://vault:8200\n\nconnections:\n  A:\n    type: postgres\n    password: ref+vault://secret/pg#/password\n"
+	path := editTestPath(t, []byte(body))
+	e, err := LoadEnvEditor(path)
+	require.NoError(t, err)
+	require.NoError(t, e.Set("A", g.M("host", "h"), EditOptions{AllowOverwrite: true}))
+	require.NoError(t, e.Save(""))
+
+	got, _ := os.ReadFile(path)
+	assert.Equal(t, "secret_providers:\n  default:\n    type: vault   # prod\n    address: https://vault:8200\n\nconnections:\n  A:\n    type: postgres\n    password: ref+vault://secret/pg#/password\n    host: h\n", string(got))
+
+	ef := LoadEnvFile(path)
+	assert.Equal(t, "vault", ef.SecretProviders["default"]["type"])
+	require.NoError(t, ef.WriteEnvFile())
+	got, _ = os.ReadFile(path)
+	assert.Contains(t, string(got), "secret_providers:")
+	assert.Contains(t, string(got), "type: vault")
+}

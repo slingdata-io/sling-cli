@@ -318,6 +318,7 @@ func (t Type) IsSingleWriterDB() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
+		TypeUnknown:              "Unknown",
 		TypeApi:                  "API - Spec",
 		TypeFileLocal:            "FileSys - Local",
 		TypeFileHDFS:             "FileSys - HDFS",

@@ -36,9 +36,13 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 
 		// construct props by merging with options
+		tgtConn, err := cfg.TgtConn.Resolved(t.Context.Ctx)
+		if err != nil {
+			return cnt, err
+		}
 		options := t.getTargetOptionsMap()
 		props := append(
-			g.MapToKVArr(cfg.TgtConn.DataS()),
+			g.MapToKVArr(tgtConn.DataS()),
 			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 

@@ -47,6 +47,10 @@ var (
 	}
 
 	LocalConnections = cmap.New[map[string]any]()
+
+	// ResolveSecret resolves one secret reference for the secret() function.
+	// The connection package sets it, so iop does not import the resolver setup.
+	ResolveSecret func(ref string) (string, error)
 )
 
 func init() {

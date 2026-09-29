@@ -410,9 +410,9 @@ func CloseFileLogging() { logs.CloseFiles() }
 // setupFileLogging opens the log sinks from the environment.
 func setupFileLogging() { logs.SetupFiles() }
 
-func writeToLogFile(ll *g.LogLine) { logs.WriteFile(ll) }
+func writeToLogFile(ll *g.LogLine) { logs.WriteFile(resolvedSecrets.RedactLogLine(ll)) }
 
-func processLogEntry(ll *g.LogLine) { logs.Process(ll) }
+func processLogEntry(ll *g.LogLine) { logs.Process(resolvedSecrets.RedactLogLine(ll)) }
 
 // SecretKeys is the full set of connection property names whose values
 // are secrets. Clean and parse.Redact redact these. Keep it in sync with
@@ -457,8 +457,10 @@ func secretKeysLower() map[string]struct{} {
 	return secretKeyCache
 }
 
-// ScrubLine redacts secrets from every local connection in Env.
+// ScrubLine redacts secrets from every local connection in Env, and every
+// resolved secret value.
 func ScrubLine(line string) string {
+	line = resolvedSecrets.Redact(line)
 	if Env == nil {
 		return line
 	}
