@@ -234,3 +234,13 @@ connections:
 	_, err = get("ref+sling://env/SLING_T_UNSET_KEY")
 	assert.ErrorContains(t, err, "SLING_T_UNSET_KEY is not set")
 }
+
+func TestSecretRefTestFailsOnResolveError(t *testing.T) {
+	conn, err := NewConnection("SECRET_MISSING", "", g.M("from", "ref+file://"+filepath.Join(t.TempDir(), "missing.json")))
+	require.NoError(t, err)
+	assert.True(t, conn.Type.IsUnknown())
+
+	ok, err := conn.Test()
+	assert.False(t, ok)
+	assert.ErrorContains(t, err, "could not resolve secret reference")
+}

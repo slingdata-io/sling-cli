@@ -42,9 +42,8 @@ func (ce ConnEntries) Names() (names []string) {
 func (ce ConnEntries) Get(name string) ConnEntry {
 	for _, conn := range ce {
 		if strings.EqualFold(conn.Name, name) {
-			if err := conn.Connection.ResolveType(context.Background()); err != nil {
-				g.Warn(err.Error())
-			} else {
+			// the caller that opens the connection gets the ResolveType error
+			if err := conn.Connection.ResolveType(context.Background()); err == nil {
 				conn.Description = conn.Connection.Type.NameLong()
 			}
 			return conn

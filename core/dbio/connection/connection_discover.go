@@ -42,17 +42,11 @@ func testOptionsFromEnv() TestOptions {
 	if limit > 1000 {
 		limit = 1000 // let's set the max limit to 1000 for testing
 	}
-	if g.Getenv("SLING_TEST_ENDPOINT_LIMIT") == "" {
-		g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
-	}
 	opts.Limit = limit
 
 	maxRequests := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS", "2"))
 	if maxRequests == 0 {
 		maxRequests = 3
-	}
-	if g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS") == "" {
-		g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", maxRequests)))
 	}
 	opts.MaxRequests = maxRequests
 
@@ -89,6 +83,10 @@ func (c *Connection) TestWithOptions(ctx context.Context, opts TestOptions) (ok 
 		level := g.GetLogLevel()
 		g.SetLogLevel(g.TraceLevel)
 		defer g.SetLogLevel(level)
+	}
+
+	if err = c.ResolveType(ctx); err != nil {
+		return false, g.Error(err, "could not initiate %s", c.Name)
 	}
 
 	switch {
@@ -129,6 +127,13 @@ func (c *Connection) TestWithOptions(ctx context.Context, opts TestOptions) (ok 
 		apiClient, err := c.AsAPIContext(ctx, AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
+		}
+
+		if g.Getenv("SLING_TEST_ENDPOINT_LIMIT") == "" {
+			g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", opts.Limit)))
+		}
+		if g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS") == "" {
+			g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", opts.MaxRequests)))
 		}
 
 		// set testing mode to limit requests
@@ -263,7 +268,8 @@ func (c *Connection) TestWithOptions(ctx context.Context, opts TestOptions) (ok 
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-
+	default:
+		return false, g.Error("could not test %s: connection type %q is not known", c.Name, c.Type)
 	}
 
 	return true, nil
