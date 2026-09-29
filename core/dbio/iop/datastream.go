@@ -1173,7 +1173,8 @@ skipBuffer:
 				} else {
 					// evaluate transforms
 					if transforms := ds.Sp.Config.Transforms; transforms != nil {
-						ds.it.Row, err = ds.Sp.Config.Transforms.Evaluate(ds.it.Row)
+						// normalize raw values ([]byte -> string) as the sample rows are
+						ds.it.Row, err = transforms.Evaluate(ds.Sp.ProcessRow(ds.it.Row))
 						if ds.Context.CaptureErr(err) {
 							break loop
 						}

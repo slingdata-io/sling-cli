@@ -3423,6 +3423,33 @@
   output_contains:
     - 'as it already exists. A concurrent process created it'
 
+# MySQL DATETIME reaches transforms as []byte after the first 900 sample rows.
+# CastToTime has no []byte case, so date_add fails with "could not cast to time" (KAI bronze pipeline).
+- id: 800
+  name: 'date_add on MySQL DATETIME column ([]byte value)'
+  run: 'sling run -d -r tests/replications/r.136.mysql_datetime_bytes_time_fn.yaml'
+  output_contains:
+    - 'date_add shifted MySQL DATETIME by -7h'
+  output_does_not_contain:
+    - 'could not cast to time'
+
+# A flat `col: expr` transforms map fails with a raw decode error (KAI bronze pipeline).
+- id: 801
+  name: 'flat col-expr transforms map is accepted'
+  run: 'sling run -d -r tests/replications/r.137.transforms_flat_map.yaml'
+  output_contains:
+    - 'flat transforms map applied'
+  output_does_not_contain:
+    - 'could not parse transforms'
+
+# MySQL VARCHAR reaches transforms as []byte after the first 900 sample rows.
+# String comparisons then return false, so later rows load wrong values with no error.
+- id: 802
+  name: 'string comparison transform on MySQL VARCHAR after sample rows'
+  run: 'sling run -d -r tests/replications/r.138.mysql_varchar_bytes_compare.yaml'
+  output_contains:
+    - 'string comparison correct for all 1000 rows'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

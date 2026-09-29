@@ -1508,7 +1508,7 @@ func (cfg *Config) TransformsPrepared() (stageTransforms []map[string]string) {
 
 	stageTransforms, err := iop.ParseStageTransforms(cfg.Transforms)
 	if err != nil {
-		g.Warn("could not parse transforms: %s" + err.Error())
+		g.Warn("could not parse transforms: %s", err.Error())
 	}
 
 	return

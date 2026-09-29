@@ -1,0 +1,47 @@
+# A flat `col: expr` map is the natural transforms shape.
+# parseStageTransforms rejects it with a raw decode error that names no accepted shape.
+source: MYSQL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.transforms_flat_map_test;
+        CREATE TABLE mysql.transforms_flat_map_test (
+          id INT PRIMARY KEY,
+          name VARCHAR(50)
+        );
+        INSERT INTO mysql.transforms_flat_map_test (id, name) VALUES (1, 'alice');
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: select id, name from public.transforms_flat_map_test order by id
+      into: result
+
+    - type: log
+      message: 'flat map result: {store.result}'
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.transforms_flat_map_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.transforms_flat_map_test
+
+    - type: check
+      check: store.result[0].name == "ALICE"
+      failure_message: "BUG: flat transforms map not applied"
+      success_message: "flat transforms map applied"
+
+streams:
+  mysql.transforms_flat_map_test:
+    object: public.transforms_flat_map_test
+    transforms:
+      name: upper(value)
