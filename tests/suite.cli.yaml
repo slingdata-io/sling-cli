@@ -3471,6 +3471,15 @@
 #     - 'SUCCESS: Redshift temp table COPY ran without an open transaction'
 #     - 'execution succeeded'
 
+# discussion #819: "+stage" / "stage+" stream hooks prepend / append to the default hooks.
+# A stream stage replaces only that default stage.
+- id: 806
+  name: 'Stream hook modifiers merge with default hooks (discussion #819)'
+  run: 'sling run -d -p tests/pipelines/p.57.hook_modifiers.yaml'
+  output_contains:
+    - 'cannot declare a "post+" hook at replication level'
+    - 'hook modifiers: SUCCESS'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

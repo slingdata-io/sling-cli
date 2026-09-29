@@ -887,3 +887,75 @@ func TestExpandSelectColumns(t *testing.T) {
 		})
 	}
 }
+
+func TestReplicationHookModifiers(t *testing.T) {
+	cfg, err := LoadReplicationConfig(`
+source: local
+target: local
+defaults:
+  hooks:
+    pre: [d_pre]
+    post: [d_post]
+    post_merge: [d_post_merge]
+streams:
+  none: {}
+  replace:
+    hooks:
+      post: [s_post]
+  modifiers:
+    hooks:
+      +pre: [s_pre_pre]
+      pre+: [s_pre_app]
+      +post: [s_post_pre]
+      post+: [s_post_app]
+      +pre_merge: [s_pre_merge_pre]
+      post_merge+: [s_post_merge_app]
+  wrap:
+    hooks:
+      +post: [s_post_pre]
+      post: [s_post]
+      post+: [s_post_app]
+`)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	resolve := func(name string) HookMap {
+		stream := g.PtrVal(cfg.Streams[name])
+		SetStreamDefaults(name, &stream, cfg)
+		return stream.Hooks
+	}
+
+	expected := map[string]HookMap{
+		"none": {
+			Pre:       []any{"d_pre"},
+			Post:      []any{"d_post"},
+			PostMerge: []any{"d_post_merge"},
+		},
+		"replace": {
+			Pre:       []any{"d_pre"},
+			Post:      []any{"s_post"},
+			PostMerge: []any{"d_post_merge"},
+		},
+		"modifiers": {
+			Pre:       []any{"s_pre_pre", "d_pre", "s_pre_app"},
+			Post:      []any{"s_post_pre", "d_post", "s_post_app"},
+			PreMerge:  []any{"s_pre_merge_pre"},
+			PostMerge: []any{"d_post_merge", "s_post_merge_app"},
+		},
+		"wrap": {
+			Pre:       []any{"d_pre"},
+			Post:      []any{"s_post_pre", "s_post", "s_post_app"},
+			PostMerge: []any{"d_post_merge"},
+		},
+	}
+
+	for name, want := range expected {
+		got := resolve(name)
+		assert.Equal(t, want, got, name)
+
+		// a second resolve (e.g. chunked streams) must not apply the modifiers again
+		again := got.WithDefaults(cfg.Defaults.Hooks)
+		assert.Equal(t, want, again, name+" (again)")
+	}
+}

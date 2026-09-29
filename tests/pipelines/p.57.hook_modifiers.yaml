@@ -1,0 +1,296 @@
+# Stream hook modifiers: "+stage" prepends to and "stage+" appends to the default hooks.
+# See: https://github.com/slingdata-io/sling-cli/discussions/819
+#
+# Each hook appends its label to a trace file of its stream. Checks compare the full trace,
+# so they verify which hooks run and their order.
+#
+# Covers:
+#   1. No stream hooks: the stream gets all default hooks
+#   2. A stream stage replaces only that default stage (default pre stays)
+#   3. post+ runs after the default post
+#   4. +post runs before the default post
+#   5. +pre, pre+, +post, post+ together
+#   6. Modifiers wrap an explicit stream stage (default is replaced)
+#   7. Wildcard stream with post+ (each matched file)
+#   8. Modifiers with no default stage
+#   9. Modifiers in defaults resolve as normal default hooks
+#  10. Modifiers at replication level fail
+
+env:
+  WORK: temp/p57_hook_modifiers
+
+steps:
+  - type: log
+    message: "=== hook modifiers: starting ==="
+
+  - type: delete
+    location: local/{env.WORK}/
+    recursive: true
+
+  - type: write
+    to: local/{env.WORK}/src/s1_none.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/s2_replace.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/s3_append.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/s4_prepend.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/s5_all.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/s6_wrap.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/wild/w1.csv
+    content: |
+      id,name
+      1,a
+
+  - type: write
+    to: local/{env.WORK}/src/wild/w2.csv
+    content: |
+      id,name
+      1,a
+
+  # --- Cases 1-7: default pre and post hooks, streams with their own hooks.
+  - replication:
+      source: local
+      target: local
+      defaults:
+        mode: full-refresh
+        object: "file://{env.WORK}/out/{stream_file_name}.csv"
+        hooks:
+          pre:
+            - type: command
+              command: [sh, -c, "printf 'd_pre,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+          post:
+            - type: command
+              command: [sh, -c, "printf 'd_post,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+      streams:
+        # 1. no stream hooks
+        file://{env.WORK}/src/s1_none.csv: {}
+
+        # 2. own post replaces the default post only
+        file://{env.WORK}/src/s2_replace.csv:
+          hooks:
+            post:
+              - type: command
+                command: [sh, -c, "printf 's_post,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+        # 3. post+ appends after the default post
+        file://{env.WORK}/src/s3_append.csv:
+          hooks:
+            post+:
+              - type: command
+                command: [sh, -c, "printf 's_post_app,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+        # 4. +post prepends before the default post
+        file://{env.WORK}/src/s4_prepend.csv:
+          hooks:
+            +post:
+              - type: command
+                command: [sh, -c, "printf 's_post_pre,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+        # 5. all modifiers together
+        file://{env.WORK}/src/s5_all.csv:
+          hooks:
+            +pre:
+              - type: command
+                command: [sh, -c, "printf 's_pre_pre,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+            pre+:
+              - type: command
+                command: [sh, -c, "printf 's_pre_app,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+            +post:
+              - type: command
+                command: [sh, -c, "printf 's_post_pre,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+              - type: command
+                command: [sh, -c, "printf 's_post_pre2,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+            post+:
+              - type: command
+                command: [sh, -c, "printf 's_post_app,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+        # 6. modifiers wrap an explicit stream post (default post is replaced)
+        file://{env.WORK}/src/s6_wrap.csv:
+          hooks:
+            +post:
+              - type: command
+                command: [sh, -c, "printf 's_post_pre,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+            post:
+              - type: command
+                command: [sh, -c, "printf 's_post,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+            post+:
+              - type: command
+                command: [sh, -c, "printf 's_post_app,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+        # 7. wildcard stream
+        file://{env.WORK}/src/wild/*.csv:
+          hooks:
+            post+:
+              - type: command
+                command: [sh, -c, "printf 's_post_app,' >> {env.WORK}/trace_{stream.file_name}.txt"]
+
+  - type: read
+    from: local/{env.WORK}/trace_s1_none.txt
+    into: trace_s1
+
+  - type: read
+    from: local/{env.WORK}/trace_s2_replace.txt
+    into: trace_s2
+
+  - type: read
+    from: local/{env.WORK}/trace_s3_append.txt
+    into: trace_s3
+
+  - type: read
+    from: local/{env.WORK}/trace_s4_prepend.txt
+    into: trace_s4
+
+  - type: read
+    from: local/{env.WORK}/trace_s5_all.txt
+    into: trace_s5
+
+  - type: read
+    from: local/{env.WORK}/trace_s6_wrap.txt
+    into: trace_s6
+
+  - type: read
+    from: local/{env.WORK}/trace_w1.txt
+    into: trace_w1
+
+  - type: read
+    from: local/{env.WORK}/trace_w2.txt
+    into: trace_w2
+
+  - type: log
+    message: |
+      traces:
+        s1: {store.trace_s1}
+        s2: {store.trace_s2}
+        s3: {store.trace_s3}
+        s4: {store.trace_s4}
+        s5: {store.trace_s5}
+        s6: {store.trace_s6}
+        w1: {store.trace_w1}
+        w2: {store.trace_w2}
+
+  - type: check
+    check: store.trace_s1 == "d_pre,d_post,"
+    failure_message: 'case 1 (no stream hooks): got "{store.trace_s1}"'
+
+  - type: check
+    check: store.trace_s2 == "d_pre,s_post,"
+    failure_message: 'case 2 (replace post only): got "{store.trace_s2}"'
+
+  - type: check
+    check: store.trace_s3 == "d_pre,d_post,s_post_app,"
+    failure_message: 'case 3 (post+): got "{store.trace_s3}"'
+
+  - type: check
+    check: store.trace_s4 == "d_pre,s_post_pre,d_post,"
+    failure_message: 'case 4 (+post): got "{store.trace_s4}"'
+
+  - type: check
+    check: store.trace_s5 == "s_pre_pre,d_pre,s_pre_app,s_post_pre,s_post_pre2,d_post,s_post_app,"
+    failure_message: 'case 5 (all modifiers): got "{store.trace_s5}"'
+
+  - type: check
+    check: store.trace_s6 == "d_pre,s_post_pre,s_post,s_post_app,"
+    failure_message: 'case 6 (wrap explicit post): got "{store.trace_s6}"'
+
+  - type: check
+    check: store.trace_w1 == "d_pre,d_post,s_post_app," && store.trace_w2 == "d_pre,d_post,s_post_app,"
+    failure_message: 'case 7 (wildcard): got w1="{store.trace_w1}" w2="{store.trace_w2}"'
+
+  # --- Cases 8-9: modifiers with no default stage, modifiers in defaults.
+  - replication:
+      source: local
+      target: local
+      defaults:
+        mode: full-refresh
+        object: "file://{env.WORK}/out2/{stream_file_name}.csv"
+        hooks:
+          # 9. a modifier in defaults acts as a normal default hook
+          post+:
+            - type: command
+              command: [sh, -c, "printf 'd_post_app,' >> {env.WORK}/trace2_{stream.file_name}.txt"]
+
+      streams:
+        # 8. no default pre: +pre and pre+ only
+        file://{env.WORK}/src/s1_none.csv:
+          hooks:
+            +pre:
+              - type: command
+                command: [sh, -c, "printf 's_pre_pre,' >> {env.WORK}/trace2_{stream.file_name}.txt"]
+            pre+:
+              - type: command
+                command: [sh, -c, "printf 's_pre_app,' >> {env.WORK}/trace2_{stream.file_name}.txt"]
+
+        # 9. default post+ with a stream +post
+        file://{env.WORK}/src/s2_replace.csv:
+          hooks:
+            +post:
+              - type: command
+                command: [sh, -c, "printf 's_post_pre,' >> {env.WORK}/trace2_{stream.file_name}.txt"]
+
+  - type: read
+    from: local/{env.WORK}/trace2_s1_none.txt
+    into: trace2_s1
+
+  - type: read
+    from: local/{env.WORK}/trace2_s2_replace.txt
+    into: trace2_s2
+
+  - type: check
+    check: store.trace2_s1 == "s_pre_pre,s_pre_app,d_post_app,"
+    failure_message: 'case 8 (no default stage): got "{store.trace2_s1}"'
+
+  - type: check
+    check: store.trace2_s2 == "s_post_pre,d_post_app,"
+    failure_message: 'case 9 (modifier in defaults): got "{store.trace2_s2}"'
+
+  # --- Case 10: stream stage modifiers are not valid at replication level.
+  - id: replication_level_modifier
+    replication:
+      source: local
+      target: local
+      hooks:
+        post+:
+          - type: log
+            message: should not run
+      defaults:
+        mode: full-refresh
+      streams:
+        file://{env.WORK}/src/s1_none.csv:
+          object: "file://{env.WORK}/out3/{stream_file_name}.csv"
+    on_failure: warn
+
+  - type: check
+    check: state.replication_level_modifier.status == "warning"
+    failure_message: 'case 10 (replication level): expected a warning, got "{state.replication_level_modifier.status}"'
+
+  - type: log
+    message: "hook modifiers: SUCCESS"

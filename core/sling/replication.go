@@ -1333,10 +1333,18 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// validate for pre/post/pre_merge/post_merge at replication level
 		stageHooks := map[string][]any{
-			"pre":        rd.Hooks.Pre,
-			"post":       rd.Hooks.Post,
-			"pre_merge":  rd.Hooks.PreMerge,
-			"post_merge": rd.Hooks.PostMerge,
+			"pre":         rd.Hooks.Pre,
+			"+pre":        rd.Hooks.PrePrepend,
+			"pre+":        rd.Hooks.PreAppend,
+			"post":        rd.Hooks.Post,
+			"+post":       rd.Hooks.PostPrepend,
+			"post+":       rd.Hooks.PostAppend,
+			"pre_merge":   rd.Hooks.PreMerge,
+			"+pre_merge":  rd.Hooks.PreMergePrepend,
+			"pre_merge+":  rd.Hooks.PreMergeAppend,
+			"post_merge":  rd.Hooks.PostMerge,
+			"+post_merge": rd.Hooks.PostMergePrepend,
+			"post_merge+": rd.Hooks.PostMergeAppend,
 		}
 		for stage, hooks := range stageHooks {
 			if len(hooks) > 0 {
@@ -1645,10 +1653,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 	// otherwise, use legacy replace behavior (stream replaces defaults entirely)
 	stream.Columns = mergeColumns(replicationCfg.Defaults.Columns, stream.Columns)
 
-	// set default hooks
-	if stream.Hooks.IsEmpty() {
-		stream.Hooks = replicationCfg.Defaults.Hooks
-	}
+	// set default hooks, per stage, applying "+stage" / "stage+" modifiers
+	stream.Hooks = stream.Hooks.WithDefaults(replicationCfg.Defaults.Hooks.WithDefaults(HookMap{}))
 
 	// set default options
 	if stream.SourceOptions == nil {
