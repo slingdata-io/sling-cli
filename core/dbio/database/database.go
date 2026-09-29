@@ -966,6 +966,10 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 // BulkImportStream import the stream rows in bulk
 func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	if conn.UseADBC() {
+		// the ADBC session is separate: an open tx here can hold DDL locks it waits on (#816)
+		if err = conn.Commit(); err != nil {
+			return 0, g.Error(err, "could not commit before ADBC bulk import")
+		}
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 	g.Trace("BulkImportStream not implemented for %s", conn.GetType())

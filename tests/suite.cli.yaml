@@ -3450,6 +3450,18 @@
   output_contains:
     - 'string comparison correct for all 1000 rows'
 
+# issue #816: with SLING_USE_ADBC, the truncate stays uncommitted (Sch-M) on the main
+# connection. The ADBC ingest then waits on LCK_M_SCH_S forever. The timeout ends the hang.
+- id: 804
+  name: 'MSSQL ADBC truncate does not hang on its own DDL lock (issue #816)'
+  rows: 1000
+  run: |
+    sling run -d --src-stream file://tests/files/test1.parquet --tgt-conn MSSQL --tgt-object dbo.adbc_truncate_816 --mode full-refresh
+    SLING_USE_ADBC=true timeout 120 sling run -d --src-stream file://tests/files/test1.parquet --tgt-conn MSSQL --tgt-object dbo.adbc_truncate_816 --tgt-options '{ batch_limit: 10000, direct_insert: true }' --mode truncate
+  output_contains:
+    - 'truncated table "dbo"."adbc_truncate_816"'
+    - 'execution succeeded'
+
 # issue #820: the Redshift temp-table load must not hold a transaction open during S3 staging.
 # Requires a reachable REDSHIFT connection (cluster not always available), so it stays commented out.
 # - id: 805
