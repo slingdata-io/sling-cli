@@ -871,7 +871,8 @@ func (conn *BaseConn) setTx(tx Transaction) {
 func (conn *BaseConn) postConnect() {
 
 	conn.SetProp("connected", "true")
-	conn.SetProp("connect_time", cast.ToString(time.Now()))
+	// RFC3339 so it parses back; time.String() adds a monotonic suffix
+	conn.SetProp("connect_time", time.Now().Format(time.RFC3339Nano))
 
 }
 

@@ -3450,6 +3450,15 @@
   output_contains:
     - 'string comparison correct for all 1000 rows'
 
+# issue #820: the Redshift temp-table load must not hold a transaction open during S3 staging.
+# Requires a reachable REDSHIFT connection (cluster not always available), so it stays commented out.
+# - id: 805
+#   name: 'Redshift temp table COPY runs without an open transaction (issue #820)'
+#   run: 'sling run -d -r tests/replications/r.139.redshift_copy_no_tx.yaml'
+#   output_contains:
+#     - 'SUCCESS: Redshift temp table COPY ran without an open transaction'
+#     - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

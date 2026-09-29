@@ -1,0 +1,59 @@
+# issue #820: the temp-table load must not open a transaction on Redshift.
+# BulkImportFlow first streams the whole source to S3, then runs one COPY.
+# An open transaction during the S3 write keeps Serverless RPUs busy.
+# Redshift logs each statement with its xid. A BEGIN in the same xid as the
+# COPY into the temp table shows that the transaction was open during staging.
+#
+# Note: requires a reachable REDSHIFT connection; skipped by default in the suite.
+
+source: local
+target: redshift
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.rs_copy_no_tx_820
+
+    # older runs stay in the statement log, so only look at this run
+    - type: query
+      connection: '{target.name}'
+      query: SELECT getdate() AS ts
+      into: start
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT count(DISTINCT c.xid) AS cnt
+        FROM svl_statementtext c
+        JOIN svl_statementtext b
+          ON b.xid = c.xid
+         AND b.pid = c.pid
+        WHERE c.text ILIKE 'copy %rs_copy_no_tx_820_tmp%'
+          AND b.text ILIKE 'begin%'
+          AND c.starttime >= '{store.start[0].ts}'
+      into: tx_copies
+
+    - type: log
+      message: 'store.tx_copies => {store.tx_copies}'
+
+    - type: check
+      check: int_parse(store.tx_copies[0].cnt) == 0
+      message: 'COPY into temp table ran inside a transaction opened before S3 staging'
+
+    - type: log
+      message: 'SUCCESS: Redshift temp table COPY ran without an open transaction'
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.rs_copy_no_tx_820
+
+streams:
+  file://tests/files/test1.csv:
+    object: public.rs_copy_no_tx_820
+    mode: full-refresh

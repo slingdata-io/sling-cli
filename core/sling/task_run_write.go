@@ -343,11 +343,15 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		conn.Close()
 	})
 
-	// Begin transaction for temp table operations
+	// Begin transaction for temp table operations.
+	// Redshift stages the whole stream to S3 before one atomic COPY, so a
+	// transaction would sit open (and bill Serverless RPUs) during extraction.
 	txOptions := determineTxOptions(cfg, tgtConn.GetType())
-	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
-		err = g.Error(err, "could not open transaction to write to temp table")
-		return 0, err
+	if tgtConn.GetType() != dbio.TypeDbRedshift {
+		if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
+			err = g.Error(err, "could not open transaction to write to temp table")
+			return 0, err
+		}
 	}
 
 	// Configure column handlers
