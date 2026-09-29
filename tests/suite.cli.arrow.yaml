@@ -1059,7 +1059,8 @@
     sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-object file:///tmp/arrow_lane_783.parquet --mode full-refresh --tgt-options '{format: parquet}'
   output_contains:
     - 'forced but not eligible'
-    - 'not enabled for this plan'
+    - 'requires a CLI Pro Max or Advanced Platform plan'
+  output_does_not_contain:
     - 'unable to validate CLI Pro token'
 
 - id: 784

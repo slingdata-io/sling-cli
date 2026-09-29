@@ -311,6 +311,10 @@ Create or update a connection in the Sling environment file:
 **Important Notes:**
 - Check existing connections with `list` before overwriting
 - Never pass secret values. Use a `${VAR}` ref, or omit the secret field to scaffold a ref
+- A secret field can also hold a secret manager reference, such as `op://vault/item/field` or `ref+awssecrets://prod/postgres#/password`. Sling resolves it when the connection opens. Never ask the user for the secret value
+- `from: ref+awssecrets://prod/postgres` loads all keys of the connection from one JSON secret. Keys written in the entry win. `type` is necessary with `from`
+- A console identifier also works as a whole value, with no prefix: an Azure secret URL (`https://<vault>.vault.azure.net/secrets/<name>`), an AWS Secrets Manager or SSM ARN, a GCP resource name (`projects/<p>/secrets/<name>`), or a Conjur ID (`<account>:variable:<id>`)
+- `ref+sling://connections/<name>/<field>` reads a field of another connection. `ref+sling://connections/<name>` copies a whole connection (use with `from:`). `ref+sling://env/<KEY>` reads an env var
 - The tool returns `{path, line, missing}` so the user can replace refs in `env.yaml`
 
 ### Testing Connections
