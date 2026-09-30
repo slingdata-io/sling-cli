@@ -43,6 +43,45 @@ streams:
           url: "https://webhook.example.com"
 ```
 
+### Stream Hooks and Default Hooks
+
+Sling applies `defaults.hooks` one stage at a time. A stream stage replaces only the default hooks of that stage. The other default stages stay.
+
+To add to the default hooks instead of replacing them, use a modifier key:
+
+| Key | Runs |
+|-----|------|
+| `+pre` / `pre+` | Before / after the `pre` hooks |
+| `+post` / `post+` | Before / after the `post` hooks |
+| `+pre_merge` / `pre_merge+` | Before / after the `pre_merge` hooks |
+| `+post_merge` / `post_merge+` | Before / after the `post_merge` hooks |
+
+If the stream also sets the stage (e.g. `post`), the modifiers wrap the stream hooks, and the default hooks of that stage do not run. At the replication level, only `start` and `end` are valid.
+
+```yaml
+defaults:
+  hooks:
+    pre:
+      - type: log
+        message: "starting {stream.name}"
+    post:
+      - type: query
+        query: file://log_insert.sql
+
+streams:
+  table_a: {}                 # pre: [starting], post: [log_insert]
+  table_b:
+    hooks:
+      post:                   # pre: [starting], post: [check]
+        - type: check
+          check: run.total_rows > 0
+  table_c:
+    hooks:
+      +post:                  # pre: [starting], post: [log, log_insert]
+        - type: log
+          message: "done {stream.name}"
+```
+
 ## Common Properties
 
 | Property | Description |
