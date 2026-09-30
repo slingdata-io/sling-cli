@@ -959,3 +959,22 @@ streams:
 		assert.Equal(t, want, again, name+" (again)")
 	}
 }
+
+func TestMatchStreamsChunkParts(t *testing.T) {
+	rd := ReplicationConfig{Streams: map[string]*ReplicationStreamConfig{
+		"t_surat (part-001)": {},
+		"t_surat (part-002)": {},
+		"t_other":            {},
+	}}
+
+	// base name selects all parts
+	assert.Len(t, rd.MatchStreams("t_surat"), 2)
+
+	// a pinned part selects only that part
+	assert.Len(t, rd.MatchStreams("t_surat (part-002)"), 1)
+
+	// a pinned part still matches the unchunked stream
+	assert.Len(t, rd.MatchStreams("t_other (part-001)"), 1)
+
+	assert.Len(t, rd.MatchStreams("t_sura"), 0)
+}

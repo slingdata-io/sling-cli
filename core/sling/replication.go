@@ -265,6 +265,9 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 			streams[streamName] = streamCfg
 		} else if basePattern != pattern && rd.Normalize(basePattern) == rd.Normalize(streamName) {
 			streams[streamName] = streamCfg
+		} else if baseStream := chunkPartSuffixRe.ReplaceAllString(streamName, ""); baseStream != streamName && rd.Normalize(baseStream) == rd.Normalize(pattern) {
+			// a base-name selection matches all chunk parts of that stream
+			streams[streamName] = streamCfg
 		}
 	}
 	return
