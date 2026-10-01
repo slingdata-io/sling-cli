@@ -2,6 +2,7 @@ package iop
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,7 @@ type Batch struct {
 	ds          *Datastream
 	closed      bool
 	closeChan   chan struct{}
+	sendMu      sync.RWMutex // Close waits for a Push in progress before it closes Rows
 	transforms  []func(row []any) []any
 	context     *g.Context
 }
@@ -108,8 +110,10 @@ func (b *Batch) Close() {
 		case b.closeChan <- struct{}{}:
 		case <-timer.C:
 		}
+		b.sendMu.Lock() // a Push that missed the signal finishes its send first
 		b.closed = true
 		close(b.Rows)
+		b.sendMu.Unlock()
 		if !b.ds.NoDebug {
 			g.Trace("closed %s", b.ID())
 		}
@@ -206,26 +210,31 @@ func (b *Batch) Push(row []any) {
 		newRow = append(newRow, nil)
 	}
 
-	b.context.Lock()
+	// hold the read lock only until the select ends: the case bodies can call Close
+	b.sendMu.RLock()
 	if b.closed {
-		b.context.Unlock()
+		b.sendMu.RUnlock()
 		b.ds.it.Reprocess <- row
 		return
 	}
-	b.context.Unlock()
 
 	select {
 	case <-b.ds.Context.Ctx.Done():
+		b.sendMu.RUnlock()
 		b.ds.Close()
 	case <-b.ds.pauseChan:
+		b.sendMu.RUnlock()
 		<-b.ds.unpauseChan // wait for unpause
 		b.ds.it.Reprocess <- row
 	case <-b.closeChan:
+		b.sendMu.RUnlock()
 		b.ds.it.Reprocess <- row
 	case v := <-b.ds.schemaChgChan:
+		b.sendMu.RUnlock()
 		b.ds.it.Reprocess <- row
 		b.ds.schemaChgChan <- v
 	case b.Rows <- newRow:
+		b.sendMu.RUnlock()
 		b.Count++
 		atomic.AddUint64(&b.ds.Count, 1)
 		b.ds.bwRows <- newRow

@@ -886,10 +886,17 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 	dsN.it.IsCasted = true
 	dsN.Inferred = true
 
+	// set the config before dsN starts. The source streams already applied the
+	// transforms, and transforms2 holds source state, so dsN must not run them.
+	firstDs := <-df.StreamCh
+	if firstDs != nil {
+		dsN.Sp.Config = firstDs.Sp.Config
+		dsN.Sp.Config.Transforms = nil
+	}
+
 	go func() {
 		defer close(rows)
-		for ds := range df.StreamCh {
-			dsN.Sp.Config = ds.Sp.Config // copy config
+		for ds := firstDs; ds != nil; ds = <-df.StreamCh {
 			for batch := range ds.BatchChan {
 				if !dsN.Columns.IsSimilarTo(df.Columns) {
 					dsN.AddColumns(df.Columns, false)

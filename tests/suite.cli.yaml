@@ -3480,6 +3480,22 @@
     - 'cannot declare a "post+" hook at replication level'
     - 'hook modifiers: SUCCESS'
 
+# replace_accents uses one global transform.Chain. The chain keeps state, and one stream
+# calls it from more than one goroutine. This causes runtime.boundsError panics or a hang (AEG Vision).
+- id: 807
+  name: 'replace_accents does not panic or hang on one stream'
+  run: |
+    mkdir -p /tmp/sling/accent_race
+    awk 'BEGIN{split("é|Ångström café|ab|Łódź|x|naïve résumé déjà vu|Ærøskøbing|ñ",v,"|"); print "id,a,b"; for(i=1;i<=20000;i++) printf "%d,%s,%s\n", i, v[i%8+1], v[(i+3)%8+1]}' > /tmp/sling/accent_race/input.csv
+    timeout 60 sling run --src-stream file:///tmp/sling/accent_race/input.csv --tgt-object file:///tmp/sling/accent_race/output.csv --transforms '[replace_accents]'
+    if LC_ALL=C grep -q '[^ -~]' /tmp/sling/accent_race/output.csv; then echo 'accents left in output'; else echo 'accents removed: OK'; fi
+  output_contains:
+    - 'wrote 20000 rows'
+    - 'accents removed: OK'
+  output_does_not_contain:
+    - 'boundsError'
+    - 'panic occurred'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

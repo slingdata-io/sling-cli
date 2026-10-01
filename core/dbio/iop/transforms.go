@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -377,8 +378,7 @@ var (
 	TransformReplaceAccents = TransformLegacy{
 		Name: "replace_accents",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
-			newVal, _, err := transform.String(sp.transformers.Accent, val)
-			return newVal, err
+			return Transforms.ReplaceAccents(val), nil
 		},
 	}
 
@@ -529,6 +529,19 @@ func (t transformsNS) duckDbListAsText(val string) string {
 		return val + " "
 	}
 	return val
+}
+
+// ReplaceAccents removes combining marks and maps special letters to ASCII.
+// It keeps no state, so concurrent calls are safe.
+func (t transformsNS) ReplaceAccents(val string) string {
+	var sb strings.Builder
+	sb.Grow(len(val))
+	for _, r := range norm.NFD.String(val) {
+		if !unicode.Is(unicode.Mn, r) {
+			sb.WriteRune(accentRune(r))
+		}
+	}
+	return norm.NFC.String(sb.String())
 }
 
 func (t transformsNS) Decode(sp *StreamProcessor, decoder *encoding.Decoder, val string) (string, error) {
