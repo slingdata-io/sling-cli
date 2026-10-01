@@ -711,7 +711,8 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			)
 		}
 
-		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
+		sshOptions := iop.NewSSHOptions(func(key string) string { return conn.GetProp(key) })
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"), sshOptions)
 		if err != nil {
 			return g.Error(err, "could not connect to ssh tunnel server")
 		}

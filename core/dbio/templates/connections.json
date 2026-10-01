@@ -56,6 +56,26 @@
         "ssh_passphrase": {
           "type": "string",
           "description": "SSH key passphrase"
+        },
+        "ssh_host_key": {
+          "type": "string",
+          "description": "Accepted SSH host key fingerprints (SHA256:...) or public keys, comma-separated"
+        },
+        "ssh_known_hosts": {
+          "type": "string",
+          "description": "Path to a known_hosts file, read in addition to ~/.ssh/known_hosts"
+        },
+        "ssh_strict_host_key": {
+          "type": "boolean",
+          "description": "Reject SSH hosts with an unverified host key. Set to false to skip verification"
+        },
+        "ssh_ciphers": {
+          "type": "string",
+          "description": "SSH ciphers to offer, comma-separated. Replaces the default list"
+        },
+        "ssh_kex_algorithms": {
+          "type": "string",
+          "description": "SSH key exchange algorithms to offer, comma-separated. Replaces the default list"
         }
       }
     },
@@ -728,6 +748,26 @@
         "passphrase": {
           "type": "string",
           "description": "Private key passphrase"
+        },
+        "ssh_host_key": {
+          "type": "string",
+          "description": "Accepted SSH host key fingerprints (SHA256:...) or public keys, comma-separated"
+        },
+        "ssh_known_hosts": {
+          "type": "string",
+          "description": "Path to a known_hosts file, read in addition to ~/.ssh/known_hosts"
+        },
+        "ssh_strict_host_key": {
+          "type": "boolean",
+          "description": "Reject SSH hosts with an unverified host key. Set to false to skip verification"
+        },
+        "ssh_ciphers": {
+          "type": "string",
+          "description": "SSH ciphers to offer, comma-separated. Replaces the default list"
+        },
+        "ssh_kex_algorithms": {
+          "type": "string",
+          "description": "SSH key exchange algorithms to offer, comma-separated. Replaces the default list"
         }
       }
     },
