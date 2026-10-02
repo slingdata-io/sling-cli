@@ -229,6 +229,31 @@ func TestResolverResolveEntryFrom(t *testing.T) {
 	assert.ErrorContains(t, err, "needs a JSON or YAML object")
 }
 
+func TestResolverIsSecret(t *testing.T) {
+	var seen []string
+	r := NewResolver(Options{
+		OnValue:  func(v string) { seen = append(seen, v) },
+		IsSecret: func(path []string) bool { return path[len(path)-1] == "password" },
+	})
+	ctx := context.Background()
+
+	out, err := r.ResolveEntry(ctx, map[string]any{
+		"from":   "ref+fake://pg",
+		"inputs": map[string]any{"token": "ref+fake://token"},
+		"url":    "postgres://etl:ref+fake://pg#/password+@host/db",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "db.acme.internal", out["host"])
+	assert.Equal(t, "db.acme.internal", r.Redact("db.acme.internal"), "host is not secret")
+	assert.Equal(t, "tok-123456", r.Redact("tok-123456"), "inputs.token is not secret")
+	assert.Equal(t, "***", r.Redact("s3cr3t-pass"))
+	assert.Equal(t, []string{"s3cr3t-pass"}, seen)
+
+	_, err = r.Resolve(ctx, "ref+fake://api_key")
+	require.NoError(t, err)
+	assert.Equal(t, "***", r.Redact("key-abcdef"), "a value with no key is secret")
+}
+
 func TestResolverInstanceChoice(t *testing.T) {
 	ctx := context.Background()
 

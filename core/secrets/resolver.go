@@ -41,6 +41,10 @@ type Options struct {
 	OnValue  func(v string) // called for each resolved value (redaction hook)
 	BaseDir  string         // folder for relative `file` paths
 
+	// IsSecret tells if the value at a key path is redacted. The path is
+	// empty when the key is not known. Nil redacts all values.
+	IsSecret func(path []string) bool
+
 	// KeyAliases renames keys of a `from:` object, e.g. username -> user.
 	KeyAliases map[string]string
 }
@@ -81,10 +85,16 @@ func NewResolver(opts Options) *Resolver {
 // Resolve returns the value for one reference string. A string that is not a
 // reference comes back unchanged. A pointer to an object is an error: objects
 // are valid only in `from:`.
+// Its value is always redacted.
 func (r *Resolver) Resolve(ctx context.Context, s string) (any, error) {
+	return r.resolve(ctx, s, nil)
+}
+
+// resolve is Resolve for the value at path.
+func (r *Resolver) resolve(ctx context.Context, s string, path []string) (any, error) {
 	if !IsRef(s) {
 		if embeddedRefRe.MatchString(s) {
-			return r.resolveEmbedded(ctx, s)
+			return r.resolveEmbedded(ctx, s, path)
 		}
 		return s, nil
 	}
@@ -100,6 +110,7 @@ func (r *Resolver) Resolve(ctx context.Context, s string) (any, error) {
 	case map[string]any, []any:
 		return nil, r.wrap(ref, fmt.Errorf("the value is an object or a list. Use it in `from:`, or add a pointer such as #/password"))
 	}
+	r.rememberAt(path, v)
 	return v, nil
 }
 
@@ -123,7 +134,7 @@ func (r *Resolver) ResolveValue(ctx context.Context, v any) (any, error) {
 	if err := r.prefetch(ctx, refs); err != nil {
 		return nil, err
 	}
-	return r.replace(ctx, v)
+	return r.replace(ctx, v, nil)
 }
 
 // ResolveEntry is ResolveValue plus the `from:` merge for one connection entry.
@@ -155,6 +166,7 @@ func (r *Resolver) ResolveEntry(ctx context.Context, props map[string]any) (map[
 	for k, v := range obj {
 		if _, set := out[k]; !set {
 			out[k] = v
+			r.rememberAt([]string{k}, v)
 		}
 	}
 	return out, nil
@@ -194,7 +206,6 @@ func (r *Resolver) fromObject(ctx context.Context, from string) (map[string]any,
 			delete(obj, alias)
 		}
 	}
-	walkStrings(obj, r.remember)
 	return obj, nil
 }
 
@@ -242,7 +253,6 @@ func (r *Resolver) value(ctx context.Context, ref Ref) (any, error) {
 	if err != nil {
 		return nil, r.wrap(ref, err)
 	}
-	walkStrings(v, r.remember)
 	return v, nil
 }
 
@@ -364,15 +374,16 @@ func (r *Resolver) prefetch(ctx context.Context, refs []Ref) error {
 	return nil
 }
 
-// replace copies v with every reference swapped for its value.
-func (r *Resolver) replace(ctx context.Context, v any) (any, error) {
+// replace copies v with every reference swapped for its value. path is the
+// key path of v.
+func (r *Resolver) replace(ctx context.Context, v any, path []string) (any, error) {
 	switch t := v.(type) {
 	case string:
-		return r.Resolve(ctx, t)
+		return r.resolve(ctx, t, path)
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, item := range t {
-			nv, err := r.replace(ctx, item)
+			nv, err := r.replace(ctx, item, append(slices.Clone(path), k))
 			if err != nil {
 				return nil, err
 			}
@@ -382,7 +393,7 @@ func (r *Resolver) replace(ctx context.Context, v any) (any, error) {
 	case map[any]any:
 		out := make(map[string]any, len(t))
 		for k, item := range t {
-			nv, err := r.replace(ctx, item)
+			nv, err := r.replace(ctx, item, append(slices.Clone(path), fmt.Sprint(k)))
 			if err != nil {
 				return nil, err
 			}
@@ -392,7 +403,7 @@ func (r *Resolver) replace(ctx context.Context, v any) (any, error) {
 	case []any:
 		out := make([]any, len(t))
 		for i, item := range t {
-			nv, err := r.replace(ctx, item)
+			nv, err := r.replace(ctx, item, path)
 			if err != nil {
 				return nil, err
 			}
@@ -405,7 +416,7 @@ func (r *Resolver) replace(ctx context.Context, v any) (any, error) {
 }
 
 // resolveEmbedded replaces each `ref+...+` inside s with its scalar value.
-func (r *Resolver) resolveEmbedded(ctx context.Context, s string) (string, error) {
+func (r *Resolver) resolveEmbedded(ctx context.Context, s string, path []string) (string, error) {
 	var firstErr error
 	out := embeddedRefRe.ReplaceAllStringFunc(s, func(m string) string {
 		if firstErr != nil {
@@ -426,6 +437,7 @@ func (r *Resolver) resolveEmbedded(ctx context.Context, s string) (string, error
 			firstErr = r.wrap(ref, fmt.Errorf("an embedded reference must point to a scalar value"))
 			return m
 		}
+		r.rememberAt(path, v)
 		return fmt.Sprint(v)
 	})
 	if firstErr != nil {
@@ -508,6 +520,29 @@ func (r *Resolver) store(key string, raw []byte) {
 	r.mu.Lock()
 	r.cache[key] = e
 	r.mu.Unlock()
+}
+
+// rememberAt records the secret values in v, which is at path. Keys of a map
+// extend the path.
+func (r *Resolver) rememberAt(path []string, v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, item := range t {
+			r.rememberAt(append(slices.Clone(path), k), item)
+		}
+	case map[any]any:
+		for k, item := range t {
+			r.rememberAt(append(slices.Clone(path), fmt.Sprint(k)), item)
+		}
+	case []any:
+		for _, item := range t {
+			r.rememberAt(path, item)
+		}
+	case string:
+		if len(path) == 0 || r.opts.IsSecret == nil || r.opts.IsSecret(path) {
+			r.remember(t)
+		}
+	}
 }
 
 // remember records a resolved value for redaction.

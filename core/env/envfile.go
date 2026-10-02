@@ -1238,6 +1238,43 @@ func (s *secretValues) RedactLogLine(ll *g.LogLine) *g.LogLine {
 	return &out
 }
 
+// secretKeyParts mark a key as secret when the key, without "_" and "-",
+// contains one of them.
+var secretKeyParts = []string{
+	"password", "passwd", "passphrase", "secret", "token", "credential",
+	"privatekey", "accesskey", "accountkey", "apikey", "keybody", "sastoken",
+	"connstr", "connectionstring", "authstring", "authorization",
+}
+
+// IsSecretPath tells if a resolved value at a key path is secret. Log output
+// shows the other values. A top-level URL can hold a password, thus it is
+// secret. All values under `secrets:` are secret. Under `inputs:` (API
+// specs), a URL is not secret.
+func IsSecretPath(path []string) bool {
+	if len(path) == 0 || strings.EqualFold(path[0], "secrets") {
+		return true
+	}
+	key := strings.ToLower(path[len(path)-1])
+	words := strings.FieldsFunc(key, func(r rune) bool { return r == '_' || r == '-' || r == '.' })
+	joined := strings.Join(words, "")
+	for _, part := range secretKeyParts {
+		if strings.Contains(joined, part) {
+			return true
+		}
+	}
+	for _, w := range words {
+		switch w {
+		case "key", "dsn":
+			return true
+		case "url", "uri", "headers", "tunnel":
+			if len(path) == 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // fromKeyAliases maps key names of common secret layouts (AWS RDS rotation
 // secrets) to connection keys, for `from:`.
 var fromKeyAliases = map[string]string{
@@ -1264,6 +1301,7 @@ var SecretResolver = sync.OnceValues(func() (*secrets.Resolver, error) {
 	opts := secrets.Options{
 		CacheTTL:   5 * time.Minute,
 		OnValue:    AddSecretValue,
+		IsSecret:   IsSecretPath,
 		BaseDir:    baseDir,
 		KeyAliases: fromKeyAliases,
 	}
