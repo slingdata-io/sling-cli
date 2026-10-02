@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
+
+// matches ISODate("...") / ObjectId("...").
+// The inner `\(?` tolerates the doubled paren in the date_layout_str template.
+var shellCtorRegex = regexp.MustCompile(`^(ISODate|ObjectId)\(\(?"([^"]*)"\)\)?$`)
 
 // MongoDBConn is a Mongo connection
 type MongoDBConn struct {
@@ -182,6 +187,10 @@ func (conn *MongoDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 func (conn *MongoDBConn) processMongoFilter(filter any) any {
 	switch v := filter.(type) {
 	case map[string]any:
+		if val, ok := parseExtendedJSON(v); ok {
+			return val
+		}
+
 		// Process map recursively
 		result := make(map[string]any)
 		for key, val := range v {
@@ -194,10 +203,17 @@ func (conn *MongoDBConn) processMongoFilter(filter any) any {
 		}
 		return result
 	case map[any]any:
+		normalized := make(map[string]any, len(v))
+		for key, val := range v {
+			normalized[cast.ToString(key)] = val
+		}
+		if val, ok := parseExtendedJSON(normalized); ok {
+			return val
+		}
+
 		// Process map recursively
 		result := make(map[string]any)
-		for key, val := range v {
-			keyStr := cast.ToString(key)
+		for keyStr, val := range normalized {
 			if keyStr == "_id" || strings.HasSuffix(keyStr, "_id") {
 				result[keyStr] = conn.processObjectIDValue(val)
 			} else {
@@ -230,6 +246,23 @@ func (conn *MongoDBConn) processMongoFilter(filter any) any {
 	}
 }
 
+// normalizeFilterValue converts a template-rendered incremental/backfill value
+// into a real BSON value. The templates wrap datetimes as ISODate("<iso>"),
+// which is mongosh syntax the driver does not understand.
+func (conn *MongoDBConn) normalizeFilterValue(key, value string) any {
+	value = strings.Trim(value, "'")
+
+	if m := shellCtorRegex.FindStringSubmatch(value); m != nil {
+		value = m[2]
+	}
+
+	if key == "_id" || strings.HasSuffix(key, "_id") {
+		return conn.processObjectIDValue(value)
+	}
+
+	return conn.processMongoFilter(value)
+}
+
 // processObjectIDValue handles ObjectID conversion for _id fields
 func (conn *MongoDBConn) processObjectIDValue(val any) any {
 	switch v := val.(type) {
@@ -249,6 +282,10 @@ func (conn *MongoDBConn) processObjectIDValue(val any) any {
 		}
 		return v
 	case map[string]any:
+		if val, ok := parseExtendedJSON(v); ok {
+			return val
+		}
+
 		// Handle operators like $gte, $lt
 		result := make(map[string]any)
 		for op, opVal := range v {
@@ -260,10 +297,17 @@ func (conn *MongoDBConn) processObjectIDValue(val any) any {
 		}
 		return result
 	case map[any]any:
+		normalized := make(map[string]any, len(v))
+		for op, opVal := range v {
+			normalized[cast.ToString(op)] = opVal
+		}
+		if val, ok := parseExtendedJSON(normalized); ok {
+			return val
+		}
+
 		// Handle operators like $gte, $lt
 		result := make(map[string]any)
-		for op, opVal := range v {
-			opStr := cast.ToString(op)
+		for opStr, opVal := range normalized {
 			if strings.HasPrefix(opStr, "$") {
 				result[opStr] = conn.processObjectIDValue(opVal)
 			} else {
@@ -274,6 +318,63 @@ func (conn *MongoDBConn) processObjectIDValue(val any) any {
 	default:
 		return conn.processMongoFilter(val)
 	}
+}
+
+// parseExtendedJSON converts an Extended JSON wrapper to its BSON value,
+// e.g. {"$date": "2019-06-01T00:00:00Z"} => time.Time. Returns false if the
+// map is not a single-key wrapper of a supported type.
+func parseExtendedJSON(m map[string]any) (any, bool) {
+	if len(m) != 1 {
+		return nil, false
+	}
+
+	for key, val := range m {
+		switch key {
+		case "$date":
+			switch v := val.(type) {
+			case string:
+				if t, ok := parseISODateString(v); ok {
+					return t, true
+				}
+			case map[string]any:
+				if inner, ok := v["$numberLong"]; ok && len(v) == 1 {
+					if millis, err := cast.ToInt64E(inner); err == nil {
+						return time.UnixMilli(millis).UTC(), true
+					}
+				}
+			default: // epoch millis
+				if millis, err := cast.ToInt64E(val); err == nil {
+					return time.UnixMilli(millis).UTC(), true
+				}
+			}
+		case "$oid":
+			if s, ok := val.(string); ok {
+				if oid, err := primitive.ObjectIDFromHex(s); err == nil {
+					return oid, true
+				}
+			}
+		case "$numberLong":
+			if i, err := cast.ToInt64E(val); err == nil {
+				return i, true
+			}
+		case "$numberInt":
+			if i, err := cast.ToInt32E(val); err == nil {
+				return i, true
+			}
+		case "$numberDouble":
+			if f, err := cast.ToFloat64E(val); err == nil {
+				return f, true
+			}
+		case "$numberDecimal":
+			if s, ok := val.(string); ok {
+				if d, err := primitive.ParseDecimal128(s); err == nil {
+					return d, true
+				}
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // parseISODateString attempts to parse an ISO 8601 datetime string.
@@ -363,15 +464,19 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 		}
 	}
 
-	// Add incremental/backfill filters if specified
+	// Add incremental/backfill filters if specified. Values arrive as
+	// template-rendered strings, so normalize them to real BSON values.
+	// Otherwise a Date field is compared against a String and matches nothing.
 	if updateKey != "" && incrementalValue != "" {
 		// incremental mode
-		incrementalValue = strings.Trim(incrementalValue, "'")
-		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gt", Value: incrementalValue}}})
+		value := conn.normalizeFilterValue(updateKey, incrementalValue)
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gt", Value: value}}})
 	} else if updateKey != "" && startValue != "" && endValue != "" {
 		// backfill mode
-		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gte", Value: startValue}}})
-		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$lte", Value: endValue}}})
+		start := conn.normalizeFilterValue(updateKey, startValue)
+		end := conn.normalizeFilterValue(updateKey, endValue)
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gte", Value: start}}})
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$lte", Value: end}}})
 	}
 
 	if strings.TrimSpace(collectionName) == "" {

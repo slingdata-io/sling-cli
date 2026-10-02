@@ -1,0 +1,7 @@
+# legacy file
+connections:
+  A:
+    type: postgres
+    host: a
+variables:
+  OLD_VAR: 1

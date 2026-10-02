@@ -1,0 +1,16 @@
+connections:
+  # first
+  A:
+    type: postgres
+    host: a.example.com
+  # middle
+  B:
+    type: duckdb
+    instance: b.db
+  # last
+  C:
+    type: sqlite
+    instance: c.db
+# trailing note: kept when the last entry goes away
+env:
+  K: v

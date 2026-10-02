@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode"
@@ -28,7 +29,7 @@ var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*[mGKHJA-Z]`)
 type testCase struct {
 	ID      int               `yaml:"id"`
 	After   []int             `yaml:"after"`
-	Group   string            `yaml:"group"`
+	Group   string            `yaml:"group"` // comma-separated; runs one at a time per group
 	Name    string            `yaml:"name"`
 	Run     string            `yaml:"run"`
 	Env     map[string]string `yaml:"env"`
@@ -186,18 +187,49 @@ func TestCLI(t *testing.T) {
 	}
 
 	running := cmap.New[testCase]()
-	groupRun := cmap.New[testCase]()
+
+	// a case takes all of its groups at once, or waits
+	var groupMu sync.Mutex
+	groupRun := map[string]bool{}
+	takeGroups := func(groups []string) bool {
+		groupMu.Lock()
+		defer groupMu.Unlock()
+		for _, group := range groups {
+			if groupRun[group] {
+				return false
+			}
+		}
+		for _, group := range groups {
+			groupRun[group] = true
+		}
+		return true
+	}
+	releaseGroups := func(groups []string) {
+		groupMu.Lock()
+		defer groupMu.Unlock()
+		for _, group := range groups {
+			delete(groupRun, group)
+		}
+	}
+
+	done := make(chan struct{})
+	defer close(done)
 
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
-		for range ticker.C {
-			ids := running.Keys()
-			if len(ids) == 0 {
-				ticker.Stop()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
 				return
+			case <-ticker.C:
+				// group-waiters don't appear in `running`, so an empty map
+				// doesn't mean the run is over
+				if ids := running.Keys(); len(ids) > 0 {
+					now := time.Now().Format(time.DateTime)
+					env.Println(env.YellowString(g.F("%s -- running => %s", now, g.Marshal(ids))))
+				}
 			}
-			now := time.Now().Format(time.DateTime)
-			env.Println(env.YellowString(g.F("%s -- running => %s", now, g.Marshal(ids))))
 		}
 	}()
 
@@ -207,6 +239,9 @@ func TestCLI(t *testing.T) {
 		allTestContext.SetConcurrencyLimit(8)
 	}
 
+	// allDone tracks completion of every test, including re-queued attempts
+	allDone := sync.WaitGroup{}
+
 	for _, tt := range tests {
 		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
@@ -214,132 +249,158 @@ func TestCLI(t *testing.T) {
 
 		testID := g.F("%d/%s", tt.ID, tt.Name)
 
-		allTestContext.Wg.Read.Add()
+		allDone.Add(1)
 
-		go func(tt testCase) {
-			defer allTestContext.Wg.Read.Done()
-
-			if tt.Group != "" {
-			retryGroup:
-				if groupRun.Has(tt.Group) {
-					time.Sleep(time.Second)
-					goto retryGroup
-				}
-				groupRun.Set(tt.Group, tt)
-				defer groupRun.Remove(tt.Group)
+		// attempts re-queue themselves when their groups are taken, releasing
+		// the concurrency slot while waiting, so other tests keep it busy
+		var attempt func(tt testCase, testID string)
+		attempt = func(tt testCase, testID string) {
+			if allTestContext.Ctx.Err() != nil {
+				allDone.Done() // canceled, this test will never run
+				return
 			}
 
-			t.Run(testID, func(t *testing.T) {
-				running.Set(g.CastToString(tt.ID), tt)
-				defer running.Remove(g.CastToString(tt.ID))
+			allTestContext.Wg.Read.Add()
 
-			retry:
-				for _, needID := range tt.After {
-					if running.Has(g.CastToString(needID)) {
-						time.Sleep(time.Second)
-						goto retry
+			groups := lo.Compact(lo.Map(strings.Split(tt.Group, ","), func(group string, _ int) string {
+				return strings.TrimSpace(group)
+			}))
+
+			if len(groups) > 0 && !takeGroups(groups) {
+				// do not hold a concurrency slot (or the spawn loop) while
+				// waiting on groups: release the slot and retry async
+				allTestContext.Wg.Read.Done()
+				go func() {
+					time.Sleep(time.Second)
+					if allTestContext.Ctx.Err() != nil {
+						allDone.Done() // canceled, this test will never run
+						return
 					}
+					attempt(tt, testID)
+				}()
+				return
+			}
+
+			go func() {
+				defer allDone.Done()
+				defer allTestContext.Wg.Read.Done()
+				if len(groups) > 0 {
+					defer releaseGroups(groups)
 				}
 
-				now := time.Now().Format(time.DateTime)
-				env.Println(env.GreenString(g.F("%s -- %02d | ", now, tt.ID) + tt.Run))
+				t.Run(testID, func(t *testing.T) {
+					running.Set(g.CastToString(tt.ID), tt)
+					defer running.Remove(g.CastToString(tt.ID))
 
-				p, err := process.NewProc("bash")
-				if !g.AssertNoError(t, err) {
-					return
-				}
-				p.Capture = true
-				if os.Getenv("DEBUG") != "" {
-					p.Print = true
-				}
-				p.WorkDir = "../.."
-
-				// set new env
-				p.Env = map[string]string{}
-				for k, v := range defaultEnv {
-					p.Env[k] = v
-				}
-				for k, v := range tt.Env {
-					p.Env[k] = v
-				}
-
-				// create a tmp bash script with the command in tmp folder
-				tmpDir := os.TempDir()
-				tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
-				if err != nil {
-					t.Fatalf("Failed to create temp file: %v", err)
-				}
-				defer os.Remove(tmpFile.Name())
-
-				// write the command to the tmp file
-				lines := []string{
-					"#!/bin/bash",
-					"set -e",
-					"shopt -s expand_aliases",
-					g.F("alias sling=%s", absBin),
-					tt.Run,
-				}
-				content := strings.Join(lines, "\n")
-				_, err = tmpFile.WriteString(content)
-				if err != nil {
-					t.Fatalf("Failed to write command to temp file: %v", err)
-				}
-				tmpFile.Close()
-
-				// run
-				err = p.Run(tmpFile.Name())
-				if tt.Err {
-					assert.Error(t, err)
-				} else {
-					assert.NoError(t, err)
-				}
-
-				// check output
-				stderr := ansiEscapeRegex.ReplaceAllString(p.Stderr.String(), "")
-				stdout := ansiEscapeRegex.ReplaceAllString(p.Stdout.String(), "")
-				for _, contains := range tt.OutputContains {
-					if contains == "" {
-						continue
+				retry:
+					for _, needID := range tt.After {
+						if running.Has(g.CastToString(needID)) {
+							time.Sleep(time.Second)
+							goto retry
+						}
 					}
 
-					found := false
-					if strings.Contains(stderr, contains) {
-						found = true
+					now := time.Now().Format(time.DateTime)
+					env.Println(env.GreenString(g.F("%s -- %02d | ", now, tt.ID) + tt.Run))
+
+					p, err := process.NewProc("bash")
+					if !g.AssertNoError(t, err) {
+						return
 					}
-					if strings.Contains(stdout, contains) {
-						found = true
+					p.Capture = true
+					if os.Getenv("DEBUG") != "" {
+						p.Print = true
 					}
-					assert.True(t, found, "Output does not contain %#v", contains)
-				}
-				for _, notContain := range tt.OutputDoesNotContain {
-					if notContain == "" {
-						continue
+					p.WorkDir = "../.."
+
+					// set new env
+					p.Env = map[string]string{}
+					for k, v := range defaultEnv {
+						p.Env[k] = v
+					}
+					for k, v := range tt.Env {
+						p.Env[k] = v
 					}
 
-					found := false
-					if strings.Contains(stderr, notContain) {
-						found = true
+					// create a tmp bash script with the command in tmp folder
+					tmpDir := os.TempDir()
+					tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
+					if err != nil {
+						t.Fatalf("Failed to create temp file: %v", err)
 					}
-					if strings.Contains(stdout, notContain) {
-						found = true
-					}
-					assert.False(t, found, "Output contains %#v", notContain)
-				}
+					defer os.Remove(tmpFile.Name())
 
-				// Track failure inside the subtest where t refers to the subtest
-				if t.Failed() {
-					testFailuresMux.Lock()
-					testFailures = append(testFailures, testFailure{
-						connType: "CLI",
-						testID:   testID,
-						otherIDs: lo.Filter(running.Keys(), func(k string, i int) bool {
-							return k != testID
-						}),
-					})
-					testFailuresMux.Unlock()
-				}
-			})
-		}(tt)
+					// write the command to the tmp file
+					lines := []string{
+						"#!/bin/bash",
+						"set -e",
+						"shopt -s expand_aliases",
+						g.F("alias sling=%s", absBin),
+						tt.Run,
+					}
+					content := strings.Join(lines, "\n")
+					_, err = tmpFile.WriteString(content)
+					if err != nil {
+						t.Fatalf("Failed to write command to temp file: %v", err)
+					}
+					tmpFile.Close()
+
+					// run
+					err = p.Run(tmpFile.Name())
+					if tt.Err {
+						assert.Error(t, err)
+					} else {
+						assert.NoError(t, err)
+					}
+
+					// check output
+					stderr := ansiEscapeRegex.ReplaceAllString(p.Stderr.String(), "")
+					stdout := ansiEscapeRegex.ReplaceAllString(p.Stdout.String(), "")
+					for _, contains := range tt.OutputContains {
+						if contains == "" {
+							continue
+						}
+
+						found := false
+						if strings.Contains(stderr, contains) {
+							found = true
+						}
+						if strings.Contains(stdout, contains) {
+							found = true
+						}
+						assert.True(t, found, "Output does not contain %#v", contains)
+					}
+					for _, notContain := range tt.OutputDoesNotContain {
+						if notContain == "" {
+							continue
+						}
+
+						found := false
+						if strings.Contains(stderr, notContain) {
+							found = true
+						}
+						if strings.Contains(stdout, notContain) {
+							found = true
+						}
+						assert.False(t, found, "Output contains %#v", notContain)
+					}
+
+					// Track failure inside the subtest where t refers to the subtest
+					if t.Failed() {
+						testFailuresMux.Lock()
+						testFailures = append(testFailures, testFailure{
+							connType: "CLI",
+							testID:   testID,
+							otherIDs: lo.Filter(running.Keys(), func(k string, i int) bool {
+								return k != testID
+							}),
+						})
+						testFailuresMux.Unlock()
+					}
+				})
+			}()
+		}
+		attempt(tt, testID)
 
 		// cancel early if not specified (check parent test failure status)
 		if t.Failed() && !cast.ToBool(os.Getenv("RUN_ALL")) {
@@ -350,7 +411,8 @@ func TestCLI(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	allTestContext.Wg.Read.Wait()
+	// wait for all tests to complete, re-queued attempts included
+	allDone.Wait()
 }
 
 func TestBase64(t *testing.T) {

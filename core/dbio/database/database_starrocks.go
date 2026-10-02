@@ -76,6 +76,8 @@ func (conn *StarRocksConn) Connect(timeOut ...int) (err error) {
 			conn.version = major*100 + minor*10 + patch
 			g.Debug("starrocks version => %s (%d)", version, conn.version)
 		}
+	} else if err != nil {
+		g.Debug("could not detect starrocks version: %s", err.Error())
 	}
 
 	return nil
@@ -104,8 +106,9 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 // NewTransaction creates a new transaction
 func (conn *StarRocksConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
 	// transactions are BETA in 3.5. only inserts are supported in 3.5, let's disable for now
-	if conn.version >= 350 {
-		g.Debug("transactions are in BETA in starrocks 3.5, disabling")
+	// version 0 means detection failed. Fail-safe: disable as well, since 4.x rejects DDL in tx (err 5305).
+	if conn.version == 0 || conn.version >= 350 {
+		g.Debug("transactions disabled for starrocks (version %d)", conn.version)
 		return nil, nil
 	}
 	return conn.BaseConn.NewTransaction(ctx, options...)
@@ -642,7 +645,10 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		} else {
 			respMap, _ := g.UnmarshalMap(respString)
 			g.Debug("stream-load completed for %s => %s", localFile.Node.Path(), respString)
-			if cast.ToString(respMap["Status"]) == "Fail" {
+			// an empty batch (e.g. no new incremental rows) fails when the FE sets empty_load_as_error
+			emptyLoad := cast.ToInt(respMap["NumberTotalRows"]) == 0 &&
+				strings.Contains(cast.ToString(respMap["Message"]), "No partitions have data available for loading")
+			if cast.ToString(respMap["Status"]) == "Fail" && !emptyLoad {
 				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 				df.Context.Cancel()
 			}
@@ -691,9 +697,10 @@ func (conn *StarRocksConn) injectInlineColumnComments(ddl string, columns iop.Co
 	}
 
 	// build lookup of described columns (escaped)
+	describeAll := NewSchemaMigrator(nil).HasDescriptionEnabled()
 	comments := map[string]string{}
 	for _, col := range columns {
-		if !col.IsDDLExplicit() {
+		if !col.IsDDLExplicit() && !describeAll {
 			continue
 		}
 		description := col.Metadata[iop.ColMetaDescription.String()]

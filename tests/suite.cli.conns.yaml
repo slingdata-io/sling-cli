@@ -11,12 +11,11 @@
     - 'DistinctivePassXYZ'
 
 - id: 527
-  name: 'sling conns set refuses argv password literal'
-  err: true
+  name: 'sling conns set stores argv password literal'
   run: |
     HOME_DIR=$(mktemp -d)
-    sling conns set --home-dir "$HOME_DIR" MY_PG --type postgres host=localhost password=hunter2-ARGV
+    sling conns set --home-dir "$HOME_DIR" MY_PG --type postgres host=localhost password=hunter2-ARGV -o text
+    cat "$HOME_DIR/env.yaml"
   output_contains:
-    - 'must be an env-var ref'
-  output_does_not_contain:
     - 'connection `MY_PG` has been set'
+    - 'password: hunter2-ARGV'

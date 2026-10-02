@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -55,6 +56,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	cfg.Source.table = sTable
+
+	// StarRocks: the first metadata pass did not know the source primary key
+	// and set _sling_row_id as hash key. Use the primary key instead.
+	if cfg.TgtConn.Type == dbio.TypeDbStarRocks && len(sTable.Columns.PrimaryKeyNames()) > 0 {
+		if hashKeys := cfg.Target.Options.TableKeys[iop.HashKey]; len(hashKeys) == 1 && hashKeys[0] == env.ReservedFields.RowID {
+			delete(cfg.Target.Options.TableKeys, iop.HashKey)
+			srcConn.SetProp("METADATA", g.Marshal(t.setGetMetadata()))
+		}
+	}
 
 	if len(cfg.Source.Select) > 0 {
 		// Normalize select expressions
@@ -463,8 +473,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	return
 }
 
-// ReadFromFile reads from a source file
-func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+// ReadFromFile reads from a source file. tgtConn is the live target
+// connection when the run has one, so the arrow lane can check the target
+// schema before the read starts.
+func (t *TaskExecution) ReadFromFile(cfg *Config, tgtConn database.Connection) (df *iop.Dataflow, err error) {
 
 	setStage("3 - prepare-dataflow")
 
@@ -572,7 +584,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {
 			fsCfg.Format = *ffmt
 		}
-		df, err = fs.ReadDataflow(uri, fsCfg)
+		df, err = t.readFsDataflow(fs, uri, fsCfg, tgtConn)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
 			return t.df, err
@@ -607,6 +619,57 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	setStage("3 - dataflow-stream")
 
 	return
+}
+
+// readFsDataflow reads a source file system: on the arrow lane when the gate
+// allows it, on the row path otherwise.
+func (t *TaskExecution) readFsDataflow(fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (df *iop.Dataflow, err error) {
+	df, err = readArrowFileDataflowHook(t, fs, uri, fsCfg, tgtConn)
+	if err != nil || df != nil {
+		return df, err
+	}
+
+	return fs.ReadDataflow(uri, fsCfg)
+}
+
+// setArrowLane installs the arrow lane verdict on the source connection.
+func (t *TaskExecution) setArrowLane(src arrowLaneSource, tgtConn database.Connection) error {
+	return setArrowLaneHook(t, src, tgtConn)
+}
+
+// arrowLaneSource describes what the lane reads: an ADBC query, or a local
+// cache file (CDC Phase B), which brings its own schema.
+type arrowLaneSource struct {
+	conn   database.Connection // nil for a cache file
+	schema *arrow.Schema       // cache file schema; nil for a query (stage 2 reads it)
+	file   bool                // parquet/arrow file source: the footers are read later
+	stream string              // stream name for the log lines
+}
+
+// The closed task_run_arrow..go sets these hooks. The stubs keep every stream
+// on the row path.
+var (
+	setArrowLaneHook = func(t *TaskExecution, src arrowLaneSource, tgtConn database.Connection) error {
+		src.conn.SetProp("arrow_lane", "")
+		src.conn.SetArrowLane(nil, nil)
+		return arrowLaneStub(src.stream)
+	}
+	readArrowFileDataflowHook = func(t *TaskExecution, fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (*iop.Dataflow, error) {
+		if t.Config.SrcConn.Type.Kind() != dbio.KindFile {
+			return nil, nil
+		}
+		return nil, arrowLaneStub(uri)
+	}
+)
+
+// arrowLaneStub declines the lane, since the open build has none. It fails a
+// run with SLING_ARROW_LANE=force.
+func arrowLaneStub(stream string) error {
+	reason := "the arrow lane requires the official release of sling-cli"
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
+		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, reason)
+	}
+	return nil
 }
 
 // ReadFromApi reads from a source api

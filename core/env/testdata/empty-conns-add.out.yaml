@@ -1,0 +1,7 @@
+# header
+connections:   # none yet
+  FIRST:
+    type: duckdb
+    instance: a.db
+env:
+  K: v

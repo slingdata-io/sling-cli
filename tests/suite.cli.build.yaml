@@ -593,7 +593,7 @@
     - 'OK'
     - 'Build Completed'
 
-- id: 462
+- id: 609
   name: 'sling build clickhouse incremental counts temp table before merge'
   group: build
   after: [440]
@@ -756,3 +756,60 @@
     - 'fct_orders'
   output_does_not_contain:
     - 'revenue'
+
+# Machine-readable run output (`--json`)
+
+- id: 613
+  name: 'sling build run --json emits per-node results'
+  env:
+    JSON_RUN_DUCK: '{type: duckdb, instance: "temp/build_json_run/test.duckdb"}'
+  run: |
+    mkdir -p temp/build_json_run
+    rm -f temp/build_json_run/test.duckdb
+    sling build run tests/build/json_run_project --target JSON_RUN_DUCK --json -s stg_orders,fct_orders
+  group: build
+  output_contains:
+    - '"path":"tests/build/json_run_project"'
+    - '"name":"staging.stg_orders"'
+    - '"name":"marts.fct_orders"'
+    - '"status":"success"'
+    - '"total":2'
+    - '"ok":2'
+    - '"failed":0'
+
+- id: 614
+  name: 'sling build run --json reports per-model errors and exits non-zero'
+  env:
+    JSON_RUN_DUCK: '{type: duckdb, instance: "temp/build_json_run/test.duckdb"}'
+  run: |
+    mkdir -p temp/build_json_run
+    sling build run tests/build/json_run_project --target JSON_RUN_DUCK --json -s stg_bad
+  err: true
+  group: build
+  after: [613]
+  output_contains:
+    - '"name":"staging.stg_bad"'
+    - '"status":"error"'
+    - '"total":1'
+    - '"ok":0'
+    - '"failed":1'
+
+- id: 615
+  name: 'sling build run --help lists --json'
+  run: 'sling build run --help'
+  output_contains:
+    - '--json'
+    - '--full-refresh'
+    - '--select'
+
+- id: 616
+  name: 'sling build run -R --json groups results per sub-project'
+  run: 'sling build run tests/build/multi_target_project -R --json'
+  group: build
+  after: [614]
+  output_contains:
+    - '"sub_projects":[{'
+    - '"name":"staging.stg_orders"'
+    - '"name":"staging.stg_events"'
+    - '"ok":2'
+    - '"failed":0'

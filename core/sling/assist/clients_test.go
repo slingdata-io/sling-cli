@@ -183,11 +183,17 @@ variables:
 			t.Errorf("expected output to contain %q\n--- got ---\n%s", sub, out)
 		}
 	}
-	// Legacy `variables:` migrates to `env:` on save — the block contents
-	// (region: us-west-2) survive, but the heading comment attached to the
-	// renamed key is dropped along with the old key.
-	if strings.Contains(out, "variables:") {
-		t.Errorf("expected legacy variables: block to be renamed to env:\n--- got ---\n%s", out)
+	// the legacy `variables:` block is the env block of this file: the
+	// profile goes into it, and every original line stays as it was
+	if !strings.HasPrefix(out, original) {
+		t.Errorf("expected the original lines unchanged, with the profile appended\n--- got ---\n%s", out)
+	}
+	if strings.Contains(out, "\nenv:") {
+		t.Errorf("expected no second env block\n--- got ---\n%s", out)
+	}
+	loaded, exists, err := LoadProfile()
+	if err != nil || !exists || loaded.Agent != "claude" {
+		t.Errorf("profile did not load back: exists=%v agent=%q err=%v", exists, loaded.Agent, err)
 	}
 
 	// Idempotency: a second save should leave comments intact and not duplicate

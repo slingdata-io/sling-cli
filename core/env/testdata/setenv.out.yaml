@@ -1,0 +1,8 @@
+connections:
+  A:
+    type: postgres
+    host: a.example.com
+# shared variables
+env:
+  OLD: 1
+  SLING_BUCKET: s3://acme-bucket

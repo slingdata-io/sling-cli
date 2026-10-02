@@ -1,0 +1,32 @@
+# arrow lane CLI suite case 753: chunked read
+#
+# env: SOURCE, TARGET, SCHEMA, KEEP_TARGET (all set by the suite entry in
+# tests/suite.cli.arrow.yaml). A chunked read compiles into one stream per
+# chunk, each with its own range in the source SQL, and every chunk stream
+# takes the lane on its own. Chunking needs a database target and an
+# update_key, so this case targets {TARGET} over ADBC. The end hook drops the
+# target table unless the entry sets KEEP_TARGET=true.
+source: '{SOURCE}'
+target: '{TARGET}'
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  end:
+    - type: query
+      if: 'env.KEEP_TARGET == "false"'
+      connection: '{TARGET}'
+      query: 'drop table if exists {SCHEMA}.arrow_dst_753'
+
+streams:
+  '{SCHEMA}.arrow_src':
+    object: '{SCHEMA}.arrow_dst_753'
+    update_key: c_int2
+    source_options:
+      chunk_size: 2500
+
+env:
+  SOURCE: ${SOURCE}
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

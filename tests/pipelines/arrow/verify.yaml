@@ -1,0 +1,97 @@
+# Arrow lane CLI suite: compare two target tables (tests/suite.cli.arrow.yaml).
+#
+# Asserts that {TABLE_A} and {TABLE_B} on {TARGET} hold the same rows: the row
+# counts must match, and the set difference must be empty. The comparison uses
+# EXCEPT where the engine has it, and an ordered md5 of a concatenated
+# aggregate where it does not. Any difference fails the pipeline.
+#
+# env (from the suite entry):
+#   TARGET, SCHEMA, TABLE_A, TABLE_B
+#   VERIFY_MODE  required: "except" (engine has EXCEPT), "concat" (MySQL or
+#                MariaDB) or "mssql" (SQL Server 2017+). It must always be set:
+#                an `if` comparison against a missing env var is truthy.
+#   VERIFY_COLS  comma separated column list, required by "concat" and "mssql"
+#   VERIFY_PROJECTION  select list both sides are compared through, required by
+#                "except" (see the diff_except step)
+
+steps:
+  - id: count_a
+    connection: '{env.TARGET}'
+    query: 'select count(*) as cnt from {env.TABLE_A}'
+    into: count_a
+
+  - id: count_b
+    connection: '{env.TARGET}'
+    query: 'select count(*) as cnt from {env.TABLE_B}'
+    into: count_b
+
+  - type: check
+    check: int_parse(store.count_a[0].cnt) == int_parse(store.count_b[0].cnt)
+    failure_message: 'row count differs: {env.TABLE_A}={store.count_a[0].cnt} {env.TABLE_B}={store.count_b[0].cnt}'
+
+  # EXCEPT: DuckDB, SQLite, Postgres, Snowflake, Redshift, Databricks, BigQuery,
+  # Oracle. The two directions catch a row that only one side holds.
+  #
+  # VERIFY_PROJECTION is the select list both sides are compared through, and
+  # is required in this mode. It exists because the two paths can type a
+  # column differently while holding the same value: a Postgres `numeric`
+  # arrives from the ADBC driver as utf8, so the lane's target column is text
+  # where the row path writes numeric. Text comparison cannot see through that
+  # (numeric renders 10.1, the driver's text 10.10), so the projection casts
+  # the column back to its value type: `cast(c_dec as numeric) as c_dec`.
+  - id: diff_except
+    if: 'env.VERIFY_MODE == "except"'
+    connection: '{env.TARGET}'
+    query: |
+      select
+        (select count(*) from (select {env.VERIFY_PROJECTION} from {env.TABLE_A} except select {env.VERIFY_PROJECTION} from {env.TABLE_B}) as a)
+        + (select count(*) from (select {env.VERIFY_PROJECTION} from {env.TABLE_B} except select {env.VERIFY_PROJECTION} from {env.TABLE_A}) as b) as cnt
+    into: diff_except
+
+  - type: check
+    if: 'env.VERIFY_MODE == "except"'
+    check: int_parse(store.diff_except[0].cnt) == 0
+    failure_message: 'tables differ: {store.diff_except[0].cnt} rows are only on one side'
+
+  # MySQL / MariaDB: per-row md5 of the concatenated columns, counted as a
+  # multiset (+1 for A, -1 for B). A hash with a non-zero sum exists on only
+  # one side. This avoids group_concat_max_len truncation.
+  - id: diff_concat
+    if: 'env.VERIFY_MODE == "concat"'
+    connection: '{env.TARGET}'
+    query: |
+      select count(*) as cnt from (
+        select r, sum(side) as s from (
+          select md5(concat_ws(char(31), {env.VERIFY_COLS})) as r, 1 as side from {env.TABLE_A}
+          union all
+          select md5(concat_ws(char(31), {env.VERIFY_COLS})), -1 from {env.TABLE_B}
+        ) t group by r having sum(side) <> 0
+      ) d
+    into: diff_concat
+
+  - type: check
+    if: 'env.VERIFY_MODE == "concat"'
+    check: int_parse(store.diff_concat[0].cnt) == 0
+    failure_message: 'tables differ: {store.diff_concat[0].cnt} row hashes are only on one side'
+
+  # SQL Server 2017+: same multiset comparison, over hashbytes.
+  - id: diff_mssql
+    if: 'env.VERIFY_MODE == "mssql"'
+    connection: '{env.TARGET}'
+    query: |
+      select count(*) as cnt from (
+        select r, sum(side) as s from (
+          select convert(varchar(32), hashbytes('MD5', concat_ws(char(31), {env.VERIFY_COLS})), 2) as r, 1 as side from {env.TABLE_A}
+          union all
+          select convert(varchar(32), hashbytes('MD5', concat_ws(char(31), {env.VERIFY_COLS})), 2), -1 from {env.TABLE_B}
+        ) t group by r having sum(side) <> 0
+      ) d
+    into: diff_mssql
+
+  - type: check
+    if: 'env.VERIFY_MODE == "mssql"'
+    check: int_parse(store.diff_mssql[0].cnt) == 0
+    failure_message: 'tables differ: {store.diff_mssql[0].cnt} row hashes are only on one side'
+
+  - type: log
+    message: 'arrow lane verify: {env.TABLE_A} equals {env.TABLE_B}'

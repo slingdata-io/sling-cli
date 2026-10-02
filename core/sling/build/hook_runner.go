@@ -55,25 +55,13 @@ func RunForHook(path string, opts sling.HookBuildRunOptions) (map[string]any, er
 		return compileToState(path, b), nil
 	}
 
-	// Multi-target / recursive sub-projects use Build.Execute (no per-node results).
+	// Independent sub-projects (no root sling_build.yml): per-node results are
+	// grouped per sub-project rather than merged.
 	if len(b.Project.SubProjects) > 0 {
 		if err := b.Execute(); err != nil {
-			return g.M(
-				"path", path,
-				"target", b.GetTarget(),
-				"sub_projects", len(b.Project.SubProjects),
-			), g.Error(err, "build failed")
+			return SubProjectsPayload(path, b.SubBuilds), g.Error(err, "build failed")
 		}
-		return g.M(
-			"path", path,
-			"target", b.GetTarget(),
-			"sub_projects", len(b.Project.SubProjects),
-			"results", []map[string]any{},
-			"total", 0,
-			"ok", 0,
-			"failed", 0,
-			"skipped", 0,
-		), nil
+		return SubProjectsPayload(path, b.SubBuilds), nil
 	}
 
 	executor, err := NewExecutor(b)
@@ -82,14 +70,59 @@ func RunForHook(path string, opts sling.HookBuildRunOptions) (map[string]any, er
 	}
 
 	runErr := executor.Execute()
-	data := resultsToState(path, b.GetTarget(), executor.Results)
+	data := RunResultsPayload(path, b.GetTarget(), executor.Results)
 	if runErr != nil {
 		return data, g.Error(runErr, "build failed")
 	}
 	return data, nil
 }
 
-func resultsToState(path, target string, results []ExecutionResult) map[string]any {
+// SubProjectsPayload is the run payload for a project directory that holds
+// independent builds (no root sling_build.yml, only subdirectory ones). Node
+// names are not unique across independent projects, so each is reported under
+// its own entry in `sub_projects`; the top-level counts aggregate them.
+// Kept in the same shape as RunResultsPayload so callers can read one contract.
+func SubProjectsPayload(path string, subs []*Build) map[string]any {
+	all := make([]map[string]any, 0, len(subs))
+	total, ok, failed, skipped := 0, 0, 0, 0
+	var totalRows, totalBytes uint64
+
+	for _, sub := range subs {
+		all = append(all, RunResultsPayload(sub.Project.Dir, sub.GetTarget(), sub.Results))
+		for _, r := range sub.Results {
+			total++
+			switch {
+			case r.Skipped:
+				skipped++
+			case r.Err != nil:
+				failed++
+			default:
+				ok++
+			}
+			totalRows += r.Rows
+			totalBytes += r.Bytes
+		}
+	}
+
+	return g.M(
+		"path", path,
+		"target", "",
+		"sub_projects", all,
+		"results", []map[string]any{},
+		"total", total,
+		"ok", ok,
+		"failed", failed,
+		"skipped", skipped,
+		"rows", totalRows,
+		"bytes", totalBytes,
+		"ok_names", "",
+	)
+}
+
+// RunResultsPayload is the machine-readable run payload: per-node results,
+// counts, and row/byte totals. Shared by `sling build run --json` and pipeline
+// `type: build` steps (state.<step_id>.results).
+func RunResultsPayload(path, target string, results []ExecutionResult) map[string]any {
 	rows := make([]map[string]any, 0, len(results))
 	ok, failed, skipped := 0, 0, 0
 	var totalRows, totalBytes uint64

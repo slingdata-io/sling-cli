@@ -942,6 +942,19 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 
 // BulkExportFlow reads in bulk
 func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	// Arrow lane: read through ADBC when the gate marked this connection. A
+	// stage 2 decline reads with the native driver.
+	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
+		sql := table.Select()
+		if table.SQL != "" {
+			sql = table.SQL
+		}
+		df, err = adbcConn.laneExportFlow(sql)
+		if !errors.Is(err, ErrArrowLaneDeclined) {
+			return df, err
+		}
+	}
+
 	if conn.GetProp("GC_BUCKET") == "" {
 		g.Warn("No GCS Bucket was provided, pulling from cursor (which may be slower for big datasets). ")
 		return conn.BaseConn.BulkExportFlow(table)

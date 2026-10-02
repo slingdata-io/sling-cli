@@ -1,0 +1,7 @@
+connections:
+  BASE: &base
+    type: postgres
+    host: base.example.com
+  PG_COPY:
+    <<: *base
+    port: 5433

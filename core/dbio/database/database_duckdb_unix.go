@@ -12,24 +12,32 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
-	switch conn.GetProp("copy_method") {
-	case "named_pipes":
-		return conn.importViaNamedPipe(tableFName, df)
-	case "csv_files":
-		return conn.importViaTempCSVs(tableFName, df)
-	case "csv_http":
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
-	case "arrow_http":
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
-	default:
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
+	if conn.useADBC() {
+		// the CLI import paths below read the CSV through the CLI session,
+		// which cannot share the instance file with the ADBC handle
+		return conn.adbc.BulkImportFlow(tableFName, df)
 	}
+	// the deprecated copy_method values csv_files and named_pipes select a
+	// csv transport of their own
+	if conn.GetProp("copy_format") == "" {
+		switch conn.GetProp("copy_method") {
+		case "named_pipes":
+			return conn.importViaNamedPipe(tableFName, df)
+		case "csv_files":
+			return conn.importViaTempCSVs(tableFName, df)
+		}
+	}
+
+	format, err := conn.duck.SessionFormat()
+	if err != nil {
+		return 0, err
+	}
+	return conn.importViaHTTP(tableFName, df, format)
 }
 
 func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) (count uint64, err error) {

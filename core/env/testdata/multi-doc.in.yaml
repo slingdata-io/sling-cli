@@ -1,0 +1,7 @@
+connections:
+  A:
+    type: postgres
+---
+connections:
+  B:
+    type: duckdb

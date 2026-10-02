@@ -1,0 +1,4 @@
+connections:
+  FIRST:
+    type: duckdb
+    instance: a.db

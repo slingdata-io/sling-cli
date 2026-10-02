@@ -1,0 +1,29 @@
+# arrow lane CLI suite case 757: direct_insert
+#
+# env: SOURCE, SCHEMA, KEEP_TARGET (all set by the suite entry in
+# tests/suite.cli.arrow.yaml). The target is a local Parquet file: the case
+# falls back to the row path, and the ADBC bulk ingest on Postgres rejects the
+# type matrix (smallint, jsonb), so a DB target would fail on that adjacent
+# defect rather than on the lane.
+source: '{SOURCE}'
+target: LOCAL
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: parquet
+    direct_insert: true
+
+hooks:
+  end:
+    - type: command
+      if: 'env.KEEP_TARGET == "false"'
+      command: 'rm -f /tmp/arrow_lane_757.parquet'
+
+streams:
+  '{SCHEMA}.arrow_src':
+    object: 'file:///tmp/arrow_lane_757.parquet'
+
+env:
+  SOURCE: ${SOURCE}
+  SCHEMA: ${SCHEMA}

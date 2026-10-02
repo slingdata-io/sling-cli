@@ -1,0 +1,11 @@
+connections:
+  # middle
+  B:
+    type: duckdb
+    instance: b.db
+  # last
+  C:
+    type: sqlite
+    instance: c.db
+env:
+  K: v

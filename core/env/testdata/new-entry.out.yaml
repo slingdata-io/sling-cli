@@ -1,0 +1,6 @@
+connections:
+  SQLITE_MAIN:
+    type: sqlite
+    instance: main.db
+    extra: x
+    port: 1235

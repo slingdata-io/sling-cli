@@ -267,7 +267,8 @@ metadata:
       data_type,
       character_maximum_length as maximum_length,
       numeric_precision as precision, 
-      numeric_scale as scale
+      numeric_scale as scale,
+      CASE WHEN is_nullable = 'YES' THEN 'true' ELSE 'false' END AS is_nullable
     from information_schema.columns
     where table_schema = lower('{schema}')
       and table_name = lower('{table}')

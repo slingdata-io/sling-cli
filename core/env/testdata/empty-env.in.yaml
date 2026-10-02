@@ -1,0 +1,4 @@
+connections:
+  A:
+    type: postgres
+env: {}   # later

@@ -92,15 +92,22 @@ func TestExplainSQLUnsupported(t *testing.T) {
 
 	_, err = TypeDbPostgres.ExplainSQL("  ;  ")
 	require.Error(t, err)
+
+	_, err = TypeDbDBase.ExplainSQL("select 1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
 }
 
 func TestExplainTemplatePresentForSQLDatabases(t *testing.T) {
 	noExplain := map[Type]bool{
 		TypeDbMongoDB:       true,
 		TypeDbElasticsearch: true,
+		TypeDbOpenSearch:    true,
 		TypeDbAzureTable:    true,
 		TypeDbBigTable:      true,
 		TypeDbPrometheus:    true,
+		TypeDbDBase:         true, // dBase has no query engine
+		TypeDbDynamoDB:      true,
 	}
 	for _, td := range AllType {
 		if !td.Value.IsDb() {

@@ -1,4 +1,6 @@
 core:
+  drop_table: drop table {table}
+
   incremental_select: |
     select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc 
     --iceberg-json={"table_name": "{table_name}", "table_schema": "{table_schema}", "incremental_key": {update_key}, "incremental_value": "{incremental_value}", "fields_array": {fields_array}}
@@ -9,8 +11,84 @@ core:
 
   backfill_where: '{update_key} >= {start_value} and {update_key} <= {end_value}'
 
+  # DuckDB-attached Iceberg catalog (merge fallback). MERGE INTO is not used.
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+    WHERE NOT EXISTS (
+      SELECT 1 FROM {tgt_table} tgt WHERE {src_tgt_pk_equal}
+    )
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  # Iceberg tables have no PK constraint for INSERT OR REPLACE / MERGE INTO.
+  merge_update_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_change_capture: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) src
+      WHERE src._rn = 1 AND {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) src WHERE _rn = 1
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} tgt SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
+    WHERE COALESCE(_sling_synced_op, '') != 'D'
+    AND EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+      ) src
+      WHERE src._rn = 1 AND src._sling_synced_op = 'D' AND {src_tgt_pk_equal}
+    );
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+        FROM {src_table}
+        WHERE _sling_synced_op != 'D'
+      ) src
+      WHERE src._rn = 1 AND {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+      WHERE _sling_synced_op != 'D'
+    ) src WHERE _rn = 1
+
 variable:
   quote_char: '"'
+  default_merge_strategy: delete_insert
 
 native_type_map:
   binary: binary

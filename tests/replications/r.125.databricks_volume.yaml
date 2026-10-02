@@ -1,0 +1,52 @@
+# Postgres → Databricks Unity Catalog Volume (parquet).
+# Requires a `databricks-volume` connection named DATABRICKS_VOLUME
+# (host + token + catalog/schema/volume). Not in the default CLI suite.
+source: postgres
+target: DATABRICKS_VOLUME
+
+defaults:
+  mode: full-refresh
+  object: 'sling_test/{stream_table}.parquet'
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_databricks_volume_src;
+        CREATE TABLE public.sling_databricks_volume_src (
+          id bigint,
+          name varchar(100)
+        );
+        INSERT INTO public.sling_databricks_volume_src VALUES
+          (1, 'alice'),
+          (2, 'bob'),
+          (3, 'carol');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: list
+      id: listed
+      location: 'DATABRICKS_VOLUME/sling_test/'
+      only: files
+
+    - type: check
+      check: length(state.listed.result) >= 1
+      failure_message: "expected at least one parquet file in the volume"
+
+    - type: delete
+      location: 'DATABRICKS_VOLUME/sling_test/'
+      recursive: true
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.sling_databricks_volume_src
+
+streams:
+  public.sling_databricks_volume_src:
+    object: 'sling_test/sling_databricks_volume_src.parquet'
+    target_options:
+      format: parquet

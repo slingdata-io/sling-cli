@@ -389,6 +389,12 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 			addRowIDCol = false
 		}
 
+		// source primary key found by schema migration (known after ReadFromDB)
+		if pkNames := t.Config.Source.table.Columns.PrimaryKeyNames(); addRowIDCol && len(pkNames) > 0 {
+			t.Config.Target.Options.TableKeys[iop.PrimaryKey] = pkNames
+			addRowIDCol = false
+		}
+
 		if addRowIDCol {
 			metadata.RowID.Key = env.ReservedFields.RowID
 			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{env.ReservedFields.RowID}
@@ -635,10 +641,10 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		}
 
 		// whether one of the task's connections is a DuckDB-class connection,
-		// which accepts the `copy_method` property
+		// which accepts the `copy_format` property
 		usesDuckDb := false
 		for _, connType := range connTypes {
-			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake) {
+			if g.In(connType, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
 				usesDuckDb = true
 			}
 		}
@@ -690,7 +696,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		case contains("Maximum line size of", "bytes exceeded"):
 			helpString = "A row exceeded the max_line_size limit of Sling's internal DuckDB CSV bridge. Sling raises this limit to 256MB when the source schema has string, text, json or binary columns. For larger values, set the `max_line_size` property in your connection to a higher byte value."
 		case contains("Invalid Input Error: CSV Error on Line:") && usesDuckDb:
-			helpString = "By default, Sling uses CSV serialization to pipe data into DuckDB. Try setting the `copy_method: arrow_http` property in your DuckDB / MotherDuck connection to avoid serialization errors. See https://docs.slingdata.io/connections/database-connections for more details."
+			helpString = "Sling used CSV serialization to pipe data into DuckDB. Set the `copy_format: arrow` property in your DuckDB / MotherDuck / DuckLake connection to avoid serialization errors. Arrow needs the DuckDB `arrow` community extension. See https://docs.slingdata.io/connections/database-connections for more details."
 		case contains("it does not have a replica identity and publishes updates"):
 			helpString = `Since PG replication is turned on, you'll need to create a replica identity on the respective table for executing UPDATE/DELETE operations. You can use target_options.table_ddl to specify an extra statement to define the replication identity upon creation, such as:
 			

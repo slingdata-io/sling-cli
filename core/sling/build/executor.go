@@ -277,7 +277,9 @@ func (e *Executor) Execute() error {
 
 	total := len(e.Build.Selected)
 	if total == 0 {
-		fmt.Println("No models selected.")
+		if !e.Build.Options.JSON {
+			fmt.Println("No models selected.")
+		}
 		if !sling.IsPipelineRunMode() {
 			e.syncBuildStatus(sling.ExecStatusSuccess, nil)
 		}
@@ -437,7 +439,9 @@ func (e *Executor) Execute() error {
 		e.syncModelStatus(name, result, sling.ExecStatusSkipped)
 	}
 
-	fmt.Println()
+	if !e.Build.Options.JSON {
+		fmt.Println()
+	}
 	e.printSummary()
 
 	var errs []error
@@ -1515,12 +1519,13 @@ func (e *Executor) printSummary() {
 
 	g.Info("Build Completed in %s | %s | %s%s\n", g.DurationString(totalDuration), successStr, failureStr, skippedStr)
 
-	// Print errors section
+	// Print errors section. Diagnostics go to stderr so stdout stays reserved
+	// for machine-readable output (--json).
 	if len(failedResults) > 0 {
-		fmt.Println(env.RedString("Errors:"))
+		fmt.Fprintln(os.Stderr, env.RedString("Errors:"))
 		for _, r := range failedResults {
 			errMsg := strings.ReplaceAll(strings.TrimSpace(g.ErrMsgSimple(r.Err)), "\n", "\n      ")
-			fmt.Printf("  - %s:\n      %s\n", r.Name, env.RedString(errMsg))
+			fmt.Fprintf(os.Stderr, "  - %s:\n      %s\n", r.Name, env.RedString(errMsg))
 		}
 	}
 }

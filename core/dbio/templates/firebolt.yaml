@@ -1,0 +1,226 @@
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_schema: drop schema if exists {schema} cascade
+  create_schema: create schema if not exists {schema}
+  create_table: create table if not exists {table} ({col_types})
+  truncate_table: truncate table {table}
+  rename_table: alter table {table} rename to {new_table}
+  rename_column: alter table {table} rename column {column} to {new_column}
+  add_column: alter table {table} add column if not exists {column} {type}
+  drop_column: alter table {table} drop column if exists {column}
+  insert: insert into {table} ({fields}) values ({values})
+  update: update {table} set {set_fields} where {pk_fields_equal}
+  delete: delete from {table} where {where}
+  # Firebolt has no plain CREATE INDEX. Secondary indexes are specialized
+  # (FULL_TEXT / INVERTED_INDEX / HNSW / SKIP_INDEX) and are declared separately.
+  create_index: "select 'create_index not implemented'"
+  create_unique_index: "select 'create_unique_index not implemented'"
+  drop_index: "select 'drop_index not implemented'"
+  # Firebolt supports LIMIT/OFFSET on derived tables
+  limit_sql: |
+    select * from (
+      {sql}
+    ) as t limit {limit} offset {offset}
+
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+    WHERE NOT EXISTS (
+      SELECT 1 FROM {tgt_table} tgt WHERE {src_tgt_pk_equal}
+    )
+
+  merge_update: |
+    UPDATE {tgt_table} tgt
+    SET {set_fields}
+    FROM {src_table} src
+    WHERE {src_tgt_pk_equal}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+metadata:
+  current_database: |
+    select current_database()
+
+  current_schema: |
+    select current_schema()
+
+  databases: |
+    select catalog_name as name
+    from information_schema.catalogs
+    order by catalog_name
+
+  schemas: |
+    select schema_name
+    from information_schema.schemata
+    where schema_name not in ('information_schema', 'pg_catalog')
+      {{if .schema -}} and schema_name = '{schema}' {{- end}}
+    order by schema_name
+
+  schemata: |
+    select
+      c.table_schema as schema_name,
+      c.table_name as table_name,
+      'table' as table_type,
+      c.column_name,
+      c.data_type,
+      c.is_nullable,
+      c.ordinal_position as "position"
+    from information_schema.columns c
+    where 1=1
+      {{if .schema -}} and c.table_schema = '{schema}' {{- end}}
+      {{if .tables -}} and c.table_name in ({tables}) {{- end}}
+    order by c.table_schema, c.table_name, c.ordinal_position
+
+  tables: |
+    select
+      table_schema as schema_name,
+      table_name,
+      'false' as is_view
+    from information_schema.tables
+    where table_type = 'BASE TABLE'
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .table -}} and table_name = '{table}' {{- end}}
+    order by table_schema, table_name
+
+  views: |
+    select
+      table_schema as schema_name,
+      table_name,
+      'true' as is_view
+    from information_schema.views
+    where 1=1
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .view -}} and table_name = '{view}' {{- end}}
+    order by table_schema, table_name
+
+  columns: |
+    select
+      table_schema as schema_name,
+      table_name,
+      column_name,
+      data_type,
+      is_nullable,
+      column_default,
+      character_maximum_length,
+      numeric_precision,
+      numeric_scale,
+      ordinal_position
+    from information_schema.columns
+    where 1=1
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .table -}} and table_name = '{table}' {{- end}}
+    order by table_schema, table_name, ordinal_position
+
+  primary_keys: |
+    select
+      tc.constraint_name as pk_name,
+      kcu.ordinal_position as position,
+      kcu.column_name
+    from information_schema.table_constraints tc
+    join information_schema.key_column_usage kcu
+      on kcu.constraint_name = tc.constraint_name
+      and kcu.constraint_schema = tc.constraint_schema
+      and kcu.table_schema = tc.table_schema
+      and kcu.table_name = tc.table_name
+    where tc.constraint_type = 'PRIMARY KEY'
+      {{if .schema -}} and tc.table_schema = '{schema}' {{- end}}
+      {{if .table -}} and tc.table_name = '{table}' {{- end}}
+    order by tc.table_name, kcu.ordinal_position
+
+  # Firebolt has no secondary indexes (only specialized FULL_TEXT / INVERTED /
+  # HNSW / SKIP indexes), so report an empty set
+  indexes: |
+    select
+      '{schema}' as schema_name,
+      '{table}' as table_name,
+      cast(null as text) as index_name,
+      cast(null as text) as column_name
+    where 1 = 0
+
+  ddl: |
+    select ddl
+    from information_schema.tables
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+
+function:
+  string_type: varchar
+  # Firebolt's length() only accepts text/array/bytea, so cast first
+  checksum_boolean: 'length(cast({field} as varchar))'
+  checksum_json: "length(replace(cast({field} as varchar), ' ', ''))"
+  cast_to_string: cast({field} as varchar)
+  cast_to_text: cast({field} as varchar)
+  date_trunc_key: date_trunc('{unit}', {field})
+  date_format: to_char({field}, {format})
+  date_parse_format: to_timestamp({string}, {format})
+  hash: md5({fields})
+  random: random()
+  uuid: uuid()
+
+variable:
+  bind_string: ${c}
+  column_upper: false
+  max_column_length: 128
+  max_string_type: text
+  max_string_length: 65535
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000-07'
+  default_merge_strategy: update_insert
+
+native_type_map:
+  bigint: bigint
+  long: bigint
+  integer: integer
+  int: integer
+  "double precision": float
+  double: float
+  real: float
+  float: float
+  text: text
+  varchar: text
+  boolean: bool
+  bool: bool
+  date: date
+  timestamp: timestamp
+  timestamptz: timestampz
+  timestampntz: timestamp
+  numeric: decimal
+  decimal: decimal
+  bytea: binary
+  json: json
+  array: json
+  struct: json
+  geography: text
+
+general_type_map:
+  bigint: bigint
+  binary: bytea
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: numeric
+  float: "double precision"
+  integer: integer
+  json: json
+  smallint: integer
+  string: text
+  text: text
+  time: text
+  timestamp: timestamp
+  timestampz: timestamptz
+  uuid: text

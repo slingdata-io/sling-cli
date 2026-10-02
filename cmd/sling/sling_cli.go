@@ -375,7 +375,7 @@ var cliConns = &g.CliSC{
 				{
 					Name:        "type",
 					Type:        "string",
-					Description: "Connection type (postgres, s3, api, ...). Use ${NAME_KEY} refs for secrets.",
+					Description: "Connection type (postgres, s3, api, ...).",
 				},
 				{
 					Name:        "output",
@@ -489,9 +489,11 @@ func Track(event string, props ...map[string]interface{}) {
 		properties[k] = v
 	}
 
+	env.TelMux.Lock()
 	for k, v := range env.TelMap {
 		properties[k] = v
 	}
+	env.TelMux.Unlock()
 
 	if len(props) > 0 {
 		for k, v := range props[0] {
@@ -547,6 +549,7 @@ func main() {
 		case <-kill:
 			env.Println("\nkilling process...")
 			exitCode = 111
+			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
 			exit()
 		case <-interrupt:
 			g.SentryClear()
@@ -560,6 +563,7 @@ func main() {
 				case <-time.After(10 * time.Second):
 				}
 			}
+			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
 			exit()
 			return
 		case <-done:

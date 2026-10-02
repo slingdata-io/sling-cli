@@ -1,0 +1,62 @@
+# SQL Server BCP rejects a 3-part table name when -d is also passed.
+# Table.FullName() prefixes the connection database (SupportsThreePartName).
+# BCP then gets both `master.dbo.table` and `-d master`, which it rejects:
+# "The -d database name option is not supported when a 3 part dbtable name is specified".
+# Fix: if part 0 is the connection database, pass schema.table and keep -d.
+
+source: LOCAL
+target: MSSQL
+
+defaults:
+  mode: full-refresh
+  target_options:
+    use_bulk: true
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('master.dbo.bcp_3part','U') IS NOT NULL DROP TABLE master.dbo.bcp_3part;
+        IF OBJECT_ID('master.dbo.bcp_3part_tmp','U') IS NOT NULL DROP TABLE master.dbo.bcp_3part_tmp;
+
+    - type: write
+      content: |
+        id,name
+        1,alice
+        2,bob
+      to: file:///tmp/r.125.sqlserver_bcp_3part.csv
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select id, name from master.dbo.bcp_3part order by id
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].id) == 1
+      failure_message: "expected first row id 1, got {store.result}"
+
+    - type: check
+      check: store.result[0].name == "alice"
+      failure_message: "expected first row name alice, got {store.result}"
+
+    - type: check
+      check: int_parse(store.result[1].id) == 2
+      failure_message: "expected 2 rows loaded via bcp, got {store.result}"
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        IF OBJECT_ID('master.dbo.bcp_3part','U') IS NOT NULL DROP TABLE master.dbo.bcp_3part;
+
+    - type: log
+      message: "SUCCESS: SQL Server BCP loaded a 3-part target name"
+
+streams:
+  file:///tmp/r.125.sqlserver_bcp_3part.csv:
+    object: master.dbo.bcp_3part

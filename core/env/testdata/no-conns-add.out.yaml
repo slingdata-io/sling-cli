@@ -1,0 +1,8 @@
+# only env
+
+env:
+  K: v   # keep
+connections:
+  FIRST:
+    type: duckdb
+    instance: a.db

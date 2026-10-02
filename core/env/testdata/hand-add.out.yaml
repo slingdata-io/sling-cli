@@ -1,0 +1,58 @@
+# Sling env file
+# maintained by hand
+
+connections:
+
+  # production postgres
+  PG_PROD:
+    type: postgres
+    host: "db.example.com"      # primary
+    port: 5432
+    user: 'admin'
+    password: ${PG_PASS}        # from vault
+    sslmode: require
+
+  # local duckdb
+  DUCK:
+    type: duckdb
+    instance: /tmp/a.db
+    options: {read_only: true, threads: 4}
+
+  S3_BASE: &s3
+    type: s3
+    bucket: my-bucket
+    region: us-east-1
+
+  S3_COPY:
+    <<: *s3
+    bucket: other-bucket
+
+  MY_API:
+    type: api
+    spec: stripe
+    secrets:
+      api_key: ${STRIPE_KEY}   # keep this ref
+    inputs:
+      start: 2024-01-01
+
+  # URL style
+  PG_URL: postgres://u:p@h:5432/db   # one line
+
+  # MY_OLD:
+  #   type: mysql
+
+  NEW_PG:
+    type: postgres
+    host: h2
+    password: ${NEW_PG_PASSWORD} # replace with the value, or set the env var (CI)
+    user: u
+
+# shared variables
+env:
+  PG_PASS: secret123     # inline
+  SLING_THREADS: 4
+  LIST: [a, b]
+
+# unmanaged block
+custom:
+  keep: yes

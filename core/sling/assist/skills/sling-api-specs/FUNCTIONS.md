@@ -171,7 +171,7 @@ chunk(queue.ids, 50)
 | `type_of(value)` | Runtime type name | `type_of(42)` → "integer" |
 | `parse_ms_uuid(string)` | Parse MS UUID timestamp | Extracts time from MS-style UUID |
 | `pretty_table(rows)` | Format rows as table | Debug / log helper |
-| `conn_property(name)` | Connection property | Reads from active connection |
+| `conn_property(connection, key)` | Connection property | `conn_property("my_db", "host")` → host value |
 | `machine_stats()` | Host stats object | Runtime diagnostics |
 
 ## Common Patterns
