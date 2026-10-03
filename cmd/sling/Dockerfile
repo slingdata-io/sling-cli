@@ -2,7 +2,7 @@ FROM ubuntu:jammy
 
 RUN groupadd -r sling && useradd -r -g sling sling
 
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg2 unixodbc odbcinst && \
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y iproute2 unzip libaio1 postgresql-client wget curl gnupg2 unixodbc odbcinst && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
 
@@ -28,6 +28,7 @@ RUN chmod 755 /usr/local/bin/sling
 
 # Switch to non-root user
 RUN mkdir -p /home/sling && chmod 755 /home/sling && chown sling:sling /home/sling
+RUN mkdir -p /runner && chown sling:sling /runner
 USER sling
 
 # Final ENV updates
