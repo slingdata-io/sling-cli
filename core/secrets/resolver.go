@@ -24,11 +24,11 @@ type closer interface{ Close() error }
 // maxConcurrentFetches limits parallel provider calls in ResolveValue.
 const maxConcurrentFetches = 8
 
-// credentialKeys are provider config keys that hold credentials. Their values
+// CredentialKeys are provider config keys that hold credentials. Their values
 // are redacted like resolved values.
-var credentialKeys = []string{
+var CredentialKeys = []string{
 	"token", "connect_token", "secret_id", "client_secret", "api_key", "access_key",
-	"password", "jwt", "credentials_json", "config",
+	"password", "jwt", "credentials_json", "config", "session",
 }
 
 // minRedactLen skips short values, so "on" or "5432" do not redact log text.
@@ -491,7 +491,7 @@ func (r *Resolver) instance(ref Ref) (Provider, error) {
 	pc.baseDir = r.opts.BaseDir
 	pc.timeout = r.opts.Timeout
 	pc.redact = r.Redact
-	for _, k := range credentialKeys {
+	for _, k := range CredentialKeys {
 		r.remember(pc.Get(k))
 	}
 	p, err := f(pc)
@@ -594,6 +594,19 @@ func HasRef(v any) bool {
 		}
 	})
 	return found
+}
+
+// Refs returns the references in v, deeply. A reference that does not
+// parse is left out.
+func Refs(v any) (refs []Ref) {
+	walkStrings(v, func(s string) {
+		for _, raw := range refsIn(s) {
+			if ref, err := ParseRef(raw); err == nil {
+				refs = append(refs, ref)
+			}
+		}
+	})
+	return refs
 }
 
 // refsIn returns the whole or embedded references in s.

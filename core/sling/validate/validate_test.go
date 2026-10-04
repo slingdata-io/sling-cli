@@ -74,6 +74,12 @@ func TestDetectFileKindOrder(t *testing.T) {
 			want: KindPipeline,
 		},
 		{
+			name: "secret_providers alone is an env file",
+			body: "secret_providers:\n  vault_prod:\n    type: vault\n",
+			path: "foo.yaml",
+			want: KindEnv,
+		},
+		{
 			name: "replication needs source target streams",
 			body: "source: PG\ntarget: SF\nstreams:\n  public.t:\n    object: t\n",
 			path: "foo.yaml",

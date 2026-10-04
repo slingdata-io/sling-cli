@@ -121,6 +121,31 @@ func PromoteLiteralSecrets(connName string, props, existing map[string]any, envU
 	return promoted
 }
 
+// PromoteProviderSecrets is PromoteLiteralSecrets for one secret_providers
+// entry: a literal credential value moves to `env:` as ${<NAME>_<KEY>}.
+func PromoteProviderSecrets(name string, props, existing, envUpdates map[string]any) (promoted []string) {
+	if props == nil || envUpdates == nil {
+		return nil
+	}
+	for _, k := range secrets.CredentialKeys {
+		v, ok := props[k]
+		if !ok || !isLiteralSecret(v) {
+			continue
+		}
+		if k == "config" && strings.EqualFold(cast.ToString(props["type"]), "doppler") {
+			continue // the Doppler config name, not a credential
+		}
+		if ref, ok := existingRefFor(existing[k], cast.ToString(v)); ok {
+			props[k] = ref
+			continue
+		}
+		envUpdates[EnvVarNameOf(name, k)] = cast.ToString(v)
+		props[k] = EnvVarRef(name, k)
+		promoted = append(promoted, k)
+	}
+	return promoted
+}
+
 // existingRefFor returns the on-disk ref for a field when literal equals that
 // ref's expansion.
 func existingRefFor(existing any, literal string) (string, bool) {
@@ -323,6 +348,7 @@ func FormatUnsetRefError(refs []UnsetEnvRef, loc env.ConnLocation) error {
 }
 
 // ScrubConnProps returns key names and ref/status only. No secret values.
+// A ${VAR} or a secret manager reference shows as `ref`.
 func ScrubConnProps(kv map[string]any) []map[string]any {
 	out := []map[string]any{}
 	keys := lo.Keys(kv)
@@ -345,7 +371,7 @@ func ScrubConnProps(kv map[string]any) []map[string]any {
 func scrubEntry(key string, v any) map[string]any {
 	s := strings.TrimSpace(cast.ToString(v))
 	entry := g.M("key", key)
-	if env.IsEnvVarRef(s) {
+	if env.IsEnvVarRef(s) || secrets.IsRef(s) {
 		entry["ref"] = s
 		return entry
 	}
@@ -522,7 +548,7 @@ func (c *Connection) Resolved(ctx context.Context) (*Connection, error) {
 	if !c.HasSecretRef() {
 		return c, nil
 	}
-	r, err := env.SecretResolver()
+	r, err := env.SecretResolverFor(c.secretProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -552,6 +578,7 @@ func (c *Connection) Resolved(ctx context.Context) (*Connection, error) {
 		return nil, g.Error(err, "could not build connection %s from resolved secrets", c.Name)
 	}
 	nc.context = c.context
+	nc.secretProviders = c.secretProviders
 	return &nc, nil
 }
 

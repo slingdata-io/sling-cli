@@ -58,6 +58,10 @@ type Connection struct {
 	Data    map[string]interface{} `json:"data,omitempty"`
 	context *g.Context             `json:"-"`
 
+	// secretProviders is the secret_providers block of the env.yaml that
+	// holds the connection. It adds to the providers of SecretResolver.
+	secretProviders map[string]map[string]any
+
 	File     filesys.FileSysClient
 	Database database.Connection
 	API      *api.APIConnection
@@ -223,6 +227,7 @@ func (c *Connection) IsADBC() bool {
 // ToMap transforms DataConn to a Map
 func (c *Connection) Copy() *Connection {
 	nc, _ := NewConnectionFromMap(c.ToMap())
+	nc.secretProviders = c.secretProviders
 	return &nc
 }
 

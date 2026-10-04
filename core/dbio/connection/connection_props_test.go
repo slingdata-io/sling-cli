@@ -244,3 +244,53 @@ func TestSecretRefTestFailsOnResolveError(t *testing.T) {
 	assert.False(t, ok)
 	assert.ErrorContains(t, err, "could not resolve secret reference")
 }
+
+func TestSecretProvidersPerEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "per_env.db")
+	secretFile := filepath.Join(dir, "instance.txt")
+	require.NoError(t, os.WriteFile(secretFile, []byte(dbPath), 0600))
+
+	entries := func(providers string) ConnEntries {
+		ef, err := env.LoadSlingEnvFileBody(providers + `
+connections:
+  PER_ENV:
+    type: sqlite
+    instance: ref+file://` + secretFile + `?provider=proj_file
+`)
+		require.NoError(t, err)
+		ec := EnvFileConns{EnvFile: &ef}
+		ce, err := ec.ConnectionEntries()
+		require.NoError(t, err)
+		return ce
+	}
+	ctx := context.Background()
+
+	// the provider comes from the env.yaml of the connection, not ENV_YAML
+	conn := entries("secret_providers:\n  proj_file: {type: file}\n").Get("PER_ENV").Connection
+	rc, err := conn.Resolved(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, dbPath, rc.Data["instance"])
+	rc, err = conn.Copy().Resolved(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, dbPath, rc.Data["instance"])
+
+	// another env.yaml without the provider does not see it
+	other := entries("").Get("PER_ENV").Connection
+	_, err = other.Resolved(ctx)
+	assert.ErrorContains(t, err, `secret provider "proj_file" is not in secret_providers`)
+}
+
+func TestPromoteProviderSecrets(t *testing.T) {
+	envUpdates := map[string]any{}
+	props := map[string]any{"type": "vault", "address": "https://vault:8200", "token": "hvs.literal", "secret_id": "${KEEP}"}
+	promoted := PromoteProviderSecrets("vault_prod", props, nil, envUpdates)
+	assert.Equal(t, []string{"token"}, promoted)
+	assert.Equal(t, "${VAULT_PROD_TOKEN}", props["token"])
+	assert.Equal(t, "${KEEP}", props["secret_id"])
+	assert.Equal(t, map[string]any{"VAULT_PROD_TOKEN": "hvs.literal"}, envUpdates)
+
+	props = map[string]any{"type": "doppler", "config": "prd", "token": "${DOPPLER_TOKEN}"}
+	assert.Empty(t, PromoteProviderSecrets("dop", props, nil, map[string]any{}))
+	assert.Equal(t, "prd", props["config"])
+}

@@ -161,3 +161,16 @@ func TestNativeRef(t *testing.T) {
 		}
 	}
 }
+
+func TestRefs(t *testing.T) {
+	v := map[string]any{
+		"a": "op://vault/item/field",
+		"b": []any{"plain", `{secret("ref+exec://ls")}`},
+		"c": map[string]any{"d": "ref+file:///etc/hosts"},
+	}
+	got := []string{}
+	for _, ref := range Refs(v) {
+		got = append(got, ref.Kind+":"+ref.Path)
+	}
+	assert.ElementsMatch(t, []string{"op:vault/item/field", `exec:ls")}`, "file:/etc/hosts"}, got)
+}

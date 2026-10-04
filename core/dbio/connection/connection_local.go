@@ -627,6 +627,7 @@ func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {
 	connsMap := map[string]ConnEntry{}
 	profileConns, err := ReadConnections(m)
 	for _, conn := range profileConns {
+		conn.secretProviders = ec.EnvFile.SecretProviders
 		c := ConnEntry{
 			Name:        strings.ToUpper(conn.Info().Name),
 			Description: conn.GetType().NameLong(),

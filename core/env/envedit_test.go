@@ -376,3 +376,30 @@ func TestEnvFileEditorKeepsSecretProviders(t *testing.T) {
 	assert.Contains(t, string(got), "secret_providers:")
 	assert.Contains(t, string(got), "type: vault")
 }
+
+func TestEnvFileEditorSecretProviders(t *testing.T) {
+	in := "# my env\nconnections:\n  PG:\n    type: postgres # keep\n    password: op://vault/pg/password\n"
+	e, err := LoadEnvEditorBytes("env.yaml", []byte(in))
+	require.NoError(t, err)
+
+	require.NoError(t, e.SetProvider("vault_prod", g.M("type", "vault", "address", "https://vault:8200", "token", "${VAULT_TOKEN}")))
+	require.NoError(t, e.SetProvider("aws", g.M("type", "awssecrets", "region", "us-east-1")))
+	b, err := e.Bytes()
+	require.NoError(t, err)
+	out := string(b)
+	assert.True(t, strings.HasPrefix(out, in), out)
+	assert.Contains(t, out, "secret_providers:\n  vault_prod:\n    type: vault\n")
+	assert.Contains(t, out, "  aws:\n    type: awssecrets\n    region: us-east-1\n")
+
+	// replace drops keys that props does not pass
+	require.NoError(t, e.SetProvider("vault_prod", g.M("type", "vault", "address", "https://vault2:8200")))
+	b, _ = e.Bytes()
+	assert.NotContains(t, string(b), "VAULT_TOKEN")
+	assert.Contains(t, string(b), "vault2")
+
+	require.NoError(t, e.DeleteProvider("vault_prod"))
+	require.NoError(t, e.DeleteProvider("aws"))
+	b, _ = e.Bytes()
+	assert.Equal(t, in+"secret_providers: {}\n", string(b))
+	assert.ErrorContains(t, e.DeleteProvider("nope"), "did not find secret provider `nope`")
+}

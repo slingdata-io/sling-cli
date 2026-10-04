@@ -1029,6 +1029,37 @@ func (ef *EnvFile) DeleteConnectionNode(name string) error {
 	return e.Save("")
 }
 
+// SetSecretProviderNode replaces one secret_providers entry of the file at
+// ef.Path, writes envUpdates under `env:` in the same edit, and saves.
+func (ef *EnvFile) SetSecretProviderNode(name string, props, envUpdates map[string]any) error {
+	e, err := LoadEnvEditor(ef.Path)
+	if err != nil {
+		return err
+	}
+	if len(envUpdates) > 0 {
+		if err := e.SetEnv(envUpdates, true); err != nil {
+			return err
+		}
+	}
+	if err := e.SetProvider(name, props); err != nil {
+		return err
+	}
+	return e.Save("")
+}
+
+// DeleteSecretProviderNode removes one secret_providers entry of the file at
+// ef.Path and saves.
+func (ef *EnvFile) DeleteSecretProviderNode(name string) error {
+	e, err := LoadEnvEditor(ef.Path)
+	if err != nil {
+		return err
+	}
+	if err := e.DeleteProvider(name); err != nil {
+		return err
+	}
+	return e.Save("")
+}
+
 // SetEnvNodes sets keys under the `env:` block (legacy `variables:` when `env:`
 // is absent) of the file at ef.Path and saves. Existing keys are only
 // replaced when allowOverwrite is true or the value is unchanged.
@@ -1282,37 +1313,81 @@ var fromKeyAliases = map[string]string{
 	"dbname":   "database",
 }
 
-// SecretResolver returns the process resolver for secret references. It is
-// built once from the secret_providers of the home env.yaml and ENV_YAML.
-var SecretResolver = sync.OnceValues(func() (*secrets.Resolver, error) {
+// SecretResolver returns the resolver for the secret_providers of the home
+// env.yaml and ENV_YAML.
+func SecretResolver() (*secrets.Resolver, error) {
+	return secretResolvers.For(nil)
+}
+
+// SecretResolverFor is SecretResolver with the providers of another env.yaml
+// (e.g. a platform project) on top.
+func SecretResolverFor(providers map[string]map[string]any) (*secrets.Resolver, error) {
+	return secretResolvers.For(providers)
+}
+
+var secretResolvers = &secretResolverCache{resolvers: map[string]*secrets.Resolver{}}
+
+// secretResolverCache keeps one resolver per provider config. An edit to
+// secret_providers gives a new resolver, without a restart.
+type secretResolverCache struct {
+	mu        sync.Mutex
+	homeStamp string // path, size and mtime of the home env.yaml
+	home      map[string]map[string]any
+	baseDir   string
+	resolvers map[string]*secrets.Resolver // by config hash
+}
+
+func (c *secretResolverCache) For(extra map[string]map[string]any) (*secrets.Resolver, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.loadHome()
 	raw := map[string]map[string]any{}
-	baseDir := ""
-	if path := GetEnvFilePath(HomeDir); g.PathExists(path) {
-		ef := LoadEnvFile(path)
-		maps.Copy(raw, ef.SecretProviders)
-		baseDir = filepath.Dir(path)
-	}
+	maps.Copy(raw, c.home)
 	if content := os.Getenv("ENV_YAML"); content != "" {
 		if ef, err := LoadSlingEnvFileBody(content); err == nil {
 			maps.Copy(raw, ef.SecretProviders)
 		}
 	}
+	maps.Copy(raw, extra)
 
-	opts := secrets.Options{
-		CacheTTL:   5 * time.Minute,
-		OnValue:    AddSecretValue,
-		IsSecret:   IsSecretPath,
-		BaseDir:    baseDir,
-		KeyAliases: fromKeyAliases,
+	key := g.Marshal(raw) + "|" + c.baseDir // map keys marshal sorted
+	if r, ok := c.resolvers[key]; ok {
+		return r, nil
 	}
 
 	cfg, err := secrets.ParseConfig(raw)
 	if err != nil {
 		return nil, g.Error(err, "invalid secret_providers")
 	}
-	opts.Config = cfg
-	return secrets.NewResolver(opts), nil
-})
+	r := secrets.NewResolver(secrets.Options{
+		Config:     cfg,
+		CacheTTL:   5 * time.Minute,
+		OnValue:    AddSecretValue,
+		IsSecret:   IsSecretPath,
+		BaseDir:    c.baseDir,
+		KeyAliases: fromKeyAliases,
+	})
+	c.resolvers[key] = r
+	return r, nil
+}
+
+// loadHome reads the home env.yaml again only when the file changes.
+func (c *secretResolverCache) loadHome() {
+	path := GetEnvFilePath(HomeDir)
+	stamp := ""
+	if fi, err := os.Stat(path); err == nil {
+		stamp = g.F("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+	}
+	if stamp == c.homeStamp {
+		return
+	}
+	c.homeStamp, c.home, c.baseDir = stamp, nil, ""
+	if stamp != "" {
+		c.home = LoadEnvFile(path).SecretProviders
+		c.baseDir = filepath.Dir(path)
+	}
+}
 
 // ResolveSecretEnv returns envMap with its secret references resolved. It is
 // for the env: block of a replication or pipeline.
