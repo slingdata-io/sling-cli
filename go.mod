@@ -268,6 +268,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/hetznercloud/hcloud-go/v2 v2.14.0 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20251118225945-96ee0021ea0f // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
