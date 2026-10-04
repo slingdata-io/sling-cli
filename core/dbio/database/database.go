@@ -769,6 +769,17 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		driver := getDriverName(conn)
 		g.Trace("driver=%s conn_url=%s", driver, connURL)
 
+		// lib/pq panics if these well-defined env vars are set, even when empty.
+		// See parseEnviron in github.com/lib/pq/conn.go.
+		if driver == "postgres" {
+			for _, key := range []string{"PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGREALM", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER", "PGKRBSRVNAME", "PGGSSLIB", "PGSYSCONFDIR", "PGLOCALEDIR"} {
+				if _, ok := os.LookupEnv(key); ok {
+					g.Warn("ignoring env var %s (not supported by the postgres driver)", key)
+					os.Unsetenv(key)
+				}
+			}
+		}
+
 		if !usePool || !poolOk {
 			db, err = sqlx.Open(driver, connURL)
 			if err != nil {
