@@ -1914,6 +1914,20 @@ func (o *TargetOptions) GetDeleteMissingConfig() *DeleteMissingConfig {
 		return nil
 	}
 
+	cfg := o.parseDeleteMissing()
+	if cfg == nil {
+		return nil
+	}
+
+	// "none", "false" or "off" disable delete_missing
+	cfg.Type = strings.ToLower(strings.TrimSpace(cfg.Type))
+	if g.In(cfg.Type, "none", "false", "off") {
+		return nil
+	}
+	return cfg
+}
+
+func (o *TargetOptions) parseDeleteMissing() *DeleteMissingConfig {
 	switch v := o.DeleteMissing.(type) {
 	case string:
 		// Simple format: "soft" or "hard"

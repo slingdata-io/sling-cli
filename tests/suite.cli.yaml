@@ -3496,6 +3496,15 @@
     - 'boundsError'
     - 'panic occurred'
 
+# delete_missing: none (or false/off) must mean "disabled", not a hard error (Final Orbit).
+- id: 809
+  name: 'delete_missing none is a no-op'
+  run: 'sling run -d --src-conn postgres --src-stream public.test1k_postgres_pg --tgt-conn mysql --tgt-object ''mysql.public_test1k_dm_none'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: none }'''
+  output_contains:
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'invalid value for missing ID deletion'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
