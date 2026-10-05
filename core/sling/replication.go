@@ -3,6 +3,7 @@ package sling
 import (
 	"context"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -44,11 +45,17 @@ type ReplicationConfig struct {
 	startHooks, endHooks Hooks
 
 	streamsOrdered []string
+	unmatched      []unmatchedPattern // wildcard streams that matched no object
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
 	state          *ReplicationState
 
 	CDCRunner CDCRunner `json:"-"`
+}
+
+type unmatchedPattern struct {
+	pattern string
+	stream  *ReplicationStreamConfig
 }
 
 type CDCRunner interface {
@@ -308,6 +315,7 @@ type Wildcard struct {
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	rd.unmatched = nil
 
 	conn, err := rd.GetSourceConnection()
 	if err != nil {
@@ -380,6 +388,14 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		}
 	} else {
 		return g.Error("invalid connection for wildcards: %s", rd.Source)
+	}
+
+	// an empty match drops the stream, so the run can pass without its data
+	for _, wildcard := range wildcards {
+		if len(wildcard.StreamNames) == 0 && hasWildcard(wildcard.Pattern) {
+			g.Warn("stream pattern '%s' did not match any object in %s, so it has no task", wildcard.Pattern, rd.Source)
+			rd.unmatched = append(rd.unmatched, unmatchedPattern{wildcard.Pattern, rd.Streams[wildcard.Pattern]})
+		}
 	}
 
 	// add wildcard streams
@@ -1134,6 +1150,33 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 	return
 }
 
+// ReportUnmatchedPatterns sends a task status 'warning' for each wildcard
+// stream that matched no object. Without it, the run shows as a success.
+func (rd *ReplicationConfig) ReportUnmatchedPatterns(execID string) {
+	for _, u := range rd.unmatched {
+		stream := ReplicationStreamConfig{}
+		if u.stream != nil {
+			stream = *u.stream
+		}
+		SetStreamDefaults(u.pattern, &stream, *rd)
+		stream.replication = rd
+
+		cfg, err := rd.StreamToTaskConfig(&stream, u.pattern, g.CastToMapString(rd.Env))
+		if err != nil {
+			cfg = Config{StreamName: u.pattern, Env: g.CastToMapString(rd.Env)}
+			cfg.Source.Conn, cfg.Source.Stream = rd.Source, u.pattern
+			cfg.Target.Conn = rd.Target
+		}
+
+		t := NewTask(execID, &cfg)
+		now := time.Now()
+		t.StartTime, t.EndTime = &now, &now
+		t.Status = ExecStatusWarning
+		t.Err = fmt.Errorf("stream pattern '%s' did not match any object in %s", u.pattern, rd.Source) // plain error, without a stack
+		t.StateSet()
+	}
+}
+
 // Compile compiles the replication into tasks
 func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
 	rd.Context = g.NewContext(context.Background())
@@ -1323,6 +1366,13 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		cfg.IncrementalValStr = incrementalValStr
 
 		rd.Tasks = append(rd.Tasks, &cfg)
+	}
+
+	// keep only the unmatched patterns that the selection names
+	if len(selectStreams) > 0 {
+		rd.unmatched = lo.Filter(rd.unmatched, func(u unmatchedPattern, _ int) bool {
+			return g.In(u.pattern, selectStreams...)
+		})
 	}
 
 	// fail loudly when an include-style selection matched nothing,

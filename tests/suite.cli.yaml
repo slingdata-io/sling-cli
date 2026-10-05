@@ -3505,6 +3505,17 @@
   output_does_not_contain:
     - 'invalid value for missing ID deletion'
 
+# A wildcard stream that matches nothing must warn. The CLI sends a 'warning' task status for it.
+- id: 810
+  name: 'Wildcard stream that matches nothing warns'
+  run: |
+    mkdir -p /tmp/sling/wildcard_no_match/data
+    printf 'a,b\n1,2\n' > /tmp/sling/wildcard_no_match/data/one.csv
+    sling run -d -r tests/replications/r.140.wildcard_no_match.yaml
+  output_contains:
+    - "stream pattern 'file:///tmp/sling/wildcard_no_match/data/*.parquet' did not match any object in local"
+    - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

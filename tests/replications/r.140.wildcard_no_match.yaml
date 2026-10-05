@@ -1,0 +1,10 @@
+# A wildcard stream that matches no file must warn, and the other streams must still run.
+source: local
+target: local
+
+defaults:
+  object: file:///tmp/sling/wildcard_no_match/out/{stream_file_name}.csv
+
+streams:
+  file:///tmp/sling/wildcard_no_match/data/*.csv:
+  file:///tmp/sling/wildcard_no_match/data/*.parquet:

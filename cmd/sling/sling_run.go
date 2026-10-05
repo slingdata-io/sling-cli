@@ -660,6 +660,10 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return g.Error(err, "Error compiling replication config")
 	}
 
+	if !env.IsThreadChild {
+		replication.ReportUnmatchedPatterns(env.ExecID)
+	}
+
 	if len(replication.Tasks) == 0 {
 		g.Warn("Did not match any streams. Exiting.")
 		return
