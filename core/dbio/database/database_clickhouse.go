@@ -71,7 +71,10 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 	if tlsConfig == nil {
 		err = conn.BaseConn.Connect(timeOut...)
 		if err != nil {
-			if strings.Contains(err.Error(), "unexpected packet") {
+			if strings.Contains(err.Error(), "unexpected packet [72]") {
+				// 72 is ASCII "H": the server replied with HTTP
+				err = g.Error(err, "the server at %s:%s did not reply with the ClickHouse native protocol (the reply looks like HTTP). Verify the host and port: the native port is usually 9000 (9440 with TLS), the HTTP port is 8123 (8443 with TLS). To connect over HTTP, use `http_url`.", conn.GetProp("host"), conn.GetProp("port"))
+			} else if strings.Contains(err.Error(), "unexpected packet") {
 				g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 			}
 		} else {

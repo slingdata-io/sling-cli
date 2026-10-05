@@ -978,3 +978,13 @@ func TestMatchStreamsChunkParts(t *testing.T) {
 
 	assert.Len(t, rd.MatchStreams("t_sura"), 0)
 }
+
+func TestChunkBaseName(t *testing.T) {
+	base, isPart := ChunkBaseName("t_surat (part-002)")
+	assert.Equal(t, "t_surat", base)
+	assert.True(t, isPart)
+
+	base, isPart = ChunkBaseName("t_surat")
+	assert.Equal(t, "t_surat", base)
+	assert.False(t, isPart)
+}

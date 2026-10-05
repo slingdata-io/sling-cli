@@ -247,8 +247,14 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *Repl
 	return
 }
 
-// GetStream returns the stream if the it exists
 var chunkPartSuffixRe = regexp.MustCompile(`\s*\(part-\d+\)$`)
+
+// ChunkBaseName returns the stream name without its chunk label "(part-NNN)".
+// isPart is true when the name has the label.
+func ChunkBaseName(name string) (base string, isPart bool) {
+	base = chunkPartSuffixRe.ReplaceAllString(name, "")
+	return base, base != name
+}
 
 func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
 	streams = map[string]*ReplicationStreamConfig{}
@@ -265,7 +271,7 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 			streams[streamName] = streamCfg
 		} else if basePattern != pattern && rd.Normalize(basePattern) == rd.Normalize(streamName) {
 			streams[streamName] = streamCfg
-		} else if baseStream := chunkPartSuffixRe.ReplaceAllString(streamName, ""); baseStream != streamName && rd.Normalize(baseStream) == rd.Normalize(pattern) {
+		} else if baseStream, isPart := ChunkBaseName(streamName); isPart && rd.Normalize(baseStream) == rd.Normalize(pattern) {
 			// a base-name selection matches all chunk parts of that stream
 			streams[streamName] = streamCfg
 		}

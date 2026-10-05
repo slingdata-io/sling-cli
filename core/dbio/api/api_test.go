@@ -4073,3 +4073,10 @@ endpoints:
 	}
 	assert.Equal(t, 3, count, "queue should contain the 3 ids emitted by the producer processor")
 }
+
+func TestXMLFailureMessage(t *testing.T) {
+	body := []byte(`<?xml version="1.0"?><response><control><status>success</status></control><operation><authentication><status>failure</status></authentication><errormessage><error><errorno>XL03000006</errorno><description></description><description2>Login information is incorrect</description2></error></errormessage></operation></response>`)
+	assert.Equal(t, "XL03000006 Login information is incorrect", xmlFailureMessage(body))
+	assert.Equal(t, "", xmlFailureMessage([]byte(`<response><status>success</status></response>`)))
+	assert.Equal(t, "", xmlFailureMessage([]byte(`{"a":1}`)))
+}
