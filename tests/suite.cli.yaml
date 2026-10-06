@@ -3516,6 +3516,17 @@
     - "stream pattern 'file:///tmp/sling/wildcard_no_match/data/*.parquet' did not match any object in local"
     - 'execution succeeded'
 
+# StarRocks stream load and INSERT must quote column names. Reserved words (default, key, rows) fail bare.
+- id: 811
+  name: 'StarRocks stream load and INSERT with reserved column names'
+  run: 'sling run -d -r tests/replications/r.141.postgres_starrocks_reserved_cols.yaml'
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'SUCCESS: StarRocks handled reserved column names'
+    - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

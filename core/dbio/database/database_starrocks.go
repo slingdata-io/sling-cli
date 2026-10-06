@@ -289,7 +289,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		sql := g.R(
 			"insert into {table} ({fields}) values  {values} "+noDebugKey,
 			"table", tableFName,
-			"fields", strings.Join(insCols.Names(), ", "),
+			"fields", strings.Join(conn.Template().QuoteNames(insCols.Names()...), ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
 		)
 		_, err = conn.ExecContext(ds.Context.Ctx, sql)
@@ -539,11 +539,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		}
 	}()
 
-	// col names must match ddl
-	colNames := lo.Map(df.Columns.Names(), func(name string, i int) string {
-		q := conn.template.Variable["quote_char"]
-		return strings.ReplaceAll(conn.Quote(name), q, "")
-	})
+	// col names must match ddl. Keep quotes for reserved words.
+	colNames := conn.Template().QuoteNames(df.Columns.Names()...)
 
 	// default is CSV
 	headers := map[string]string{

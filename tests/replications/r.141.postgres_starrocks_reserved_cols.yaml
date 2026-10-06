@@ -1,0 +1,71 @@
+source: postgres
+target: starrocks
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_sr_reserved_cols;
+        CREATE TABLE public.test_sr_reserved_cols (
+          id INT PRIMARY KEY,
+          "default" VARCHAR(50),
+          "key" VARCHAR(50),
+          "rows" INT
+        );
+        INSERT INTO public.test_sr_reserved_cols (id, "default", "key", "rows") VALUES
+          (1, 'a', 'k1', 10),
+          (2, 'b', 'k2', 20),
+          (3, 'c', 'k3', 30);
+
+  end:
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_sr_reserved_cols
+
+    - type: check
+      check: runs["public_test_sr_reserved_cols"].status == "success"
+      failure_message: 'stream load failed for reserved column names'
+
+    - type: check
+      check: runs["test_sr_reserved_cols_insert"].status == "success"
+      failure_message: 'insert failed for reserved column names'
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select 'stream_load' as path, count(*) as cnt, sum(`rows`) as total from public.test_sr_reserved_cols
+        union all
+        select 'insert' as path, count(*) as cnt, sum(`rows`) as total from public.test_sr_reserved_cols_insert
+      into: result
+
+    - type: check
+      check: |
+        int_parse(store.result[0].cnt) == 3 && int_parse(store.result[0].total) == 60 &&
+        int_parse(store.result[1].cnt) == 3 && int_parse(store.result[1].total) == 60
+      failure_message: 'unexpected target data: {store.result}'
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        drop table if exists public.test_sr_reserved_cols;
+        drop table if exists public.test_sr_reserved_cols_insert;
+
+    - type: log
+      message: 'SUCCESS: StarRocks handled reserved column names'
+
+streams:
+  # stream load path (fe_url is set on the connection)
+  public.test_sr_reserved_cols:
+    object: public.test_sr_reserved_cols
+    mode: full-refresh
+    target_options:
+      use_bulk: true
+
+  # INSERT path
+  test_sr_reserved_cols_insert:
+    sql: select * from public.test_sr_reserved_cols
+    object: public.test_sr_reserved_cols_insert
+    mode: full-refresh
+    target_options:
+      use_bulk: false
