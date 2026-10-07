@@ -959,6 +959,9 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...any) (r
 	// Extract total changes from stdout
 	result, err = duck.waitForResult(dq)
 	if err != nil {
+		if !dq.isDone() {
+			duck.abortQuery(dq, err) // the process still runs the query
+		}
 		return result, g.Error(err, "Failed to execute SQL")
 	}
 
@@ -999,11 +1002,37 @@ func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuer
 			case <-dq.closed:
 				return
 			case <-dq.Context.Ctx.Done():
+				// A cancel often comes just after the last row, before the end
+				// marker sets done. Give the query a moment to end by itself.
+				grace := time.After(2 * time.Second)
+			waitEnd:
+				for !dq.isDone() {
+					select {
+					case <-dq.closed:
+						return
+					case <-grace:
+						break waitEnd
+					case <-time.After(20 * time.Millisecond):
+					}
+				}
+				if dq.isDone() {
+					return
+				}
 				err := g.Error(dq.Context.Ctx.Err(), "duckdb query context cancelled")
 				if duck.Proc != nil && duck.Proc.Exited() {
 					err = duck.procDeathErr() // it died first; the cancel is a consequence
 				}
-				duck.abortQuery(dq, err)
+				// Unblock the reader and let the holder of the query abort it under
+				// the session lock. A kill from here can arrive after the holder
+				// ended and kill the next query, so kill only a stuck holder.
+				dq.setErr(err)
+				dq.writer.CloseWithError(err)
+				dq.reader.CloseWithError(err)
+				select {
+				case <-dq.closed:
+				case <-time.After(5 * time.Second):
+					duck.abortQuery(dq, err)
+				}
 				return
 			case <-ticker.C:
 				// Check the stall first: it needs no Proc lock, so it still fires
@@ -1032,7 +1061,9 @@ func (duck *DuckDb) abortQuery(dq *duckDbQuery, err error) {
 	dq.setErr(err)
 	dq.writer.CloseWithError(err)
 	dq.reader.CloseWithError(err)
-	duck.kill()
+	if duck.getQuery() == dq {
+		duck.kill() // a newer query owns the process otherwise
+	}
 }
 
 // procDeathErr describes a process that died or lost its stdout scanner
