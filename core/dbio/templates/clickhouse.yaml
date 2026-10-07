@@ -26,11 +26,16 @@ core:
       )
 
   # ClickHouse only supports insert and delete_insert
+  # The NOT IN set holds only target keys that are also in the source, so its size
+  # follows the source, not the full target table.
   merge_insert: |
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
     WHERE ({src_pk_fields}) NOT IN (
       SELECT {tgt_pk_fields} FROM {tgt_table}
+      WHERE ({tgt_pk_fields}) IN (
+        SELECT {src_pk_fields} FROM {src_table}
+      )
     )
 
   merge_delete_insert: |
