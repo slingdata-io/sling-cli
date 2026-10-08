@@ -3,6 +3,7 @@ package sling
 import (
 	"context"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -44,11 +45,17 @@ type ReplicationConfig struct {
 	startHooks, endHooks Hooks
 
 	streamsOrdered []string
+	unmatched      []unmatchedPattern // wildcard streams that matched no object
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
 	state          *ReplicationState
 
 	CDCRunner CDCRunner `json:"-"`
+}
+
+type unmatchedPattern struct {
+	pattern string
+	stream  *ReplicationStreamConfig
 }
 
 type CDCRunner interface {
@@ -247,8 +254,14 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *Repl
 	return
 }
 
-// GetStream returns the stream if the it exists
 var chunkPartSuffixRe = regexp.MustCompile(`\s*\(part-\d+\)$`)
+
+// ChunkBaseName returns the stream name without its chunk label "(part-NNN)".
+// isPart is true when the name has the label.
+func ChunkBaseName(name string) (base string, isPart bool) {
+	base = chunkPartSuffixRe.ReplaceAllString(name, "")
+	return base, base != name
+}
 
 func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
 	streams = map[string]*ReplicationStreamConfig{}
@@ -264,6 +277,9 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
 		} else if basePattern != pattern && rd.Normalize(basePattern) == rd.Normalize(streamName) {
+			streams[streamName] = streamCfg
+		} else if baseStream, isPart := ChunkBaseName(streamName); isPart && rd.Normalize(baseStream) == rd.Normalize(pattern) {
+			// a base-name selection matches all chunk parts of that stream
 			streams[streamName] = streamCfg
 		}
 	}
@@ -299,6 +315,7 @@ type Wildcard struct {
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	rd.unmatched = nil
 
 	conn, err := rd.GetSourceConnection()
 	if err != nil {
@@ -371,6 +388,14 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		}
 	} else {
 		return g.Error("invalid connection for wildcards: %s", rd.Source)
+	}
+
+	// an empty match drops the stream, so the run can pass without its data
+	for _, wildcard := range wildcards {
+		if len(wildcard.StreamNames) == 0 && hasWildcard(wildcard.Pattern) {
+			g.Warn("stream pattern '%s' did not match any object in %s, so it has no task", wildcard.Pattern, rd.Source)
+			rd.unmatched = append(rd.unmatched, unmatchedPattern{wildcard.Pattern, rd.Streams[wildcard.Pattern]})
+		}
 	}
 
 	// add wildcard streams
@@ -975,7 +1000,11 @@ func (rd *ReplicationConfig) GetSourceConnection() (conn connection.ConnEntry, e
 
 	var ok bool
 	conn, ok = connsMap[strings.ToLower(rd.Source)]
-	if !ok {
+	if ok {
+		if err = conn.Connection.ResolveType(context.Background()); err != nil {
+			return conn, g.Error(err, "could not init source connection")
+		}
+	} else {
 		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
 			conn = connection.LocalFileConnEntry()
 		} else if strings.Contains(rd.Source, "://") {
@@ -1119,6 +1148,33 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 	}
 
 	return
+}
+
+// ReportUnmatchedPatterns sends a task status 'warning' for each wildcard
+// stream that matched no object. Without it, the run shows as a success.
+func (rd *ReplicationConfig) ReportUnmatchedPatterns(execID string) {
+	for _, u := range rd.unmatched {
+		stream := ReplicationStreamConfig{}
+		if u.stream != nil {
+			stream = *u.stream
+		}
+		SetStreamDefaults(u.pattern, &stream, *rd)
+		stream.replication = rd
+
+		cfg, err := rd.StreamToTaskConfig(&stream, u.pattern, g.CastToMapString(rd.Env))
+		if err != nil {
+			cfg = Config{StreamName: u.pattern, Env: g.CastToMapString(rd.Env)}
+			cfg.Source.Conn, cfg.Source.Stream = rd.Source, u.pattern
+			cfg.Target.Conn = rd.Target
+		}
+
+		t := NewTask(execID, &cfg)
+		now := time.Now()
+		t.StartTime, t.EndTime = &now, &now
+		t.Status = ExecStatusWarning
+		t.Err = fmt.Errorf("stream pattern '%s' did not match any object in %s", u.pattern, rd.Source) // plain error, without a stack
+		t.StateSet()
+	}
 }
 
 // Compile compiles the replication into tasks
@@ -1312,6 +1368,13 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		rd.Tasks = append(rd.Tasks, &cfg)
 	}
 
+	// keep only the unmatched patterns that the selection names
+	if len(selectStreams) > 0 {
+		rd.unmatched = lo.Filter(rd.unmatched, func(u unmatchedPattern, _ int) bool {
+			return g.In(u.pattern, selectStreams...)
+		})
+	}
+
 	// fail loudly when an include-style selection matched nothing,
 	// instead of compiling zero tasks downstream
 	if len(selectStreams) > 0 && len(matchedStreams) == 0 && len(includeTags) == 0 && len(excludeTags) == 0 {
@@ -1329,10 +1392,18 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// validate for pre/post/pre_merge/post_merge at replication level
 		stageHooks := map[string][]any{
-			"pre":        rd.Hooks.Pre,
-			"post":       rd.Hooks.Post,
-			"pre_merge":  rd.Hooks.PreMerge,
-			"post_merge": rd.Hooks.PostMerge,
+			"pre":         rd.Hooks.Pre,
+			"+pre":        rd.Hooks.PrePrepend,
+			"pre+":        rd.Hooks.PreAppend,
+			"post":        rd.Hooks.Post,
+			"+post":       rd.Hooks.PostPrepend,
+			"post+":       rd.Hooks.PostAppend,
+			"pre_merge":   rd.Hooks.PreMerge,
+			"+pre_merge":  rd.Hooks.PreMergePrepend,
+			"pre_merge+":  rd.Hooks.PreMergeAppend,
+			"post_merge":  rd.Hooks.PostMerge,
+			"+post_merge": rd.Hooks.PostMergePrepend,
+			"post_merge+": rd.Hooks.PostMergeAppend,
 		}
 		for stage, hooks := range stageHooks {
 			if len(hooks) > 0 {
@@ -1641,10 +1712,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 	// otherwise, use legacy replace behavior (stream replaces defaults entirely)
 	stream.Columns = mergeColumns(replicationCfg.Defaults.Columns, stream.Columns)
 
-	// set default hooks
-	if stream.Hooks.IsEmpty() {
-		stream.Hooks = replicationCfg.Defaults.Hooks
-	}
+	// set default hooks, per stage, applying "+stage" / "stage+" modifiers
+	stream.Hooks = stream.Hooks.WithDefaults(replicationCfg.Defaults.Hooks.WithDefaults(HookMap{}))
 
 	// set default options
 	if stream.SourceOptions == nil {
@@ -1691,6 +1760,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	// replace variables across the yaml file
 	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
+	if Env, err = env.ResolveSecretEnv(context.Background(), Env); err != nil {
+		return
+	}
 	replicYAML = g.Rm(replicYAML, Env)
 
 	// parse again

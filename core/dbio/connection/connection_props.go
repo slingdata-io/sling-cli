@@ -1,7 +1,11 @@
 package connection
 
 import (
+	"context"
 	"encoding/json"
+	"maps"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -10,7 +14,9 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/secrets"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v3"
 )
@@ -115,6 +121,31 @@ func PromoteLiteralSecrets(connName string, props, existing map[string]any, envU
 	return promoted
 }
 
+// PromoteProviderSecrets is PromoteLiteralSecrets for one secret_providers
+// entry: a literal credential value moves to `env:` as ${<NAME>_<KEY>}.
+func PromoteProviderSecrets(name string, props, existing, envUpdates map[string]any) (promoted []string) {
+	if props == nil || envUpdates == nil {
+		return nil
+	}
+	for _, k := range secrets.CredentialKeys {
+		v, ok := props[k]
+		if !ok || !isLiteralSecret(v) {
+			continue
+		}
+		if k == "config" && strings.EqualFold(cast.ToString(props["type"]), "doppler") {
+			continue // the Doppler config name, not a credential
+		}
+		if ref, ok := existingRefFor(existing[k], cast.ToString(v)); ok {
+			props[k] = ref
+			continue
+		}
+		envUpdates[EnvVarNameOf(name, k)] = cast.ToString(v)
+		props[k] = EnvVarRef(name, k)
+		promoted = append(promoted, k)
+	}
+	return promoted
+}
+
 // existingRefFor returns the on-disk ref for a field when literal equals that
 // ref's expansion.
 func existingRefFor(existing any, literal string) (string, bool) {
@@ -212,7 +243,7 @@ func RejectLiteralSecrets(name string, kv map[string]any) error {
 		return nil
 	}
 	example := EnvVarRef(name, "PASSWORD")
-	return g.Error("secret field(s) %s must be an env-var ref such as %s. Do not pass secret values.", strings.Join(literals, ", "), example)
+	return g.Error("secret field(s) %s must be an env-var ref such as %s or a secret reference such as op://vault/item/field. Do not pass secret values.", strings.Join(literals, ", "), example)
 }
 
 func isLiteralSecret(v any) bool {
@@ -227,7 +258,7 @@ func isLiteralSecret(v any) bool {
 	if s == "" {
 		return false
 	}
-	return !env.IsEnvVarRef(s)
+	return !env.IsEnvVarRef(s) && !secrets.IsRef(s)
 }
 
 // ValidateConnProps checks that props can be written as a connection entry:
@@ -317,6 +348,7 @@ func FormatUnsetRefError(refs []UnsetEnvRef, loc env.ConnLocation) error {
 }
 
 // ScrubConnProps returns key names and ref/status only. No secret values.
+// A ${VAR} or a secret manager reference shows as `ref`.
 func ScrubConnProps(kv map[string]any) []map[string]any {
 	out := []map[string]any{}
 	keys := lo.Keys(kv)
@@ -339,7 +371,7 @@ func ScrubConnProps(kv map[string]any) []map[string]any {
 func scrubEntry(key string, v any) map[string]any {
 	s := strings.TrimSpace(cast.ToString(v))
 	entry := g.M("key", key)
-	if env.IsEnvVarRef(s) {
+	if env.IsEnvVarRef(s) || secrets.IsRef(s) {
 		entry["ref"] = s
 		return entry
 	}
@@ -481,4 +513,200 @@ func loadTemplateOrder() {
 			break
 		}
 	}
+}
+
+func init() {
+	secrets.Register("sling", func(secrets.ProviderConfig) (secrets.Provider, error) {
+		return slingProvider{}, nil
+	})
+
+	iop.ResolveSecret = func(ref string) (string, error) {
+		if !secrets.IsRef(ref) {
+			return "", g.Error("not a secret reference: use a form such as op://vault/item/field or ref+awssecrets://name#/key")
+		}
+		r, err := env.SecretResolver()
+		if err != nil {
+			return "", err
+		}
+		v, err := r.Resolve(context.Background(), ref)
+		if err != nil {
+			return "", err
+		}
+		return cast.ToString(v), nil
+	}
+}
+
+// HasSecretRef is true when the connection data holds a secret reference or `from:`.
+func (c *Connection) HasSecretRef() bool {
+	_, hasFrom := c.Data["from"]
+	return hasFrom || secrets.HasRef(c.Data)
+}
+
+// Resolved returns c when c.Data has no secret reference. Else it returns a
+// copy with resolved data and a rebuilt URL. c.Data keeps the references.
+func (c *Connection) Resolved(ctx context.Context) (*Connection, error) {
+	if !c.HasSecretRef() {
+		return c, nil
+	}
+	r, err := env.SecretResolverFor(c.secretProviders)
+	if err != nil {
+		return nil, err
+	}
+
+	data := maps.Clone(c.Data)
+	if c.derivedURL() {
+		delete(data, "url") // setURL builds it again from the resolved values
+	}
+	out, err := r.ResolveEntry(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+
+	t := c.Type
+	if t.IsUnknown() {
+		t = SchemeType(cast.ToString(out["url"]))
+		for _, key := range []string{"type", "engine"} { // engine: AWS RDS secrets
+			if kt, ok := dbio.ValidateType(cast.ToString(out[key])); ok {
+				t = kt
+				break
+			}
+		}
+	}
+
+	nc, err := NewConnection(c.Name, t, out)
+	if err != nil {
+		return nil, g.Error(err, "could not build connection %s from resolved secrets", c.Name)
+	}
+	nc.context = c.context
+	nc.secretProviders = c.secretProviders
+	return &nc, nil
+}
+
+// ResolveType sets the type of a connection with references and no `type`.
+// It reads the secrets, so call it only when the connection is used.
+func (c *Connection) ResolveType(ctx context.Context) error {
+	if !c.Type.IsUnknown() || !c.HasSecretRef() {
+		return nil
+	}
+	rc, err := c.Resolved(ctx)
+	if err != nil {
+		return err
+	}
+	if rc.Type.IsUnknown() {
+		return g.Error("could not find the type of connection %s. Add `type` to the connection, or a `type` key to the secret", c.Name)
+	}
+	c.Type = rc.Type
+	return nil
+}
+
+// derivedURL is true when setURL built c.Data["url"] from other keys that
+// hold references. That URL contains reference text and must be built again.
+func (c *Connection) derivedURL() bool {
+	u := cast.ToString(c.Data["url"])
+	if u == "" {
+		return false
+	}
+	for k, v := range c.Data {
+		s, ok := v.(string)
+		if k == "url" || !ok || !secrets.ContainsRef(s) {
+			continue
+		}
+		escaped := strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+		if strings.Contains(u, s) || strings.Contains(u, escaped) {
+			return true
+		}
+	}
+	return false
+}
+
+// slingProvider reads values that sling already has:
+//
+//	ref+sling://connections/<name>[/<field>[/<nested>...]]
+//	ref+sling://env/<KEY>
+//
+// A connection with no field comes back as JSON, so `from:` can copy it.
+// References in the value resolve too.
+type slingProvider struct{}
+
+func (p slingProvider) Get(ctx context.Context, ref secrets.Ref) ([]byte, error) {
+	scope, rest, _ := strings.Cut(strings.Trim(ref.Path, "/"), "/")
+	if rest == "" {
+		return nil, g.Error("use ref+sling://connections/<name>/<field> or ref+sling://env/<KEY>")
+	}
+
+	switch strings.ToLower(scope) {
+	case "connections":
+		return p.connection(ctx, rest)
+	case "env":
+		return p.env(ctx, rest)
+	default:
+		return nil, g.Error("unknown sling scope %q. Use connections or env", scope)
+	}
+}
+
+// connection returns a field of the local connection, or the whole connection.
+func (slingProvider) connection(ctx context.Context, path string) ([]byte, error) {
+	name, field, _ := strings.Cut(path, "/")
+	entry := GetLocalConns().Get(name)
+	if entry.Name == "" {
+		return nil, g.Error("did not find connection %s", name)
+	}
+	conn, err := entry.Connection.Resolved(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	data := maps.Clone(conn.Data)
+	data["url"] = conn.URL()
+	delete(data, "from")
+	if field == "" {
+		return json.Marshal(data)
+	}
+
+	key, nested, _ := strings.Cut(field, "/")
+	var value any
+	found := false
+	for k, v := range data {
+		if strings.EqualFold(k, key) {
+			value, found = v, true
+			break
+		}
+	}
+	if !found {
+		return nil, g.Error("connection %s has no field %q", entry.Name, key)
+	}
+
+	if nested != "" {
+		b, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		if value, err = (secrets.Ref{Pointer: "/" + nested}).Select(b); err != nil {
+			return nil, err
+		}
+	}
+	if s, ok := value.(string); ok {
+		return []byte(s), nil
+	}
+	return json.Marshal(value)
+}
+
+// env returns a process env var (this includes the env: of env.yaml).
+func (slingProvider) env(ctx context.Context, key string) ([]byte, error) {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return nil, g.Error("env var %s is not set", key)
+	}
+	if !secrets.HasRef(value) {
+		return []byte(value), nil
+	}
+	r, err := env.SecretResolver()
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := r.ResolveValue(ctx, value)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(cast.ToString(resolved)), nil
 }

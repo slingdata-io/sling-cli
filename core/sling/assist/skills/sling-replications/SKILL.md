@@ -252,6 +252,23 @@ streams:
           query: "ANALYZE {object.full_name}"
 ```
 
+A stream stage (e.g. `post`) replaces only the `defaults.hooks` of that stage. To keep the default hooks and add to them, use `+stage` (runs before) or `stage+` (runs after): `+pre`, `pre+`, `+post`, `post+`, `+pre_merge`, `pre_merge+`, `+post_merge`, `post_merge+`.
+
+```yaml
+defaults:
+  hooks:
+    post:
+      - type: query
+        query: file://log_insert.sql   # every stream
+
+streams:
+  public.orders:
+    hooks:
+      post+:                           # post: [log_insert, delete]
+        - type: query
+          query: DELETE FROM {object.full_name} WHERE log_date < CURRENT_DATE - 9
+```
+
 ## Environment Variables
 
 ```yaml

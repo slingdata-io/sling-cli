@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/flarco/g"
@@ -24,9 +23,7 @@ import (
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
-	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
 )
 
 // StreamProcessor processes rows and values
@@ -92,8 +89,6 @@ func (sc *StreamConfig) ToMap() map[string]string {
 }
 
 type Transformers struct {
-	Accent transform.Transformer
-
 	DecodeUTF8        transform.Transformer
 	DecodeUTF8BOM     transform.Transformer
 	DecodeUTF16       transform.Transformer
@@ -113,71 +108,67 @@ type Transformers struct {
 	EncodeWindows1252 transform.Transformer
 }
 
+// accentRune maps special letters that have no combining mark to ASCII.
+func accentRune(r rune) rune {
+	switch r {
+	// Polish special characters
+	case 'Ł', 'Ɫ':
+		return 'L'
+	case 'ł':
+		return 'l'
+	// Other special characters and their variations
+	case 'Æ', 'Ǽ':
+		return 'A'
+	case 'æ', 'ǽ':
+		return 'a'
+	case 'Ø', 'Ǿ':
+		return 'O'
+	case 'ø', 'ǿ':
+		return 'o'
+	case 'Þ':
+		return 'T'
+	case 'þ':
+		return 't'
+	case 'Ð':
+		return 'D'
+	case 'ð':
+		return 'd'
+	case 'ß', 'ẞ':
+		return 's'
+	case 'Œ':
+		return 'O'
+	case 'œ':
+		return 'o'
+	case 'Ĳ':
+		return 'I'
+	case 'ĳ':
+		return 'i'
+	case 'ƒ':
+		return 'f'
+	case 'Ŋ':
+		return 'N'
+	case 'ŋ':
+		return 'n'
+	case 'Ɲ':
+		return 'N'
+	case 'ɲ':
+		return 'n'
+	case 'Ƴ':
+		return 'Y'
+	case 'ƴ':
+		return 'y'
+	case 'Ɣ':
+		return 'G'
+	case 'ɣ':
+		return 'g'
+	default:
+		return r
+	}
+}
+
 func NewTransformers() Transformers {
 	win16be := encUnicode.UTF16(encUnicode.BigEndian, encUnicode.IgnoreBOM)
 	return Transformers{
-		Accent: transform.Chain(
-			norm.NFD,
-			runes.Remove(runes.In(unicode.Mn)),
-			runes.Map(func(r rune) rune {
-				switch r {
-				// Polish special characters
-				case 'Ł', 'Ɫ':
-					return 'L'
-				case 'ł':
-					return 'l'
-				// Other special characters and their variations
-				case 'Æ', 'Ǽ':
-					return 'A'
-				case 'æ', 'ǽ':
-					return 'a'
-				case 'Ø', 'Ǿ':
-					return 'O'
-				case 'ø', 'ǿ':
-					return 'o'
-				case 'Þ':
-					return 'T'
-				case 'þ':
-					return 't'
-				case 'Ð':
-					return 'D'
-				case 'ð':
-					return 'd'
-				case 'ß', 'ẞ':
-					return 's'
-				case 'Œ':
-					return 'O'
-				case 'œ':
-					return 'o'
-				case 'Ĳ':
-					return 'I'
-				case 'ĳ':
-					return 'i'
-				case 'ƒ':
-					return 'f'
-				case 'Ŋ':
-					return 'N'
-				case 'ŋ':
-					return 'n'
-				case 'Ɲ':
-					return 'N'
-				case 'ɲ':
-					return 'n'
-				case 'Ƴ':
-					return 'Y'
-				case 'ƴ':
-					return 'y'
-				case 'Ɣ':
-					return 'G'
-				case 'ɣ':
-					return 'g'
-				default:
-					return r
-				}
-			}),
-			norm.NFC,
-		),
-
 		DecodeUTF8:        encUnicode.UTF8.NewDecoder(),
 		DecodeUTF8BOM:     encUnicode.UTF8BOM.NewDecoder(),
 		DecodeUTF16:       encUnicode.BOMOverride(win16be.NewDecoder()),

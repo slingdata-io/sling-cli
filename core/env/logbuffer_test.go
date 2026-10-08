@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
@@ -152,5 +153,45 @@ func TestPrintFatalCapturesToLogBuffer(t *testing.T) {
 	}
 	if strings.Contains(got, "0001-01-01") {
 		t.Fatalf("zero timestamp on captured fatal: %q", got)
+	}
+}
+
+// Regression: an agent child runs in a project dir whose .env.sling repeats keys
+// that the agent passes in the env. The loader logs, and that must not deadlock on lb.mu.
+func TestLogBufferSetupFilesLogsWithoutDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	const key = "SLING_TEST_SETUP_FILES_HIDDEN_KEY"
+	if err := os.WriteFile(filepath.Join(dir, ".env.sling"), []byte(key+"=from-file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "from-process")
+	t.Setenv("SLING_DEBUG_FILE", filepath.Join(dir, "missing-dir", "debug.log")) // forces a Warn too
+	t.Chdir(dir)
+
+	lb := &logBuffer{} // no deferred Stop/CloseFiles: they lock lb.mu, which would hang a failing run
+	lb.Start()
+
+	oldHooks := g.LogHooks
+	defer func() { g.LogHooks = oldHooks }()
+	g.SetLogHook(g.NewLogHook(g.DebugLevel, lb.Capture))
+
+	done := make(chan struct{})
+	go func() {
+		lb.SetupFiles()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetupFiles deadlocked")
+	}
+	defer lb.Stop()
+	defer lb.CloseFiles()
+
+	got := lb.Recent()
+	for _, want := range []string{key, "could not open debug log file"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("captured logs missing %q:\n%s", want, got)
+		}
 	}
 }

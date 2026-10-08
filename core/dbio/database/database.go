@@ -711,7 +711,8 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			)
 		}
 
-		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
+		sshOptions := iop.NewSSHOptions(func(key string) string { return conn.GetProp(key) })
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"), sshOptions)
 		if err != nil {
 			return g.Error(err, "could not connect to ssh tunnel server")
 		}
@@ -767,6 +768,17 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 		driver := getDriverName(conn)
 		g.Trace("driver=%s conn_url=%s", driver, connURL)
+
+		// lib/pq panics if these well-defined env vars are set, even when empty.
+		// See parseEnviron in github.com/lib/pq/conn.go.
+		if driver == "postgres" {
+			for _, key := range []string{"PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGREALM", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER", "PGKRBSRVNAME", "PGGSSLIB", "PGSYSCONFDIR", "PGLOCALEDIR"} {
+				if _, ok := os.LookupEnv(key); ok {
+					g.Warn("ignoring env var %s (not supported by the postgres driver)", key)
+					os.Unsetenv(key)
+				}
+			}
+		}
 
 		if !usePool || !poolOk {
 			db, err = sqlx.Open(driver, connURL)
@@ -871,7 +883,8 @@ func (conn *BaseConn) setTx(tx Transaction) {
 func (conn *BaseConn) postConnect() {
 
 	conn.SetProp("connected", "true")
-	conn.SetProp("connect_time", cast.ToString(time.Now()))
+	// RFC3339 so it parses back; time.String() adds a monotonic suffix
+	conn.SetProp("connect_time", time.Now().Format(time.RFC3339Nano))
 
 }
 
@@ -965,6 +978,10 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 // BulkImportStream import the stream rows in bulk
 func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	if conn.UseADBC() {
+		// the ADBC session is separate: an open tx here can hold DDL locks it waits on (#816)
+		if err = conn.Commit(); err != nil {
+			return 0, g.Error(err, "could not commit before ADBC bulk import")
+		}
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 	g.Trace("BulkImportStream not implemented for %s", conn.GetType())
@@ -3273,6 +3290,24 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 
 	// cast into the correct type
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
+
+	// a row from the source is not deleted: clear a soft-delete mark (delete_missing: soft).
+	// Use a literal NULL, not src.col: some databases type a NULL in a derived table as text.
+	deletedAt := env.ReservedFields.DeletedAt
+	if deletedAt != env.ReservedFields.SyncedAt && srcColumns.GetColumn(deletedAt) == nil {
+		if col := tgtColumns.GetColumn(deletedAt); col != nil {
+			colQ := conn.Quote(col.Name)
+			tgtFields = append(tgtFields, colQ)
+			insertFields = append(insertFields, colQ)
+			srcFields = append(srcFields, "NULL as "+colQ)
+			srcInsertFields = append(srcInsertFields, "NULL")
+			srcInsertFieldsCasted = append(srcInsertFieldsCasted, "NULL")
+			placeholderFields = append(placeholderFields, "NULL")
+			setFields = append(setFields, colQ+" = NULL")
+			setFieldsCasted = append(setFieldsCasted, colQ+" = NULL")
+			setFieldsValues = append(setFieldsValues, colQ+" = NULL")
+		}
+	}
 
 	// Determine the merge strategy: use provided strategy if not nil, otherwise use database default
 	var mergeStrategy MergeStrategy

@@ -3303,6 +3303,54 @@
     - 'No partitions have data available for loading'
     - 'execution failed'
 
+# StarRocks target: delete_missing: soft must clear _sling_deleted_at when a row comes back.
+# Repro (user report, v1.6.4): run 2 soft-deletes id=2. Run 3 re-inserts id=2 with a new
+# updated_at. The upsert writes the row, but _sling_deleted_at keeps the old value.
+- id: 631
+  name: 'StarRocks delete_missing soft clears mark on re-insert'
+  group: starrocks_dm
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders; CREATE TABLE public.sr_dm_orders (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.sr_dm_orders VALUES (1,'alice',10.50,'2024-01-01'),(2,'bob',20.00,'2024-01-02'),(3,'carol',30.25,'2024-01-03')"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec postgres "DELETE FROM public.sr_dm_orders WHERE id = 2"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "select concat('after_delete=', count(*)) as res from public.sr_dm_orders where _sling_deleted_at is not null and id = 2"
+    sling conns exec postgres "INSERT INTO public.sr_dm_orders VALUES (2,'bob',25.00,'2024-03-01')"
+    sling run -d -r tests/replications/r.134.starrocks_delete_missing_soft.yaml
+    sling conns exec starrocks "select concat('after_return=', count(*), '_', coalesce(sum(case when _sling_deleted_at is null then 1 else 0 end), 0)) as res from public.sr_dm_orders where id = 2 and amount = 25"
+    sling conns exec starrocks "DROP TABLE IF EXISTS public.sr_dm_orders"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.sr_dm_orders"
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'after_delete=1'
+    - 'after_return=1_1'
+
+# Postgres target: same as 631, with the update_insert merge (base default).
+# The MERGE only sets source columns, so _sling_deleted_at keeps the old value.
+- id: 632
+  name: 'Postgres delete_missing soft clears mark on re-insert'
+  group: delete_missing
+  run: |
+    set -e
+    sling conns exec postgres "DROP TABLE IF EXISTS public.pg_dm_orders_src; DROP TABLE IF EXISTS public.pg_dm_orders; CREATE TABLE public.pg_dm_orders_src (id BIGINT PRIMARY KEY, customer VARCHAR(100), amount DECIMAL(10,2), updated_at TIMESTAMP); INSERT INTO public.pg_dm_orders_src VALUES (1,'alice',10.50,'2024-01-01'),(2,'bob',20.00,'2024-01-02'),(3,'carol',30.25,'2024-01-03')"
+    sling run -d -r tests/replications/r.135.postgres_delete_missing_soft.yaml
+    sling conns exec postgres "DELETE FROM public.pg_dm_orders_src WHERE id = 2"
+    sling run -d -r tests/replications/r.135.postgres_delete_missing_soft.yaml
+    sling conns exec postgres "select concat('after_delete=', count(*)) as res from public.pg_dm_orders where _sling_deleted_at is not null and id = 2"
+    sling conns exec postgres "INSERT INTO public.pg_dm_orders_src VALUES (2,'bob',25.00,'2024-03-01')"
+    sling run -d -r tests/replications/r.135.postgres_delete_missing_soft.yaml
+    sling conns exec postgres "select concat('after_return=', count(*), '_', coalesce(sum(case when _sling_deleted_at is null then 1 else 0 end), 0)) as res from public.pg_dm_orders where id = 2 and amount = 25"
+    sling conns exec postgres "DROP TABLE IF EXISTS public.pg_dm_orders_src; DROP TABLE IF EXISTS public.pg_dm_orders"
+  conns:
+    - postgres
+  output_contains:
+    - 'after_delete=1'
+    - 'after_return=1_1'
+
 # Schema migration - PostgreSQL to StarRocks (all attributes)
 - id: 630
   name: 'Schema migration comprehensive (Postgres to StarRocks)'
@@ -3357,10 +3405,133 @@
     - 'Invalid object name'
     - 'SQL Server BCP Import Error'
 
+# Concurrent runs of one stream into a new table: the loser of the create race must fail with a clear message.
+# BigQuery DDL/metadata calls are slow, so the window between TableExists and CREATE is wide.
+# The race is not deterministic, but 6 runs hit it reliably.
+- id: 799
+  name: 'concurrent runs to a new BigQuery table fail with a concurrent-process message'
+  run: |
+    sling conns exec BIGQUERY --limit 0 "drop table if exists public.toctou_799"
+    PIDS=""
+    for i in $(seq 1 6); do
+      sling run -d --src-conn POSTGRES --src-stream "select $i as run_id, g as id from generate_series(1, 10) g" --tgt-conn BIGQUERY --tgt-object public.toctou_799 --mode snapshot --tgt-options "{table_tmp: public.toctou_799_tmp_$i}" > /tmp/toctou_799_$i.log 2>&1 &
+      PIDS="$PIDS $!"
+    done
+    for p in $PIDS; do wait $p || true; done
+    cat /tmp/toctou_799_*.log
+    sling conns exec BIGQUERY --limit 0 "drop table if exists public.toctou_799"
+  output_contains:
+    - 'as it already exists. A concurrent process created it'
+
+# MySQL DATETIME reaches transforms as []byte after the first 900 sample rows.
+# CastToTime has no []byte case, so date_add fails with "could not cast to time" (KAI bronze pipeline).
+- id: 800
+  name: 'date_add on MySQL DATETIME column ([]byte value)'
+  run: 'sling run -d -r tests/replications/r.136.mysql_datetime_bytes_time_fn.yaml'
+  output_contains:
+    - 'date_add shifted MySQL DATETIME by -7h'
+  output_does_not_contain:
+    - 'could not cast to time'
+
+# A flat `col: expr` transforms map fails with a raw decode error (KAI bronze pipeline).
+- id: 801
+  name: 'flat col-expr transforms map is accepted'
+  run: 'sling run -d -r tests/replications/r.137.transforms_flat_map.yaml'
+  output_contains:
+    - 'flat transforms map applied'
+  output_does_not_contain:
+    - 'could not parse transforms'
+
+# MySQL VARCHAR reaches transforms as []byte after the first 900 sample rows.
+# String comparisons then return false, so later rows load wrong values with no error.
+- id: 802
+  name: 'string comparison transform on MySQL VARCHAR after sample rows'
+  run: 'sling run -d -r tests/replications/r.138.mysql_varchar_bytes_compare.yaml'
+  output_contains:
+    - 'string comparison correct for all 1000 rows'
+
+# issue #816: with SLING_USE_ADBC, the truncate stays uncommitted (Sch-M) on the main
+# connection. The ADBC ingest then waits on LCK_M_SCH_S forever. The timeout ends the hang.
+- id: 804
+  name: 'MSSQL ADBC truncate does not hang on its own DDL lock (issue #816)'
+  rows: 1000
+  run: |
+    sling run -d --src-stream file://tests/files/test1.parquet --tgt-conn MSSQL --tgt-object dbo.adbc_truncate_816 --mode full-refresh
+    SLING_USE_ADBC=true timeout 120 sling run -d --src-stream file://tests/files/test1.parquet --tgt-conn MSSQL --tgt-object dbo.adbc_truncate_816 --tgt-options '{ batch_limit: 10000, direct_insert: true }' --mode truncate
+  output_contains:
+    - 'truncated table "dbo"."adbc_truncate_816"'
+    - 'execution succeeded'
+
+# issue #820: the Redshift temp-table load must not hold a transaction open during S3 staging.
+# Requires a reachable REDSHIFT connection (cluster not always available), so it stays commented out.
+# - id: 805
+#   name: 'Redshift temp table COPY runs without an open transaction (issue #820)'
+#   run: 'sling run -d -r tests/replications/r.139.redshift_copy_no_tx.yaml'
+#   output_contains:
+#     - 'SUCCESS: Redshift temp table COPY ran without an open transaction'
+#     - 'execution succeeded'
+
+# discussion #819: "+stage" / "stage+" stream hooks prepend / append to the default hooks.
+# A stream stage replaces only that default stage.
+- id: 806
+  name: 'Stream hook modifiers merge with default hooks (discussion #819)'
+  run: 'sling run -d -p tests/pipelines/p.57.hook_modifiers.yaml'
+  output_contains:
+    - 'cannot declare a "post+" hook at replication level'
+    - 'hook modifiers: SUCCESS'
+
+# replace_accents uses one global transform.Chain. The chain keeps state, and one stream
+# calls it from more than one goroutine. This causes runtime.boundsError panics or a hang (AEG Vision).
+- id: 807
+  name: 'replace_accents does not panic or hang on one stream'
+  run: |
+    mkdir -p /tmp/sling/accent_race
+    awk 'BEGIN{split("é|Ångström café|ab|Łódź|x|naïve résumé déjà vu|Ærøskøbing|ñ",v,"|"); print "id,a,b"; for(i=1;i<=20000;i++) printf "%d,%s,%s\n", i, v[i%8+1], v[(i+3)%8+1]}' > /tmp/sling/accent_race/input.csv
+    timeout 60 sling run --src-stream file:///tmp/sling/accent_race/input.csv --tgt-object file:///tmp/sling/accent_race/output.csv --transforms '[replace_accents]'
+    if LC_ALL=C grep -q '[^ -~]' /tmp/sling/accent_race/output.csv; then echo 'accents left in output'; else echo 'accents removed: OK'; fi
+  output_contains:
+    - 'wrote 20000 rows'
+    - 'accents removed: OK'
+  output_does_not_contain:
+    - 'boundsError'
+    - 'panic occurred'
+
+# delete_missing: none (or false/off) must mean "disabled", not a hard error (Final Orbit).
+- id: 809
+  name: 'delete_missing none is a no-op'
+  run: 'sling run -d --src-conn postgres --src-stream public.test1k_postgres_pg --tgt-conn mysql --tgt-object ''mysql.public_test1k_dm_none'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: none }'''
+  output_contains:
+    - 'execution succeeded'
+  output_does_not_contain:
+    - 'invalid value for missing ID deletion'
+
+# A wildcard stream that matches nothing must warn. The CLI sends a 'warning' task status for it.
+- id: 810
+  name: 'Wildcard stream that matches nothing warns'
+  run: |
+    mkdir -p /tmp/sling/wildcard_no_match/data
+    printf 'a,b\n1,2\n' > /tmp/sling/wildcard_no_match/data/one.csv
+    sling run -d -r tests/replications/r.140.wildcard_no_match.yaml
+  output_contains:
+    - "stream pattern 'file:///tmp/sling/wildcard_no_match/data/*.parquet' did not match any object in local"
+    - 'execution succeeded'
+
+# StarRocks stream load and INSERT must quote column names. Reserved words (default, key, rows) fail bare.
+- id: 811
+  name: 'StarRocks stream load and INSERT with reserved column names'
+  run: 'sling run -d -r tests/replications/r.141.postgres_starrocks_reserved_cols.yaml'
+  conns:
+    - postgres
+    - starrocks
+  output_contains:
+    - 'SUCCESS: StarRocks handled reserved column names'
+    - 'execution succeeded'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml
 - suite: suite.cli.conns.yaml
+- suite: suite.cli.secrets.yaml
 - suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml

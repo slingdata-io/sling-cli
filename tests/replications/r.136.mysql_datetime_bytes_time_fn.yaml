@@ -1,0 +1,56 @@
+# MySQL DATETIME values reach the transform engine as []byte.
+# ProcessRow converts []byte to string only for the first SampleSize (900) rows.
+# Later rows keep []byte, and CastToTime has no []byte case,
+# so time functions fail with "could not cast to time".
+source: MYSQL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.datetime_bytes_test;
+        CREATE TABLE mysql.datetime_bytes_test (
+          id INT PRIMARY KEY,
+          created_at DATETIME
+        );
+        INSERT INTO mysql.datetime_bytes_test (id, created_at)
+        WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+        SELECT n, '2026-09-28 09:06:00' FROM seq;
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: select id, cast(created_at as text) as created_at from public.datetime_bytes_test where id in (1, 1000) order by id
+      into: result
+
+    - type: log
+      message: 'datetime bytes result: {store.result}'
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.datetime_bytes_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.datetime_bytes_test
+
+    - type: check
+      check: contains(store.result[0].created_at, "2026-09-28 02:06:00")
+      failure_message: "control: date_add did not shift row 1 (inside sample) by -7h"
+      success_message: "control passed: date_add shifted row 1 by -7h"
+
+    - type: check
+      check: contains(store.result[1].created_at, "2026-09-28 02:06:00")
+      failure_message: "BUG: date_add did not shift row 1000 (after sample) by -7h"
+      success_message: "date_add shifted MySQL DATETIME by -7h"
+
+streams:
+  mysql.datetime_bytes_test:
+    object: public.datetime_bytes_test
+    transforms:
+      - created_at: 'date_add(value, -7, "hour")'

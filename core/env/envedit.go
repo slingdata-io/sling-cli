@@ -251,13 +251,73 @@ func (e *EnvFileEditor) Set(name string, props map[string]any, opts EditOptions)
 // Comments that follow the entry stay. Deleting the only entry leaves
 // `connections: {}`.
 func (e *EnvFileEditor) Delete(name string) error {
-	connsKey, conns := mappingChildFold(e.root, "connections")
-	if conns == nil || conns.Kind != yaml.MappingNode {
-		return g.Error("connections block not found in %s", e.path)
+	return e.deleteEntry("connections", "connection", name)
+}
+
+// SetProvider creates or replaces one entry of `secret_providers:`. The
+// entry holds exactly props after the edit.
+func (e *EnvFileEditor) SetProvider(name string, props map[string]any) error {
+	name = strings.TrimSpace(name)
+	if err := ValidateKey(name); err != nil {
+		return err
 	}
-	keyNode, _ := mappingChildFold(conns, name)
+	if len(props) == 0 {
+		return g.Error("no properties provided for secret provider %s", name)
+	}
+
+	blockKey, block := mappingChildFold(e.root, "secret_providers")
+	var entryKey, entryVal *yaml.Node
+	if block != nil && block.Kind == yaml.MappingNode {
+		entryKey, entryVal = mappingChildFold(block, name)
+	}
+
+	ed := &lineEdits{}
+	if entryKey == nil {
+		val, err := orderedConnNode(props)
+		if err != nil {
+			return g.Error(err, "could not render secret provider %s", name)
+		}
+		annotateRefs(val)
+		if blockKey == nil {
+			top := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{strNode(name), val}}
+			if err := e.addTopBlock(ed, "secret_providers", top, e.indentUnit()); err != nil {
+				return err
+			}
+		} else if err := e.addChild(ed, blockKey, block, name, val, e.indentUnit()); err != nil {
+			return err
+		}
+	} else if _, err := e.updateEntry(ed, entryKey, entryVal, props, true); err != nil {
+		return err
+	}
+
+	return e.apply(ed, func(before, after map[string]any) error {
+		dropEntry(before, "secret_providers", name)
+		got := dropEntry(after, "secret_providers", name)
+		if !reflect.DeepEqual(before, after) {
+			return g.Error("the edit changed other entries")
+		}
+		if gotMap := anyStringMap(got); gotMap != nil && !sameValue(props, gotMap) {
+			return g.Error("secret provider %s does not hold the new values", name)
+		}
+		return nil
+	})
+}
+
+// DeleteProvider removes one entry of `secret_providers:`.
+func (e *EnvFileEditor) DeleteProvider(name string) error {
+	return e.deleteEntry("secret_providers", "secret provider", name)
+}
+
+// deleteEntry removes the entry name of a top-level block and the comment
+// right above it.
+func (e *EnvFileEditor) deleteEntry(blockName, noun, name string) error {
+	blockKey, block := mappingChildFold(e.root, blockName)
+	if block == nil || block.Kind != yaml.MappingNode {
+		return g.Error("%s block not found in %s", blockName, e.path)
+	}
+	keyNode, _ := mappingChildFold(block, name)
 	if keyNode == nil {
-		return g.Error("did not find connection `%s`", name)
+		return g.Error("did not find %s `%s`", noun, name)
 	}
 
 	ed := &lineEdits{}
@@ -273,15 +333,15 @@ func (e *EnvFileEditor) Delete(name string) error {
 	}
 	ed.replace(start, end+1, nil)
 
-	if len(conns.Content) == 2 {
-		line := e.lines[connsKey.Line-1]
-		off := e.keyEnd(line, connsKey)
-		ed.replace(connsKey.Line-1, connsKey.Line, []string{line[:off] + ": {}" + e.afterColonValue(line, off)})
+	if len(block.Content) == 2 {
+		line := e.lines[blockKey.Line-1]
+		off := e.keyEnd(line, blockKey)
+		ed.replace(blockKey.Line-1, blockKey.Line, []string{line[:off] + ": {}" + e.afterColonValue(line, off)})
 	}
 
 	return e.apply(ed, func(before, after map[string]any) error {
-		dropConn(before, name)
-		dropConn(after, name)
+		dropEntry(before, blockName, name)
+		dropEntry(after, blockName, name)
 		if !reflect.DeepEqual(before, after) {
 			return g.Error("the edit changed other entries")
 		}
@@ -1146,18 +1206,23 @@ func scalarString(v any) string {
 // dropConn removes the connection name (any case) from a decoded file and
 // returns its value.
 func dropConn(file map[string]any, name string) any {
-	conns := anyStringMap(file["connections"])
+	return dropEntry(file, "connections", name)
+}
+
+// dropEntry removes name from the top-level block of file and returns its value.
+func dropEntry(file map[string]any, block, name string) any {
+	entries := anyStringMap(file[block])
 	var val any
-	for k, v := range conns {
+	for k, v := range entries {
 		if strings.EqualFold(k, name) {
 			val = v
-			delete(conns, k)
+			delete(entries, k)
 		}
 	}
-	if len(conns) == 0 {
-		delete(file, "connections")
+	if len(entries) == 0 {
+		delete(file, block)
 	} else {
-		file["connections"] = conns
+		file[block] = entries
 	}
 	return val
 }

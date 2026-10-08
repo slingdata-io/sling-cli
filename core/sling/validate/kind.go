@@ -62,7 +62,7 @@ func detectKindFromContent(body []byte) Kind {
 	if hasKey(root, "routines") {
 		return KindRoutine
 	}
-	if hasKey(root, "connections") {
+	if hasKey(root, "connections") || hasKey(root, "secret_providers") {
 		return KindEnv
 	}
 	return KindUnknown

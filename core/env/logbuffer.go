@@ -257,19 +257,31 @@ func (lb *logBuffer) SetupFiles() {
 		return // don't write log from child processes
 	}
 
+	// Log only while lb.mu is free: logging calls Capture, which locks lb.mu.
+	LoadSlingEnvFile()
+	LoadDotEnvSling()
+
+	warns, cleanupDir := lb.openFiles()
+	for _, w := range warns {
+		g.Warn("%s", w)
+	}
+	if cleanupDir != "" {
+		lb.cleanupOldLogFiles(cleanupDir, 15)
+	}
+}
+
+// openFiles (re)opens the sinks under lb.mu. It returns warnings to log and
+// the rotation directory to clean, for the caller to handle after unlock.
+func (lb *logBuffer) openFiles() (warns []string, cleanupDir string) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
 	lb.closeFiles() // for re-initialization
 
-	// setup env from env.yaml and .env.sling
-	LoadSlingEnvFile()
-	LoadDotEnvSling()
-
 	if debugPath := os.Getenv("SLING_DEBUG_FILE"); debugPath != "" {
 		f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			g.Warn("could not open debug log file: %s", err.Error())
+			warns = append(warns, "could not open debug log file: "+err.Error())
 		} else {
 			lb.debugFile = f
 		}
@@ -281,15 +293,15 @@ func (lb *logBuffer) SetupFiles() {
 			logDir = filepath.Join(g.UserHomeDir(), logDir[2:])
 		}
 		if err := os.MkdirAll(logDir, 0755); err != nil {
-			g.Warn("could not create log directory: %s", err.Error())
+			warns = append(warns, "could not create log directory: "+err.Error())
 		} else {
 			logPath := filepath.Join(logDir, "sling_debug_"+time.Now().Format("2006_01_02")+".log")
 			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			if err != nil {
-				g.Warn("could not open log file: %s", err.Error())
+				warns = append(warns, "could not open log file: "+err.Error())
 			} else {
 				lb.debugFile = f
-				lb.cleanupOldLogFiles(logDir, 15)
+				cleanupDir = logDir
 			}
 		}
 	}
@@ -297,11 +309,13 @@ func (lb *logBuffer) SetupFiles() {
 	if tracePath := os.Getenv("SLING_TRACE_FILE"); tracePath != "" {
 		f, err := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			g.Warn("could not open trace log file: %s", err.Error())
+			warns = append(warns, "could not open trace log file: "+err.Error())
 		} else {
 			lb.traceFile = f
 		}
 	}
+
+	return warns, cleanupDir
 }
 
 // WriteFile writes the log entry to the configured log file(s).
@@ -396,9 +410,9 @@ func CloseFileLogging() { logs.CloseFiles() }
 // setupFileLogging opens the log sinks from the environment.
 func setupFileLogging() { logs.SetupFiles() }
 
-func writeToLogFile(ll *g.LogLine) { logs.WriteFile(ll) }
+func writeToLogFile(ll *g.LogLine) { logs.WriteFile(resolvedSecrets.RedactLogLine(ll)) }
 
-func processLogEntry(ll *g.LogLine) { logs.Process(ll) }
+func processLogEntry(ll *g.LogLine) { logs.Process(resolvedSecrets.RedactLogLine(ll)) }
 
 // SecretKeys is the full set of connection property names whose values
 // are secrets. Clean and parse.Redact redact these. Keep it in sync with
@@ -443,8 +457,10 @@ func secretKeysLower() map[string]struct{} {
 	return secretKeyCache
 }
 
-// ScrubLine redacts secrets from every local connection in Env.
+// ScrubLine redacts secrets from every local connection in Env, and every
+// resolved secret value.
 func ScrubLine(line string) string {
+	line = resolvedSecrets.Redact(line)
 	if Env == nil {
 		return line
 	}

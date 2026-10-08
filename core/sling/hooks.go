@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v3"
 )
@@ -76,10 +77,45 @@ type HookMap struct {
 	Post      []any `json:"post,omitempty" yaml:"post,omitempty"`
 	PreMerge  []any `json:"pre_merge,omitempty" yaml:"pre_merge,omitempty"`
 	PostMerge []any `json:"post_merge,omitempty" yaml:"post_merge,omitempty"`
+
+	// modifiers: "+stage" prepends to and "stage+" appends to the default hooks
+	PrePrepend       []any `json:"+pre,omitempty" yaml:"+pre,omitempty"`
+	PreAppend        []any `json:"pre+,omitempty" yaml:"pre+,omitempty"`
+	PostPrepend      []any `json:"+post,omitempty" yaml:"+post,omitempty"`
+	PostAppend       []any `json:"post+,omitempty" yaml:"post+,omitempty"`
+	PreMergePrepend  []any `json:"+pre_merge,omitempty" yaml:"+pre_merge,omitempty"`
+	PreMergeAppend   []any `json:"pre_merge+,omitempty" yaml:"pre_merge+,omitempty"`
+	PostMergePrepend []any `json:"+post_merge,omitempty" yaml:"+post_merge,omitempty"`
+	PostMergeAppend  []any `json:"post_merge+,omitempty" yaml:"post_merge+,omitempty"`
 }
 
 func (hm HookMap) IsEmpty() bool {
 	return len(hm.Start)+len(hm.End)+len(hm.Pre)+len(hm.Post)+len(hm.PreMerge)+len(hm.PostMerge) == 0
+}
+
+// WithDefaults resolves stream hooks against the default hooks, one stage at a time.
+// A stage set on the stream replaces the default stage. Modifier hooks go
+// before ("+stage") or after ("stage+") the stream or default stage.
+func (hm HookMap) WithDefaults(defaults HookMap) HookMap {
+	resolve := func(own, prepend, appended, def []any) []any {
+		base := lo.Ternary(len(own) > 0, own, def)
+		if len(prepend)+len(appended) == 0 {
+			return base
+		}
+		out := make([]any, 0, len(prepend)+len(base)+len(appended))
+		out = append(out, prepend...)
+		out = append(out, base...)
+		return append(out, appended...)
+	}
+
+	return HookMap{
+		Start:     hm.Start,
+		End:       hm.End,
+		Pre:       resolve(hm.Pre, hm.PrePrepend, hm.PreAppend, defaults.Pre),
+		Post:      resolve(hm.Post, hm.PostPrepend, hm.PostAppend, defaults.Post),
+		PreMerge:  resolve(hm.PreMerge, hm.PreMergePrepend, hm.PreMergeAppend, defaults.PreMerge),
+		PostMerge: resolve(hm.PostMerge, hm.PostMergePrepend, hm.PostMergeAppend, defaults.PostMerge),
+	}
 }
 
 type ParseOptions struct {

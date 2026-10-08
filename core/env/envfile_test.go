@@ -1306,3 +1306,43 @@ func TestRepairKeepsValues(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, ef.Repaired)
 }
+
+func TestSecretValuesRedact(t *testing.T) {
+	s := &secretValues{set: map[string]struct{}{}}
+	assert.Equal(t, "pass abc", s.Redact("pass abc"))
+
+	s.Add("abc") // too short
+	s.Add("s3cr3t")
+	s.Add("s3cr3t-long")
+	assert.Equal(t, "pass *** and *** abc", s.Redact("pass s3cr3t-long and s3cr3t abc"))
+
+	ll := &g.LogLine{Text: "token is %s", Args: []any{"s3cr3t", g.M("k", "v")}}
+	out := s.RedactLogLine(ll)
+	assert.Equal(t, "token is ***", out.Text)
+	assert.Equal(t, []any{g.M("k", "v")}, out.Args)
+	assert.Equal(t, "token is %s", ll.Text, "original stays")
+
+	clean := &g.LogLine{Text: "nothing %s", Args: []any{"here"}}
+	assert.Same(t, clean, s.RedactLogLine(clean))
+}
+
+func TestIsSecretPath(t *testing.T) {
+	secret := [][]string{
+		{}, {"password"}, {"PASSWORD"}, {"token"}, {"motherduck_token"}, {"url"}, {"http_url"},
+		{"catalog_uri"}, {"conn_string"}, {"ssh_private_key"}, {"private_key_passphrase"},
+		{"client_secret"}, {"secrets", "database"}, {"secrets", "url"}, {"inputs", "api_key"},
+		{"ODOO_PASSWORD"}, {"DATABASE_URL"}, {"DB_URL_808"}, {"key"}, {"headers", "Authorization"},
+		{"secrets", "apiKey"}, {"ssh_tunnel"}, {"azure_sas_svc_url"},
+	}
+	for _, path := range secret {
+		assert.True(t, IsSecretPath(path), path)
+	}
+	public := [][]string{
+		{"host"}, {"database"}, {"user"}, {"username"}, {"port"}, {"account"}, {"region"},
+		{"inputs", "url"}, {"inputs", "base_url"}, {"inputs", "database"}, {"ODOO_DATABASE"},
+		{"client_id"}, {"keyspace"}, {"monkey"}, {"curls"},
+	}
+	for _, path := range public {
+		assert.False(t, IsSecretPath(path), path)
+	}
+}

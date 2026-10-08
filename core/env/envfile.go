@@ -2,18 +2,24 @@ package env
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/slingdata-io/sling-cli/core/secrets"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +37,10 @@ type EnvFile struct {
 	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
 	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
 	Workbench   *WorkbenchConfig          `json:"workbench,omitempty" yaml:"workbench,omitempty"`
+
+	// SecretProviders holds named secret manager instances (see core/secrets).
+	// Connection values that are secret references use them.
+	SecretProviders map[string]map[string]any `json:"secret_providers,omitempty" yaml:"secret_providers,omitempty"`
 
 	Path       string `json:"-" yaml:"-"`
 	Repaired   bool   `json:"-" yaml:"-"` // indentation was repaired on read
@@ -153,7 +163,7 @@ func (ef *EnvFile) structToRootNode(original *yaml.Node) (*yaml.Node, error) {
 	}
 
 	managed := map[string]struct{}{
-		"connections": {}, "variables": {}, "env": {}, "workbench": {},
+		"connections": {}, "variables": {}, "env": {}, "workbench": {}, "secret_providers": {},
 	}
 	if original != nil && len(original.Content) > 0 && original.Content[0].Kind == yaml.MappingNode {
 		newMap := doc.Content[0]
@@ -1019,6 +1029,37 @@ func (ef *EnvFile) DeleteConnectionNode(name string) error {
 	return e.Save("")
 }
 
+// SetSecretProviderNode replaces one secret_providers entry of the file at
+// ef.Path, writes envUpdates under `env:` in the same edit, and saves.
+func (ef *EnvFile) SetSecretProviderNode(name string, props, envUpdates map[string]any) error {
+	e, err := LoadEnvEditor(ef.Path)
+	if err != nil {
+		return err
+	}
+	if len(envUpdates) > 0 {
+		if err := e.SetEnv(envUpdates, true); err != nil {
+			return err
+		}
+	}
+	if err := e.SetProvider(name, props); err != nil {
+		return err
+	}
+	return e.Save("")
+}
+
+// DeleteSecretProviderNode removes one secret_providers entry of the file at
+// ef.Path and saves.
+func (ef *EnvFile) DeleteSecretProviderNode(name string) error {
+	e, err := LoadEnvEditor(ef.Path)
+	if err != nil {
+		return err
+	}
+	if err := e.DeleteProvider(name); err != nil {
+		return err
+	}
+	return e.Save("")
+}
+
 // SetEnvNodes sets keys under the `env:` block (legacy `variables:` when `env:`
 // is absent) of the file at ef.Path and saves. Existing keys are only
 // replaced when allowOverwrite is true or the value is unchanged.
@@ -1143,4 +1184,224 @@ func annotateMappingRefs(n *yaml.Node) {
 			annotateMappingRefs(val)
 		}
 	}
+}
+
+// minSecretValueLen skips short values, so "on" or "5432" do not redact log text.
+const minSecretValueLen = 4
+
+// secretValues is the set of resolved secret values (from secret references).
+// Log output replaces each value with ***, whatever key holds it.
+type secretValues struct {
+	mu   sync.RWMutex
+	set  map[string]struct{}
+	vals []string // longest first
+}
+
+// resolvedSecrets holds the values that the secret resolver returned.
+var resolvedSecrets = &secretValues{set: map[string]struct{}{}}
+
+// AddSecretValue records a resolved secret value for redaction.
+func AddSecretValue(v string) { resolvedSecrets.Add(v) }
+
+func (s *secretValues) Add(v string) {
+	v = strings.TrimSpace(v)
+	if len(v) < minSecretValueLen {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.set[v]; ok {
+		return
+	}
+	s.set[v] = struct{}{}
+	s.vals = append(s.vals, v)
+	// longest first, so a value that contains another is replaced whole
+	sort.Slice(s.vals, func(i, j int) bool { return len(s.vals[i]) > len(s.vals[j]) })
+}
+
+func (s *secretValues) Empty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.vals) == 0
+}
+
+// Redact replaces each value in line with ***.
+func (s *secretValues) Redact(line string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.vals {
+		if strings.Contains(line, v) {
+			line = strings.ReplaceAll(line, v, "***")
+		}
+	}
+	return line
+}
+
+// RedactLogLine returns ll, or a copy with the format args applied and the
+// values redacted. Map args and caller markers stay: formatters skip them.
+func (s *secretValues) RedactLogLine(ll *g.LogLine) *g.LogLine {
+	if ll == nil || s.Empty() {
+		return ll
+	}
+	out := *ll
+	var formatArgs, keep []any
+	for _, arg := range ll.Args {
+		switch a := arg.(type) {
+		case map[string]any:
+			keep = append(keep, arg)
+		case string:
+			if strings.HasPrefix(a, "_DEBUG_CALLER_START=") {
+				keep = append(keep, arg)
+				continue
+			}
+			formatArgs = append(formatArgs, arg)
+		default:
+			formatArgs = append(formatArgs, arg)
+		}
+	}
+	text := g.F(ll.Text, formatArgs...)
+	redacted := s.Redact(text)
+	if redacted == text {
+		return ll
+	}
+	out.Text = redacted
+	out.Args = keep
+	return &out
+}
+
+// secretKeyParts mark a key as secret when the key, without "_" and "-",
+// contains one of them.
+var secretKeyParts = []string{
+	"password", "passwd", "passphrase", "secret", "token", "credential",
+	"privatekey", "accesskey", "accountkey", "apikey", "keybody", "sastoken",
+	"connstr", "connectionstring", "authstring", "authorization",
+}
+
+// IsSecretPath tells if a resolved value at a key path is secret. Log output
+// shows the other values. A top-level URL can hold a password, thus it is
+// secret. All values under `secrets:` are secret. Under `inputs:` (API
+// specs), a URL is not secret.
+func IsSecretPath(path []string) bool {
+	if len(path) == 0 || strings.EqualFold(path[0], "secrets") {
+		return true
+	}
+	key := strings.ToLower(path[len(path)-1])
+	words := strings.FieldsFunc(key, func(r rune) bool { return r == '_' || r == '-' || r == '.' })
+	joined := strings.Join(words, "")
+	for _, part := range secretKeyParts {
+		if strings.Contains(joined, part) {
+			return true
+		}
+	}
+	for _, w := range words {
+		switch w {
+		case "key", "dsn":
+			return true
+		case "url", "uri", "headers", "tunnel":
+			if len(path) == 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fromKeyAliases maps key names of common secret layouts (AWS RDS rotation
+// secrets) to connection keys, for `from:`.
+var fromKeyAliases = map[string]string{
+	"username": "user",
+	"dbname":   "database",
+}
+
+// SecretResolver returns the resolver for the secret_providers of the home
+// env.yaml and ENV_YAML.
+func SecretResolver() (*secrets.Resolver, error) {
+	return secretResolvers.For(nil)
+}
+
+// SecretResolverFor is SecretResolver with the providers of another env.yaml
+// (e.g. a platform project) on top.
+func SecretResolverFor(providers map[string]map[string]any) (*secrets.Resolver, error) {
+	return secretResolvers.For(providers)
+}
+
+var secretResolvers = &secretResolverCache{resolvers: map[string]*secrets.Resolver{}}
+
+// secretResolverCache keeps one resolver per provider config. An edit to
+// secret_providers gives a new resolver, without a restart.
+type secretResolverCache struct {
+	mu        sync.Mutex
+	homeStamp string // path, size and mtime of the home env.yaml
+	home      map[string]map[string]any
+	baseDir   string
+	resolvers map[string]*secrets.Resolver // by config hash
+}
+
+func (c *secretResolverCache) For(extra map[string]map[string]any) (*secrets.Resolver, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.loadHome()
+	raw := map[string]map[string]any{}
+	maps.Copy(raw, c.home)
+	if content := os.Getenv("ENV_YAML"); content != "" {
+		if ef, err := LoadSlingEnvFileBody(content); err == nil {
+			maps.Copy(raw, ef.SecretProviders)
+		}
+	}
+	maps.Copy(raw, extra)
+
+	key := g.Marshal(raw) + "|" + c.baseDir // map keys marshal sorted
+	if r, ok := c.resolvers[key]; ok {
+		return r, nil
+	}
+
+	cfg, err := secrets.ParseConfig(raw)
+	if err != nil {
+		return nil, g.Error(err, "invalid secret_providers")
+	}
+	r := secrets.NewResolver(secrets.Options{
+		Config:     cfg,
+		CacheTTL:   5 * time.Minute,
+		OnValue:    AddSecretValue,
+		IsSecret:   IsSecretPath,
+		BaseDir:    c.baseDir,
+		KeyAliases: fromKeyAliases,
+	})
+	c.resolvers[key] = r
+	return r, nil
+}
+
+// loadHome reads the home env.yaml again only when the file changes.
+func (c *secretResolverCache) loadHome() {
+	path := GetEnvFilePath(HomeDir)
+	stamp := ""
+	if fi, err := os.Stat(path); err == nil {
+		stamp = g.F("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+	}
+	if stamp == c.homeStamp {
+		return
+	}
+	c.homeStamp, c.home, c.baseDir = stamp, nil, ""
+	if stamp != "" {
+		c.home = LoadEnvFile(path).SecretProviders
+		c.baseDir = filepath.Dir(path)
+	}
+}
+
+// ResolveSecretEnv returns envMap with its secret references resolved. It is
+// for the env: block of a replication or pipeline.
+func ResolveSecretEnv(ctx context.Context, envMap map[string]any) (map[string]any, error) {
+	if !secrets.HasRef(envMap) {
+		return envMap, nil
+	}
+	r, err := SecretResolver()
+	if err != nil {
+		return nil, err
+	}
+	v, err := r.ResolveValue(ctx, envMap)
+	if err != nil {
+		return nil, g.Error(err, "could not resolve env")
+	}
+	return v.(map[string]any), nil
 }

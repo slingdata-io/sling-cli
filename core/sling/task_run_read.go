@@ -373,9 +373,14 @@ func (t *TaskExecution) ReadFromFile(cfg *Config, tgtConn database.Connection) (
 	}
 
 	if uri := cfg.SrcConn.URL(); uri != "" {
+		srcConn, err := cfg.SrcConn.Resolved(t.Context.Ctx)
+		if err != nil {
+			return t.df, err
+		}
+
 		// construct props by merging with options
 		props := append(
-			g.MapToKVArr(cfg.SrcConn.DataS()),
+			g.MapToKVArr(srcConn.DataS()),
 			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 

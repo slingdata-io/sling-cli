@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"context"
 	"io"
 	"os"
 	"path"
@@ -87,6 +88,10 @@ func LoadPipelineConfig(content string, overlay ...map[string]string) (pipeline 
 		for k, v := range ov {
 			Env[k] = v
 		}
+	}
+
+	if Env, err = env.ResolveSecretEnv(context.Background(), Env); err != nil {
+		return
 	}
 
 	// replace variables across the yaml file

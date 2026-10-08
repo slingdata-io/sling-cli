@@ -583,6 +583,9 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = *c.Connection.Copy()
+			if err = cfg.TgtConn.ResolveType(context.Background()); err != nil {
+				return g.Error(err, "could not init target connection")
+			}
 		} else if connType := connection.SchemeType(cfg.Target.Conn); !connType.IsUnknown() {
 			cfg.TgtConn, err = connection.NewConnectionFromURL(connType.String(), cfg.Target.Conn)
 			if err != nil {
@@ -652,6 +655,9 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = *c.Connection.Copy()
+			if err = cfg.SrcConn.ResolveType(context.Background()); err != nil {
+				return g.Error(err, "could not init source connection")
+			}
 		} else if connType := connection.SchemeType(cfg.Source.Conn); !connType.IsUnknown() {
 			cfg.SrcConn, err = connection.NewConnectionFromURL(connType.String(), cfg.Source.Conn)
 			if err != nil {
@@ -1508,7 +1514,7 @@ func (cfg *Config) TransformsPrepared() (stageTransforms []map[string]string) {
 
 	stageTransforms, err := iop.ParseStageTransforms(cfg.Transforms)
 	if err != nil {
-		g.Warn("could not parse transforms: %s" + err.Error())
+		g.Warn("could not parse transforms: %s", err.Error())
 	}
 
 	return
@@ -1908,6 +1914,20 @@ func (o *TargetOptions) GetDeleteMissingConfig() *DeleteMissingConfig {
 		return nil
 	}
 
+	cfg := o.parseDeleteMissing()
+	if cfg == nil {
+		return nil
+	}
+
+	// "none", "false" or "off" disable delete_missing
+	cfg.Type = strings.ToLower(strings.TrimSpace(cfg.Type))
+	if g.In(cfg.Type, "none", "false", "off") {
+		return nil
+	}
+	return cfg
+}
+
+func (o *TargetOptions) parseDeleteMissing() *DeleteMissingConfig {
 	switch v := o.DeleteMissing.(type) {
 	case string:
 		// Simple format: "soft" or "hard"

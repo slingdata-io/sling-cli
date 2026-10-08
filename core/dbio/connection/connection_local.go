@@ -42,6 +42,10 @@ func (ce ConnEntries) Names() (names []string) {
 func (ce ConnEntries) Get(name string) ConnEntry {
 	for _, conn := range ce {
 		if strings.EqualFold(conn.Name, name) {
+			// the caller that opens the connection gets the ResolveType error
+			if err := conn.Connection.ResolveType(context.Background()); err == nil {
+				conn.Description = conn.Connection.Type.NameLong()
+			}
 			return conn
 		}
 	}
@@ -623,6 +627,7 @@ func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {
 	connsMap := map[string]ConnEntry{}
 	profileConns, err := ReadConnections(m)
 	for _, conn := range profileConns {
+		conn.secretProviders = ec.EnvFile.SecretProviders
 		c := ConnEntry{
 			Name:        strings.ToUpper(conn.Info().Name),
 			Description: conn.GetType().NameLong(),

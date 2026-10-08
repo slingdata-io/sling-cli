@@ -98,7 +98,8 @@ func (fs *FtpFileSysClient) Connect() (err error) {
 		tunnelPrivateKey := fs.GetProp("ssh_private_key")
 		tunnelPassphrase := fs.GetProp("ssh_passphrase")
 
-		localPort, err := iop.OpenTunnelSSH(fs.GetProp("host"), cast.ToInt(fs.GetProp("port")), sshTunnelURL, tunnelPrivateKey, tunnelPassphrase)
+		sshOptions := iop.NewSSHOptions(func(key string) string { return fs.GetProp(key) })
+		localPort, err := iop.OpenTunnelSSH(fs.GetProp("host"), cast.ToInt(fs.GetProp("port")), sshTunnelURL, tunnelPrivateKey, tunnelPassphrase, sshOptions)
 		if err != nil {
 			return g.Error(err, "could not connect to ssh tunnel server")
 		}

@@ -154,6 +154,7 @@ transforms:
 | `parse_ms_uuid(s)` | Parse MS UUID timestamp | Extracts time from MS-style UUID |
 | `pretty_table(rows)` | Format as table string | Debug / log helper |
 | `conn_property(name)` | Connection property | Reads from active connection |
+| `secret(ref)` | Secret manager value | `secret("op://Data/x/field")`; logs show `***` |
 | `machine_stats()` | Host stats object | Runtime diagnostics |
 
 ## Transform Examples

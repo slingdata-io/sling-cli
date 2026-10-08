@@ -36,9 +36,13 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 
 		// construct props by merging with options
+		tgtConn, err := cfg.TgtConn.Resolved(t.Context.Ctx)
+		if err != nil {
+			return cnt, err
+		}
 		options := t.getTargetOptionsMap()
 		props := append(
-			g.MapToKVArr(cfg.TgtConn.DataS()),
+			g.MapToKVArr(tgtConn.DataS()),
 			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 
@@ -339,11 +343,15 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		conn.Close()
 	})
 
-	// Begin transaction for temp table operations
+	// Begin transaction for temp table operations.
+	// Redshift stages the whole stream to S3 before one atomic COPY, so a
+	// transaction would sit open (and bill Serverless RPUs) during extraction.
 	txOptions := determineTxOptions(cfg, tgtConn.GetType())
-	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
-		err = g.Error(err, "could not open transaction to write to temp table")
-		return 0, err
+	if tgtConn.GetType() != dbio.TypeDbRedshift {
+		if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
+			err = g.Error(err, "could not open transaction to write to temp table")
+			return 0, err
+		}
 	}
 
 	// Configure column handlers

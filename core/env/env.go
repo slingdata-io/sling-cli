@@ -488,7 +488,7 @@ func redactable(val string) bool {
 // Clean removes creds from a log line. CREATE/INSERT/etc. still redact:
 // Redshift COPY/UNLOAD embeds keys in those statements.
 func Clean(props map[string]string, line string) string {
-	line = strings.TrimSpace(line)
+	line = resolvedSecrets.Redact(strings.TrimSpace(line))
 	keys := secretKeysLower()
 	for k, v := range props {
 		if strings.TrimSpace(v) == "" {

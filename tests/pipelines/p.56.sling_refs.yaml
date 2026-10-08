@@ -1,0 +1,19 @@
+# ref+sling reads a field of a connection, a whole connection (from:) and an env var.
+env:
+  TOKEN_798: ref+sling://env/SREF_KEY_798
+
+steps:
+  - type: log
+    message: 'host is {secret("ref+sling://connections/SREF_PG_798/host")}'
+
+  - type: check
+    check: env.TOKEN_798 == "env-val-798"
+
+  - type: check
+    check: secret("ref+sling://connections/SREF_COPY_798/password") == "pw-798"
+
+  - type: check
+    check: secret("ref+sling://connections/SREF_COPY_798/database") == "other"
+
+  - type: log
+    message: 'sling ref checks passed'
