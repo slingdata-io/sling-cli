@@ -278,4 +278,4 @@ When introducing new features or addressing bugs, it's essential to incorporate 
 2. Update the README.md with details of changes to the interface, if applicable.
 3. Create a Pull Request with a clear title and description.
 
-Thank you for contributing to Sling!
+Thank you for contributing to sling-cli!
