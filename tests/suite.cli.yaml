@@ -3527,6 +3527,33 @@
     - 'SUCCESS: StarRocks handled reserved column names'
     - 'execution succeeded'
 
+# SAP HANA: large insert batches (go-hdb bulk exec) and upsert merge.
+- id: 812
+  name: Test SAP HANA large CSV file ingestion (100K rows)
+  run: sling run -d -r tests/replications/r.142.hana_large_csv.yaml
+  conns:
+    - hana
+  streams: 1
+  rows: 100000
+  output_contains:
+    - 'inserted 100000 rows'
+    - 'Row count: 100000'
+    - 'execution succeeded'
+
+- id: 813
+  name: Test SAP HANA incremental upsert runs twice
+  run: |
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-conn hana --tgt-object 'sling.test1_upsert' --mode full-refresh
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-conn hana --tgt-object 'sling.test1_upsert' --mode incremental --primary-key id
+    sling conns exec hana 'drop table sling.test1_upsert'
+  conns:
+    - hana
+  output_contains:
+    - 'MERGE INTO "SLING"."TEST1_UPSERT"'
+    - 'inserted 1000 rows'
+  output_does_not_contain:
+    - 'execution failed'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -26,6 +26,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
+	_ "github.com/SAP/go-hdb/driver"
 	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
@@ -310,6 +311,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ClickhouseConn{URL: URL}
 	} else if strings.HasPrefix(URL, "exasol:") {
 		conn = &ExasolConn{URL: URL}
+	} else if strings.HasPrefix(URL, "hdb:") || strings.HasPrefix(URL, "hana:") {
+		conn = &HanaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
@@ -408,6 +411,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
+	case dbio.TypeDbHana:
+		driverName = "hdb"
 	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
 	case dbio.TypeDbODBC:
@@ -1115,7 +1120,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		next := result.Next()
 		if next {
 			// add row
-			it.Row, err = result.SliceScan()
+			if conn.Type == dbio.TypeDbHana {
+				it.Row, err = scanHanaRow(result, colTypes)
+			} else {
+				it.Row, err = result.SliceScan()
+			}
 			if err != nil {
 				it.Context.CaptureErr(g.Error(err, "failed to scan"))
 			} else {
@@ -4293,6 +4302,8 @@ func PrintSessionID(conn Connection) {
 		sql = "SELECT @@SPID"
 	case dbio.TypeDbExasol:
 		sql = "SELECT SESSION_ID FROM EXA_ALL_SESSIONS WHERE SESSION_ID = CURRENT_SESSION"
+	case dbio.TypeDbHana:
+		sql = "SELECT CURRENT_CONNECTION FROM DUMMY"
 	}
 
 	if sql != "" {

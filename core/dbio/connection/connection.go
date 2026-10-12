@@ -1153,6 +1153,11 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
 			template = template + "&schema={schema}"
 		}
+	case dbio.TypeDbHana:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		template = "hdb://{username}:{password}@{host}:{port}?"
 	case dbio.TypeDbArrowDBC:
 		// ADBC connections use a driver path and driver-specific properties
 		// Set a simple URL scheme for connection identification

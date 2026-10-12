@@ -582,7 +582,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 		return DecimalType
 
 	// Decimal types
-	case decimal.Decimal:
+	case decimal.Decimal, decimalDecomposer:
 		return DecimalType
 
 	// Boolean
@@ -651,6 +651,30 @@ type chJSON interface {
 	MarshalJSON() ([]byte, error)
 }
 
+// decimalDecomposer is the database/sql decimal interface
+type decimalDecomposer interface {
+	Decompose(buf []byte) (form byte, negative bool, coefficient []byte, exponent int32)
+}
+
+// decomposedToRat returns nil for infinite and NaN values
+func decomposedToRat(d decimalDecomposer) *big.Rat {
+	form, negative, coefficient, exponent := d.Decompose(nil)
+	if form != 0 {
+		return nil
+	}
+
+	num := new(big.Int).SetBytes(coefficient)
+	if negative {
+		num.Neg(num)
+	}
+
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(max(exponent, -exponent))), nil)
+	if exponent >= 0 {
+		return new(big.Rat).SetInt(num.Mul(num, scale))
+	}
+	return new(big.Rat).SetFrac(num, scale)
+}
+
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessVal'
@@ -691,6 +715,12 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 	case *big.Rat:
 		decCount := lo.Ternary(col.DbScale > 0, col.DbScale, maxDec)
 		val = v.FloatString(decCount)
+	case decimal.Decimal: // keep as is
+	case decimalDecomposer: // e.g. go-hdb decimals
+		if r := decomposedToRat(v); r != nil {
+			decCount := lo.Ternary(col.DbScale > 0, col.DbScale, maxDec)
+			val = r.FloatString(decCount)
+		}
 	case []uint8:
 		sVal = string(v)
 		val = sVal

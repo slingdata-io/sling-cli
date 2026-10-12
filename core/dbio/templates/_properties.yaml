@@ -1549,3 +1549,60 @@ db2:
       type: text
       description: 'Set the current schema after connection (optional)'
       examples: ['DB2INST1', 'MYSCHEMA']
+
+hana:
+  title: 'SAP HANA'
+  kind: database
+  required: ["host", "port", "username"]
+  url_template: 'hana://{username}:{password}@{host}:{port}'
+  docs: https://docs.slingdata.io/connections/database-connections/hana
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: HANA_ERP'
+      examples: ['HANA_ERP', 'HANA_PROD', 'HANA_CLOUD']
+    host:
+      type: text
+      description: 'The hostname / IP of the SAP HANA server'
+      examples: ['localhost', 'hana.example.com', 'abc123.hna0.prod-us10.hanacloud.ondemand.com']
+    port:
+      type: integer
+      description: 'The SQL port of the tenant database. HANA Cloud uses 443.'
+      examples: ['30015', '39041', '443']
+      default: 30015
+    database:
+      type: text
+      description: 'The tenant database name (optional)'
+      examples: ['HXE', 'H00']
+    schema:
+      type: text
+      description: 'The default schema name (optional)'
+      examples: ['MYSCHEMA', 'SAPABAP1']
+    username:
+      type: text
+      description: 'The username to access the database'
+      examples: ['SYSTEM', 'DBADMIN', 'myuser']
+    password:
+      type: text
+      description: 'The password to access the database'
+      examples: ['mypassword123']
+      secret: true
+    encrypt:
+      type: boolean
+      description: 'Use TLS. HANA Cloud requires TLS.'
+      examples: [true, false]
+      default: false
+    tls_server_name:
+      type: text
+      description: 'The server name for certificate validation (optional, default is the host)'
+      examples: ['hana.example.com']
+    tls_root_ca_file:
+      type: text
+      description: 'The path to the root CA certificate file (optional)'
+      examples: ['/path/to/DigiCertGlobalRootCA.crt.pem']
+    tls_skip_verify:
+      type: boolean
+      description: 'Skip the server certificate validation (optional)'
+      examples: [true, false]
+      default: false

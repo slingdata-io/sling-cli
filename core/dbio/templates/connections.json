@@ -1388,6 +1388,83 @@
         }
       }
     },
+    "hana": {
+      "name": "SAP HANA",
+      "description": "SAP HANA database connection (HANA 2.0, HANA Express, HANA Cloud)",
+      "category": "database",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname of the SAP HANA server",
+          "required": true,
+          "examples": [
+            "localhost",
+            "abc123.hna0.prod-us10.hanacloud.ondemand.com"
+          ]
+        },
+        "port": {
+          "type": "number",
+          "description": "SQL port of the tenant database (3<instance>15 for a single container, 3<instance>41 for a tenant, 443 for HANA Cloud)",
+          "default": 30015,
+          "examples": [
+            "30015",
+            "39041",
+            "443"
+          ]
+        },
+        "user": {
+          "type": "string",
+          "description": "Username for authentication",
+          "required": true
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for authentication",
+          "required": true
+        },
+        "database": {
+          "type": "string",
+          "description": "Tenant database name (optional)",
+          "examples": [
+            "HXE",
+            "H00"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "Default schema name",
+          "examples": [
+            "MYSCHEMA"
+          ]
+        },
+        "encrypt": {
+          "type": "boolean",
+          "description": "Use TLS (required for HANA Cloud)",
+          "default": false
+        },
+        "tls_server_name": {
+          "type": "string",
+          "description": "Server name for TLS certificate validation (default: host)"
+        },
+        "tls_root_ca_file": {
+          "type": "string",
+          "description": "Path to the root CA certificate file"
+        },
+        "tls_skip_verify": {
+          "type": "boolean",
+          "description": "Skip TLS certificate validation",
+          "default": false
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Driver timeout in seconds"
+        },
+        "ping_interval": {
+          "type": "string",
+          "description": "Connection ping interval in seconds"
+        }
+      }
+    },
     "starrocks": {
       "name": "StarRocks",
       "description": "StarRocks analytics database",

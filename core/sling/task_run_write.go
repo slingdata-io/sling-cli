@@ -818,7 +818,7 @@ func determineTxOptions(cfg *Config, dbType dbio.Type) sql.TxOptions {
 	switch dbType {
 	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		return sql.TxOptions{}
-	case dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbOracle, dbio.TypeDbExasol:
+	case dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbOracle, dbio.TypeDbExasol, dbio.TypeDbHana:
 		return sql.TxOptions{Isolation: sql.LevelDefault}
 	default:
 		return sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}

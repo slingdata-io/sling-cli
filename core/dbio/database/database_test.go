@@ -1604,7 +1604,7 @@ func TestSoftMergeGuardIsNullSafe(t *testing.T) {
 		dbio.TypeDbBigQuery, dbio.TypeDbSQLServer, dbio.TypeDbDuckDb,
 		dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbClickhouse,
 		dbio.TypeDbSQLite, dbio.TypeDbOracle, dbio.TypeDbDatabricks,
-		dbio.TypeDbStarRocks, dbio.TypeDbD1, dbio.TypeDbExasol,
+		dbio.TypeDbStarRocks, dbio.TypeDbD1, dbio.TypeDbExasol, dbio.TypeDbHana,
 	}
 
 	for _, ty := range types {
@@ -3844,5 +3844,116 @@ func TestD1StreamRowsPaged(t *testing.T) {
 				assert.Equal(t, tc.wantPaged, strings.HasPrefix(q, "select * from (\n"), q)
 			}
 		})
+	}
+}
+
+func TestHanaGetURL(t *testing.T) {
+	cases := []struct {
+		name   string
+		url    string
+		props  []string
+		expect map[string]string
+	}{
+		{
+			name:   "basic",
+			url:    "hana://user:pass@host:39041",
+			props:  []string{"database=HXE", "schema=SLING"},
+			expect: map[string]string{"databaseName": "HXE", "defaultSchema": "SLING"},
+		},
+		{
+			name:   "hdb alias and unknown keys removed",
+			url:    "hdb://user:pass@host:39041?sslmode=disable",
+			expect: map[string]string{"sslmode": ""},
+		},
+		{
+			name:   "encrypt sets server name",
+			url:    "hana://user:pass@abc.hanacloud.ondemand.com:443",
+			props:  []string{"encrypt=true"},
+			expect: map[string]string{"TLSServerName": "abc.hanacloud.ondemand.com"},
+		},
+		{
+			name:   "tls props",
+			url:    "hana://user:pass@host:443",
+			props:  []string{"encrypt=true", "tls_server_name=other", "tls_skip_verify=true", "tls_root_ca_file=/ca.pem"},
+			expect: map[string]string{"TLSServerName": "other", "TLSInsecureSkipVerify": "true", "TLSRootCAFile": "/ca.pem"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn, err := NewConnContext(context.Background(), c.url, c.props...)
+			require.NoError(t, err)
+			hana, ok := conn.(*HanaConn)
+			require.True(t, ok, "expected *HanaConn, got %T", conn)
+
+			u, err := url.Parse(hana.GetURL())
+			require.NoError(t, err)
+			assert.Equal(t, "hdb", u.Scheme)
+			assert.Empty(t, u.Path)
+			for key, val := range c.expect {
+				assert.Equal(t, val, u.Query().Get(key), key)
+			}
+		})
+	}
+}
+
+func TestHanaGetURLTunnel(t *testing.T) {
+	conn, err := NewConnContext(context.Background(), "hana://user:pass@abc.hanacloud.ondemand.com:443", "encrypt=true")
+	require.NoError(t, err)
+
+	u, err := url.Parse(conn.(*HanaConn).GetURL("hana://user:pass@127.0.0.1:50001"))
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:50001", u.Host)
+	assert.Equal(t, "abc.hanacloud.ondemand.com", u.Query().Get("TLSServerName"))
+}
+
+func TestHanaGetURLSpecialPassword(t *testing.T) {
+	conn, err := NewConnContext(context.Background(), "hana://host:39041", "user=SLING", "password=p@ss:w/rd?#")
+	require.NoError(t, err)
+
+	u, err := url.Parse(conn.(*HanaConn).GetURL())
+	require.NoError(t, err)
+	pass, _ := u.User.Password()
+	assert.Equal(t, "SLING", u.User.Username())
+	assert.Equal(t, "p@ss:w/rd?#", pass)
+}
+
+func TestHanaInsertRow(t *testing.T) {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+	cols := iop.Columns{
+		{Name: "s", DbType: "NVARCHAR"},
+		{Name: "t", DbType: "nvarchar"},
+		{Name: "j", DbType: "NCLOB"},
+		{Name: "b", DbType: "BOOLEAN"},
+		{Name: "bin", DbType: "VARBINARY"},
+		{Name: "i", DbType: "INTEGER"},
+		{Name: "n", DbType: "NVARCHAR"},
+	}
+	row := processHanaInsertRow(cols, []any{123, ts, map[string]any{"a": 1}, "true", "ab", 5, nil})
+
+	assert.Equal(t, "123", row[0])
+	assert.Equal(t, ts.Format(time.RFC3339Nano), row[1])
+	assert.Equal(t, `{"a":1}`, row[2])
+	assert.Equal(t, true, row[3])
+	assert.Equal(t, []byte("ab"), row[4])
+	assert.Equal(t, 5, row[5])
+	assert.Nil(t, row[6])
+}
+
+func TestHanaTemplate(t *testing.T) {
+	tmpl, err := dbio.TypeDbHana.Template()
+	require.NoError(t, err)
+
+	assert.Equal(t, "nvarchar()", tmpl.GeneralTypeMap["string"])
+	assert.Equal(t, "nclob", tmpl.GeneralTypeMap["text"])
+	assert.Equal(t, "timestamp", tmpl.GeneralTypeMap["timestampz"])
+	assert.Equal(t, "decimal", tmpl.NativeTypeMap["decimal"])
+	assert.Equal(t, "datetime", tmpl.NativeTypeMap["seconddate"])
+	assert.Equal(t, "bool", tmpl.NativeTypeMap["boolean"])
+
+	// drop statements are anonymous blocks: they must stay one statement
+	for _, key := range []string{"drop_table", "drop_view", "drop_index"} {
+		stmts := ParseSQLMultiStatements(tmpl.Core[key], dbio.TypeDbHana)
+		assert.Len(t, stmts, 1, key)
 	}
 }
