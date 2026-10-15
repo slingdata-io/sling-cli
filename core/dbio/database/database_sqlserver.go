@@ -31,6 +31,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/google/uuid"
 	mssql "github.com/microsoft/go-mssqldb"
 	"github.com/microsoft/go-mssqldb/azuread"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -742,7 +743,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		defer conn.SetProp("bcp_identity_insert", "")
 	}
 
-	var boolCols []int
+	var boolCols, uuidCols []int
 	hasBinaryCol := false
 	insColMap := insCols.Map()
 	for i, col := range ds.Columns {
@@ -754,6 +755,8 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 			if insCol.IsBool() || insCol.IsInteger() {
 				boolCols = append(boolCols, i)
 			}
+		case strings.EqualFold(insCol.DbType, "uniqueidentifier"):
+			uuidCols = append(uuidCols, i)
 		case insCol.IsBinary():
 			hasBinaryCol = true
 		}
@@ -770,6 +773,14 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	// If we use the parallel way, we gain back the speed by using more power. We also loose order.
 	transf := func(row []any) (nRow []any) {
 		nRow = row
+		for _, colI := range uuidCols {
+			if v, ok := row[colI].(string); ok && v == "" {
+				row[colI] = nil // no valid uniqueidentifier is empty
+			} else if ok {
+				row[colI] = normalizeMsUUID(v)
+			}
+		}
+
 		for i, val := range row {
 
 			switch v := val.(type) {
@@ -923,6 +934,52 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	}
 
 	return ds.Count, ds.Err()
+}
+
+// normalizeMsUUID adds dashes to a 32-hex UUID. bcp rejects the undashed form for uniqueidentifier.
+func normalizeMsUUID(val string) string {
+	if len(val) != 32 {
+		return val
+	}
+	if u, err := uuid.Parse(val); err == nil {
+		return u.String()
+	}
+	return val
+}
+
+// summarizeBcpOutput removes progress lines, duplicate lines and row data, and caps the length of the bcp output.
+// The full output can repeat the same row error many times, with the row values (PII).
+func summarizeBcpOutput(out string) string {
+	const maxLines, maxLineLen = 20, 500
+	seen := map[string]bool{}
+	lines := []string{}
+	skipped := 0
+	isRowData := false
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		// the bcp error file puts the row values on the line after "#@ Row N, Column M: ... @#"
+		if isRowData {
+			isRowData = false
+			continue
+		}
+		isRowData = strings.HasPrefix(line, "#@ Row")
+		if line == "" || seen[line] || line == "Starting copy..." || strings.Contains(line, "rows sent to SQL Server") {
+			continue
+		}
+		seen[line] = true
+		if len(lines) >= maxLines {
+			skipped++
+			continue
+		}
+		if len(line) > maxLineLen {
+			line = line[:maxLineLen] + "..."
+		}
+		lines = append(lines, line)
+	}
+	if skipped > 0 {
+		lines = append(lines, g.F("... (%d more lines)", skipped))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // processSQLServerInsertRow ensures binary column values are bound as []byte
@@ -1249,8 +1306,8 @@ retry:
 		err = g.Error(
 			err,
 			fmt.Sprintf(
-				"SQL Server BCP Import Command -> %s\nSQL Server BCP Import Error  -> %s\n%s",
-				cmdStr, errOut, stdout.String(),
+				"SQL Server BCP Import Command -> %s\nSQL Server BCP Import Error  -> %s",
+				cmdStr, summarizeBcpOutput(errOut+"\n"+stdout.String()),
 			),
 		)
 		return

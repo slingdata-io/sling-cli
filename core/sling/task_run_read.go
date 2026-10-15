@@ -252,8 +252,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"fields_array", g.Marshal(sFields),
 			)
 		} else {
-			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
-				err = g.Error("Since using %s mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
+			// with a range (chunking) but no placeholder, each chunk reads the same rows
+			needsPlaceholder := g.In(t.Config.Mode, IncrementalMode, BackfillMode) || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange()
+			if needsPlaceholder && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
+				err = g.Error("Since using %s mode + custom SQL, with an `update_key` or a `range` (chunking), the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
 				return t.df, err
 			}
 
