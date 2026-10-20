@@ -122,6 +122,27 @@ Databricks: Unity Catalog Volumes are a file connection (`type: databricks-volum
 
 ---
 
+### S3-compatible endpoint addressing
+
+For custom S3 endpoints that require virtual-hosted-style requests, such as
+Alibaba Cloud OSS, set `url_style: vhost` in the connection:
+
+```yaml
+connections:
+  OSS:
+    type: s3
+    bucket: example-bucket
+    endpoint: https://oss-cn-hangzhou.aliyuncs.com
+    region: cn-hangzhou
+    url_style: vhost
+    access_key_id: <access-key-id>
+    secret_access_key: <secret-access-key>
+```
+
+Use the regional endpoint without the bucket name. Requests will address
+`example-bucket.oss-cn-hangzhou.aliyuncs.com`. Omitting `url_style` preserves
+existing custom-endpoint behavior.
+
 ## Installation
 
 #### One-liner on Mac / Linux
