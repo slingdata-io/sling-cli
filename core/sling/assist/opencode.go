@@ -302,13 +302,13 @@ func keyedProvider(kind, model, envKey string) ProviderChoice {
 // HarnessProviderChoice picks a keyed provider env if set, else free Zen.
 func HarnessProviderChoice() ProviderChoice {
 	if k := envFirst("ANTHROPIC_API_KEY"); k != "" {
-		return keyedProvider("anthropic", "anthropic/claude-sonnet-4-5", k)
+		return keyedProvider("anthropic", "anthropic/claude-sonnet-5-5", k)
 	}
 	if k := envFirst("OPENAI_API_KEY"); k != "" {
 		return keyedProvider("openai", "openai/gpt-4o", k)
 	}
 	if k := envFirst("GEMINI_API_KEY", "GOOGLE_API_KEY"); k != "" {
-		return keyedProvider("google", "google/gemini-2.0-flash", k)
+		return keyedProvider("google", "google/gemini-3.8-flash", k)
 	}
 	if k := envFirst("XAI_API_KEY"); k != "" {
 		return keyedProvider("xai", "xai/grok-3", k)
