@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	stdnet "net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -2024,10 +2025,11 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	// create fromExprChn channel
 	streamPartChn = make(chan HttpStreamPart)
 
-	// start local http server
-	port, err := g.GetPort("localhost:0")
+	// Bind before duckdb gets the URL, so its HEAD request cannot reach a
+	// port that is not listening yet, or that another socket took first.
+	listener, err := stdnet.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		err = g.Error(err, "could not acquire local port for duckdb http import")
+		err = g.Error(err, "could not listen on local port for duckdb http import")
 		return streamPartChn, err
 	}
 	// create reader channel to pass between handler and main flow
@@ -2055,9 +2057,10 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		case <-importContext.Ctx.Done():
 		}
 	}()
-	httpURL := g.F("http://localhost:%d/data", port)
+	httpURL := g.F("http://%s/data", listener.Addr().String())
 	server := echo.New()
 	{
+		server.Listener = listener
 		server.HidePort = true
 		server.HideBanner = true
 
@@ -2091,20 +2094,14 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			return c.NoContent(http.StatusOK)
 		})
 
-		// start server in background, wait for it to start
-		importContext.Wg.Read.Add()
+		g.Debug("started %s for duckdb direct %s stream (batch_limit=%d)", httpURL, format, sc.BatchLimit)
 		go func() {
-			g.Debug("started %s for duckdb direct %s stream (batch_limit=%d)", httpURL, format, sc.BatchLimit)
-			importContext.Wg.Read.Done()
-			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
-				g.Error(err, "duckdb import http server error")
+			if err := server.Start(""); err != http.ErrServerClosed {
+				g.LogError(g.Error(err, "duckdb import http server error"))
 			}
 		}()
 	}
 
-	// wait for local server startup
-	importContext.Wg.Read.Wait()
-	time.Sleep(100 * time.Millisecond)
 	df.SetBatchLimit(sc.BatchLimit)
 	ds := MergeDataflow(df)
 

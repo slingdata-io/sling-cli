@@ -3,11 +3,16 @@ package iop
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -445,7 +450,7 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 				// Verify part structure
 				assert.NotEmpty(t, part.FromExpr)
 				assert.Contains(t, part.FromExpr, "read_csv")
-				assert.Contains(t, part.FromExpr, "http://localhost:")
+				assert.Contains(t, part.FromExpr, "http://127.0.0.1:")
 				assert.NotNil(t, part.Columns)
 				assert.Equal(t, 3, len(part.Columns))
 
@@ -541,7 +546,7 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 				// Verify part structure for Arrow format
 				assert.NotEmpty(t, part.FromExpr)
 				assert.Contains(t, part.FromExpr, "read_arrow")
-				assert.Contains(t, part.FromExpr, "http://localhost:")
+				assert.Contains(t, part.FromExpr, "http://127.0.0.1:")
 				assert.NotNil(t, part.Columns)
 				assert.Equal(t, 2, len(part.Columns))
 
@@ -1278,4 +1283,93 @@ func TestDuckDbStreamParallelScan(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, data.Rows, 160000)
 	})
+}
+
+// TestDuckDbHttpStreamListenerReady checks that the local data server answers
+// as soon as a stream part is handed out, while other code in the process
+// binds and frees ephemeral ports (parallel streams, ssh tunnels, proxies).
+func TestDuckDbHttpStreamListenerReady(t *testing.T) {
+	iterations := 100
+	if testing.Short() {
+		iterations = 20
+	}
+
+	stop := make(chan struct{})
+	var churn sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		churn.Add(1)
+		go func() {
+			defer churn.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if ln, err := net.Listen("tcp", "localhost:0"); err == nil {
+					time.Sleep(time.Millisecond)
+					ln.Close()
+				}
+			}
+		}()
+	}
+	defer func() { close(stop); churn.Wait() }()
+
+	urlRe := regexp.MustCompile(`http://[^']+`)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	failures := 0
+	for i := 0; i < iterations; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		columns := NewColumnsFromFields("id")
+		columns[0].Type = IntegerType
+		ds := NewDatastreamContext(ctx, columns)
+		ds.SetConfig(map[string]string{})
+		ds.Buffer = append(ds.Buffer, []any{int64(i)})
+		ds.Count = 1
+		ds.Ready = true
+
+		df := NewDataflow()
+		df.Columns = columns
+		df.Ready = true
+		df.Streams = append(df.Streams, ds)
+		go func() {
+			defer close(df.StreamCh)
+			df.StreamCh <- ds
+			ds.Close()
+		}()
+
+		duck := NewDuckDb(ctx)
+		parts, err := duck.DataflowToHttpStream(df, StreamConfig{Format: dbio.FileTypeCsv, BatchLimit: 10})
+		require.NoError(t, err)
+
+		part := <-parts
+		url := urlRe.FindString(part.FromExpr)
+		require.NotEmpty(t, url, part.FromExpr)
+
+		err = func() error {
+			resp, err := client.Head(url)
+			if err != nil {
+				return err
+			}
+			resp.Body.Close()
+			resp, err = client.Get(url)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			_, err = io.Copy(io.Discard, resp.Body)
+			return err
+		}()
+		if err != nil {
+			failures++
+			t.Logf("iteration %d: %s: %v", i, url, err)
+		}
+
+		cancel()
+		for range parts {
+		}
+	}
+	assert.Zero(t, failures, "requests failed in %d of %d iterations", failures, iterations)
 }
