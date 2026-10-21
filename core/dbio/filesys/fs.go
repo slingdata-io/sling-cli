@@ -1670,6 +1670,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 				return bw, err
 			}
 			_, err = duck.Exec(sql)
+			streamPart.Done()
 			if err != nil {
 				err = g.Error(err, "Could not write to file")
 				return bw, err
@@ -1700,6 +1701,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			}
 
 			_, err = duck.Exec(sql)
+			streamPart.Done()
 			if err != nil {
 				err = g.Error(err, "Could not write to file")
 				return bw, err

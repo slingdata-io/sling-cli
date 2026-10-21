@@ -1991,6 +1991,68 @@ type HttpStreamPart struct {
 	// (on an insert error) otherwise strands the producer on an unbuffered send
 	// with no reader, hanging the process.
 	Cancel context.CancelFunc
+
+	// Done tells the producer that the query of this part returned. Consumers
+	// MUST call it after each query: until then, duckdb can read the source
+	// of the query again, so the producer keeps the batch and the server.
+	Done func()
+}
+
+// httpBatch is one batch that the local server gives to duckdb. duckdb can
+// read the source of one query more than once (MotherDuck does), so the first
+// read also writes the batch to a spool file, which serves each later read.
+type httpBatch struct {
+	reader  io.Reader
+	spool   *os.File
+	spooled chan struct{} // closed when the spool has the full batch, or err
+	err     error
+}
+
+func newHttpBatch(reader io.Reader) (*httpBatch, error) {
+	spool, err := os.CreateTemp(env.GetTempFolder(), "duckdb-http-*.batch")
+	if err != nil {
+		return nil, g.Error(err, "could not create spool file for duckdb http import")
+	}
+	return &httpBatch{reader: reader, spool: spool, spooled: make(chan struct{})}, nil
+}
+
+// serveFirst streams the batch and writes it to the spool. If duckdb drops
+// the response, the rest of the batch still goes to the spool.
+func (b *httpBatch) serveFirst(c echo.Context, contentType string, duck *DuckDb) error {
+	defer close(b.spooled)
+	err := c.Stream(http.StatusOK, contentType, &activityReader{Reader: io.TeeReader(b.reader, b.spool), duck: duck})
+	if err != nil {
+		_, b.err = io.Copy(b.spool, b.reader)
+	}
+	return err
+}
+
+// serveAgain serves the spool when the first read has completed it.
+func (b *httpBatch) serveAgain(ctx context.Context, c echo.Context, contentType string) error {
+	select {
+	case <-b.spooled:
+	case <-ctx.Done():
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
+	if b.err != nil {
+		return c.String(http.StatusInternalServerError, b.err.Error())
+	}
+
+	f, err := os.Open(b.spool.Name())
+	if err != nil {
+		return c.String(http.StatusInternalServerError, err.Error())
+	}
+	defer f.Close()
+
+	g.Debug("duckdb reads the http batch again, serving it from %s", b.spool.Name())
+	c.Response().Header().Set(echo.HeaderContentType, contentType)
+	http.ServeContent(c.Response(), c.Request(), "", time.Time{}, f)
+	return nil
+}
+
+func (b *httpBatch) remove() {
+	b.spool.Close()
+	os.Remove(b.spool.Name())
 }
 
 // activityReader resets the stall clock as duckdb consumes the HTTP stream.
@@ -2032,9 +2094,11 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		err = g.Error(err, "could not listen on local port for duckdb http import")
 		return streamPartChn, err
 	}
-	// create reader channel to pass between handler and main flow
-	readerCh := make(chan io.Reader)
-	doneCh := make(chan bool)
+	// batchCh gives the next batch to the first GET of its query. current is
+	// the batch of the running query, which a later GET reads again.
+	batchCh := make(chan *httpBatch)
+	var batchMu sync.Mutex
+	var current *httpBatch
 
 	// determine content type and format based on sc.Format
 	contentType := "text/csv"
@@ -2049,7 +2113,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 
 	// The dataflow and the duckdb connection live on separate context trees, so
 	// a failure on the source side would otherwise never reach this producer
-	// (and vice versa), deadlocking the readerCh/doneCh handshake. Bridge them.
+	// (and vice versa), deadlocking the batch handshake. Bridge them.
 	go func() {
 		select {
 		case <-df.Context.Ctx.Done():
@@ -2071,22 +2135,25 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 
 		// server.Use(middleware.Logger())
 		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
-			var reader io.Reader
-			select {
-			case reader = <-readerCh:
-			case <-importContext.Ctx.Done():
-				return c.NoContent(http.StatusOK)
+			// Hold the lock while waiting, so that parallel GETs of one query
+			// cannot take the batch of the next query.
+			batchMu.Lock()
+			first := current == nil
+			if first {
+				select {
+				case current = <-batchCh:
+				case <-importContext.Ctx.Done():
+					batchMu.Unlock()
+					return c.NoContent(http.StatusOK)
+				}
 			}
-			if reader != nil {
-				defer func() {
-					select {
-					case doneCh <- true:
-					case <-importContext.Ctx.Done():
-					}
-				}()
-				return c.Stream(200, contentType, &activityReader{Reader: reader, duck: duck})
+			batch := current
+			batchMu.Unlock()
+
+			if first {
+				return batch.serveFirst(c, contentType, duck)
 			}
-			return c.NoContent(http.StatusOK)
+			return batch.serveAgain(importContext.Ctx, c, contentType)
 		})
 
 		server.Add(http.MethodHead, "/data", func(c echo.Context) error {
@@ -2153,122 +2220,89 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				ds.Context.Cancel()
 			}
 		}()
-		var partIndex int
+		// serve gives one batch to duckdb, and keeps it until the query of
+		// the batch returns.
+		serve := func(batchR *BatchReader, fromExpr string, partIndex int) bool {
+			defer closeBatchReader(batchR)
 
+			pipeR, pipeW := io.Pipe()
+			batch, err := newHttpBatch(pipeR)
+			if err != nil {
+				df.Context.CaptureErr(err)
+				importContext.Cancel()
+				return false
+			}
+			defer batch.remove()
+
+			queryDone := make(chan struct{})
+			select {
+			case streamPartChn <- HttpStreamPart{
+				Index:    partIndex,
+				FromExpr: fromExpr,
+				Columns:  batchR.Columns,
+				Cancel:   importContext.Cancel,
+				Done:     sync.OnceFunc(func() { close(queryDone) }),
+			}:
+			case <-importContext.Ctx.Done():
+				pipeR.CloseWithError(importContext.Ctx.Err())
+				pipeW.CloseWithError(importContext.Ctx.Err())
+				return false
+			}
+
+			// Stream data through pipe
+			go func() {
+				defer pipeW.Close()
+				_, err := io.Copy(pipeW, batchR.Reader)
+				if err != nil {
+					g.LogError(g.Error(err, "failed to stream %s batch", format))
+				}
+			}()
+
+			select {
+			case batchCh <- batch:
+			case <-importContext.Ctx.Done():
+				pipeR.CloseWithError(importContext.Ctx.Err())
+				return false
+			}
+
+			select {
+			case <-batch.spooled:
+			case <-importContext.Ctx.Done():
+				pipeR.CloseWithError(importContext.Ctx.Err())
+				return false
+			}
+
+			// If the spool did not take the full batch, data stays buffered in
+			// the batch pipe, and the writer's next flush blocks on it forever.
+			closeBatchReader(batchR)
+
+			select {
+			case <-queryDone:
+			case <-importContext.Ctx.Done():
+				return false
+			}
+
+			batchMu.Lock()
+			current = nil
+			batchMu.Unlock()
+			return true
+		}
+
+		var partIndex int
 		if format == dbio.FileTypeArrow {
-			// Use Arrow format
 			for batchR := range ds.NewArrowReaderChnl(sc) {
 				g.Trace("processing duckdb arrow batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
-
-				// Stream data directly without buffering all in memory
-				// Create a pipe to stream data through
-				pipeR, pipeW := io.Pipe()
-
-				// Use read_arrow for Arrow format
-				fromExpr := g.F(`read_arrow('%s')`, httpURL)
-
-				select {
-				case streamPartChn <- HttpStreamPart{
-					Index:    partIndex,
-					FromExpr: fromExpr,
-					Columns:  batchR.Columns,
-					Cancel:   importContext.Cancel,
-				}:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					pipeW.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
+				if !serve(batchR, g.F(`read_arrow('%s')`, httpURL), partIndex) {
 					return
 				}
-
-				// Stream data through pipe
-				go func() {
-					defer pipeW.Close()
-					_, err := io.Copy(pipeW, batchR.Reader)
-					if err != nil {
-						g.LogError(g.Error(err, "failed to stream arrow batch"))
-					}
-				}()
-
-				select {
-				case readerCh <- pipeR:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
-					return
-				}
-
-				select {
-				case <-doneCh:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
-					return
-				}
-
-				// Done with this batch. If duckdb dropped the response early,
-				// io.Copy stopped mid-batch and left data buffered in the batch
-				// pipe; the writer's next flush would block on it forever.
-				closeBatchReader(batchR)
-
 				partIndex++
 			}
 		} else {
-			// Default to CSV format
 			for batchR := range ds.NewCsvReaderChnl(sc) {
 				g.Trace("processing duckdb csv batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
-
-				// Stream data directly without buffering all in memory
-				// Create a pipe to stream data through
-				pipeR, pipeW := io.Pipe()
-
-				// can use this as a from table
-				fromExpr := duck.ReadCsvExpr(httpURL, batchR.Columns)
-
-				select {
-				case streamPartChn <- HttpStreamPart{
-					Index:    partIndex,
-					FromExpr: fromExpr,
-					Columns:  batchR.Columns,
-					Cancel:   importContext.Cancel,
-				}:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					pipeW.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
+				if !serve(batchR, duck.ReadCsvExpr(httpURL, batchR.Columns), partIndex) {
 					return
 				}
-
-				// Stream data through pipe
-				go func() {
-					defer pipeW.Close()
-					_, err := io.Copy(pipeW, batchR.Reader)
-					if err != nil {
-						g.LogError(g.Error(err, "failed to stream csv batch"))
-					}
-				}()
-
-				select {
-				case readerCh <- pipeR:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
-					return
-				}
-
-				select {
-				case <-doneCh:
-				case <-importContext.Ctx.Done():
-					pipeR.CloseWithError(importContext.Ctx.Err())
-					closeBatchReader(batchR)
-					return
-				}
-
-				// Done with this batch. If duckdb dropped the response early,
-				// io.Copy stopped mid-batch and left data buffered in the batch
-				// pipe; the writer's next flush would block on it forever.
-				closeBatchReader(batchR)
-
 				partIndex++
 			}
 		}

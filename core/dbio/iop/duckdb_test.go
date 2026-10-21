@@ -1373,3 +1373,77 @@ func TestDuckDbHttpStreamListenerReady(t *testing.T) {
 	}
 	assert.Zero(t, failures, "requests failed in %d of %d iterations", failures, iterations)
 }
+
+// TestDuckDbHttpStreamReread checks that duckdb can read the source of one
+// query again (MotherDuck does), also after it dropped the first response.
+func TestDuckDbHttpStreamReread(t *testing.T) {
+	const rows = 50000
+	urlRe := regexp.MustCompile(`http://[^']+`)
+
+	stream := func(t *testing.T) (HttpStreamPart, chan HttpStreamPart, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		columns := NewColumnsFromFields("id", "name")
+		columns[0].Type = IntegerType
+		columns[1].Type = StringType
+		data := NewDataset(columns)
+		for i := 0; i < rows; i++ {
+			data.Rows = append(data.Rows, []any{int64(i), "name-" + cast.ToString(i)})
+		}
+		df, err := MakeDataFlow(data.Stream())
+		require.NoError(t, err)
+
+		duck := NewDuckDb(ctx)
+		parts, err := duck.DataflowToHttpStream(df, StreamConfig{Format: dbio.FileTypeCsv})
+		require.NoError(t, err)
+		return <-parts, parts, cancel
+	}
+
+	get := func(t *testing.T, url string, limit int64) string {
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(url)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+		require.NoError(t, err)
+		return string(body)
+	}
+
+	finish := func(t *testing.T, part HttpStreamPart, parts chan HttpStreamPart) {
+		part.Done()
+		select {
+		case _, ok := <-parts:
+			assert.False(t, ok, "expected one part only")
+		case <-time.After(10 * time.Second):
+			t.Fatal("producer did not finish after Done")
+		}
+	}
+
+	t.Run("read again after a full read", func(t *testing.T) {
+		part, parts, cancel := stream(t)
+		defer cancel()
+		url := urlRe.FindString(part.FromExpr)
+
+		first := get(t, url, math.MaxInt64)
+		assert.Equal(t, rows, strings.Count(first, "\n"))
+
+		resp, err := http.Head(url)
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, first, get(t, url, math.MaxInt64))
+
+		finish(t, part, parts)
+	})
+
+	t.Run("read again after a dropped response", func(t *testing.T) {
+		part, parts, cancel := stream(t)
+		defer cancel()
+		url := urlRe.FindString(part.FromExpr)
+
+		assert.Len(t, get(t, url, 100), 100)
+		again := get(t, url, math.MaxInt64)
+		assert.Equal(t, rows, strings.Count(again, "\n"))
+		assert.True(t, strings.HasSuffix(again, "name-"+cast.ToString(rows-1)+"\n"), again[len(again)-50:])
+
+		finish(t, part, parts)
+	})
+}
