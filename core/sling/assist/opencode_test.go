@@ -296,6 +296,31 @@ func TestHarnessProviderChoiceKeyedWins(t *testing.T) {
 	}
 }
 
+// The model of each keyed provider must be one that the provider still serves.
+func TestHarnessProviderChoiceKeyedModels(t *testing.T) {
+	cases := []struct {
+		env   string
+		kind  string
+		model string
+	}{
+		{"ANTHROPIC_API_KEY", "anthropic", "anthropic/claude-sonnet-5-5"},
+		{"OPENAI_API_KEY", "openai", "openai/gpt-4o"},
+		{"GEMINI_API_KEY", "google", "google/gemini-3.8-flash"},
+		{"GOOGLE_API_KEY", "google", "google/gemini-3.8-flash"},
+		{"XAI_API_KEY", "xai", "xai/grok-3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			isolateOpenCodeEnv(t)
+			t.Setenv(tc.env, "key-test")
+			c := HarnessProviderChoice()
+			if c.Kind != tc.kind || c.Model != tc.model {
+				t.Fatalf("got %s %s, want %s %s", c.Kind, c.Model, tc.kind, tc.model)
+			}
+		})
+	}
+}
+
 func TestApplyHarnessProviderConfigWritesModel(t *testing.T) {
 	isolateOpenCodeEnv(t)
 	if err := ApplyHarnessProviderConfig(); err != nil {
