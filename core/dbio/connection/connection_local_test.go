@@ -654,3 +654,10 @@ env:
 		t.Errorf("a failed command changed the file\n%s", got)
 	}
 }
+
+func TestDiscoverUnknownConnection(t *testing.T) {
+	_, _, _, err := ConnEntries{}.Discover("NOT_THERE", &DiscoverOptions{})
+	if err == nil || !strings.Contains(err.Error(), "Invalid Connection name: NOT_THERE") {
+		t.Fatalf("want invalid connection name error, got %v", err)
+	}
+}
