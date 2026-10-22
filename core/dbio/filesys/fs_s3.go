@@ -241,8 +241,10 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		configOptions = append(configOptions, config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 				return aws.Endpoint{
-					URL:               finalEndpoint,
-					HostnameImmutable: true,
+					URL: finalEndpoint,
+					// OSS requires bucket.endpoint/key rather than endpoint/bucket/key.
+					// Opt in so other custom endpoints retain their existing behavior.
+					HostnameImmutable: !strings.EqualFold(fs.GetProp("url_style"), "vhost"),
 				}, nil
 			})))
 	}
