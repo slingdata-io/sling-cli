@@ -137,7 +137,9 @@ metadata:
     order by database, name
 
   columns: |
-    select name as column_name, type as data_type
+    select name as column_name, type as data_type,
+      if(position(type, 'Decimal') > 0, numeric_precision, null) as precision,
+      if(position(type, 'Decimal') > 0, numeric_scale, null) as scale
     from system.columns
     where database = '{schema}'
       and table = '{table}'

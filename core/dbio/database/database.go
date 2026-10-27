@@ -965,7 +965,7 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 	// row is built. The fidelity reason above still holds for the row path,
 	// so a stage 2 decline reads with the native driver.
 	if adbcConn, ok := conn.arrowLaneReader(); ok {
-		ds, err = adbcConn.laneExportStream(table.Select())
+		ds, err = adbcConn.laneExportStream(table.Select(), table.Columns)
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}

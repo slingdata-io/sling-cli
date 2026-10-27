@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math/big"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -394,6 +397,54 @@ func TestArrowAppendToBuilderTimeOfDay(t *testing.T) {
 	assert.Equal(t, wantMicros, arr.Value(0), "fractional time-of-day not parsed")
 	assert.Equal(t, wantMicros, arr.Value(1), "plain time-of-day not parsed")
 	assert.True(t, arr.IsNull(2), "nil should append null")
+}
+
+func TestArrowColumnsToArrowSchemaDecimal(t *testing.T) {
+	cases := []struct {
+		col  Column
+		want arrow.DataType
+	}{
+		{Column{Name: "a", Type: DecimalType, DbPrecision: 25, DbScale: 8}, &arrow.Decimal128Type{Precision: 25, Scale: 8}},
+		{Column{Name: "b", Type: DecimalType, DbPrecision: 10, DbScale: 0}, &arrow.Decimal128Type{Precision: 10, Scale: 0}},
+		{Column{Name: "c", Type: DecimalType}, &arrow.Decimal128Type{Precision: int32(env.DdlMinDecLength), Scale: int32(env.DdlMinDecScale)}},
+		{Column{Name: "d", Type: DecimalType, DbPrecision: 50, DbScale: 10}, &arrow.Decimal256Type{Precision: 50, Scale: 10}},
+	}
+	for _, c := range cases {
+		got := ColumnsToArrowSchema(Columns{c.col}).Field(0).Type
+		assert.Equal(t, c.want, got, c.col.Name)
+	}
+}
+
+// the builder type gives the scale, not the column, and the value is cut
+// toward zero
+func TestArrowAppendToBuilderDecimal(t *testing.T) {
+	col := &Column{Name: "d", Type: DecimalType} // no scale on the column
+	mem := memory.NewGoAllocator()
+
+	b128 := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 25, Scale: 8})
+	defer b128.Release()
+	for _, v := range []any{"12345678901234567.12345678", "-0.000000019", "0.000000019", "abc"} {
+		AppendToBuilder(b128, col, v)
+	}
+	arr128 := b128.NewDecimal128Array()
+	defer arr128.Release()
+	assert.Equal(t, decimal128.FromBigInt(bigInt(t, "1234567890123456712345678")), arr128.Value(0))
+	assert.Equal(t, decimal128.FromI64(-1), arr128.Value(1))
+	assert.Equal(t, decimal128.FromI64(1), arr128.Value(2))
+	assert.True(t, arr128.IsNull(3))
+
+	b256 := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 50, Scale: 10})
+	defer b256.Release()
+	AppendToBuilder(b256, col, "1234567890123456789012345678901234567890.0123456789")
+	arr256 := b256.NewDecimal256Array()
+	defer arr256.Release()
+	assert.Equal(t, "1234567890123456789012345678901234567890.0123456789", decimal256ToString(arr256.Value(0), 50, 10))
+}
+
+func bigInt(t *testing.T, s string) *big.Int {
+	v, ok := new(big.Int).SetString(s, 10)
+	require.True(t, ok)
+	return v
 }
 
 func TestArrowParseTimeOfDayE(t *testing.T) {

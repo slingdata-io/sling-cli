@@ -277,6 +277,8 @@ func (p *ParquetArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 		return array.NewFloat64Builder(p.mem)
 	case arrow.DECIMAL128:
 		return array.NewDecimal128Builder(p.mem, dtype.(*arrow.Decimal128Type))
+	case arrow.DECIMAL256:
+		return array.NewDecimal256Builder(p.mem, dtype.(*arrow.Decimal256Type))
 	case arrow.DATE32:
 		return array.NewDate32Builder(p.mem)
 	case arrow.TIMESTAMP:

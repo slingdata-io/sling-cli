@@ -359,7 +359,7 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 	// Arrow lane: read through ADBC when the gate marked this connection. A
 	// stage 2 decline reads with the native driver.
 	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
-		ds, err = adbcConn.laneExportStream(table.Select())
+		ds, err = adbcConn.laneExportStream(table.Select(), table.Columns)
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}

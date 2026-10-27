@@ -743,16 +743,19 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		case FloatType:
 			arrowType = arrow.PrimitiveTypes.Float64
 		case DecimalType:
-			// Use minimum scale/precision when not set, matching AppendToBuilder logic
-			scale := col.DbScale
-			if scale == 0 {
-				scale = env.DdlMinDecScale
-			}
-			precision := col.DbPrecision
+			// a scale of 0 is real only when the precision is set
+			precision, scale := col.DbPrecision, col.DbScale
 			if precision == 0 {
 				precision = env.DdlMinDecLength
+				if scale == 0 {
+					scale = env.DdlMinDecScale
+				}
 			}
-			arrowType = &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}
+			if precision > 38 {
+				arrowType = &arrow.Decimal256Type{Precision: int32(precision), Scale: int32(scale)}
+			} else {
+				arrowType = &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}
+			}
 		case DateType:
 			arrowType = arrow.FixedWidthTypes.Date32
 		case DatetimeType, TimestampType, TimestampzType:
@@ -873,16 +876,13 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places - use default if not set
-			scaleToUse := col.DbScale
-			if scaleToUse == 0 {
-				scaleToUse = env.DdlMinDecScale
-			}
+			// the builder type gives the scale
+			scaleToUse := b.Type().(*arrow.Decimal128Type).Scale
 			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
-			// Calculate scaled value: num * scale / denom
+			// Calculate scaled value: num * scale / denom, truncated toward zero
 			scaledNum := new(big.Int).Mul(num, scale)
-			scaledVal := new(big.Int).Div(scaledNum, denom)
+			scaledVal := new(big.Int).Quo(scaledNum, denom)
 
 			// Convert to Decimal128
 			dec128 := decimal128.FromBigInt(scaledVal)
@@ -902,16 +902,13 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places - use default if not set
-			scaleToUse := col.DbScale
-			if scaleToUse == 0 {
-				scaleToUse = env.DdlMinDecScale
-			}
+			// the builder type gives the scale
+			scaleToUse := b.Type().(*arrow.Decimal256Type).Scale
 			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
-			// Calculate scaled value: num * scale / denom
+			// Calculate scaled value: num * scale / denom, truncated toward zero
 			scaledNum := new(big.Int).Mul(num, scale)
-			scaledVal := new(big.Int).Div(scaledNum, denom)
+			scaledVal := new(big.Int).Quo(scaledNum, denom)
 
 			// Convert to Decimal256
 			dec256 := decimal256.FromBigInt(scaledVal)

@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/file"
@@ -3334,7 +3335,7 @@ func pgReaderSchema() *arrow.Schema {
 }
 
 func TestAdbcLaneRead_Labels(t *testing.T) {
-	r := newAdbcLaneRead(pgReaderSchema())
+	r := newAdbcLaneRead(pgReaderSchema(), nil)
 
 	types := map[string]iop.ColumnType{}
 	for _, col := range r.columns {
@@ -3346,8 +3347,10 @@ func TestAdbcLaneRead_Labels(t *testing.T) {
 	assert.Equal(t, iop.UUIDType, types["c_uuid"])
 	assert.Equal(t, iop.StringType, types["c_str"])
 
-	// numeric is carried as the decimal the row path builds
+	// numeric is carried as the decimal the row path builds. Without the
+	// catalog columns, the precision is unknown, and stage 2 declines.
 	assert.Equal(t, arrow.DECIMAL128, r.schema.Field(1).Type.ID())
+	assert.Equal(t, 0, r.columns[1].DbPrecision)
 	assert.Equal(t, []int{1}, r.decimals)
 	// the other fields keep the driver's type
 	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.String, r.schema.Field(2).Type))
@@ -3356,16 +3359,18 @@ func TestAdbcLaneRead_Labels(t *testing.T) {
 
 func TestAdbcLaneRead_Record(t *testing.T) {
 	src := pgReaderSchema()
-	r := newAdbcLaneRead(src)
+	srcCols := iop.Columns{{Name: "C_DEC", Type: iop.DecimalType, DbPrecision: 25, DbScale: 8}}
+	r := newAdbcLaneRead(src, srcCols)
 	mem := memory.NewGoAllocator()
 
 	b := array.NewRecordBuilder(mem, src)
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
-	b.Field(1).(*array.StringBuilder).AppendValues([]string{"12.34", ""}, []bool{true, false})
-	b.Field(2).(*array.StringBuilder).AppendValues([]string{`{"a": 1}`, "null"}, nil)
-	b.Field(3).(*array.BinaryBuilder).AppendValues([][]byte{make([]byte, 16), make([]byte, 16)}, nil)
-	b.Field(4).(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{3, 4}, nil)
+	b.Field(1).(*array.StringBuilder).AppendValues([]string{"12.34", "", "12345678901234567.12345678", "-0.00000001"}, []bool{true, false, true, true})
+	b.Field(2).(*array.StringBuilder).AppendValues([]string{`{"a": 1}`, "null", "1", "2"}, nil)
+	b.Field(3).(*array.BinaryBuilder).AppendValues([][]byte{make([]byte, 16), make([]byte, 16), make([]byte, 16), make([]byte, 16)}, nil)
+	b.Field(4).(*array.StringBuilder).AppendValues([]string{"a", "b", "c", "d"}, nil)
 	rec := b.NewRecordBatch()
 	defer rec.Release()
 
@@ -3374,16 +3379,19 @@ func TestAdbcLaneRead_Record(t *testing.T) {
 	defer out.Release()
 
 	assert.True(t, out.Schema().Equal(r.schema))
+	// the catalog columns give the precision and scale, so no digit is cut
 	dec := out.Column(1).(*array.Decimal128)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 25, Scale: 8}, dec.DataType())
 	assert.Equal(t, "12.34", dec.ValueStr(0))
-	assert.EqualValues(t, 6, dec.DataType().(*arrow.Decimal128Type).Scale)
 	assert.True(t, dec.IsNull(1))
+	assert.Equal(t, "12345678901234567.12345678", dec.ValueStr(2))
+	assert.Equal(t, decimal128.FromI64(-1), dec.Value(3)) // -0.00000001
 	assert.Equal(t, `{"a": 1}`, out.Column(2).(*array.String).Value(0))
 }
 
 func TestAdbcLaneRead_NoLabels(t *testing.T) {
 	src := arrow.NewSchema([]arrow.Field{{Name: "c_str", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
-	r := newAdbcLaneRead(src)
+	r := newAdbcLaneRead(src, nil)
 	assert.True(t, r.schema.Equal(src))
 	assert.Empty(t, r.decimals)
 }

@@ -1173,6 +1173,7 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	noArrowLane := false
 	arrowRecords := false
 	laneOnly := false
+	var srcCols iop.Columns
 	if len(options) > 0 {
 		if val, ok := options[0]["limit"]; ok {
 			limit = cast.ToUint64(val)
@@ -1189,6 +1190,9 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 		// a connection with its own driver reads here only for the lane
 		if val, ok := options[0]["lane_only"]; ok {
 			laneOnly = cast.ToBool(val)
+		}
+		if val, ok := options[0]["columns"].(iop.Columns); ok {
+			srcCols = val
 		}
 	}
 
@@ -1222,7 +1226,7 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	// Arrow lane: stage 2 of the gate runs on the real reader schema, before
 	// the datastream starts, so the stream mode never changes after Start.
 	if arrowRecords && !noArrowLane && limit == 0 {
-		ds, err = conn.laneReaderStream(queryContext, sql, reader, func() { stmt.Close() })
+		ds, err = conn.laneReaderStream(queryContext, sql, reader, srcCols, func() { stmt.Close() })
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}
@@ -1252,15 +1256,17 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 // driver's, or a native one. It runs stage 2 of the gate on the reader schema.
 // A decline returns ErrArrowLaneDeclined and keeps the reader open, so the
 // caller can read it on the row path or close it. Otherwise the stream owns
-// the reader, and closeReader runs after the last record.
-func (conn *ArrowDBConn) laneReaderStream(queryContext *g.Context, sql string, reader array.RecordReader, closeReader func()) (ds *iop.Datastream, err error) {
+// the reader, and closeReader runs after the last record. srcCols are the
+// catalog columns of the source, which give the precision and scale of a
+// decimal that the driver gives as text.
+func (conn *ArrowDBConn) laneReaderStream(queryContext *g.Context, sql string, reader array.RecordReader, srcCols iop.Columns, closeReader func()) (ds *iop.Datastream, err error) {
 	if conn.lane == nil || conn.laneCheck == nil {
 		return nil, ErrArrowLaneDeclined
 	}
 
 	// the lane reads the driver's type labels; the row path keeps the
 	// plain columns and infers from the values, as before the lane
-	laneRead := newAdbcLaneRead(reader.Schema())
+	laneRead := newAdbcLaneRead(reader.Schema(), srcCols)
 	ok, _, maxCol := conn.laneCheck(laneRead.schema, laneRead.columns) // the check logs its own decline line
 	if !ok {
 		return nil, ErrArrowLaneDeclined
@@ -2298,7 +2304,8 @@ type adbcLaneRead struct {
 	mem      memory.Allocator
 }
 
-func newAdbcLaneRead(src *arrow.Schema) *adbcLaneRead {
+func newAdbcLaneRead(src *arrow.Schema, srcCols iop.Columns) *adbcLaneRead {
+	srcColMap := srcCols.FieldMap(true)
 	r := &adbcLaneRead{
 		columns: iop.ArrowSchemaToColumns(src),
 		mem:     memory.NewGoAllocator(),
@@ -2322,6 +2329,12 @@ func newAdbcLaneRead(src *arrow.Schema) *adbcLaneRead {
 			}
 			col.Type = iop.DecimalType
 			col.DbType = "DECIMAL"
+			// the driver gives no typmod. Without a catalog precision that a
+			// decimal128 holds, stage 2 declines, so no value is cut.
+			if j, ok := srcColMap[strings.ToLower(field.Name)]; ok && srcCols[j].IsDecimal() && srcCols[j].DbPrecision <= 38 {
+				col.DbPrecision = srcCols[j].DbPrecision
+				col.DbScale = srcCols[j].DbScale
+			}
 			fields[i] = arrow.Field{
 				Name:     field.Name,
 				Type:     iop.ColumnsToArrowSchema(iop.Columns{*col}).Field(0).Type,
@@ -2507,14 +2520,15 @@ func (conn *BaseConn) arrowLaneReader() (*ArrowDBConn, bool) {
 
 // laneExportStream is the lane's read for a connection that reads with its
 // own driver otherwise. It returns ErrArrowLaneDeclined when stage 2
-// declines, so the caller keeps its own reader for the row path.
-func (conn *ArrowDBConn) laneExportStream(sql string) (*iop.Datastream, error) {
-	return conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "lane_only", true))
+// declines, so the caller keeps its own reader for the row path. srcCols are
+// the catalog columns of the source, or nil.
+func (conn *ArrowDBConn) laneExportStream(sql string, srcCols iop.Columns) (*iop.Datastream, error) {
+	return conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "lane_only", true, "columns", srcCols))
 }
 
 // laneExportFlow is laneExportStream as a dataflow.
 func (conn *ArrowDBConn) laneExportFlow(sql string) (*iop.Dataflow, error) {
-	ds, err := conn.laneExportStream(sql)
+	ds, err := conn.laneExportStream(sql, nil)
 	if err != nil {
 		return nil, err
 	}
