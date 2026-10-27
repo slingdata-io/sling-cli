@@ -988,3 +988,28 @@ func TestChunkBaseName(t *testing.T) {
 	assert.Equal(t, "t_surat", base)
 	assert.False(t, isPart)
 }
+
+func TestReplicationCheckConnections(t *testing.T) {
+	t.Setenv("CHECK_CONN_PG", "postgres://u:p@localhost:5432/db")
+	connection.GetLocalConns(true) // reload the cache with the env var
+
+	// both names in one error
+	rd := ReplicationConfig{Source: "MISSING_SRC_X1", Target: "missing_tgt_x2"}
+	err := rd.checkConnections()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "could not find connection(s): MISSING_SRC_X1, missing_tgt_x2")
+	}
+
+	// defined, local and URL names pass
+	rd = ReplicationConfig{Source: "check_conn_pg", Target: "LOCAL"}
+	assert.NoError(t, rd.checkConnections())
+	rd = ReplicationConfig{Source: "file://", Target: "postgres://u:p@localhost:5432/db"}
+	assert.NoError(t, rd.checkConnections())
+
+	// one missing name
+	rd = ReplicationConfig{Source: "CHECK_CONN_PG", Target: "MISSING_TGT_X3"}
+	err = rd.checkConnections()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "could not find connection(s): MISSING_TGT_X3.")
+	}
+}

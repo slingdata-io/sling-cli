@@ -1020,6 +1020,28 @@ func (rd *ReplicationConfig) GetSourceConnection() (conn connection.ConnEntry, e
 	return conn, nil
 }
 
+// checkConnections names all the source and target connections that are not
+// defined, so that the user can add them in one pass.
+func (rd *ReplicationConfig) checkConnections() error {
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+
+	missing := []string{}
+	for _, name := range lo.Uniq([]string{rd.Source, rd.Target}) {
+		if name == "" || strings.Contains(name, "://") || !connection.SchemeType(name).IsUnknown() {
+			continue
+		} else if _, ok := connsMap[strings.ToLower(name)]; !ok {
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) > 0 {
+		return g.Error("could not find connection(s): %s. Add them to the environment", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 
 	g.Debug("processing database wildcards for %s: %s", rd.Source, g.Marshal(patterns))
@@ -1213,6 +1235,10 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 
 		return nil
+	}
+
+	if err = rd.checkConnections(); err != nil {
+		return err
 	}
 
 	err = rd.ProcessWildcards()

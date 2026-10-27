@@ -25,6 +25,7 @@ type GoogleDriveFileSysClient struct {
 	context      g.Context
 	rootFolderID string // Optional: Use a specific folder as root
 	fileID       string // Optional: Direct file ID for single file access
+	accountEmail string // service account email, for the sharing hint
 }
 
 // googleDriveTimeout is the default timeout for Google Drive API requests
@@ -110,6 +111,7 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 		if err != nil {
 			return g.Error(err, "could not parse Google Drive service account key")
 		}
+		fs.accountEmail = config.Email
 		g.Trace("using KEYBODY JSON payload for google drive authentication")
 		authOption = option.WithTokenSource(config.TokenSource(fs.Context().Ctx))
 	} else if val := fs.GetProp("KEY_FILE"); val != "" {
@@ -122,6 +124,7 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 		if err != nil {
 			return g.Error(err, "could not parse Google Drive service account key")
 		}
+		fs.accountEmail = config.Email
 		g.Trace("using KEY_FILE (%s) for google drive authentication", val)
 		authOption = option.WithTokenSource(config.TokenSource(fs.Context().Ctx))
 	} else if clientID := fs.GetProp("CLIENT_ID"); clientID != "" && fs.GetProp("CLIENT_SECRET") != "" {
@@ -172,7 +175,7 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 		folderInfo, err := fs.client.Files.Get(fs.rootFolderID).Context(ctx).SupportsAllDrives(true).Fields("id,name,mimeType,parents,capabilities,driveId,owners,permissions").Do()
 		if err != nil {
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
-				return g.Error("Root folder ID '%s' does not exist or is not accessible", fs.rootFolderID)
+				return g.Error("Root folder ID '%s' does not exist or is not accessible. %s", fs.rootFolderID, fs.shareHint("folder"))
 			}
 			return g.Error(err, "Could not verify root folder ID: %s", fs.rootFolderID)
 		}
@@ -186,7 +189,7 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 		_, err = fs.client.Files.Get(fs.fileID).Context(ctx).Fields("id").SupportsAllDrives(true).Do()
 		if err != nil {
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
-				return g.Error("File ID '%s' does not exist or is not accessible", fs.fileID)
+				return g.Error("File ID '%s' does not exist or is not accessible. %s", fs.fileID, fs.shareHint("file"))
 			}
 			return g.Error(err, "Could not verify file ID: %s", fs.fileID)
 		}
@@ -194,6 +197,14 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 	}
 
 	return nil
+}
+
+// shareHint tells the user how to make an item visible to the credentials.
+func (fs *GoogleDriveFileSysClient) shareHint(item string) string {
+	if fs.accountEmail != "" {
+		return g.F("Verify the %s ID, and share the %s with the service account %s", item, item, fs.accountEmail)
+	}
+	return g.F("Verify the %s ID, and share the %s with the account of the credentials", item, item)
 }
 
 // Buckets returns the root folder (Google Drive doesn't have buckets)
