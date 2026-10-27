@@ -1,0 +1,32 @@
+# The platform creates a task for each step. Each step that does not run must
+# send a "skipped" status. If a step sends no status, the platform marks it
+# "stalled" after 5 minutes.
+# - success_goto to a later step skips the steps in between.
+# - a check with on_failure: break skips the rest of the steps.
+steps:
+  - type: log
+    id: before_break
+    message: "break-test before break"
+
+  - type: check
+    id: jump
+    check: "1 == 1"
+    success_goto: stop_here
+
+  - type: log
+    id: jumped_over
+    message: "should-not-reach jumped over by goto"
+
+  - type: check
+    id: stop_here
+    check: "1 == 2"
+    failure_message: "Nothing to do."
+    on_failure: break
+
+  - type: log
+    id: after_break_1
+    message: "should-not-reach after break 1"
+
+  - type: log
+    id: after_break_2
+    message: "should-not-reach after break 2"

@@ -3554,6 +3554,35 @@
   output_does_not_contain:
     - 'execution failed'
 
+# A step that a break or a forward goto skips must send a "skipped" status.
+# Else the platform keeps the step pending and marks it "stalled"
+# (exec 3L9h5czBxVXLzls21YaQOg34GPQ on staging).
+- id: 814
+  name: 'Pipeline break and goto send skipped status for the steps that do not run'
+  run: |
+    LOG=$(mktemp)
+    python3 tests/files/status_capture_server.py > "$LOG" 2>&1 &
+    PID=$!
+    PORT=""
+    for _ in $(seq 1 40); do
+      PORT=$(sed -n 's/^PORT=//p' "$LOG")
+      [ -n "$PORT" ] && break
+      sleep 0.25
+    done
+    SLING_STATUS_URL="http://127.0.0.1:$PORT/status" sling run -p tests/pipelines/p.59.break_marks_skipped.yaml
+    sleep 0.5
+    kill "$PID" 2>/dev/null || true
+    grep '^status ' "$LOG" | sort -u
+  output_contains:
+    - 'break-test before break'
+    - 'status step=jump => success'
+    - 'status step=jumped_over => skipped'
+    - 'status step=stop_here => success'
+    - 'status step=after_break_1 => skipped'
+    - 'status step=after_break_2 => skipped'
+  output_does_not_contain:
+    - 'should-not-reach'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
