@@ -25,16 +25,16 @@ Database operations in Sling provide comprehensive functionality for interacting
 - **Schema Discovery**: Explore database structure at schema, table, and column levels
 - **Metadata Retrieval**: Get detailed information about tables, columns, and data types
 - **Query Execution**: Run read-only SQL queries with results in structured format
-- **Cross-Database Support**: Works with 24+ database types with consistent interface
+- **Cross-Database Support**: Works with 32+ database types with consistent interface
 - **Safety**: Built-in protection against destructive operations
 
 ### Supported Database Types
 
 - **Relational**: PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SAP HANA, SQLite, dBase
-- **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks
+- **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks, Fabric, Firebolt
 - **Analytics**: ClickHouse, DuckDB, MotherDuck, StarRocks, Trino, Proton
-- **NoSQL**: MongoDB, ElasticSearch, Prometheus
-- **Specialized**: Azure Table, BigTable, Exasol, D1
+- **NoSQL**: MongoDB, ElasticSearch, Prometheus, DynamoDB, ScyllaDB
+- **Specialized**: Azure Table, BigTable, Exasol, D1, ADBC, ODBC
 
 ---
 

@@ -102,10 +102,10 @@ Error: out of memory processing large dataset
 ```
 
 **Solutions:**
-1. Reduce batch size:
+1. Reduce the transaction batch size (database target):
    ```yaml
-   env:
-     SLING_BATCH_SIZE: 5000
+   target_options:
+     batch_limit: 5000
    ```
 2. Enable chunking:
    ```yaml
@@ -173,7 +173,7 @@ sling run -r replication.yaml --trace
 ### Validate Configuration
 ```bash
 # Parse only (no execution)
-sling run -r replication.yaml --parse
+sling validate replication.yaml --parse-only
 
 # Or via MCP
 {"action": "validate", "input": {"file_path": "replication.yaml"}}
@@ -273,8 +273,10 @@ Sling tracks progress automatically. Re-run to resume.
 ```yaml
 env:
   SLING_RETRIES: 3
-  SLING_RETRY_DELAY: 60s
 ```
+
+Retry delay is per-feature: change capture reads `retry_attempts` / `retry_delay` under
+`change_capture_options` ("5s" by default).
 
 ### Run Specific Streams
 ```bash

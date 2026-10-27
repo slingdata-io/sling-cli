@@ -1243,7 +1243,7 @@ api:
 athena:
   title: 'AWS Athena'
   kind: database
-  required: ["region", "database", "s3_staging_dir"]
+  required: ["region", "database", "data_location", "s3_staging_dir"]
   url_template: 'athena://{region}/{database}'
   docs: https://docs.slingdata.io/connections/datalake-connections/athena
   properties:
@@ -1260,6 +1260,10 @@ athena:
       type: text
       description: 'Athena database name'
       examples: ['default', 'analytics', 'data_lake']
+    data_location:
+      type: text
+      description: 'S3 location for table data storage'
+      examples: ['s3://my-athena-bucket/data', 's3://analytics-bucket/athena-data']
     s3_staging_dir:
       type: text
       description: 'S3 location for query results'

@@ -106,23 +106,23 @@ For database operations (queries, schema exploration) and file system operations
 
 ## 3. Connection Types Overview
 
-Sling supports 42+ different connection types across four categories:
+Sling supports 45+ different connection types across four categories:
 
-### Database Connections (25 types)
+### Database Connections (32 types)
 - **Relational**: PostgreSQL, MySQL, MariaDB, SQLServer, Oracle, SAP HANA, SQLite, dBase
-- **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks
+- **Cloud Warehouses**: Snowflake, BigQuery, Redshift, Databricks, Fabric, Firebolt
 - **Analytics**: ClickHouse, DuckDB, MotherDuck, StarRocks, Trino, Proton
-- **NoSQL**: MongoDB, ElasticSearch, Prometheus
-- **Specialized**: Azure Table, BigTable, Exasol, D1
+- **NoSQL**: MongoDB, ElasticSearch, Prometheus, DynamoDB, ScyllaDB
+- **Specialized**: Azure Table, BigTable, Exasol, D1, ADBC, ODBC
 
-### File/Storage Connections (13 types)
+### File/Storage Connections (12 types)
 - **Cloud Storage**: AWS S3, Google Cloud Storage, Azure Blob
 - **S3-Compatible**: MinIO, DigitalOcean Spaces, Cloudflare R2, Wasabi, B2
 - **File Transfer**: FTP, SFTP
 - **Cloud Drives**: Google Drive
 - **Local**: Local file system
 
-### Datalake Connections (5 types)
+### Datalake Connections (4 types)
 - **Query Engines**: Athena, DuckLake
 - **Table Formats**: Iceberg, LanceDB
 
@@ -145,7 +145,7 @@ Navigate or fetch the content of the connector from the below respective URL to 
 
 **SQL Server (`sqlserver`)** -> https://docs.slingdata.io/connections/database-connections/sqlserver
 
-**Oracle (`oracle`)** -> https://docs.slingdata.io/connections/database-connections/oraclese
+**Oracle (`oracle`)** -> https://docs.slingdata.io/connections/database-connections/oracle
 
 **ClickHouse (`clickhouse`)** -> https://docs.slingdata.io/connections/database-connections/clickhouse
 
@@ -186,6 +186,18 @@ Navigate or fetch the content of the connector from the below respective URL to 
 **SAP HANA (`hana`)** -> https://docs.slingdata.io/connections/database-connections/hana
 
 **D1 (`d1`)** -> https://docs.slingdata.io/connections/database-connections/d1
+
+**ADBC (`adbc`)** -> https://docs.slingdata.io/connections/database-connections/adbc
+
+**DynamoDB (`dynamodb`)** -> https://docs.slingdata.io/connections/database-connections/dynamodb
+
+**Microsoft Fabric (`fabric`)** -> https://docs.slingdata.io/connections/database-connections/fabric
+
+**Firebolt (`firebolt`)** -> https://docs.slingdata.io/connections/database-connections/firebolt
+
+**ODBC (`odbc`)** -> https://docs.slingdata.io/connections/database-connections/odbc
+
+**ScyllaDB (`scylladb`)** -> https://docs.slingdata.io/connections/database-connections/scylladb
 
 ---
 
@@ -450,9 +462,11 @@ my_project:
 
 ### Credential Precedence
 
-1. Sling env.yaml file (`~/.sling/env.yaml`)
-2. Environment variables
-3. DBT profiles (`~/.dbt/profiles.yml`)
+Later sources replace a connection with the same name from an earlier source:
+
+1. DBT profiles (`~/.dbt/profiles.yml`)
+2. Sling env.yaml file (`~/.sling/env.yaml`), or the `SLING_ENV_YAML` variable
+3. Environment variables and `.env.sling`
 
 ### Location String Format
 
@@ -490,21 +504,20 @@ streams:
     object: orders.parquet
 ```
 
-### Connection Variables in Replications
+### Runtime Variables in Replications
 
-Access connection properties in replication configurations:
+Use runtime variables in `object` to name target objects dynamically:
 
 ```yaml
 source: MY_POSTGRES
 target: MY_S3
 
-defaults:
-  target_options:
-    file_path: "exports/{source.schema}.{stream.object}.csv"
-
 streams:
   public.*:
+    object: exports/{stream_schema}/{stream_table}.csv
 ```
+
+The available variables (`{stream_schema}`, `{stream_table}`, `{stream_file_name}`, `{YYYY}`, ...) are listed in the replication documentation.
 
 ---
 

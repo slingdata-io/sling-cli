@@ -207,18 +207,25 @@
       "description": "MotherDuck cloud DuckDB service",
       "category": "database",
       "properties": {
-        "token": {
+        "motherduck_token": {
           "type": "string",
-          "description": "MotherDuck authentication token",
+          "description": "MotherDuck service token",
           "required": true
         },
         "database": {
           "type": "string",
-          "description": "Database name"
+          "description": "MotherDuck database name",
+          "required": true
         },
         "schema": {
           "type": "string",
-          "description": "Default schema name"
+          "description": "Default schema name",
+          "default": "main"
+        },
+        "interactive": {
+          "type": "boolean",
+          "description": "Use interactive DuckDB CLI mode",
+          "default": true
         }
       }
     },
@@ -633,10 +640,10 @@
           "type": "string",
           "description": "Custom S3 endpoint URL"
         },
-        "force_path_style": {
-          "type": "boolean",
-          "description": "Force path-style requests",
-          "default": false
+        "url_style": {
+          "type": "string",
+          "description": "S3 URL style: path (default) or vhost (virtual-hosted, e.g. Alibaba Cloud OSS)",
+          "enum": ["path", "vhost"]
         }
       }
     },
@@ -784,6 +791,11 @@
         "database": {
           "type": "string",
           "description": "Athena database name",
+          "required": true
+        },
+        "data_location": {
+          "type": "string",
+          "description": "S3 location for table data storage",
           "required": true
         },
         "s3_staging_dir": {
@@ -975,6 +987,19 @@
         }
       }
     },
+    "dbase": {
+      "name": "dBase / FoxPro",
+      "description": "Read-only dBase / FoxPro (.dbf) files — a single table file or a directory of them",
+      "category": "database",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to a .dbf file or a directory holding .dbf files",
+          "required": true,
+          "examples": ["/data/tables", "/data/tables/customers.dbf", "C:/data/tables"]
+        }
+      }
+    },
     "azuresql": {
       "name": "Azure SQL Database",
       "description": "Azure SQL Database connection",
@@ -1118,6 +1143,51 @@
           "type": "boolean",
           "description": "Trust server certificate",
           "default": false
+        }
+      }
+    },
+    "firebolt": {
+      "name": "Firebolt",
+      "description": "Self-hosted Firebolt Core analytical database (HTTP query endpoint)",
+      "category": "database",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname or IP of the Firebolt Core engine",
+          "required": true
+        },
+        "port": {
+          "type": "number",
+          "description": "Port of the instance",
+          "default": 3473
+        },
+        "database": {
+          "type": "string",
+          "description": "Database to run queries against",
+          "default": "firebolt"
+        },
+        "schema": {
+          "type": "string",
+          "description": "Default schema for unqualified table names",
+          "default": "public"
+        },
+        "secure": {
+          "type": "boolean",
+          "description": "Use HTTPS / TLS",
+          "default": false
+        },
+        "skip_verify": {
+          "type": "boolean",
+          "description": "Skip TLS certificate verification (self-signed)",
+          "default": false
+        },
+        "user": {
+          "type": "string",
+          "description": "Accepted for URL compatibility (alias: username); not sent to Firebolt Core"
+        },
+        "password": {
+          "type": "string",
+          "description": "Accepted for URL compatibility; not sent to Firebolt Core"
         }
       }
     },
@@ -1311,18 +1381,26 @@
       "description": "Prometheus monitoring system",
       "category": "database",
       "properties": {
-        "url": {
+        "http_url": {
           "type": "string",
-          "description": "Prometheus URL",
+          "description": "Prometheus HTTP URL",
           "required": true
+        },
+        "token": {
+          "type": "string",
+          "description": "Bearer token for authentication"
+        },
+        "tenant": {
+          "type": "string",
+          "description": "Tenant id for Grafana Mimir auth"
         },
         "user": {
           "type": "string",
-          "description": "Username for authentication"
+          "description": "Username for Basic Auth"
         },
         "password": {
           "type": "string",
-          "description": "Password for authentication"
+          "description": "Password for Basic Auth"
         }
       }
     },

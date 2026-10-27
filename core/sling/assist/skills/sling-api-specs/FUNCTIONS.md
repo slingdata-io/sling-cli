@@ -13,7 +13,7 @@ Functions available within `{...}` expressions. Double-quoted strings are prefer
 | `trim(string)` | Remove whitespace | `trim(" hello ")` → "hello" |
 | `contains(str, substr)` | Check substring | `contains("hello", "ell")` → true |
 | `split(str, sep)` | Split to array | `split("a,b,c", ",")` → ["a","b","c"] |
-| `split_part(str, sep, idx)` | Get split part (1-based) | `split_part("a,b,c", ",", 2)` → "b" |
+| `split_part(str, sep, idx)` | Get split part (0-based) | `split_part("a,b,c", ",", 1)` → "b" |
 | `join(array, sep)` | Join array | `join(["a","b"], ", ")` → "a, b" |
 | `length(value)` | Length of string/array/map | `length("hello")` → 5 |
 | `snake(string)` | Snake case | `snake("Hello World")` → "hello_world" |
@@ -155,9 +155,10 @@ chunk(queue.ids, 50)
 | `encode_base64(string)` | Base64 encode | `encode_base64("hello")` |
 | `decode_base64(string)` | Base64 decode | `decode_base64("aGVsbG8=")` |
 | `hash(str[, algo])` | Hash string | `hash("hello", "sha256")` |
+| `hmac(str, key[, algo])` | Keyed HMAC hash | `hmac("hello", "secret")` |
 | `json_parse(string)` | Parse JSON string | `json_parse('{"a":1}')` |
 
-**Hash algorithms**: md5, sha1, sha256
+**Hash algorithms**: md5, sha1, sha256, sha512
 
 ## Utility Functions
 
@@ -212,7 +213,7 @@ expression: 'if(!is_null(record.meta), record.meta.tags, array())'
 
 ```yaml
 # Extract domain
-expression: 'split_part(record.email, "@", 2)'
+expression: 'split_part(record.email, "@", 1)'
 
 # Build URL
 url: '{join([state.base_url, "users", state.user_id], "/")}'
