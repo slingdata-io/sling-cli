@@ -1,0 +1,12 @@
+# A child that cannot connect fails the streams that did not start yet.
+source: LOCAL
+target: PG_UNREACHABLE
+env:
+  SLING_THREADS: 2
+defaults:
+  object: public.unreachable_{stream_file_name}
+streams:
+  file://tests/files/test1.1.csv:
+  file://tests/files/test1.2.csv:
+  file://tests/files/test.wide.csv:
+  file://tests/files/test_wide_columns.csv:

@@ -3583,6 +3583,17 @@
   output_does_not_contain:
     - 'should-not-reach'
 
+# A threaded replication to an unreachable target must not dial once per
+# stream. The first failed connect fails the streams that did not start
+# (exec 3L1aEVlx72sm4DSDiKBj22azq4w on staging parked until SLING_TIMEOUT).
+- id: 815
+  name: 'Threaded replication fails pending streams after a target connect failure'
+  run: PG_UNREACHABLE='postgres://u:p@127.0.0.1:1/db' sling run -r tests/replications/r.143.unreachable_target_threads.yaml
+  err: true
+  output_contains:
+    - 'target unreachable: stream'
+    - 'Replication failure (4 streams failed)'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

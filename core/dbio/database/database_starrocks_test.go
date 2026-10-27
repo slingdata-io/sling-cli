@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
@@ -94,4 +95,29 @@ func TestStarRocksForeignKeysDDL(t *testing.T) {
 		"alter table `public`.`sm_order_items` set ('foreign_key_constraints' = '(order_id) REFERENCES public.sm_orders(order_id);(product_id) REFERENCES public.sm_products(product_id)')",
 		statements[0],
 	)
+}
+
+func TestStarRocksStreamLoadTimeout(t *testing.T) {
+	newConn := func(ctx context.Context) *StarRocksConn {
+		conn, err := NewConnContext(ctx, "starrocks://root:@localhost:9030/sys")
+		require.NoError(t, err)
+		return conn.(*StarRocksConn)
+	}
+
+	// no deadline: keep the prop timeout + 30
+	assert.Equal(t, 36030, newConn(context.Background()).streamLoadTimeout(36030))
+
+	// SLING_TIMEOUT deadline in 5 min: end 10s before it
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	got := newConn(ctx).streamLoadTimeout(36030)
+	assert.InDelta(t, 290, got, 2)
+
+	// a deadline after the prop timeout does not change it
+	assert.Equal(t, 60, newConn(ctx).streamLoadTimeout(60))
+
+	// deadline almost passed: still a positive timeout
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	assert.Equal(t, 1, newConn(ctx2).streamLoadTimeout(330))
 }

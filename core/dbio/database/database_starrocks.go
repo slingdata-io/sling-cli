@@ -621,7 +621,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			apiURL = strings.ReplaceAll(apiURL, fu.U.Host, conn.feHost)
 		}
 
-		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, timeout)
+		loadTimeout := conn.streamLoadTimeout(timeout)
+		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, loadTimeout)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
 			if redirectUrl != nil {
@@ -631,12 +632,16 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				g.Warn("StarRocks redirected the API call to '%s://%s'. Please use that as your FE url.", redirectUrl.Scheme, redirectUrl.Host)
 				conn.feHost = redirectUrl.Host
 				reader, _ = os.Open(localFile.Node.Path()) // re-open file since it would be closed
-				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
+				loadTimeout = conn.streamLoadTimeout(timeout)
+				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, loadTimeout)
 			}
 		}
 
 		respString := strings.ReplaceAll(string(respBytes), "127.0.0.1", fu.U.Hostname())
 		if err != nil {
+			if loadTimeout < timeout {
+				err = g.Error(err, "stream load stopped after %ds, before the SLING_TIMEOUT deadline", loadTimeout)
+			}
 			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 			df.Context.Cancel()
 		} else {
@@ -775,4 +780,21 @@ func (conn *StarRocksConn) injectInlineColumnComments(ddl string, columns iop.Co
 	}
 
 	return ddl[:openParen+1] + strings.Join(entries, ",") + ddl[closeParen:]
+}
+
+// streamLoadTimeout caps the stream load client deadline (seconds) so that it
+// ends before the context deadline (SLING_TIMEOUT). A PUT that outlives it
+// gets the exec killed, and the error of the load is lost.
+func (conn *StarRocksConn) streamLoadTimeout(timeout int) int {
+	if conn.context == nil {
+		return timeout
+	}
+	deadline, ok := conn.context.Ctx.Deadline()
+	if !ok {
+		return timeout
+	}
+	if left := int(time.Until(deadline).Seconds()) - 10; left < timeout {
+		return max(left, 1)
+	}
+	return timeout
 }
