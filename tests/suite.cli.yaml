@@ -3594,6 +3594,13 @@
     - 'target unreachable: stream'
     - 'Replication failure (4 streams failed)'
 
+# pgx reads timestamptz as UTC (binary). Sling must give it in the session time zone, as lib/pq did.
+- id: 816
+  name: 'Postgres timestamptz in the session time zone'
+  run: PGTZ=America/New_York sling run --src-conn POSTGRES --src-stream "select timestamptz '2026-01-15 12:00:00.123456Z' as winter, timestamptz '2026-07-15 12:00:00Z' as summer, timestamp '2026-01-15 12:00:00' as no_zone" --stdout
+  output_contains:
+    - '2026-01-15 07:00:00.123456 -05,2026-07-15 08:00:00 -04,2026-01-15 12:00:00'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -786,7 +786,11 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		}
 
 		if !usePool || !poolOk {
-			db, err = sqlx.Open(driver, connURL)
+			if conn.Type == dbio.TypeDbPostgres {
+				db, err = openPgx(connURL)
+			} else {
+				db, err = sqlx.Open(driver, connURL)
+			}
 			if err != nil {
 				return g.Error(err, "Could not connect to DB: %s", driver)
 			}
@@ -1072,6 +1076,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				}
 			}
 
+			// pgx gives the oid of a type that it does not know (enum, extension)
+			if conn.Type == dbio.TypeDbPostgres && dataType != "" && strings.Trim(dataType, "0123456789") == "" {
+				dataType = ""
+			}
+
 			colType := ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
@@ -1103,6 +1112,15 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
 
+	var timetzCols []int
+	if conn.Type == dbio.TypeDbPostgres {
+		for i, ct := range colTypes {
+			if ct.DatabaseTypeName == "TIMETZ" {
+				timetzCols = append(timetzCols, i)
+			}
+		}
+	}
+
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
@@ -1124,6 +1142,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				it.Row, err = scanHanaRow(result, colTypes)
 			} else {
 				it.Row, err = result.SliceScan()
+				for _, i := range timetzCols {
+					if val, ok := it.Row[i].(string); ok {
+						it.Row[i] = formatTimetz(val)
+					}
+				}
 			}
 			if err != nil {
 				it.Context.CaptureErr(g.Error(err, "failed to scan"))

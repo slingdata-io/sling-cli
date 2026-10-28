@@ -668,7 +668,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/concepts/replication/target-options"
 		case (contains("driver: bad connection") || contains("Timeout exceeded while reading from socket")) && contains("could not commit transaction"):
 			helpString = "Try using the `batch_limit` target option. See https://docs.slingdata.io/concepts/replication/target-options"
-		case contains("pq: canceling statement due to statement timeout "):
+		case contains("canceling statement due to statement timeout"):
 			helpString = "You could try specifying a `statement_timeout` for your Postgres connection. See https://docs.slingdata.io/connections/database-connections/postgres"
 		case contains("[AppendRow]: converting"):
 			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/concepts/replication/target-options"

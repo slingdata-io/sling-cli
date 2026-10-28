@@ -15,13 +15,15 @@ import (
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq/oid"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
-	"github.com/lib/pq"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
 
@@ -389,121 +391,90 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 
 // BulkImportStream inserts a stream into a table
 func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	// For Cloud SQL with pgx, use a specialized implementation
-	if conn.isCloudSQL && conn.cloudSQLConn != nil {
-		return conn.bulkImportStreamPgx(tableFName, ds)
-	}
-
-	if conn.UseADBC() {
+	if conn.UseADBC() && !conn.isCloudSQL {
 		conn.Commit()
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
-
-	// Standard lib/pq implementation for normal PostgreSQL
-	var columns iop.Columns
-
-	mux := ds.Context.Mux
-
-	table, err := ParseTableName(tableFName, conn.GetType())
-	if err != nil {
-		err = g.Error(err, "could not get table name for import")
-		return
-	}
-
-	// set OnSchemaChange
-	if df := ds.Df(); df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
-		oldOnColumnChanged := df.OnColumnChanged
-		df.OnColumnChanged = func(col iop.Column) error {
-
-			// sleep to allow transaction to close
-			time.Sleep(300 * time.Millisecond)
-
-			mux.Lock()
-			defer mux.Unlock()
-
-			// use pre-defined function
-			err = oldOnColumnChanged(col)
-			if err != nil {
-				return g.Error(err, "could not process ColumnChange for Postgres")
-			}
-
-			return nil
-		}
-	}
-
-	for batch := range ds.BatchChan {
-		if batch.ColumnsChanged() || batch.IsFirst() {
-			mux.Lock()
-			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
-			mux.Unlock()
-			if err != nil {
-				return count, g.Error(err, "could not get matching list of columns from table")
-			}
-
-			err = batch.Shape(columns)
-			if err != nil {
-				return count, g.Error(err, "could not shape batch stream")
-			}
-		}
-
-		err = func() error {
-
-			// COPY needs a transaction
-			if conn.Tx() == nil {
-				err = conn.Begin()
-				if err != nil {
-					return g.Error(err, "could not begin")
-				}
-				defer conn.Rollback()
-			}
-
-			stmt, err := conn.Prepare(pq.CopyInSchema(table.Schema, table.Name, columns.Names()...))
-			if err != nil {
-				g.Trace("%s: %#v", table, columns.Names())
-				return g.Error(err, "could not prepare statement")
-			}
-
-			for row := range batch.Rows {
-				// g.PP(batch.Columns.MakeRec(row))
-				count++
-				// Do insert
-				mux.Lock()
-				_, err := stmt.Exec(row...)
-				mux.Unlock()
-				if err != nil {
-					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
-					ds.Context.Cancel()
-					g.Trace("error for rec: %s", g.Pretty(batch.Columns.MakeRec(row)))
-					return g.Error(err, "could not execute statement")
-				}
-			}
-
-			err = stmt.Close()
-			if err != nil {
-				g.Warn("%#v", err)
-				return g.Error(err, "could not close statement")
-			}
-
-			err = conn.Commit()
-			if err != nil {
-				return g.Error(err, "could not commit transaction")
-			}
-
-			return nil
-		}()
-
-		if err != nil {
-			return count, g.Error(err, "could not copy data")
-		}
-	}
-
-	ds.SetEmpty()
-
-	g.Trace("COPY %d ROWS", count)
-	return count, nil
+	return conn.bulkImportStreamPgx(tableFName, ds)
 }
 
-// bulkImportStreamPgx handles COPY for Cloud SQL using native pgx
+// copyFrom runs a pgx COPY on the Cloud SQL connection, or on a connection of the pool.
+func (conn *PostgresConn) copyFrom(ctx context.Context, table Table, columns []string, rows [][]any) (n int64, err error) {
+	if conn.isCloudSQL {
+		if conn.cloudSQLConn == nil {
+			return 0, g.Error("native pgx connection not available for Cloud SQL COPY")
+		}
+		return copyRows(ctx, conn.cloudSQLConn, table, columns, rows)
+	}
+
+	sqlConn, err := conn.Db().Conn(ctx)
+	if err != nil {
+		return 0, g.Error(err, "could not get connection for COPY")
+	}
+	defer sqlConn.Close()
+
+	err = sqlConn.Raw(func(driverConn any) (err error) {
+		stdConn, ok := driverConn.(*stdlib.Conn)
+		if !ok {
+			return g.Error("connection is not pgx (%T)", driverConn)
+		}
+		n, err = copyRows(ctx, stdConn.Conn(), table, columns, rows)
+		return err
+	})
+	return n, err
+}
+
+var copyTextEscaper = strings.NewReplacer(`\`, `\\`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
+
+// copyRows runs a binary COPY. If a column type has no binary codec in pgx
+// (timetz, an extension type such as geometry), it runs a text COPY, as lib/pq did.
+func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, rows [][]any) (int64, error) {
+	tableIdent := pgx.Identifier{table.Schema, table.Name}.Sanitize()
+	quoted := make([]string, len(columns))
+	for i, col := range columns {
+		quoted[i] = pgx.Identifier{col}.Sanitize()
+	}
+	colList := strings.Join(quoted, ", ")
+
+	sd, err := c.PgConn().Prepare(ctx, "", g.F("select %s from %s", colList, tableIdent), nil)
+	if err != nil {
+		return 0, g.Error(err, "could not get column types of %s", tableIdent)
+	}
+
+	binary := true
+	for _, field := range sd.Fields {
+		if t, ok := c.TypeMap().TypeForOID(field.DataTypeOID); !ok || !t.Codec.FormatSupported(pgx.BinaryFormatCode) {
+			binary = false
+			break
+		}
+	}
+	if binary {
+		return c.CopyFrom(ctx, pgx.Identifier{table.Schema, table.Name}, columns, pgx.CopyFromRows(rows))
+	}
+
+	var buf []byte
+	for _, row := range rows {
+		for i, val := range row {
+			if i > 0 {
+				buf = append(buf, '\t')
+			}
+			text, err := c.TypeMap().Encode(sd.Fields[i].DataTypeOID, pgx.TextFormatCode, val, nil)
+			if err != nil {
+				return 0, g.Error(err, "could not encode value of column %s", columns[i])
+			} else if text == nil {
+				buf = append(buf, `\N`...)
+			} else {
+				buf = append(buf, copyTextEscaper.Replace(string(text))...)
+			}
+		}
+		buf = append(buf, '\n')
+	}
+
+	tag, err := c.PgConn().CopyFrom(ctx, bytes.NewReader(buf), g.F("copy %s (%s) from stdin", tableIdent, colList))
+	return tag.RowsAffected(), err
+}
+
+// bulkImportStreamPgx inserts a stream into a table with pgx COPY
 func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 
@@ -513,11 +484,6 @@ func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastr
 	if err != nil {
 		err = g.Error(err, "could not get table name for import")
 		return
-	}
-
-	// Verify native pgx connection is available
-	if conn.cloudSQLConn == nil {
-		return count, g.Error("native pgx connection not available for Cloud SQL COPY")
 	}
 
 	// set OnSchemaChange
@@ -541,7 +507,7 @@ func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastr
 		}
 	}
 
-	// close the transaction from main connection to allow cloudSQLConn connection to COPY
+	// COPY runs on a different connection, so close the open transaction
 	if err = conn.Commit(); err != nil {
 		return 0, g.Error(err, "could not commit for COPY operation")
 	}
@@ -574,12 +540,7 @@ func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastr
 
 			// Use pgx CopyFrom with pgx.Identifier for schema.table
 			mux.Lock()
-			rowsInserted, err := conn.cloudSQLConn.CopyFrom(
-				conn.Context().Ctx,
-				pgx.Identifier{table.Schema, table.Name},
-				columns.Names(),
-				pgx.CopyFromRows(rows),
-			)
+			rowsInserted, err := conn.copyFrom(conn.Context().Ctx, table, columns.Names(), rows)
 			mux.Unlock()
 
 			if err != nil {
@@ -675,4 +636,54 @@ func (conn *PostgresConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable
 	)
 
 	return
+}
+
+// openPgx opens a pgx pool that returns timestamptz values in the session
+// time zone, as lib/pq did. By default pgx uses the local zone of the process.
+func openPgx(connURL string) (*sqlx.DB, error) {
+	config, err := pgx.ParseConfig(connURL)
+	if err != nil {
+		return nil, g.Error(err, "could not parse postgres url")
+	}
+
+	// no named prepared statements, as with lib/pq (PgBouncer in transaction mode)
+	if !strings.Contains(connURL, "default_query_exec_mode") {
+		config.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	}
+
+	keepSessionZone := func(ctx context.Context, c *pgx.Conn) error {
+		loc, err := time.LoadLocation(c.PgConn().ParameterStatus("TimeZone"))
+		if err != nil {
+			// a POSIX zone such as "<-03>+03"
+			var offset int
+			if err = c.QueryRow(ctx, "select extract(timezone from now())::int").Scan(&offset); err != nil {
+				return g.Error(err, "could not get session time zone")
+			}
+			loc = time.FixedZone("", offset)
+		}
+		c.TypeMap().RegisterType(&pgtype.Type{Name: "timestamptz", OID: pgtype.TimestamptzOID, Codec: &pgtype.TimestamptzCodec{ScanLocation: loc}})
+
+		// built-in types that pgx does not know (such as timetz) keep their name, and come as text
+		for typOid, name := range oid.TypeName {
+			if _, ok := c.TypeMap().TypeForOID(uint32(typOid)); !ok {
+				c.TypeMap().RegisterType(&pgtype.Type{Name: strings.ToLower(name), OID: uint32(typOid), Codec: &pgtype.TextFormatOnlyCodec{Codec: &pgtype.TextCodec{}}})
+			}
+		}
+		return nil
+	}
+
+	// "postgres" gives the $1 bind type in sqlx
+	return sqlx.NewDb(stdlib.OpenDB(*config, stdlib.OptionAfterConnect(keepSessionZone)), "postgres"), nil
+}
+
+// formatTimetz gives a timetz value in the format of lib/pq: "08:30:45+02" becomes "08:30:45+02:00"
+func formatTimetz(str string) string {
+	layout := "15:04:05-07"
+	for i := 3; i <= 6 && len(str) > i && str[len(str)-i] == ':'; i += 3 {
+		layout += ":00"
+	}
+	if t, err := time.Parse(layout, str); err == nil {
+		return t.Format("15:04:05.999999-07:00")
+	}
+	return str
 }
