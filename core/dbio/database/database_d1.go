@@ -794,7 +794,7 @@ func (conn *D1Conn) InsertBatchStream(tableFName string, ds *iop.Datastream) (co
 			mux.Unlock()
 		}
 
-		for row := range batch.Rows {
+		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
 			if len(batchRows) == batchSize {

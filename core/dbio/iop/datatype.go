@@ -287,8 +287,8 @@ func IsDummy(columns []Column) bool {
 // NewColumns normalizes Columns: defaults missing/invalid Type to StringType
 // and assigns 1-based Position.
 func NewColumns(cols ...Column) Columns {
-	for i, col := range cols {
-		if string(col.Type) == "" || !col.Type.IsValid() {
+	for i := range cols {
+		if string(cols[i].Type) == "" || !cols[i].Type.IsValid() {
 			cols[i].Type = StringType
 		}
 		cols[i].Position = i + 1

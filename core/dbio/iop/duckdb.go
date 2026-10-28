@@ -1354,8 +1354,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		if qErr := dq.getErr(); qErr != nil {
 			err = g.Error(qErr, err.Error())
 		}
-		// cancel before Close, which drains readyChn instead of signaling
-		// it, leaving WaitReady blocked forever
+		// cancel, so that WaitReady does not block when the stream never got ready
 		ds.Context.CaptureErr(err)
 		ds.Context.Cancel()
 		ds.Close()

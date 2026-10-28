@@ -1807,7 +1807,7 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Colum
 
 	// Consume all rows from the batch channel and append to builder
 	rowCount := 0
-	for row := range batch.Rows {
+	for row := range batch.Rows() {
 		for colIdx, col := range cols {
 			srcCol := srcIdx[colIdx]
 			var val interface{}

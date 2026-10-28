@@ -1519,7 +1519,7 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 	timestampLayout := dbio.TypeDbSQLServer.GetTemplateValue("variable.timestamp_layout")
 	Sp.SetConfig(map[string]string{"datetime_format": timestampLayout})
 
-	for row0 := range batch.Rows {
+	for row0 := range batch.Rows() {
 		cnt++
 		row := make([]string, len(row0))
 		for i, val := range row0 {
@@ -1532,9 +1532,9 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 			return cnt, g.Error(err, "could not write row to file")
 		}
 
-		if batch.Count == int64(limit) {
+		// the rows in transit after Close also go into this file
+		if cnt == uint64(limit) {
 			batch.Close()
-			break
 		}
 	}
 

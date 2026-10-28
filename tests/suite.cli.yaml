@@ -3149,10 +3149,10 @@
 # rows are gone, so sling runs the task again with a new sidecar.
 - id: 622
   name: 'duckdb sidecar killed during parquet write recovers'
-  rows: 1000000
+  rows: 5000000
   run: |
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 5000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""
@@ -3182,7 +3182,7 @@
   run: |
     set -m
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 5000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""

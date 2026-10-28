@@ -440,7 +440,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
 		}
 
-		for row := range batch.Rows {
+		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
 			if len(batchRows) == batchSize {

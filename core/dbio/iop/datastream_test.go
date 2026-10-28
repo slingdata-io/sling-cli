@@ -629,9 +629,11 @@ func TestDatastreamArrow_RowConsumerGuard(t *testing.T) {
 	require.ErrorContains(t, e.ds.Context.Err(), guard)
 
 	e2 := dsArrowTestEnvNew(t, 2)
-	rows := e2.ds.Rows()
-	_, ok := <-rows
-	assert.False(t, ok, "Rows yields a closed channel")
+	n := 0
+	for range e2.ds.Rows() {
+		n++
+	}
+	assert.Zero(t, n, "Rows yields no row")
 	require.ErrorContains(t, e2.ds.Context.Err(), guard)
 }
 

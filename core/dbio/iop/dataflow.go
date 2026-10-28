@@ -918,7 +918,7 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 					}
 				}
 
-				for row := range batch.Rows {
+				for row := range batch.Rows() {
 					rows <- shaper.Func(row)
 				}
 				if dsN.CurrentBatch != nil {

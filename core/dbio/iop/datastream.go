@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"io"
+	"iter"
 	"os"
 	"path"
 	"runtime"
@@ -48,7 +49,8 @@ type Datastream struct {
 	BatchChan     chan *Batch
 	Batches       []*Batch
 	CurrentBatch  *Batch
-	Count         uint64
+	Count         uint64 // rows taken by the consumer
+	pushed        uint64 // rows pushed by the producer
 	Context       *g.Context
 	Ready         bool
 	Bytes         atomic.Uint64
@@ -63,7 +65,9 @@ type Datastream struct {
 	it            *Iterator
 	config        StreamConfig
 	df            *Dataflow
-	bwRows        chan []any // for correct byte written
+	bwRows        chan [][]any // for correct byte written
+	bwMu          sync.Mutex
+	bwClosed      bool
 	readyChn      chan struct{}
 	schemaChgChan chan schemaChg
 	bwCsv         *csv.Writer // for correct byte written
@@ -225,7 +229,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		config:        StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
-		bwRows:        make(chan []any, 100),
+		bwRows:        make(chan [][]any, 100),
 		readyChn:      make(chan struct{}, 1),
 		schemaChgChan: make(chan schemaChg, 1000),
 		pauseChan:     make(chan struct{}),
@@ -351,7 +355,7 @@ func (ds *Datastream) startArrow() (err error) {
 }
 
 func (ds *Datastream) Limited(limit ...int) bool {
-	count := atomic.LoadUint64(&ds.Count)
+	count := max(atomic.LoadUint64(&ds.pushed), atomic.LoadUint64(&ds.Count))
 	if len(limit) > 0 && count >= uint64(limit[0]) {
 		return true
 	}
@@ -377,9 +381,11 @@ func (ds *Datastream) processBwRows() {
 			}
 		}()
 
-		for row := range ds.bwRows {
+		for rows := range ds.bwRows {
 			if processBw {
-				ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+				for _, row := range rows {
+					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+				}
 				ds.bwCsv.Flush()
 			}
 		}
@@ -392,6 +398,18 @@ func (ds *Datastream) processBwRows() {
 		if done {
 			break
 		}
+	}
+}
+
+// sendBwRows gives rows to the bytes-written processor
+func (ds *Datastream) sendBwRows(rows [][]any) {
+	if len(rows) == 0 {
+		return
+	}
+	ds.bwMu.Lock()
+	defer ds.bwMu.Unlock()
+	if !ds.bwClosed {
+		ds.bwRows <- rows
 	}
 }
 
@@ -546,26 +564,22 @@ func (ds *Datastream) Close() {
 	ds.Context.Lock()
 
 	if !ds.closed {
-		close(ds.bwRows)
 		close(ds.BatchChan)
 
 		if batch := ds.LatestBatch(); batch != nil {
 			batch.Close()
 		}
 
-		for _, batch := range ds.Batches {
-			select {
-			case <-batch.closeChan: // clean up
-			default:
-			}
-		}
+		ds.bwMu.Lock()
+		ds.bwClosed = true
+		close(ds.bwRows)
+		ds.bwMu.Unlock()
 
 	loop:
 		for {
 			select {
 			case <-ds.pauseChan:
 				<-ds.unpauseChan // wait for unpause
-			case <-ds.readyChn:
 			case <-ds.schemaChgChan:
 			default:
 				break loop
@@ -587,11 +601,6 @@ func (ds *Datastream) Close() {
 	}
 	ds.closed = true
 	ds.Context.Unlock()
-
-	select {
-	case <-ds.readyChn:
-	default:
-	}
 }
 
 // SetColumns sets the columns
@@ -1266,28 +1275,23 @@ skipBuffer:
 	return
 }
 
-func (ds *Datastream) Rows() chan []any {
-	if ds.ArrowOnly {
-		// A sink took the row branch on an Arrow stream. Do not panic: the
-		// error names the wiring bug and ends the run with a useful message.
-		ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
-		rows := MakeRowsChan()
-		close(rows)
-		return rows
-	}
+func (ds *Datastream) Rows() iter.Seq[[]any] {
+	return func(yield func([]any) bool) {
+		if ds.ArrowOnly {
+			// A sink took the row branch on an Arrow stream. Do not panic: the
+			// error names the wiring bug and ends the run with a useful message.
+			ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
+			return
+		}
 
-	rows := MakeRowsChan()
-
-	go func() {
-		defer close(rows)
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
-				rows <- row
+			for row := range batch.Rows() {
+				if !yield(row) {
+					return
+				}
 			}
 		}
-	}()
-
-	return rows
+	}
 }
 
 func (ds *Datastream) SetMetadata(jsonStr string) {
@@ -2637,7 +2641,7 @@ func (ds *Datastream) Map(newColumns Columns, transf func([]any) []any) (nDs *Da
 	go func() {
 		defer close(rows)
 		for batch0 := range ds.BatchChan {
-			for row := range batch0.Rows {
+			for row := range batch0.Rows() {
 				rows <- transf(row)
 			}
 		}
@@ -2649,67 +2653,6 @@ func (ds *Datastream) Map(newColumns Columns, transf func([]any) []any) (nDs *Da
 	}
 
 	return nDs
-}
-
-// MapParallel applies the provided function to every row in parallel and returns the result. Order is not maintained.
-func (ds *Datastream) MapParallel(transf func([]any) []any, numWorkers int) (nDs *Datastream) {
-	var wg sync.WaitGroup
-	nDs = NewDatastreamContext(ds.Context.Ctx, ds.Columns)
-
-	transform := func(wDs *Datastream, wg *sync.WaitGroup) {
-		defer wg.Done()
-
-	loop:
-		for row := range wDs.Rows() {
-			select {
-			case <-nDs.Context.Ctx.Done():
-				break loop
-			case <-wDs.Context.Ctx.Done():
-				break loop
-			default:
-				nDs.Rows() <- transf(row)
-				atomic.AddUint64(&nDs.Count, 1)
-			}
-		}
-	}
-
-	wStreams := map[int]*Datastream{}
-	for i := 0; i < numWorkers; i++ {
-		wStream := NewDatastreamContext(ds.Context.Ctx, ds.Columns)
-		wStreams[i] = wStream
-
-		wg.Add(1)
-		go transform(wStream, &wg)
-	}
-
-	go func() {
-		wi := 0
-
-	loop:
-		for row := range ds.Rows() {
-			select {
-			case <-nDs.Context.Ctx.Done():
-				break loop
-			default:
-				wStreams[wi].Push(row)
-			}
-			if wi == numWorkers-1 {
-				wi = -1 // cycle through workers
-			}
-			wi++
-		}
-
-		for i := 0; i < numWorkers; i++ {
-			close(wStreams[i].Rows())
-			wStreams[i].closed = true
-		}
-
-		wg.Wait()
-		close(nDs.Rows())
-		nDs.closed = true
-	}()
-
-	return
 }
 
 // NewCsvBytesChnl returns a channel yield chunk of bytes of csv
@@ -2831,7 +2774,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 				}
 			}
 
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				// g.PP(batch.Columns.MakeRec(row0))
 				br.Counter++
 				// convert to csv string
@@ -2930,7 +2873,7 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 		tbw = tbw + cast.ToInt64(bw)
 
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				c++
 
 				b, err := encodeRowAsJSONObject(row0, batch.Columns)
@@ -3082,7 +3025,7 @@ func (ds *Datastream) newGeojsonFromRowsReaderChnl(sc StreamConfig, geometryColI
 
 		rowCount := 0
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				rowCount++
 				if !firstFeature {
 					pipe.Writer.Write([]byte{','})
@@ -3178,7 +3121,7 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 		c := int64(0) // local counter
 
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				c++
 
 				b, err := encodeRowAsJSONObject(row0, batch.Columns)
@@ -3289,7 +3232,7 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err := aw.WriteRow(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
@@ -3379,7 +3322,7 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err := pw.WriteRow(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
@@ -3785,7 +3728,7 @@ func (ds *Datastream) NewParquetReaderChnl(sc StreamConfig) (readerChn chan *Bat
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 
 				err := pw.WriteRec(row)
 				if err != nil {
@@ -3835,8 +3778,10 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 		// only process current batch
 		var batch *Batch
 		select {
-		case batch = <-ds.BatchChan:
+		case batch = <-ds.BatchChan: // nil when the stream is already closed
 		default:
+		}
+		if batch == nil {
 			batch = ds.LatestBatch()
 		}
 		if batch == nil {
@@ -3859,7 +3804,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 			}
 		}
 
-		for row0 := range batch.Rows {
+		for row0 := range batch.Rows() {
 			c++
 			// convert to csv string
 			row := make([]string, len(row0))

@@ -327,7 +327,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 			mux.Unlock()
 		}
 
-		for row := range batch.Rows {
+		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
 			if len(batchRows) == batchSize {

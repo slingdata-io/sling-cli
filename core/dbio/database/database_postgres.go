@@ -530,7 +530,7 @@ func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastr
 		err = func() error {
 			// Collect rows from batch for CopyFrom
 			var rows [][]interface{}
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				rows = append(rows, row)
 			}
 

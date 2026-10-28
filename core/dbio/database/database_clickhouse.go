@@ -537,7 +537,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 			batchStart := time.Now()
 			maxDur := ds.Sp.Config.BatchMaxDuration
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				var eG g.ErrorGroup
 
 				// set decimals correctly

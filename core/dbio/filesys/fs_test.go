@@ -441,7 +441,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				if batch.Count > 10000 {
 					continue
 				}
@@ -500,7 +500,7 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err = pw.WriteRow(row)
 				g.LogFatal(err)
 			}
@@ -534,7 +534,7 @@ func TestFileSysLocalLargeParquet3(t *testing.T) {
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err = pw.WriteRec(row)
 				g.LogFatal(err)
 			}
@@ -568,7 +568,7 @@ func BenchmarkFileSysLocalLargeParquet1(b *testing.B) {
 	var rows [][]any
 	ds := <-df1.StreamCh
 	batch := <-ds.BatchChan
-	for row := range batch.Rows {
+	for row := range batch.Rows() {
 		if batch.Count > 100 {
 			break
 		}
@@ -609,7 +609,7 @@ func TestFileSysLocalLargeParquet2(t *testing.T) {
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err := pw.WriteRow(row)
 				g.LogFatal(err)
 			}
