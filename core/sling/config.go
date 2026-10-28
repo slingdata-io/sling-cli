@@ -1909,6 +1909,12 @@ func (dmc *DeleteMissingConfig) GetTargetWhere() string {
 
 // GetDeleteMissingConfig parses the delete_missing field into a structured config
 // Returns nil if delete_missing is not set
+// IsDirectInsert is true when the direct_insert option or SLING_DIRECT_INSERT
+// is set.
+func (o *TargetOptions) IsDirectInsert() bool {
+	return g.PtrVal(o.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
+}
+
 func (o *TargetOptions) GetDeleteMissingConfig() *DeleteMissingConfig {
 	if o == nil || o.DeleteMissing == nil {
 		return nil

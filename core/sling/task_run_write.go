@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path"
 	"strings"
@@ -225,7 +226,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set direct insert mode
-	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
+	directInsert := cfg.Target.Options.IsDirectInsert()
 
 	// write directly to the final table (no temp table)
 	if directInsert || writeDirectly {
@@ -290,7 +291,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 
 		// Create the final table with inferred schema
-		if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+		if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return 0, err
 		}
@@ -312,7 +313,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Create temp table
-	if err := createTable(t, tgtConn, tableTmp, sampleData, true); err != nil {
+	if _, err := createTable(t, tgtConn, tableTmp, sampleData, true); err != nil {
 		err = g.Error(err, "could not create table "+tableTmp.FullName())
 		return 0, err
 	}
@@ -557,7 +558,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// Create final table
-	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+	if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 		return 0, err
 	}
 
@@ -727,7 +728,7 @@ func (t *TaskExecution) writeToIcebergMerge(cfg *Config, df *iop.Dataflow, tgtCo
 		return 0, err
 	}
 
-	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+	if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 		return 0, err
 	}
 
@@ -936,15 +937,19 @@ func dropTableIfExists(tgtConn database.Connection, tableName string) error {
 	return nil
 }
 
-func createTable(t *TaskExecution, tgtConn database.Connection, table database.Table, sampleData iop.Dataset, isTemp bool) error {
-	created, err := createTableIfNotExists(tgtConn, sampleData, &table, isTemp)
-	if err != nil {
-		return g.Error(err, "could not create table "+table.FullName())
+func createTable(t *TaskExecution, tgtConn database.Connection, table database.Table, sampleData iop.Dataset, isTemp bool) (created bool, err error) {
+	created, err = createTableIfNotExists(tgtConn, sampleData, &table, isTemp)
+	if errors.As(err, new(tableExistsError)) && !isTemp && t.Config.WithChunking() {
+		// a chunk in a different process created it
+		g.Debug("table %s was created by a different chunk", table.FullName())
+		return false, nil
+	} else if err != nil {
+		return false, g.Error(err, "could not create table "+table.FullName())
 	}
 	if created {
 		t.SetProgress("created table %s", table.FullName())
 	}
-	return nil
+	return created, nil
 }
 
 func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tgtConn database.Connection, table database.Table) error {
@@ -1053,12 +1058,10 @@ func prepareFinal(
 	sample.Rows = df.Buffer
 	sample.Inferred = true // already inferred with SyncStats
 
-	created, err := createTableIfNotExists(tgtConn, sample, &targetTable, false)
+	created, err := createTable(t, tgtConn, targetTable, sample, false)
 	if err != nil {
-		return g.Error(err, "could not create table "+targetTable.FullName())
-	} else if created {
-		t.SetProgress("created table %s", targetTable.FullName())
-	} else if cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
+		return err
+	} else if !created && cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
 		// Truncate table since it exists
 		// Don't truncate if refreshing with range, will already have been truncated
 		if err := database.TruncateTable(tgtConn, targetTable.FullName()); err != nil {

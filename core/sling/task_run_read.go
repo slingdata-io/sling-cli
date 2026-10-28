@@ -166,7 +166,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if incValStr := cfg.IncrementalValStr; incValStr != "" {
+		if incValStr := cfg.IncrementalValStr; cfg.HasIncrementalVal() {
 			if srcConn.GetType().IsNoSQL() {
 				// escape double quote since this uses JSON
 				incValStr = strings.ReplaceAll(incValStr, `"`, `\"`)

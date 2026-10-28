@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -54,7 +55,49 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
+// tableCreateLocks serializes the check and the create of one table in this
+// process. The chunks of a stream with direct insert create the same table.
+type tableCreateLocks struct {
+	mu      sync.Mutex
+	entries map[string]*tableCreateEntry
+}
+
+type tableCreateEntry struct {
+	sync.Mutex
+	refs    int
+	created bool // a holder of this entry created the table
+}
+
+var tableCreates = &tableCreateLocks{entries: map[string]*tableCreateEntry{}}
+
+// lock returns the locked entry of key. The entry lives while it has holders.
+func (l *tableCreateLocks) lock(key string) (entry *tableCreateEntry, unlock func()) {
+	l.mu.Lock()
+	entry, ok := l.entries[key]
+	if !ok {
+		entry = &tableCreateEntry{}
+		l.entries[key] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+
+	entry.Lock()
+	return entry, func() {
+		entry.Unlock()
+		l.mu.Lock()
+		if entry.refs--; entry.refs == 0 {
+			delete(l.entries, key)
+		}
+		l.mu.Unlock()
+	}
+}
+
+// tableExistsError is the error when a different process creates the table first.
+type tableExistsError struct{ error }
+
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table, temp bool) (created bool, err error) {
+	entry, unlock := tableCreates.lock(strings.ToLower(string(conn.GetType()) + ":" + table.FullName()))
+	defer unlock()
 
 	// check table existence
 	exists, err := conn.TableExists(*table)
@@ -79,11 +122,16 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 	if err != nil {
 		errorFilterTableExists := conn.GetTemplateValue("variable.error_filter_table_exists")
 		if errorFilterTableExists != "" && strings.Contains(err.Error(), errorFilterTableExists) {
-			return false, g.Error(err, "Error creating table %s as it already exists. A concurrent process created it, possibly another run of this stream (check for overlapping schedules)", table.FullName())
+			// a chunk of this run created it, and the catalog does not show it yet
+			if entry.created {
+				return false, nil
+			}
+			return false, tableExistsError{g.Error(err, "Error creating table %s as it already exists. A concurrent process created it, possibly another run of this stream (check for overlapping schedules)", table.FullName())}
 		}
 		return false, g.Error(err, "Error creating table "+table.FullName())
 	}
 
+	entry.created = true
 	return true, nil
 }
 
@@ -213,7 +261,7 @@ var (
 func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
 	// check if already set from override
 	if cfg.IncrementalValStr != "" {
-		if cfg.IncrementalVal == nil {
+		if cfg.IncrementalVal == nil && cfg.HasIncrementalVal() {
 			cfg.IncrementalVal = strings.Trim(cfg.IncrementalValStr, "\"'")
 		}
 		return
