@@ -647,3 +647,75 @@ func TestArrowRecordChnlWritesIPCFile(t *testing.T) {
 	defer reader.Close()
 	assert.Equal(t, 1, reader.NumRecords())
 }
+
+// a decimal precision that is not from the source DDL gets the max, so that
+// later rows fit (SLING-135)
+func TestColumnsFileDecimals(t *testing.T) {
+	cols := Columns{
+		{Name: "unsourced", Type: DecimalType, DbPrecision: 23, DbScale: 15},
+		{Name: "sourced", Type: DecimalType, DbPrecision: 25, DbScale: 8, Sourced: true},
+		{Name: "small", Type: DecimalType, DbPrecision: 10, DbScale: 2, Sourced: true},
+		{Name: "wide", Type: DecimalType, DbPrecision: 50, DbScale: 10, Sourced: true},
+		{Name: "s", Type: StringType},
+	}
+	out := cols.FileDecimals()
+	assert.Equal(t, [2]int{38, 15}, [2]int{out[0].DbPrecision, out[0].DbScale})
+	assert.Equal(t, [2]int{25, 8}, [2]int{out[1].DbPrecision, out[1].DbScale})
+	assert.Equal(t, [2]int{env.DdlMinDecLength, env.DdlMinDecScale}, [2]int{out[2].DbPrecision, out[2].DbScale})
+	assert.Equal(t, [2]int{50, 10}, [2]int{out[3].DbPrecision, out[3].DbScale})
+	assert.Equal(t, 23, cols[0].DbPrecision, "the input columns do not change")
+
+	asString, wide := out.DecimalsAsString(38)
+	assert.Equal(t, []string{"wide (decimal(50,10))"}, wide)
+	assert.Equal(t, StringType, asString[3].Type)
+	assert.Equal(t, DecimalType, asString[0].Type)
+	assert.Equal(t, DecimalType, out[3].Type, "the input columns do not change")
+}
+
+func TestArrowDecimalIntDigits(t *testing.T) {
+	cases := map[string]int{
+		"0":                       0,
+		"0.5":                     0,
+		"-0.000001":               0,
+		"123.45":                  3,
+		"-99999999999999999999.5": 20,
+		"+007.1":                  1,
+		"$1,234.5":                4,
+		"1e21":                    22,
+		"-1.5E3":                  4,
+		"NaN":                     0,
+		"Infinity":                0,
+	}
+	for val, want := range cases {
+		assert.Equal(t, want, decimalIntDigits(val), val)
+	}
+}
+
+// a value with more integer digits than the Arrow type holds is an error,
+// not a value that is not valid (SLING-135)
+func TestArrowWriterDecimalOverflow(t *testing.T) {
+	// precision from the source: the value does not fit
+	columns := Columns{{Name: "d", Type: DecimalType, DbPrecision: 25, DbScale: 8, Sourced: true}}
+	aw, err := NewArrowWriter(&bytes.Buffer{}, columns)
+	require.NoError(t, err)
+	require.NoError(t, aw.WriteRow([]any{"99999999999999999.12345678"}))
+	err = aw.WriteRow([]any{"999999999999999999.5"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not fit decimal(25,8)")
+
+	// precision from the first rows: the max precision holds the value
+	columns = Columns{{Name: "d", Type: DecimalType, DbPrecision: 23, DbScale: 15}}
+	var buf bytes.Buffer
+	aw, err = NewArrowWriter(&buf, columns)
+	require.NoError(t, err)
+	require.NoError(t, aw.WriteRow([]any{"-99999999999999999999.5"}))
+	require.NoError(t, aw.Close())
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	rec, err := reader.Record(0)
+	require.NoError(t, err)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 15}, rec.Schema().Field(0).Type)
+	assert.Equal(t, "-99999999999999999999.500000000000000", GetValueFromArrowArray(rec.Column(0), 0))
+}

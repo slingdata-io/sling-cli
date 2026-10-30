@@ -3626,3 +3626,13 @@
 - suite: suite.cli.secrets.yaml
 - suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml
+
+# A value wider than decimal(38,s) fails the run with a clear error. It must not
+# write a value that is not valid (SLING-135).
+- id: 837
+  name: 'Row path to Parquet fails on a numeric value wider than decimal(38,s)'
+  run: |
+    SLING_ARROW_LANE=false sling run --src-conn POSTGRES --src-stream "select g as id, case when g = 2000 then 12345678901234567890123456789012345.123456::numeric else g::numeric / 3 end as d from generate_series(1, 3000) g" --tgt-object file:///tmp/sling_837/dec.parquet
+  err: true
+  output_contains:
+    - 'of column d does not fit decimal(38,20)'

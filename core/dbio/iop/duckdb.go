@@ -2255,6 +2255,10 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 				if err != nil {
 					g.LogError(g.Error(err, "failed to stream %s batch", format))
 				}
+				// df must have the row error before duckdb sees the short read
+				if dsErr := ds.Err(); dsErr != nil && df.Err() == nil {
+					df.Context.CaptureErr(dsErr)
+				}
 			}()
 
 			select {

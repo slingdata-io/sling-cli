@@ -399,6 +399,7 @@ type ArrowWriter struct {
 	mem          memory.Allocator
 	builders     []array.Builder
 	rowsBuffered int
+	decimals     decimalLimits
 
 	// record path (WriteRecord): the record buffers go straight to the writer
 	recordsWritten int64
@@ -410,15 +411,8 @@ type ArrowWriter struct {
 // ipc.NewFileWriter.
 func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowWriter, err error) {
 
-	// set minimum decimal precision/scale, on a copy: the caller's columns
-	// give the target DDL
-	columns = columns.Clone()
-	for i, col := range columns {
-		if col.IsDecimal() {
-			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-		}
-	}
+	// on a copy: the caller's columns give the target DDL
+	columns = columns.FileDecimals()
 
 	a = &ArrowWriter{
 		columns: columns,
@@ -427,6 +421,7 @@ func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowW
 
 	// Create arrow schema from columns
 	a.arrowSchema = ColumnsToArrowSchema(columns)
+	a.decimals = newDecimalLimits(a.arrowSchema)
 
 	// Create arrow file writer
 	writerOpts := append([]ipc.Option{ipc.WithSchema(a.arrowSchema), ipc.WithAllocator(a.mem)}, opts...)
@@ -451,12 +446,7 @@ func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowW
 // pyarrow.ipc.open_stream / arrow::ipc::RecordBatchStreamReader.
 func NewArrowStreamWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowWriter, err error) {
 
-	for i, col := range columns {
-		if col.IsDecimal() {
-			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-		}
-	}
+	columns = columns.FileDecimals()
 
 	a = &ArrowWriter{
 		columns: columns,
@@ -464,6 +454,7 @@ func NewArrowStreamWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *
 	}
 
 	a.arrowSchema = ColumnsToArrowSchema(columns)
+	a.decimals = newDecimalLimits(a.arrowSchema)
 
 	writerOpts := append([]ipc.Option{ipc.WithSchema(a.arrowSchema), ipc.WithAllocator(a.mem)}, opts...)
 	a.Writer = ipc.NewWriter(w, writerOpts...)
@@ -510,6 +501,9 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 }
 
 func (a *ArrowWriter) WriteRow(row []any) error {
+	if err := a.decimals.Check(row); err != nil {
+		return err
+	}
 	for i, val := range row {
 		if i >= len(a.builders) {
 			continue
@@ -533,6 +527,67 @@ func (a *ArrowWriter) WriteRow(row []any) error {
 	}
 
 	return nil
+}
+
+// decimalLimit is the Arrow decimal type of a column.
+type decimalLimit struct {
+	index     int
+	name      string
+	precision int32
+	scale     int32
+}
+
+// decimalLimits rejects a decimal value with more integer digits than its
+// Arrow type holds. Such a value makes a file that is not valid, or a wrong
+// value in Parquet.
+type decimalLimits []decimalLimit
+
+func newDecimalLimits(schema *arrow.Schema) (dl decimalLimits) {
+	for i, f := range schema.Fields() {
+		switch t := f.Type.(type) {
+		case *arrow.Decimal128Type:
+			dl = append(dl, decimalLimit{i, f.Name, t.Precision, t.Scale})
+		case *arrow.Decimal256Type:
+			dl = append(dl, decimalLimit{i, f.Name, t.Precision, t.Scale})
+		}
+	}
+	return dl
+}
+
+func (dl decimalLimits) Check(row []any) error {
+	for _, l := range dl {
+		if l.index >= len(row) || row[l.index] == nil {
+			continue
+		}
+		val := cast.ToString(row[l.index])
+		if n := decimalIntDigits(val); n > int(l.precision-l.scale) {
+			return g.Error("value %s of column %s does not fit decimal(%d,%d). Set a wider type for the column, for example with `columns: {%s: string}`", val, l.name, l.precision, l.scale, l.name)
+		}
+	}
+	return nil
+}
+
+// decimalIntDigits gives the count of integer digits of a decimal text,
+// without leading zeros.
+func decimalIntDigits(val string) (n int) {
+	if strings.ContainsAny(val, "eE") {
+		f, ok := new(big.Float).SetString(strings.TrimSpace(val))
+		if !ok || f.IsInf() {
+			return 0
+		}
+		i, _ := f.Int(nil)
+		val = i.String()
+	}
+	for _, c := range val {
+		switch {
+		case c == '.':
+			return n
+		case c == '0' && n == 0:
+		case c >= '0' && c <= '9':
+			n++
+		}
+	}
+	return n
 }
 
 func (a *ArrowWriter) flushBatch() error {
