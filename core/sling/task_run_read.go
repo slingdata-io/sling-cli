@@ -532,6 +532,7 @@ var (
 	setArrowLaneHook = func(t *TaskExecution, src arrowLaneSource, tgtConn database.Connection) error {
 		src.conn.SetProp("arrow_lane", "")
 		src.conn.SetArrowLane(nil, nil)
+		logADBCReadNote(src.conn, t.Config.Source.Stream, arrowLaneStubReason)
 		return arrowLaneStub(src.stream)
 	}
 	readArrowFileDataflowHook = func(t *TaskExecution, fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (*iop.Dataflow, error) {
@@ -542,14 +543,32 @@ var (
 	}
 )
 
+const arrowLaneStubReason = "the arrow lane requires the official release of sling-cli"
+
 // arrowLaneStub declines the lane, since the open build has none. It fails a
 // run with SLING_ARROW_LANE=force.
 func arrowLaneStub(stream string) error {
-	reason := "the arrow lane requires the official release of sling-cli"
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
-		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, reason)
+		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, arrowLaneStubReason)
 	}
 	return nil
+}
+
+// logADBCReadNote tells the user that use_adbc on a source does not change
+// the row path read.
+func logADBCReadNote(conn database.Connection, stream, reason string) {
+	if note := adbcReadNote(conn, stream, reason); note != "" {
+		g.Info("%s", note)
+	}
+}
+
+// adbcReadNote is empty when the read uses ADBC. Only the arrow lane reads
+// through ADBC, except for DuckDB and adbc connections, which always do.
+func adbcReadNote(conn database.Connection, stream, reason string) string {
+	if conn == nil || !conn.UseADBC() || g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbArrowDBC) {
+		return ""
+	}
+	return g.F("use_adbc has no effect on the read of stream %q: the arrow lane is off (%s), so the %s driver reads the rows", stream, reason, conn.GetType())
 }
 
 // ReadFromApi reads from a source api
