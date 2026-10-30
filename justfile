@@ -56,7 +56,7 @@ test-core:
     (cd core/sling && go test -v -run 'TestReplication')
     (cd core/sling && go test -v -run 'TestColumnCasing')
     (cd core/sling && go test -run 'TestCheck')
-    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines')
+    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines|TestUnmarshalTaskEnv')
     (cd core/env && go test -v)
     (cd core/secrets && go test -v)
     (cd core/sling/assist && go test -v)

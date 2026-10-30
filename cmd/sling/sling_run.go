@@ -285,7 +285,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	if taskCfgStr := os.Getenv("SLING_TASK_CONFIG"); taskCfgStr != "" {
-		err = cfg.Unmarshal(taskCfgStr)
+		err = cfg.UnmarshalTaskEnv(taskCfgStr)
 		if err != nil {
 			return ok, g.Error(err, "could not parse task configuration")
 		}

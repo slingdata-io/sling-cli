@@ -3601,6 +3601,23 @@
   output_contains:
     - '2026-01-15 07:00:00.123456 -05,2026-07-15 08:00:00 -04,2026-01-15 12:00:00'
 
+# A task config larger than 128 KiB must reach the child process on Linux.
+# It went in SLING_TASK_CONFIG as inline JSON: "argument list too long" (SLING-155).
+# The SQL is inline: a file:// SQL stays a path in the task config.
+- id: 817
+  name: 'Replication with retries and a task config larger than 128 KiB'
+  run: |
+    X=$(head -c 150000 /dev/zero | tr '\0' x)
+    SQL="select 1 as id, length('$X') as sql_len"
+    printf 'source: POSTGRES\ntarget: LOCAL\nenv:\n  SLING_RETRIES: 1\ndefaults:\n  mode: full-refresh\n  object: file:///tmp/sling_817/{stream_name}.csv\nstreams:\n  large_task_1:\n    sql: "%s"\n  large_task_2:\n    sql: "%s"\n' "$SQL" "$SQL" > /tmp/sling_817.yaml
+    sling run -r /tmp/sling_817.yaml
+    cat /tmp/sling_817/large_task_1.csv /tmp/sling_817/large_task_2.csv
+  output_contains:
+    - '2 Successes'
+    - '1,150000'
+  output_does_not_contain:
+    - 'argument list too long'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

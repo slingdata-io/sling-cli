@@ -204,6 +204,20 @@ func (cfg *Config) SetDefault() {
 	}
 }
 
+// UnmarshalTaskEnv parses the SLING_TASK_CONFIG value: config text, a file path, or a file:// path.
+// The file content is parsed as config text, so env vars expand the same way as inline.
+func (cfg *Config) UnmarshalTaskEnv(val string) (err error) {
+	path := strings.TrimPrefix(val, "file://")
+	if strings.HasPrefix(val, "file://") || g.PathExists(path) {
+		bytes, err := os.ReadFile(path)
+		if err != nil {
+			return g.Error(err, "could not read task config: "+path)
+		}
+		val = string(bytes)
+	}
+	return cfg.Unmarshal(val)
+}
+
 // Unmarshal parse a configuration file path or config text
 func (cfg *Config) Unmarshal(cfgStr string) (err error) {
 	// Add panic recovery
