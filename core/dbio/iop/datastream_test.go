@@ -82,6 +82,40 @@ func TestBW(t *testing.T) {
 	}
 }
 
+// The consumer changes the values of each row in place. The byte count must
+// come from the values that the producer pushed (SLING-128).
+func TestBWConsumerChangesRows(t *testing.T) {
+	columns := NewColumnsFromFields("a", "b")
+	ds := NewDatastream(columns)
+	ds.StartBwProcessor()
+
+	long := strings.Repeat("x", 10000)
+	consumed := make(chan int)
+	go func() {
+		n := 0
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows() {
+				row[0], row[1] = long, long
+				n++
+			}
+		}
+		consumed <- n
+	}()
+
+	const rows = 5000
+	for i := range rows {
+		ds.Push([]any{"abc", cast.ToString(i % 10)})
+	}
+	ds.SetReady()
+	ds.Close()
+	require.Equal(t, rows, <-consumed)
+
+	want := uint64(rows * 6) // "abc,9\n"
+	require.Eventually(t, func() bool { return ds.Bytes.Load() >= want }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, want, ds.Bytes.Load())
+}
+
 func TestEncodeRowAsJSONObject(t *testing.T) {
 	stringCol := func(name string) Column { return Column{Name: name, Type: StringType} }
 	jsonCol := func(name string) Column { return Column{Name: name, Type: JsonType} }

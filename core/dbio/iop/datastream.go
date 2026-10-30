@@ -12,6 +12,7 @@ import (
 	"path"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,7 @@ type Datastream struct {
 	bwRows        chan [][]any // for correct byte written
 	bwMu          sync.Mutex
 	bwClosed      bool
+	bwOn          bool // SLING_PROCESS_BW
 	readyChn      chan struct{}
 	schemaChgChan chan schemaChg
 	bwCsv         *csv.Writer // for correct byte written
@@ -230,6 +232,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
 		bwRows:        make(chan [][]any, 100),
+		bwOn:          bwEnabled(),
 		readyChn:      make(chan struct{}, 1),
 		schemaChgChan: make(chan schemaChg, 1000),
 		pauseChan:     make(chan struct{}),
@@ -366,10 +369,7 @@ func (ds *Datastream) Limited(limit ...int) bool {
 }
 
 func (ds *Datastream) processBwRows() {
-	processBw := true
-	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
-		processBw = cast.ToBool(val)
-	}
+	processBw := bwEnabled()
 
 	done := false
 	process := func() {
@@ -399,6 +399,27 @@ func (ds *Datastream) processBwRows() {
 			break
 		}
 	}
+}
+
+func bwEnabled() bool {
+	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
+		return cast.ToBool(val)
+	}
+	return true
+}
+
+// copyBwRows copies the rows for the bytes-written processor. The consumer
+// changes the values of a row in place, so the processor must not read the
+// rows that the consumer gets. Call it before the consumer can get the rows.
+func (ds *Datastream) copyBwRows(rows [][]any) [][]any {
+	if len(rows) == 0 || !ds.bwOn {
+		return nil
+	}
+	copied := make([][]any, len(rows))
+	for i, row := range rows {
+		copied[i] = slices.Clone(row)
+	}
+	return copied
 }
 
 // sendBwRows gives rows to the bytes-written processor

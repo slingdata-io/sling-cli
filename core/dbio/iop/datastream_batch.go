@@ -141,10 +141,11 @@ func (b *Batch) Close() {
 	if b.flushTimer != nil {
 		b.flushTimer.Stop()
 	}
+	bwTail := b.ds.copyBwRows(b.tail)
 	close(b.chunks)
 	b.flushMu.Unlock()
 
-	b.ds.sendBwRows(b.tail)
+	b.ds.sendBwRows(bwTail)
 	if !b.ds.NoDebug {
 		g.Trace("closed %s", b.ID())
 	}
@@ -318,13 +319,14 @@ func (b *Batch) flush() {
 			return
 		}
 
+		bwChunk := b.ds.copyBwRows(chunk)
 		select {
 		case b.chunks <- chunk:
 			b.mu.Lock()
 			b.pending = make([][]any, 0, RowChunkSize)
 			b.mu.Unlock()
 			b.flushMu.Unlock()
-			b.ds.sendBwRows(chunk)
+			b.ds.sendBwRows(bwChunk)
 			return
 		case <-b.closing: // Close gives the pending rows as the tail
 			b.flushMu.Unlock()
@@ -356,9 +358,10 @@ func (b *Batch) flushIdle() {
 		return
 	}
 
+	bwChunk := b.ds.copyBwRows(b.pending)
 	select {
 	case b.chunks <- b.pending:
-		go b.ds.sendBwRows(b.pending)
+		go b.ds.sendBwRows(bwChunk)
 		b.pending = make([][]any, 0, RowChunkSize)
 	default:
 		b.flushTimer.Reset(RowChunkWait) // the consumer is busy
