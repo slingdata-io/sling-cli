@@ -282,6 +282,27 @@ func (cfg *Config) Unmarshal(cfgStr string) (err error) {
 	return nil
 }
 
+// runtimeState returns the state of the parent replication, or nil.
+func (cfg *Config) runtimeState() *ReplicationState {
+	if rs := cfg.ReplicationStream; rs != nil && rs.replication != nil {
+		return rs.replication.state
+	}
+	return nil
+}
+
+// SetEnv sets an env value under the replication state lock,
+// because RuntimeState reads the Env of each task from other goroutines.
+func (cfg *Config) SetEnv(key, value string) {
+	if rs := cfg.runtimeState(); rs != nil {
+		rs.lock()
+		defer rs.unlock()
+	}
+	if cfg.Env == nil {
+		cfg.Env = map[string]string{}
+	}
+	cfg.Env[key] = value
+}
+
 func (cfg *Config) sourceIsFile() bool {
 	return cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
 }
@@ -587,8 +608,15 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Env = map[string]string{}
 	}
 
+	rs := cfg.runtimeState()
+	if rs != nil {
+		rs.lock()
+	}
 	for k, v := range cfg.Env {
 		cfg.Env[k] = os.ExpandEnv(v)
+	}
+	if rs != nil {
+		rs.unlock()
 	}
 
 	// Set Target
@@ -1083,6 +1111,16 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 // GetFormatMap returns a map to format a string with provided with variables
 func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
+	return cfg.formatMap(false)
+}
+
+// formatMap builds the format map. Set stateLocked when the caller holds the replication state lock.
+func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
+	// the lock guards the state maps and Env against concurrent writers
+	if rs := cfg.runtimeState(); rs != nil && !stateLocked {
+		rs.rlock()
+		defer rs.runlock()
+	}
 
 	m = g.M(
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),

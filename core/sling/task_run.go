@@ -2,7 +2,6 @@ package sling
 
 import (
 	"context"
-	"maps"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -56,14 +55,23 @@ func (t *TaskExecution) Execute() error {
 	env.SetTelVal("stage", "2 - task-execution")
 
 	if StoreSet != nil {
+		// the ticker must exit before Execute returns. A late StateSet
+		// would read the state while the next stream is set up.
+		tickerStop := make(chan struct{})
+		tickerExited := make(chan struct{})
+		defer func() {
+			close(tickerStop)
+			<-tickerExited
+		}()
+
 		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
+			defer close(tickerExited)
 			defer ticker5s.Stop()
-			for range ticker5s.C {
-				if t.Status != ExecStatusRunning {
-					return // is done
-				}
+			for {
 				select {
+				case <-tickerStop:
+					return
 				case <-t.Context.Ctx.Done():
 					return
 				case <-ticker5s.C:
@@ -277,12 +285,12 @@ func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnect
 		return
 	}
 
-	// set replication store
+	// set replication store. The API gets a copy, mergeApiStore writes it back.
 	state, err := t.Replication.RuntimeState()
 	if err != nil {
 		g.Warn("could not get replication store to put into API context: " + err.Error())
 	} else {
-		conn.SetReplicationStore(state.Store)
+		conn.SetReplicationStore(state.GetStore())
 	}
 
 	if err := conn.Authenticate(); err != nil {
@@ -544,6 +552,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	return
 }
 
+// mergeApiStore writes the store of the API connection back to the replication state.
+func (t *TaskExecution) mergeApiStore(conn *api.APIConnection) {
+	if state, err := t.Replication.RuntimeState(); err == nil {
+		state.MergeStore(conn.GetReplicationStore())
+	}
+}
+
 func (t *TaskExecution) runApiToDb() (err error) {
 
 	start = time.Now()
@@ -566,6 +581,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
+	defer t.mergeApiStore(srcConn)
 
 	if t.Config.Mode == IncrementalMode {
 		syncState := map[string]any{}
@@ -636,11 +652,6 @@ skipGetState:
 		return
 	}
 
-	// sync back replication store
-	if state, err := t.Replication.RuntimeState(); err == nil {
-		maps.Copy(state.Store, srcConn.GetReplicationStore())
-	}
-
 	elapsed := int(time.Since(start).Seconds())
 	if len(t.df.Columns) > 0 {
 		t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
@@ -685,6 +696,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
+	defer t.mergeApiStore(srcConn)
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
@@ -735,11 +747,6 @@ skipGetState:
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
-	}
-
-	// sync back replication store
-	if state, err := t.Replication.RuntimeState(); err == nil {
-		maps.Copy(state.Store, srcConn.GetReplicationStore())
 	}
 
 	elapsed := int(time.Since(start).Seconds())

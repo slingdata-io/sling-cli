@@ -1013,3 +1013,53 @@ func TestReplicationCheckConnections(t *testing.T) {
 		assert.Contains(t, err.Error(), "could not find connection(s): MISSING_TGT_X3.")
 	}
 }
+
+// RuntimeState must not race with Env and Store writes (SLING-153).
+// Run with -race.
+func TestRuntimeStateConcurrentAccess(t *testing.T) {
+	replication, err := LoadReplicationConfig(`
+source: local
+target: local
+defaults:
+  mode: full-refresh
+streams:
+  file:///tmp/sling_race_a.csv:
+    object: file:///tmp/sling_race_a_out.csv
+  file:///tmp/sling_race_b.csv:
+    object: file:///tmp/sling_race_b_out.csv
+`)
+	if !assert.NoError(t, err) || !assert.NoError(t, replication.Compile(nil)) {
+		return
+	}
+	task := replication.Tasks[1]
+	state, err := replication.RuntimeState()
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	// writers, as in runTask, hooks and the API store merge
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			task.SetEnv(g.F("KEY_%d", i%10), cast.ToString(i))
+			state.SetStoreData(g.F("key_%d", i%10), i, false)
+			state.MergeStore(map[string]any{"merged": i})
+		}
+	}()
+
+	// readers, as in the StateSet ticker
+	for i := 0; i < 200; i++ {
+		_, err = replication.RuntimeState()
+		assert.NoError(t, err)
+		_, err = task.GetFormatMap()
+		assert.NoError(t, err)
+		state.GetStore()
+		state.Marshall()
+	}
+	<-done
+
+	state, _ = replication.RuntimeState()
+	assert.Equal(t, "1999", state.Env["KEY_9"])
+	assert.Equal(t, 1999, state.GetStore()["merged"])
+}

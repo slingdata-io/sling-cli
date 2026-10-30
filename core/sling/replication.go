@@ -130,6 +130,9 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 		}
 	}
 
+	rd.state.lock()
+	defer rd.state.unlock()
+
 	rd.state.Execution.ID = env.ExecID
 	rd.state.Source = ConnState{Name: rd.Source}
 	rd.state.Target = ConnState{Name: rd.Target}
@@ -163,7 +166,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
-			fMap, err := task.GetFormatMap()
+			fMap, err := task.formatMap(true)
 			if err != nil {
 				return rd.state, err
 			}
