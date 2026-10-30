@@ -1,0 +1,169 @@
+# target_options.insert_concurrency: Postgres → ClickHouse with 3 concurrent
+# inserts, on the native driver, on the ADBC row path and on the arrow lane.
+# Each target must hold the same rows as the source (count and sums).
+# A source error in the middle of the stream must not leave a final table.
+
+env:
+  SRC_TABLE: public.sling_ins_conc_src
+  TGT_NATIVE: default.sling_ins_conc_native
+  TGT_ADBC: default.sling_ins_conc_adbc
+  TGT_LANE: default.sling_ins_conc_lane
+  TGT_FAIL: default.sling_ins_conc_fail
+  ROW_COUNT: 300000
+
+steps:
+  - id: setup_src
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS {env.SRC_TABLE};
+      CREATE TABLE {env.SRC_TABLE} AS
+      SELECT
+        g AS id,
+        (g * 1.12345678)::numeric(25,8) AS amount,
+        md5(g::text) AS payload,
+        timestamp '2024-01-01' + g * interval '1 second' AS ts
+      FROM generate_series(1, {env.ROW_COUNT}) AS g;
+
+  - id: src_sums
+    connection: POSTGRES
+    query: |
+      SELECT count(*) AS cnt, sum(id) AS sum_id, sum(amount) AS sum_amount,
+             sum(length(payload)) AS sum_len
+      FROM {env.SRC_TABLE}
+    into: src
+
+  - connection: CLICKHOUSE_MINI
+    query: |
+      DROP TABLE IF EXISTS {env.TGT_NATIVE};
+      DROP TABLE IF EXISTS {env.TGT_ADBC};
+      DROP TABLE IF EXISTS {env.TGT_LANE};
+      DROP TABLE IF EXISTS {env.TGT_FAIL};
+      DROP TABLE IF EXISTS {env.TGT_FAIL}_lane;
+
+  - type: log
+    message: "=== insert_concurrency: native, ADBC row path, arrow lane ==="
+
+  - id: native
+    replication:
+      source: POSTGRES
+      target: CLICKHOUSE_MINI
+      defaults:
+        mode: full-refresh
+        target_options:
+          batch_limit: 50000
+          insert_concurrency: 3
+      streams:
+        "{env.SRC_TABLE}":
+          object: "{env.TGT_NATIVE}"
+
+  - id: adbc_row
+    replication:
+      source: POSTGRES
+      target: CLICKHOUSE_ADBC
+      defaults:
+        mode: full-refresh
+        target_options:
+          batch_limit: 50000
+          insert_concurrency: 3
+      streams:
+        "{env.SRC_TABLE}":
+          object: "{env.TGT_ADBC}"
+
+  - id: lane
+    replication:
+      source: POSTGRES_ADBC
+      target: CLICKHOUSE_ADBC
+      defaults:
+        mode: full-refresh
+        target_options:
+          insert_concurrency: 3
+      streams:
+        "{env.SRC_TABLE}":
+          object: "{env.TGT_LANE}"
+
+  - type: group
+    loop: [default.sling_ins_conc_native, default.sling_ins_conc_adbc, default.sling_ins_conc_lane]
+    steps:
+      - connection: CLICKHOUSE_MINI
+        query: |
+          SELECT count() AS cnt, sum(id) AS sum_id, sum(amount) AS sum_amount,
+                 sum(length(payload)) AS sum_len
+          FROM {loop.value}
+        into: tgt
+
+      - type: check
+        check: >
+          int_parse(store.tgt[0].cnt) == int_parse(store.src[0].cnt)
+          && int_parse(store.tgt[0].sum_id) == int_parse(store.src[0].sum_id)
+          && float_parse(store.tgt[0].sum_amount) == float_parse(store.src[0].sum_amount)
+          && int_parse(store.tgt[0].sum_len) == int_parse(store.src[0].sum_len)
+        failure_message: >
+          {loop.value} differs: cnt={store.tgt[0].cnt} sum_id={store.tgt[0].sum_id}
+          sum_amount={store.tgt[0].sum_amount} sum_len={store.tgt[0].sum_len},
+          source cnt={store.src[0].cnt} sum_id={store.src[0].sum_id}
+          sum_amount={store.src[0].sum_amount} sum_len={store.src[0].sum_len}
+
+      - type: log
+        message: "OK: {loop.value} matches the source"
+
+  - type: log
+    message: "=== insert_concurrency: source error in the middle of the stream ==="
+
+  # 1/(id - 200000) fails at row 200000, after the first batches are written
+  - id: fail_mid
+    on_failure: warn
+    replication:
+      source: POSTGRES
+      target: CLICKHOUSE_MINI
+      defaults:
+        mode: full-refresh
+        target_options:
+          batch_limit: 50000
+          insert_concurrency: 3
+      streams:
+        fail_stream:
+          sql: "select id, amount, 1 / (id - 200000) as boom from {env.SRC_TABLE}"
+          object: "{env.TGT_FAIL}"
+
+  # the same error on the arrow lane, where the readers share the stream
+  - id: fail_mid_lane
+    on_failure: warn
+    replication:
+      source: POSTGRES_ADBC
+      target: CLICKHOUSE_ADBC
+      defaults:
+        mode: full-refresh
+        target_options:
+          insert_concurrency: 3
+      streams:
+        fail_stream_lane:
+          sql: "select id, amount, 1 / (id - 200000) as boom from {env.SRC_TABLE}"
+          object: "{env.TGT_FAIL}_lane"
+
+  - type: check
+    check: state.fail_mid.status == "warning" && state.fail_mid_lane.status == "warning"
+    failure_message: 'a failing run did not fail: native={state.fail_mid.status} lane={state.fail_mid_lane.status}'
+
+  - id: fail_tables
+    connection: CLICKHOUSE_MINI
+    query: |
+      SELECT count() AS cnt FROM system.tables
+      WHERE database = 'default' AND name IN ('sling_ins_conc_fail', 'sling_ins_conc_fail_lane')
+    into: fail_tables
+
+  - type: check
+    check: int_parse(store.fail_tables[0].cnt) == 0
+    failure_message: 'the failing run left a final table'
+
+  - type: log
+    message: "SUCCESS: insert_concurrency kept all rows and left no partial table"
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS {env.SRC_TABLE}
+  - connection: CLICKHOUSE_MINI
+    query: |
+      DROP TABLE IF EXISTS {env.TGT_NATIVE};
+      DROP TABLE IF EXISTS {env.TGT_ADBC};
+      DROP TABLE IF EXISTS {env.TGT_LANE};
+      DROP TABLE IF EXISTS {env.TGT_FAIL};
+      DROP TABLE IF EXISTS {env.TGT_FAIL}_lane;

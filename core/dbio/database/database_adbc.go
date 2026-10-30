@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-adbc/go/adbc/drivermgr"
@@ -1608,36 +1610,108 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		tgtCols = nil
 	}
 
-	for batch := range ds.BatchChan {
-		// Convert batch to Arrow record reader
-		reader, batchRows, err := conn.batchToRecordReader(batch, tgtCols)
-		if err != nil {
-			return count, g.Error(err, "error converting batch to Arrow")
-		}
+	var total atomic.Uint64
+	err = conn.withIngestConns(conn.Context().Ctx, conn.insertConcurrency(), func(ctx context.Context, _ int, c adbc.Connection) error {
+		for batch := range ds.BatchChan {
+			if err := ctx.Err(); err != nil {
+				return err // another worker failed, or the run stops
+			}
 
-		ingested, err := adbc.IngestStream(
-			conn.Context().Ctx,
-			conn.Conn,
-			reader,
-			table.Name,
-			ingestMode,
-			opts,
-		)
-		reader.Release()
+			// Convert batch to Arrow record reader
+			reader, batchRows, err := conn.batchToRecordReader(batch, tgtCols)
+			if err != nil {
+				return g.Error(err, "error converting batch to Arrow")
+			}
 
-		if err != nil {
-			return count, g.Error(err, "error ingesting batch via ADBC")
-		}
+			ingested, err := adbc.IngestStream(ctx, c, reader, table.Name, ingestMode, opts)
+			reader.Release()
 
-		if ingested > 0 {
-			count += uint64(ingested)
-		} else {
-			// some drivers do not report a row count for a bulk ingest
-			count += uint64(batchRows)
+			if err != nil {
+				return g.Error(err, "error ingesting batch via ADBC")
+			}
+
+			if ingested > 0 {
+				total.Add(uint64(ingested))
+			} else {
+				// some drivers do not report a row count for a bulk ingest
+				total.Add(uint64(batchRows))
+			}
 		}
+		return nil
+	})
+
+	return total.Load(), err
+}
+
+// insertConcurrency returns the number of concurrent ingests (target option
+// insert_concurrency). A driver whose staging table lives in one session
+// ingests with one connection.
+func (conn *ArrowDBConn) insertConcurrency() int {
+	n := cast.ToInt(conn.GetProp("insert_concurrency"))
+	if n <= 1 {
+		return 1
+	}
+	switch conn.driverType {
+	case dbio.TypeDbDuckDb, dbio.TypeDbSQLite:
+		g.Warn("insert_concurrency has no effect on %s, using 1", conn.driverType)
+		return 1
+	}
+	return n
+}
+
+// withIngestConns runs fn on n goroutines, each with its own connection. The
+// first goroutine uses the main connection. The first error cancels the
+// context of the others, and withIngestConns returns it.
+func (conn *ArrowDBConn) withIngestConns(parent context.Context, n int, fn func(ctx context.Context, i int, c adbc.Connection) error) error {
+	if n <= 1 {
+		return fn(parent, 0, conn.Conn)
 	}
 
-	return count, nil
+	conns := []adbc.Connection{conn.Conn}
+	defer func() {
+		for _, c := range conns[1:] {
+			c.Close()
+		}
+	}()
+	for len(conns) < n {
+		c, err := conn.db.Open(parent)
+		if err != nil {
+			return g.Error(err, "could not open ADBC connection for concurrent ingest")
+		}
+		conns = append(conns, c)
+	}
+	g.Debug("ingesting with %d concurrent ADBC connections", n)
+
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i, c := range conns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if errs[i] = fn(ctx, i, c); errs[i] != nil {
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// the first real error wins over the cancel errors it caused
+	var first error
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, context.Canceled) {
+			return err
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // ingestOptions targets the catalog and schema of the table, not the
@@ -1703,25 +1777,31 @@ func (conn *ArrowDBConn) ingestRecordStream(tableFName string, ds *iop.Datastrea
 		return 0, g.Error(err, "could not label records for %s", tableFName)
 	}
 
-	reader := rs.Reader()
-	defer reader.Release()
-
 	g.Trace("arrow lane schema => %s", rs.Schema)
 
-	ingested, err := adbc.IngestStream(
-		ds.Context.Ctx,
-		conn.Conn,
-		reader,
-		table.Name,
-		conn.getIngestMode(),
-		conn.ingestOptions(table),
-	)
+	n := conn.insertConcurrency()
+	readers := rs.Readers(n)
+	var ingested atomic.Int64
+	err = conn.withIngestConns(ds.Context.Ctx, n, func(ctx context.Context, i int, c adbc.Connection) error {
+		reader := readers[i]
+		defer reader.Release()
+
+		cnt, err := adbc.IngestStream(ctx, c, reader, table.Name, conn.getIngestMode(), conn.ingestOptions(table))
+		if err != nil {
+			if n > 1 {
+				rs.Fail(err) // stop the readers of the other connections
+			}
+			return g.Error(err, "error ingesting records via ADBC")
+		}
+		ingested.Add(cnt)
+		return nil
+	})
 	if err != nil {
-		return 0, g.Error(err, "error ingesting records via ADBC")
+		return 0, err
 	}
 
-	if ingested != int64(ds.Count) {
-		g.Debug("arrow lane: driver ingested %d rows, stream counted %d", ingested, ds.Count)
+	if ingested.Load() != int64(ds.Count) {
+		g.Debug("arrow lane: driver ingested %d rows, stream counted %d", ingested.Load(), ds.Count)
 	}
 
 	// Return the stream count so the post-load check and the progress bar use

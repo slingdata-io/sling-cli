@@ -3618,6 +3618,21 @@
   output_does_not_contain:
     - 'argument list too long'
 
+- id: 833
+  name: 'insert_concurrency: postgres → clickhouse native, ADBC row path and arrow lane'
+  # Needs a ClickHouse with system.columns.numeric_precision (CLICKHOUSE_MINI).
+  # The pipeline exits 1 by design: its failure cases end in a failed task.
+  run: |
+    sling run -d -p tests/pipelines/p.133.insert_concurrency_pg_clickhouse.yaml 2>&1 || true
+  output_contains:
+    - 'with 3 concurrent inserts'
+    - 'ingesting with 3 concurrent ADBC connections'
+    - 'arrow lane: enabled (postgres -> clickhouse/adbc)'
+    - 'OK: default.sling_ins_conc_native matches the source'
+    - 'OK: default.sling_ins_conc_adbc matches the source'
+    - 'OK: default.sling_ins_conc_lane matches the source'
+    - 'SUCCESS: insert_concurrency kept all rows and left no partial table'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml

@@ -1853,6 +1853,10 @@ type TargetOptions struct {
 	Encoding         *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	DirectInsert     *bool               `json:"direct_insert,omitempty" yaml:"direct_insert,omitempty"`
 
+	// InsertConcurrency is the number of concurrent inserts into a database
+	// target (ADBC and native ClickHouse). Default 1.
+	InsertConcurrency *int `json:"insert_concurrency,omitempty" yaml:"insert_concurrency,omitempty"`
+
 	TableKeys      database.TableKeys       `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp       string                   `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	TableDDL       *string                  `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -2243,6 +2247,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.DirectInsert == nil {
 		o.DirectInsert = targetOptions.DirectInsert
+	}
+	if o.InsertConcurrency == nil {
+		o.InsertConcurrency = targetOptions.InsertConcurrency
 	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = targetOptions.DatetimeFormat

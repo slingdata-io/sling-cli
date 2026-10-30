@@ -991,6 +991,7 @@ func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (c
 		if err = conn.Commit(); err != nil {
 			return 0, g.Error(err, "could not commit before ADBC bulk import")
 		}
+		conn.adbc.SetProp("insert_concurrency", conn.GetProp("insert_concurrency"))
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 	g.Trace("BulkImportStream not implemented for %s", conn.GetType())
