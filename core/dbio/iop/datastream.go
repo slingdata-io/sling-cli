@@ -3247,6 +3247,7 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 		var aw *ArrowWriter
 		var br *BatchReader
 		var err error
+		var warnedWide bool
 
 		defer close(readerChn)
 
@@ -3269,10 +3270,20 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 			// new reader
 			pipeR, pipeW = io.Pipe()
 
-			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			columns := batch.Columns
+			if sc.MaxDecPrecision > 0 {
+				var wide []string
+				columns, wide = columns.FileDecimals().DecimalsAsString(sc.MaxDecPrecision)
+				if len(wide) > 0 && !warnedWide {
+					g.Warn("these columns have a decimal above %d digits, so they are written as strings: %s", sc.MaxDecPrecision, strings.Join(wide, ", "))
+					warnedWide = true
+				}
+			}
+
+			br = &BatchReader{batch, columns, pipeR, 0}
 			readerChn <- br
 
-			aw, err = NewArrowWriter(pipeW, batch.Columns)
+			aw, err = NewArrowWriter(pipeW, columns)
 			if err != nil {
 				return g.Error(err, "could not create arrow writer")
 			}

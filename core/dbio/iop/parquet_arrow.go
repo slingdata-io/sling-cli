@@ -211,6 +211,7 @@ type ParquetArrowWriter struct {
 	builders      []array.Builder
 	rowsBuffered  int
 	decimalScales []*big.Rat
+	decimals      decimalLimits
 
 	// record path (NewParquetArrowWriterFromSchema): no builders, records go
 	// straight to the writer
@@ -220,12 +221,10 @@ type ParquetArrowWriter struct {
 
 func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compression) (p *ParquetArrowWriter, err error) {
 
-	// set minimum decimal precision/scale
-	for i, col := range columns {
-		if col.IsDecimal() {
-			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-		}
+	// parquet has no decimal above 38 digits
+	columns, wide := columns.FileDecimals().DecimalsAsString(env.DdlMaxDecLength)
+	if len(wide) > 0 {
+		g.Warn("parquet has no decimal above %d digits, so these columns are written as strings: %s", env.DdlMaxDecLength, strings.Join(wide, ", "))
 	}
 
 	p = &ParquetArrowWriter{
@@ -236,6 +235,7 @@ func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compress
 
 	// Create arrow schema from columns
 	p.arrowSchema = ColumnsToArrowSchema(columns)
+	p.decimals = newDecimalLimits(p.arrowSchema)
 
 	// Create parquet writer properties
 	writerProps := parquet.NewWriterProperties(
@@ -301,6 +301,9 @@ func (p *ParquetArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 }
 
 func (p *ParquetArrowWriter) WriteRow(row []any) error {
+	if err := p.decimals.Check(row); err != nil {
+		return err
+	}
 	for i, val := range row {
 		if i >= len(p.builders) {
 			continue

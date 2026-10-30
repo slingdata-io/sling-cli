@@ -819,3 +819,40 @@ func TestArrowWriter_WriteRecord(t *testing.T) {
 	}
 	assert.Equal(t, len(rows), r)
 }
+
+// parquet has no decimal above 38 digits: the column is a string (SLING-136),
+// and a decimal with no source precision holds a wide value (SLING-135)
+func TestParquetArrowWriterWideDecimal(t *testing.T) {
+	columns := Columns{
+		{Name: "d", Type: DecimalType, DbPrecision: 23, DbScale: 15},
+		{Name: "d50", Type: DecimalType, DbPrecision: 50, DbScale: 10, Sourced: true},
+	}
+
+	testFile := filepath.Join(t.TempDir(), "wide.parquet")
+	f, err := os.Create(testFile)
+	require.NoError(t, err)
+	defer f.Close()
+
+	pw, err := NewParquetArrowWriter(f, columns, compress.Codecs.Snappy)
+	require.NoError(t, err)
+	require.NoError(t, pw.WriteRow([]any{"-99999999999999999999.5", "1234567890123456789012345678901234567890.0123456789"}))
+	require.NoError(t, pw.Close())
+
+	f2, err := os.Open(testFile)
+	require.NoError(t, err)
+	defer f2.Close()
+
+	reader, err := NewParquetArrowReader(f2, nil)
+	require.NoError(t, err)
+	table, err := reader.Reader.ReadTable(context.Background())
+	require.NoError(t, err)
+	defer table.Release()
+
+	d := table.Column(0).Data().Chunk(0)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 15}, d.DataType())
+	assert.Equal(t, "-99999999999999999999.500000000000000", GetValueFromArrowArray(d, 0))
+
+	d50 := table.Column(1).Data().Chunk(0)
+	assert.Equal(t, arrow.STRING, d50.DataType().ID())
+	assert.Equal(t, "1234567890123456789012345678901234567890.0123456789", GetValueFromArrowArray(d50, 0))
+}

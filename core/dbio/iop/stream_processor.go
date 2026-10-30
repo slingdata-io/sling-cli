@@ -76,6 +76,7 @@ type StreamConfig struct {
 	BoolAsInt        bool           `json:"-"`
 	EscapeBackslash  bool           `json:"-"`       // escape backslashes for MySQL LOAD DATA
 	BinaryAsHex      bool           `json:"-"`       // hex-encode binary in CSV
+	MaxDecPrecision  int            `json:"-"`       // write a wider decimal as a string in Arrow
 	Columns          Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
 	Transforms       Transform
 

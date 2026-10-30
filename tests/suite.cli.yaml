@@ -3627,6 +3627,30 @@
 - suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml
 
+# An unconstrained Postgres numeric has no precision from the source: the row
+# path gave it decimal(24,15) from the first rows, and a wider value overflowed
+# in Parquet (SLING-135). A numeric(50,10) failed in Parquet, as DuckDB and
+# Parquet have no decimal above 38 digits: it is now a string, with a warning (SLING-136).
+- id: 835
+  name: 'Row path to Parquet (DuckDB) keeps unconstrained and wide numeric values'
+  run: |
+    SLING_ARROW_LANE=false sling run --src-conn POSTGRES --src-stream "select 1 as id, -99999999999999999999.5::numeric as d, 1234567890123456789012345678901234567890.0123456789::numeric(50,10) as d50 union all select 2, 1.123456789012345, -1.5" --tgt-object file:///tmp/sling_835/dec.parquet
+    sling run --src-stream file:///tmp/sling_835/dec.parquet --stdout
+  output_contains:
+    - 'written as strings: d50 (decimal('
+    - '1,-99999999999999999999.500000000000000,1234567890123456789012345678901234567890.0123456789'
+    - '2,1.123456789012345,'
+
+- id: 836
+  name: 'Row path to Parquet (Go writer) keeps unconstrained and wide numeric values'
+  run: |
+    SLING_ARROW_LANE=false SLING_DUCKDB_COMPUTE=false sling run --src-conn POSTGRES --src-stream "select 1 as id, -99999999999999999999.5::numeric as d, 1234567890123456789012345678901234567890.0123456789::numeric(50,10) as d50 union all select 2, 1.123456789012345, -1.5" --tgt-object file:///tmp/sling_836/dec.parquet
+    sling run --src-stream file:///tmp/sling_836/dec.parquet --stdout
+  output_contains:
+    - 'written as strings: d50 (decimal('
+    - '1,-99999999999999999999.500000000000000,1234567890123456789012345678901234567890.0123456789'
+    - '2,1.123456789012345,'
+
 # A value wider than decimal(38,s) fails the run with a clear error. It must not
 # write a value that is not valid (SLING-135).
 - id: 837

@@ -2293,7 +2293,9 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 
 		var partIndex int
 		if format == dbio.FileTypeArrow {
-			for batchR := range ds.NewArrowReaderChnl(sc) {
+			arrowSc := sc
+			arrowSc.MaxDecPrecision = env.DdlMaxDecLength // duckdb reads no decimal256
+			for batchR := range ds.NewArrowReaderChnl(arrowSc) {
 				g.Trace("processing duckdb arrow batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
 				if !serve(batchR, g.F(`read_arrow('%s')`, httpURL), partIndex) {
 					return
