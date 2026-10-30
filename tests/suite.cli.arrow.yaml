@@ -588,6 +588,29 @@
   output_does_not_contain:
     - 'falling back to row-based'
 
+- id: 738
+  name: 'arrow lane: arrow file source, format from the path or set (SLING-126, SLING-127)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --select 'c_int8,c_str,c_ts' --tgt-object file:///tmp/arrow_lane_738.arrow --mode full-refresh
+    echo "magic: $(head -c 6 /tmp/arrow_lane_738.arrow)"
+    sling run -d --src-stream file:///tmp/arrow_lane_738.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_738" --mode full-refresh
+    sling run -d --src-stream file:///tmp/arrow_lane_738.arrow --src-options '{format: arrow}' --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_738" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_738"
+    rm -f /tmp/arrow_lane_738.arrow
+  output_contains:
+    - 'arrow lane: enabled (postgres -> file/file)'
+    - 'magic: ARROW1'
+    - 'arrow lane: enabled (file -> postgres/adbc)'
+  output_does_not_contain:
+    - 'falling back to row-based'
+    - 'unsupported arrow file format'
+
 - id: 740
   name: 'arrow lane declines: transform that reads record.'
   group: arrow_740_file

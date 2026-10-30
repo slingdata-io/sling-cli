@@ -246,6 +246,7 @@ func (fns FileNodes) InferFormat() (format dbio.FileType) {
 		dbio.FileTypeCsv:     0,
 		dbio.FileTypeJson:    0,
 		dbio.FileTypeParquet: 0,
+		dbio.FileTypeArrow:   0,
 	}
 
 	for _, fileType := range lo.Keys(typeCntMap) {
