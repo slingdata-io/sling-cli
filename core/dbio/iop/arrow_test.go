@@ -5,8 +5,11 @@ import (
 	"context"
 	"io"
 	"math/big"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -718,4 +721,120 @@ func TestArrowWriterDecimalOverflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 15}, rec.Schema().Field(0).Type)
 	assert.Equal(t, "-99999999999999999999.500000000000000", GetValueFromArrowArray(rec.Column(0), 0))
+}
+
+// ratDecimal128 is the big.Rat reference for parseDecimal128.
+func ratDecimal128(s string, scale int32) (decimal128.Num, bool) {
+	rat, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return decimal128.Num{}, false
+	}
+	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
+	return decimal128.FromBigInt(new(big.Int).Quo(new(big.Int).Mul(rat.Num(), pow), rat.Denom())), true
+}
+
+func TestArrowParseDecimal128(t *testing.T) {
+	rnd := rand.New(rand.NewSource(131))
+	digits := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte('0' + rnd.Intn(10))
+		}
+		return string(b)
+	}
+
+	var vals []string
+	scales := map[string]int32{}
+	add := func(s string, scale int32) { vals = append(vals, s); scales[s] = scale }
+	for p := 1; p <= 38; p++ {
+		for n := 0; n < 200; n++ {
+			s := int32(rnd.Intn(p + 1))
+			v := "0" // the int part is 0 when p == s
+			if p > int(s) {
+				v = digits(1 + rnd.Intn(p-int(s)))
+			}
+			if f := rnd.Intn(int(s) + 1); f > 0 {
+				v += "." + digits(f)
+			}
+			if rnd.Intn(2) == 0 {
+				v = "-" + v
+			}
+			add(v, s)
+		}
+		s := int32(p / 2)
+		max := strings.Repeat("9", p-int(s))
+		if s > 0 {
+			max += "." + strings.Repeat("9", int(s))
+		}
+		add(max, s)
+		add("-"+max, s)
+	}
+
+	for _, v := range vals {
+		got, ok := parseDecimal128(v, scales[v])
+		want, _ := ratDecimal128(v, scales[v])
+		if assert.True(t, ok, v) {
+			assert.Equal(t, want, got, "%s scale %d", v, scales[v])
+		}
+	}
+
+	// the edge cases: fast path or fallback, the result is the same as big.Rat
+	cases := []struct {
+		val  string
+		fast bool
+	}{
+		{"0", true}, {"-0", true}, {"-0.00000000", true}, {"+12.5", true},
+		{"0.00000001", true}, {"-0.00000001", true}, {"00012.50000000", true},
+		{"99999999999999999.99999999", true},
+		{"0.000000019", false}, // more fraction digits than the scale
+		{"1e-5", false}, {"NaN", false}, {"Infinity", false}, {"-Infinity", false},
+		{".5", false}, {"5.", false}, {"1,234.5", false}, {"$12", false}, {"", false}, {"-", false},
+		{"1.2.3", false}, {"1" + strings.Repeat("0", 30), false}, // 31 + 8 digits > 38
+	}
+	mem := memory.NewGoAllocator()
+	col := &Column{Name: "d", Type: DecimalType}
+	for _, c := range cases {
+		got, ok := parseDecimal128(c.val, 8)
+		assert.Equal(t, c.fast, ok, c.val)
+		want, wantOk := ratDecimal128(strings.ReplaceAll(strings.ReplaceAll(c.val, ",", ""), "$", ""), 8)
+		if ok {
+			assert.Equal(t, want, got, c.val)
+		}
+
+		b := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 38, Scale: 8})
+		AppendToBuilder(b, col, c.val)
+		arr := b.NewDecimal128Array()
+		assert.Equal(t, !wantOk, arr.IsNull(0), c.val)
+		if wantOk {
+			assert.Equal(t, want, arr.Value(0), c.val)
+		}
+		arr.Release()
+		b.Release()
+	}
+}
+
+func BenchmarkArrowAppendToBuilderDecimal(b *testing.B) {
+	rnd := rand.New(rand.NewSource(131))
+	vals := make([]string, 1024)
+	for i := range vals {
+		vals[i] = strconv.FormatFloat((rnd.Float64()-0.5)*1e9, 'f', 8, 64)
+	}
+	col := &Column{Name: "d", Type: DecimalType}
+	mem := memory.NewGoAllocator()
+	for _, name := range []string{"fast", "rat"} {
+		b.Run(name, func(b *testing.B) {
+			builder := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 25, Scale: 8})
+			defer builder.Release()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				v := vals[i%len(vals)]
+				if name == "rat" {
+					num, _ := ratDecimal128(v, 8)
+					builder.Append(num)
+				} else {
+					AppendToBuilder(builder, col, v)
+				}
+			}
+		})
+	}
 }

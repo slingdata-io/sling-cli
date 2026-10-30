@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"math/bits"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -921,6 +922,11 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 		b.Append(arrow.DayTimeInterval{Days: days, Milliseconds: millis})
 	case *array.Decimal128Builder:
 		valStr := cast.ToString(val)
+		if num, ok := parseDecimal128(valStr, b.Type().(*arrow.Decimal128Type).Scale); ok {
+			b.Append(num)
+			return
+		}
+
 		// Clean value (remove currency symbols, commas)
 		cleanValue := strings.ReplaceAll(strings.ReplaceAll(valStr, ",", ""), "$", "")
 
@@ -1501,6 +1507,69 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 	}
 
 	return nil
+}
+
+// parseDecimal128 parses a plain decimal text ([+-]digits[.digits]) to a
+// value with the given scale, without big.Rat. It returns false for other
+// forms (exponents, NaN, separators), for more fraction digits than scale,
+// and for more than 38 digits. The caller then uses big.Rat.
+func parseDecimal128(s string, scale int32) (decimal128.Num, bool) {
+	neg := false
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+
+	var hi, lo uint64
+	digits, intDigits, fracDigits := 0, 0, -1
+	mul10Add := func(d uint64) {
+		if hi == 0 && lo <= (math.MaxUint64-9)/10 {
+			lo = lo*10 + d
+			return
+		}
+		h, l := bits.Mul64(lo, 10)
+		l, c := bits.Add64(l, d, 0)
+		hi, lo = hi*10+h+c, l
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			if fracDigits >= 0 {
+				fracDigits++
+			} else {
+				intDigits++
+			}
+			if digits > 0 || ch != '0' {
+				digits++
+			}
+			mul10Add(uint64(ch - '0'))
+		case ch == '.' && fracDigits < 0:
+			fracDigits = 0
+		default:
+			return decimal128.Num{}, false
+		}
+	}
+
+	if fracDigits < 0 {
+		fracDigits = 0
+	} else if fracDigits == 0 {
+		return decimal128.Num{}, false
+	}
+	pad := int(scale) - fracDigits
+	if intDigits == 0 || pad < 0 || digits+pad > 38 {
+		return decimal128.Num{}, false
+	}
+	for ; pad > 0; pad-- {
+		mul10Add(0)
+	}
+
+	num := decimal128.New(int64(hi), lo)
+	if neg {
+		num = num.Negate()
+	}
+	return num, true
 }
 
 // decimal128ToString converts a Decimal128 value to its string representation
