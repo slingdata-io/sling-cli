@@ -611,6 +611,29 @@
     - 'falling back to row-based'
     - 'unsupported arrow file format'
 
+- id: 739
+  name: 'arrow lane: arrow file in the IPC stream format reads on the lane and the row path (SLING-127)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    SLING_ROW_CNT= sling conns exec "$SOURCE" "select c_int8, c_str, c_ts from $SCHEMA.arrow_src" --output arrow --limit 0 > /tmp/arrow_lane_739.arrow
+    echo "magic: $(head -c 4 /tmp/arrow_lane_739.arrow | xxd -p)"
+    sling run -d --src-stream file:///tmp/arrow_lane_739.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_739" --mode full-refresh
+    SLING_ARROW_LANE=false sling run -d --src-stream file:///tmp/arrow_lane_739.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_739" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_739"
+    rm -f /tmp/arrow_lane_739.arrow
+  output_contains:
+    - 'magic: ffffffff'
+    - 'arrow lane: enabled (file -> postgres/adbc)'
+    - 'reading datastream from /tmp/arrow_lane_739.arrow [format=arrow]'
+  output_does_not_contain:
+    - 'unsupported arrow file format'
+    - 'could not read arrow file'
+
 - id: 740
   name: 'arrow lane declines: transform that reads record.'
   group: arrow_740_file

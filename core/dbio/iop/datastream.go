@@ -2038,6 +2038,13 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 // ConsumeArrowReaderSeeker uses the provided reader to stream rows
 func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
+	// a .arrow file can have the IPC stream format (older lane output)
+	if isFile, err := IsArrowIPCFile(reader); err != nil {
+		return err
+	} else if !isFile {
+		return ds.ConsumeArrowReaderStream(reader)
+	}
+
 	selected := ds.Columns.Names()
 
 	a, err := NewArrowFileReader(reader, selected)
@@ -2104,23 +2111,52 @@ func (ds *Datastream) ConsumeArrowRecords(file *os.File, lane ArrowLane) (err er
 	return
 }
 
-// ArrowIPCFileSchema returns the schema of an Arrow IPC file from its footer
-// and rewinds the file, so the same handle can be read afterwards. Only the
-// footer is read.
+// ArrowIPCFileSchema returns the schema of an Arrow IPC file and rewinds the
+// file, so the same handle can be read afterwards. The file format gives the
+// footer schema. The stream format (older lane output) gives the schema
+// message at the start.
 func ArrowIPCFileSchema(file *os.File) (schema *arrow.Schema, err error) {
-	reader, err := ipc.NewFileReader(file)
+	isFile, err := IsArrowIPCFile(file)
 	if err != nil {
-		return nil, g.Error(err, "could not read arrow file footer")
+		return nil, err
 	}
 
-	schema = reader.Schema()
-	reader.Close()
+	if isFile {
+		reader, err := ipc.NewFileReader(file)
+		if err != nil {
+			return nil, g.Error(err, "could not read arrow file footer")
+		}
+		schema = reader.Schema()
+		reader.Close()
+	} else {
+		reader, err := ipc.NewReader(file)
+		if err != nil {
+			return nil, g.Error(err, "could not read arrow stream schema")
+		}
+		schema = reader.Schema()
+		reader.Release()
+	}
 
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return nil, g.Error(err, "could not rewind arrow file")
 	}
 
 	return schema, nil
+}
+
+// IsArrowIPCFile reports whether the file has the magic bytes of the Arrow
+// IPC file format (ARROW1). It is false for the IPC stream format. The file
+// is rewound.
+func IsArrowIPCFile(file *os.File) (bool, error) {
+	magic := make([]byte, 6)
+	n, err := io.ReadFull(file, magic)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return false, g.Error(err, "could not read arrow file magic")
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return false, g.Error(err, "could not rewind arrow file")
+	}
+	return n == 6 && string(magic) == "ARROW1", nil
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
@@ -3571,9 +3607,9 @@ func (ds *Datastream) NewArrowRecordChnl(sc StreamConfig) (readerChn chan *Batch
 			readerChn <- br
 
 			var err error
-			// the pipe is not seekable, so the IPC stream format is the one
-			// that works here (the file format needs WriteAt for its footer)
-			aw, err = NewArrowStreamWriter(pipeW, ds.Columns)
+			// the IPC file format, as the row path writes: the file writer
+			// counts its own offsets, so a pipe is enough for the footer
+			aw, err = NewArrowWriter(pipeW, ds.Columns)
 			if err != nil {
 				return g.Error(err, "could not create arrow writer")
 			}

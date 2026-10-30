@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -562,4 +563,87 @@ func TestArrowWriterTimeColumn(t *testing.T) {
 		require.NoError(t, aw.WriteRow([]any{nil}))
 		require.NoError(t, aw.Close())
 	}
+}
+
+// TestArrowIPCFormats checks that a .arrow file reads back in both IPC
+// formats: the file format (ARROW1) that sling writes, and the stream format
+// of older lane output.
+func TestArrowIPCFormats(t *testing.T) {
+	columns := Columns{
+		{Name: "id", Type: BigIntType, Position: 1},
+		{Name: "name", Type: StringType, Position: 2},
+	}
+	rows := [][]any{{int64(1), "a"}, {int64(2), nil}, {int64(3), "c"}}
+
+	writers := map[string]func(w io.Writer, cols Columns) (*ArrowWriter, error){
+		"file":   func(w io.Writer, cols Columns) (*ArrowWriter, error) { return NewArrowWriter(w, cols) },
+		"stream": func(w io.Writer, cols Columns) (*ArrowWriter, error) { return NewArrowStreamWriter(w, cols) },
+	}
+
+	for name, newWriter := range writers {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "data.arrow")
+			file, err := os.Create(path)
+			require.NoError(t, err)
+			aw, err := newWriter(file, columns.Clone())
+			require.NoError(t, err)
+			for _, row := range rows {
+				require.NoError(t, aw.WriteRow(row))
+			}
+			require.NoError(t, aw.Close())
+			require.NoError(t, file.Close())
+
+			file, err = os.Open(path)
+			require.NoError(t, err)
+			defer file.Close()
+
+			isFile, err := IsArrowIPCFile(file)
+			require.NoError(t, err)
+			assert.Equal(t, name == "file", isFile)
+
+			schema, err := ArrowIPCFileSchema(file)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"id", "name"}, []string{schema.Field(0).Name, schema.Field(1).Name})
+			pos, err := file.Seek(0, io.SeekCurrent)
+			require.NoError(t, err)
+			assert.Zero(t, pos, "the schema read rewinds the file")
+
+			ds := NewDatastreamContext(context.Background(), nil)
+			require.NoError(t, ds.ConsumeArrowReaderSeeker(file))
+			data, err := ds.Collect(0)
+			require.NoError(t, err)
+			assert.Equal(t, rows, data.Rows)
+		})
+	}
+}
+
+// TestArrowRecordChnlWritesIPCFile checks that the lane file writer writes
+// the IPC file format, as the row path does.
+func TestArrowRecordChnlWritesIPCFile(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { alloc.AssertSize(t, 0) })
+
+	schema := dsArrowTestSchema()
+	path := cdcArrowTestFile(t, alloc, schema, [][][]any{{{int64(1), "a"}, {int64(2), nil}}})
+	file, err := os.Open(path)
+	require.NoError(t, err)
+
+	ds := NewDatastreamContext(context.Background(), ArrowSchemaToColumns(schema))
+	require.NoError(t, ds.ConsumeArrowRecords(file, &openFakeLane{alloc: alloc}))
+
+	var out []byte
+	for br := range ds.NewArrowRecordChnl(StreamConfig{}) {
+		data, err := io.ReadAll(br.Reader)
+		require.NoError(t, err)
+		out = append(out, data...)
+	}
+	ds.Close()
+
+	require.Greater(t, len(out), 6)
+	assert.Equal(t, "ARROW1", string(out[:6]))
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer reader.Close()
+	assert.Equal(t, 1, reader.NumRecords())
 }
