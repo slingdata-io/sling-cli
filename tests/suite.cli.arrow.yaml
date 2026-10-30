@@ -701,6 +701,19 @@
   output_does_not_contain:
     - 'with 4 readers'
 
+# The lane declines an unconstrained numeric: no decimal128 type holds all of
+# its values (SLING-125). The run takes the row path.
+- id: 762
+  name: 'arrow lane declines: unconstrained numeric'
+  run: |
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst; create table public.arrow_762_src (id int, d numeric); insert into public.arrow_762_src values (1, 1.5), (2, -2.25)"
+    sling run -d --src-conn POSTGRES_ADBC --src-stream public.arrow_762_src --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_762_dst --mode full-refresh
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'matched_' || count(*) as res from public.arrow_762_src s join public.arrow_762_dst t on t.id = s.id and t.d = s.d"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst"
+  output_contains:
+    - 'falling back to row-based processing for stream "public.arrow_762_src". Reason: decimal column "d" has no precision from 1 to 38'
+    - 'matched_2'
+
 - id: 740
   name: 'arrow lane declines: transform that reads record.'
   group: arrow_740_file
@@ -1256,7 +1269,7 @@
   name: 'arrow lane: postgres numeric and jsonb keep their types and values'
   run: |
     sling conns exec POSTGRES "drop table if exists public.arrow_790"
-    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, -0.5::numeric as c_dec2, null::numeric as c_dec3, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_790 --mode full-refresh
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, (-0.5)::numeric(10,1) as c_dec2, null::numeric(10,2) as c_dec3, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_790 --mode full-refresh
     sling conns exec POSTGRES "select 'res=' || c_dec::text || '|' || c_dec2::text || '|' || (c_dec3 is null)::text || '|' || (c_json->>'a') || '|' || pg_typeof(c_json)::text as res from public.arrow_790"
     sling conns exec POSTGRES "drop table if exists public.arrow_790"
   output_contains:
