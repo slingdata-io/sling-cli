@@ -139,8 +139,8 @@ func (cfg *Config) SetDefault() {
 			}
 		}
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
-		// the ADBC driver writes typed decimals, the cap is for the native driver
-		if !cast.ToBool(cfg.TgtConn.Data["use_adbc"]) {
+		// the ClickHouse drivers keep all decimals, the cap is for Proton
+		if cfg.TgtConn.Type == dbio.TypeDbProton {
 			cfg.Source.Options.MaxDecimals = g.Int(11)
 			cfg.Target.Options.MaxDecimals = g.Int(11)
 		}

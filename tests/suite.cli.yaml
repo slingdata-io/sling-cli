@@ -3660,3 +3660,16 @@
   err: true
   output_contains:
     - 'of column d does not fit decimal(38,20)'
+
+# The native ClickHouse driver cut decimals to 11 digits (max_decimals 11):
+# 1.123456789012345 became 1.12345678901 (SLING-137).
+# Uses CLICKHOUSE_MINI: the local CLICKHOUSE has no numeric_precision in system.columns.
+- id: 838
+  name: 'Postgres to native ClickHouse keeps all decimals of an unconstrained numeric'
+  run: |
+    sling run --src-conn POSTGRES --src-stream "select 1 as id, 1.123456789012345::numeric as d union all select 2, -99999999999999.000000000000001" --tgt-conn CLICKHOUSE_MINI --tgt-object default.sling_838_dec --mode full-refresh
+    sling conns exec CLICKHOUSE_MINI -o csv "select id, toString(d) as dv from default.sling_838_dec order by id"
+    sling conns exec CLICKHOUSE_MINI "drop table if exists default.sling_838_dec"
+  output_contains:
+    - '1,1.123456789012345'
+    - '2,-99999999999999.000000000000001'
