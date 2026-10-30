@@ -152,6 +152,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// make them return hex WKB so duckdb can parse them at export
 	selectFields = sTable.GeometryWKBFields(selectFields)
 
+	// a true condition that the lane makes a ctid range for each reader
+	scanCond := t.parallelScanCond(sTable, srcConn)
+	where := cfg.Source.Where
+
 	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"
@@ -244,7 +248,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				srcConn.GetTemplateValue(key),
 				"fields", strings.Join(sFields, ", "),
 				"table", sTable.FDQN(),
-				"incremental_where_cond", incrementalWhereCond,
+				"incremental_where_cond", lo.Ternary(scanCond == "", incrementalWhereCond, "("+incrementalWhereCond+") and "+scanCond),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"incremental_value", cfg.IncrementalValStr,
 				"table_name", sTable.Name,
@@ -274,6 +278,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			"incremental_value", cfg.IncrementalValStr,
 		)
+		where = cfg.Source.Where
+	} else if scanCond != "" {
+		where = lo.Ternary(where == "", scanCond, "("+where+") and "+scanCond)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
@@ -304,10 +311,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// For definition-only mode, inject WHERE 1=0 to avoid reading data
 	if cfg.Mode == DefinitionOnlyMode {
 		cfg.Source.Where = "1=0"
+		where = cfg.Source.Where
 	}
 
 	// construct select statement for selected fields or where condition
-	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
+	if len(selectFields) > 1 || selectFields[0] != "*" || where != "" || cfg.Source.Limit() > 0 {
 		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() && !strings.Contains(sTable.SQL, "{fields}") {
 			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
 			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.
@@ -316,7 +324,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		sTable.SQL = sTable.Select(database.SelectOptions{
 			Fields: selectFields,
-			Where:  cfg.Source.Where,
+			Where:  where,
 			Limit:  lo.Ternary(cfg.Source.Limit() > 0, g.Ptr(cfg.Source.Limit()), nil),
 			Offset: cfg.Source.Offset(),
 		})
@@ -346,6 +354,38 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	setStage("3 - dataflow-stream")
 
 	return
+}
+
+// parallelScanCond returns the condition that marks a Postgres table read for
+// a parallel scan on the arrow lane, or an empty string. The condition is true,
+// so a read that does not split it reads all the rows.
+func (t *TaskExecution) parallelScanCond(sTable database.Table, srcConn database.Connection) string {
+	cfg := t.Config
+	n := 0
+	if cfg.Source.Options != nil {
+		n = g.PtrVal(cfg.Source.Options.ParallelScan)
+	}
+	if n <= 1 {
+		return ""
+	}
+
+	reason := ""
+	switch {
+	case srcConn.GetType() != dbio.TypeDbPostgres:
+		reason = "the source is not postgres"
+	case sTable.IsQuery():
+		reason = "the stream is a custom SQL query"
+	case cfg.Source.Limit() > 0 || cfg.Source.Offset() > 0:
+		reason = "the stream has a limit or an offset"
+	case srcConn.GetProp("arrow_lane") != "candidate":
+		reason = "the stream reads on the row path, not the arrow lane"
+	}
+	if reason != "" {
+		g.Info("parallel_scan has no effect on stream %s: %s", cfg.StreamName, reason)
+		return ""
+	}
+
+	return database.ParallelScanCond(n)
 }
 
 // ReadFromFile reads from a source file. tgtConn is the live target

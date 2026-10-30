@@ -356,12 +356,24 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	return strings.TrimSpace(ddl), nil
 }
 
+// ParallelScanCond is a true condition that marks a table read for a parallel
+// scan with n readers. The lane changes it to a ctid range for each reader.
+func ParallelScanCond(n int) string {
+	return g.F("1=1 /* sling_parallel_scan=%d */", n)
+}
+
+// postgresLaneExportHook is set by the closed database_postgres_arrow..go. The
+// stub reads through the ADBC driver with one reader.
+var postgresLaneExportHook = func(conn *PostgresConn, adbcConn *ArrowDBConn, table Table) (*iop.Datastream, error) {
+	return adbcConn.laneExportStream(table.Select(), table.Columns)
+}
+
 // BulkExportStream uses the bulk dumping (COPY)
 func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	// Arrow lane: read through ADBC when the gate marked this connection. A
 	// stage 2 decline reads with the native driver.
 	if adbcConn, ok := conn.BaseConn.arrowLaneReader(); ok {
-		ds, err = adbcConn.laneExportStream(table.Select(), table.Columns)
+		ds, err = postgresLaneExportHook(conn, adbcConn, table)
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}

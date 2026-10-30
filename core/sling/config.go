@@ -1812,6 +1812,7 @@ type SourceOptions struct {
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 	ChunkCount     *int                `json:"chunk_count,omitempty" yaml:"chunk_count,omitempty"`
 	ChunkExpr      *string             `json:"chunk_expr,omitempty" yaml:"chunk_expr,omitempty"`
+	ParallelScan   *int                `json:"parallel_scan,omitempty" yaml:"parallel_scan,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	// columns & transforms were moved out of source_options
@@ -2144,6 +2145,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.ChunkCount == nil {
 		o.ChunkCount = sourceOptions.ChunkCount
+	}
+	if o.ParallelScan == nil {
+		o.ParallelScan = sourceOptions.ParallelScan
 	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = sourceOptions.DatetimeFormat

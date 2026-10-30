@@ -1307,6 +1307,16 @@ func (conn *ArrowDBConn) setStreamProps(ds *iop.Datastream, sql string) {
 // pushes records into a RecordStream and the sink pulls them. No []any row is
 // built and no string is cloned.
 func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbcLaneRead, reader array.RecordReader, closeReader func(), maxCol int) *iop.Datastream {
+	// a reader with many sources changes the records in its own goroutines
+	toLane := laneRead.Record
+	if tr, ok := reader.(laneRecordTransformer); ok {
+		tr.SetRecordTransform(laneRead.Record)
+		toLane = func(rec arrow.RecordBatch) (arrow.RecordBatch, error) {
+			rec.Retain()
+			return rec, nil
+		}
+	}
+
 	rs := iop.NewRecordStream(queryContext, conn.lane, laneRead.schema, iop.ArrowLaneBuffer)
 	rs.Columns = laneRead.columns // the labels, which the plain schema does not carry
 	if maxCol >= 0 {
@@ -1322,7 +1332,7 @@ func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbc
 		for reader.Next() {
 			// the reader owns its record until the next Next, so the stream
 			// gets its own reference
-			record, err := laneRead.Record(reader.Record())
+			record, err := toLane(reader.Record())
 			if err != nil {
 				rs.Close(err)
 				return
@@ -1343,6 +1353,13 @@ func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbc
 	}()
 
 	return ds
+}
+
+// laneRecordTransformer is a record reader that changes each record to the
+// lane schema itself. fn returns a record that the caller owns. The reader
+// calls fn before Next returns the record.
+type laneRecordTransformer interface {
+	SetRecordTransform(fn func(arrow.RecordBatch) (arrow.RecordBatch, error))
 }
 
 // setArrowLaneTransforms hands the source transforms to the record stream, so
