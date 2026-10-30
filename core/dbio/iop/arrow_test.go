@@ -661,7 +661,7 @@ func TestColumnsFileDecimals(t *testing.T) {
 	out := cols.FileDecimals()
 	assert.Equal(t, [2]int{38, 15}, [2]int{out[0].DbPrecision, out[0].DbScale})
 	assert.Equal(t, [2]int{25, 8}, [2]int{out[1].DbPrecision, out[1].DbScale})
-	assert.Equal(t, [2]int{env.DdlMinDecLength, env.DdlMinDecScale}, [2]int{out[2].DbPrecision, out[2].DbScale})
+	assert.Equal(t, [2]int{10, 2}, [2]int{out[2].DbPrecision, out[2].DbScale})
 	assert.Equal(t, [2]int{50, 10}, [2]int{out[3].DbPrecision, out[3].DbScale})
 	assert.Equal(t, 23, cols[0].DbPrecision, "the input columns do not change")
 

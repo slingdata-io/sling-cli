@@ -476,8 +476,8 @@ func (cols Columns) IsDummy() bool {
 func (cols Columns) FileDecimals() Columns {
 	cols = cols.Clone()
 	for i, col := range cols {
-		if !col.IsDecimal() {
-			continue
+		if !col.IsDecimal() || (col.Sourced && col.DbPrecision > 0) {
+			continue // the source DDL gives the type, and Arrow lane records keep it
 		}
 		if !col.Sourced {
 			cols[i].DbPrecision = max(col.DbPrecision, env.DdlMaxDecLength)
