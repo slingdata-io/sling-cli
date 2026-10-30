@@ -703,6 +703,7 @@ native_type_map:
   bigint: bigint
   binary: binary
   boolean: bool
+  byte: smallint
   date: date
   decimal: decimal
   double: float
@@ -712,6 +713,7 @@ native_type_map:
   long: bigint
   map: json
   object: json
+  short: smallint
   smallint: smallint
   string: text
   struct: json
