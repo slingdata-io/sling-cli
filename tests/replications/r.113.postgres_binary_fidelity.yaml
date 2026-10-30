@@ -1,5 +1,5 @@
 # Test Postgres binary fidelity (bytea -> bytea)
-# Ensures binary values (PDF bytes, full byte range, large payloads, NULL) survive
+# Ensures binary values (PDF bytes, full byte range, large payloads, empty, NULL) survive
 # replication byte-for-byte and the destination column stays bytea.
 
 source: POSTGRES
@@ -23,7 +23,8 @@ hooks:
         (1, decode('25504446312D312E340AE2E3CFD30A312030206F626A0A00FF00FE0A2554697465','hex')),
         (2, decode('000102030405060708090A0B0C0D0E0FFEFFFDFC2C220A0D5C4E','hex')),
         (3, decode(repeat('DEADBEEF', 32768), 'hex')),
-        (4, NULL);
+        (4, NULL),
+        (5, '');
 
     - type: query
       connection: '{target.name}'
@@ -88,6 +89,15 @@ hooks:
     - type: check
       check: int_parse(store.null_count[0].cnt) == 1
       failure_message: "NULL bytea not preserved (got {store.null_count[0].cnt} nulls)"
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM public.binary_dest WHERE id = 5 AND cert_blob = ''::bytea
+      into: empty_count
+
+    - type: check
+      check: int_parse(store.empty_count[0].cnt) == 1
+      failure_message: "empty bytea not preserved"
 
     - type: log
       message: "SUCCESS: Postgres binary fidelity test passed"

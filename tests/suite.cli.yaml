@@ -2372,7 +2372,7 @@
   name: 'Test Postgres binary fidelity'
   run: 'sling run -d -r tests/replications/r.113.postgres_binary_fidelity.yaml'
   streams: 1
-  rows: 4
+  rows: 5
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: Postgres binary fidelity test passed'

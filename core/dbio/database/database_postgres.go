@@ -442,10 +442,17 @@ func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, r
 	}
 
 	binary := true
-	for _, field := range sd.Fields {
+	for i, field := range sd.Fields {
+		if field.DataTypeOID == pgtype.ByteaOID {
+			// pgx encodes only []byte into bytea (an empty binary value is a string)
+			for _, row := range rows {
+				if s, ok := row[i].(string); ok {
+					row[i] = []byte(s)
+				}
+			}
+		}
 		if t, ok := c.TypeMap().TypeForOID(field.DataTypeOID); !ok || !t.Codec.FormatSupported(pgx.BinaryFormatCode) {
 			binary = false
-			break
 		}
 	}
 	if binary {
