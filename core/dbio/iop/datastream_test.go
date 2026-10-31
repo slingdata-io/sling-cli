@@ -116,6 +116,21 @@ func TestBWConsumerChangesRows(t *testing.T) {
 	assert.Equal(t, want, ds.Bytes.Load())
 }
 
+// TestDataflowBufferAfterClose checks that a small stream which closes before
+// the dataflow takes it still gives its buffer to the dataflow.
+func TestDataflowBufferAfterClose(t *testing.T) {
+	columns := NewColumnsFromFields("a")
+	ds := NewDatastream(columns)
+	ds.Buffer = [][]any{{"1"}, {"2"}, {"3"}}
+	ds.SetReady()
+	ds.Close()
+	require.Nil(t, ds.Buffer)
+
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+	assert.Len(t, df.Buffer, 3)
+}
+
 func TestEncodeRowAsJSONObject(t *testing.T) {
 	stringCol := func(name string) Column { return Column{Name: name, Type: StringType} }
 	jsonCol := func(name string) Column { return Column{Name: name, Type: JsonType} }

@@ -71,6 +71,7 @@ type Datastream struct {
 	bwClosed      bool
 	bwOn          bool // SLING_PROCESS_BW
 	readyChn      chan struct{}
+	readyBuffer   [][]any // the Buffer at SetReady: Close can clear Buffer before the dataflow reads it
 	schemaChgChan chan schemaChg
 	bwCsv         *csv.Writer // for correct byte written
 	ID            string
@@ -457,6 +458,7 @@ func (ds *Datastream) DrainReprocess() []any {
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {
 		ds.Ready = true
+		ds.readyBuffer = ds.Buffer
 		go func() { ds.readyChn <- struct{}{} }()
 	}
 }
