@@ -3846,3 +3846,17 @@ func TestD1StreamRowsPaged(t *testing.T) {
 		})
 	}
 }
+
+func TestCastColumnsForSelectIntegerToString(t *testing.T) {
+	conn, err := NewConn("redshift://user:pass@localhost:5439/db")
+	g.AssertNoError(t, err)
+
+	srcColumns := iop.Columns{{Name: "flag", Type: iop.IntegerType, DbType: "bigint"}}
+	tgtColumns := iop.Columns{{Name: "flag", Type: iop.StringType, DbType: "varchar"}}
+
+	srcFields := conn.CastColumnsForSelect(srcColumns, tgtColumns)
+	assert.Len(t, srcFields, 1)
+	assert.NotContains(t, srcFields[0], "'true'")
+	assert.NotContains(t, srcFields[0], "'false'")
+	assert.Equal(t, `cast("flag" as varchar(100)) as "flag"`, srcFields[0])
+}
