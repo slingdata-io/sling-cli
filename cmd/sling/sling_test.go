@@ -94,6 +94,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("ducklake_s3"):     {name: "ducklake_s3", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbExasol:            {name: "exasol", schema: "public"},
+	dbio.TypeDbHana:              {name: "hana", schema: "sling_test"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
@@ -1081,6 +1082,20 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in exasol
 				}
+			case tgtType == dbio.TypeDbHana:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // hana has no time zone type
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using nclob for json in hana
+				}
+			case srcType == dbio.TypeDbHana && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // hana has no time zone type
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using nclob for json in hana
+				}
 			case tgtType == dbio.TypeDbFabric:
 				if correctType == iop.TimestampzType || correctType == iop.TimestampType {
 					correctType = iop.DatetimeType // fabric uses datetime
@@ -1210,6 +1225,11 @@ func TestSuiteDatabaseExasol(t *testing.T) {
 	t.Skip() // FIXME: cannot drop table, cannot create view without auto-commit
 	t.Parallel()
 	testSuite(t, dbio.TypeDbExasol)
+}
+
+func TestSuiteDatabaseHana(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbHana)
 }
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {

@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"maps"
 	"os"
 	"path"
 	"sync"
@@ -72,8 +73,20 @@ func (rs *ReplicationState) rlock() {
 
 func (rs *ReplicationState) runlock() { rs.mu.RUnlock() }
 
+// GetStore returns a copy of the store, safe to read without the lock.
 func (rs *ReplicationState) GetStore() map[string]any {
-	return rs.Store
+	rs.rlock()
+	defer rs.runlock()
+	return maps.Clone(rs.Store)
+}
+
+func (rs *ReplicationState) MergeStore(store map[string]any) {
+	rs.lock()
+	defer rs.unlock()
+	if rs.Store == nil {
+		rs.Store = map[string]any{}
+	}
+	maps.Copy(rs.Store, store)
 }
 
 func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {

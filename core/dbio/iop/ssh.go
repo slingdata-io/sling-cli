@@ -474,6 +474,10 @@ func OpenTunnelSSH(tgtHost string, tgtPort int, tunnelURL, privateKey, passphras
 
 	sshU, err := url.Parse(tunnelURL)
 	if err != nil {
+		// url.Error embeds the raw URL, which can hold the password
+		if uErr, ok := err.(*url.Error); ok {
+			err = uErr.Err
+		}
 		return 0, g.Error(err, "could not parse SSH_TUNNEL URL")
 	}
 

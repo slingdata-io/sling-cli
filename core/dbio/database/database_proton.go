@@ -183,7 +183,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				var eG g.ErrorGroup
 
 				// set decimals correctly

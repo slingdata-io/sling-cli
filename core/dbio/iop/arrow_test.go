@@ -4,16 +4,23 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math/big"
+	"math/rand"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/extensions"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -396,6 +403,54 @@ func TestArrowAppendToBuilderTimeOfDay(t *testing.T) {
 	assert.True(t, arr.IsNull(2), "nil should append null")
 }
 
+func TestArrowColumnsToArrowSchemaDecimal(t *testing.T) {
+	cases := []struct {
+		col  Column
+		want arrow.DataType
+	}{
+		{Column{Name: "a", Type: DecimalType, DbPrecision: 25, DbScale: 8}, &arrow.Decimal128Type{Precision: 25, Scale: 8}},
+		{Column{Name: "b", Type: DecimalType, DbPrecision: 10, DbScale: 0}, &arrow.Decimal128Type{Precision: 10, Scale: 0}},
+		{Column{Name: "c", Type: DecimalType}, &arrow.Decimal128Type{Precision: int32(env.DdlMinDecLength), Scale: int32(env.DdlMinDecScale)}},
+		{Column{Name: "d", Type: DecimalType, DbPrecision: 50, DbScale: 10}, &arrow.Decimal256Type{Precision: 50, Scale: 10}},
+	}
+	for _, c := range cases {
+		got := ColumnsToArrowSchema(Columns{c.col}).Field(0).Type
+		assert.Equal(t, c.want, got, c.col.Name)
+	}
+}
+
+// the builder type gives the scale, not the column, and the value is cut
+// toward zero
+func TestArrowAppendToBuilderDecimal(t *testing.T) {
+	col := &Column{Name: "d", Type: DecimalType} // no scale on the column
+	mem := memory.NewGoAllocator()
+
+	b128 := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 25, Scale: 8})
+	defer b128.Release()
+	for _, v := range []any{"12345678901234567.12345678", "-0.000000019", "0.000000019", "abc"} {
+		AppendToBuilder(b128, col, v)
+	}
+	arr128 := b128.NewDecimal128Array()
+	defer arr128.Release()
+	assert.Equal(t, decimal128.FromBigInt(bigInt(t, "1234567890123456712345678")), arr128.Value(0))
+	assert.Equal(t, decimal128.FromI64(-1), arr128.Value(1))
+	assert.Equal(t, decimal128.FromI64(1), arr128.Value(2))
+	assert.True(t, arr128.IsNull(3))
+
+	b256 := array.NewDecimal256Builder(mem, &arrow.Decimal256Type{Precision: 50, Scale: 10})
+	defer b256.Release()
+	AppendToBuilder(b256, col, "1234567890123456789012345678901234567890.0123456789")
+	arr256 := b256.NewDecimal256Array()
+	defer arr256.Release()
+	assert.Equal(t, "1234567890123456789012345678901234567890.0123456789", decimal256ToString(arr256.Value(0), 50, 10))
+}
+
+func bigInt(t *testing.T, s string) *big.Int {
+	v, ok := new(big.Int).SetString(s, 10)
+	require.True(t, ok)
+	return v
+}
+
 func TestArrowParseTimeOfDayE(t *testing.T) {
 	for _, s := range []string{"08:30:00.0000000", "08:30:00", "08:30"} {
 		tVal, err := parseTimeOfDayE(s)
@@ -510,5 +565,276 @@ func TestArrowWriterTimeColumn(t *testing.T) {
 		require.NoError(t, aw.WriteRow([]any{"08:30:00"}))
 		require.NoError(t, aw.WriteRow([]any{nil}))
 		require.NoError(t, aw.Close())
+	}
+}
+
+// TestArrowIPCFormats checks that a .arrow file reads back in both IPC
+// formats: the file format (ARROW1) that sling writes, and the stream format
+// of older lane output.
+func TestArrowIPCFormats(t *testing.T) {
+	columns := Columns{
+		{Name: "id", Type: BigIntType, Position: 1},
+		{Name: "name", Type: StringType, Position: 2},
+	}
+	rows := [][]any{{int64(1), "a"}, {int64(2), nil}, {int64(3), "c"}}
+
+	writers := map[string]func(w io.Writer, cols Columns) (*ArrowWriter, error){
+		"file":   func(w io.Writer, cols Columns) (*ArrowWriter, error) { return NewArrowWriter(w, cols) },
+		"stream": func(w io.Writer, cols Columns) (*ArrowWriter, error) { return NewArrowStreamWriter(w, cols) },
+	}
+
+	for name, newWriter := range writers {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "data.arrow")
+			file, err := os.Create(path)
+			require.NoError(t, err)
+			aw, err := newWriter(file, columns.Clone())
+			require.NoError(t, err)
+			for _, row := range rows {
+				require.NoError(t, aw.WriteRow(row))
+			}
+			require.NoError(t, aw.Close())
+			require.NoError(t, file.Close())
+
+			file, err = os.Open(path)
+			require.NoError(t, err)
+			defer file.Close()
+
+			isFile, err := IsArrowIPCFile(file)
+			require.NoError(t, err)
+			assert.Equal(t, name == "file", isFile)
+
+			schema, err := ArrowIPCFileSchema(file)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"id", "name"}, []string{schema.Field(0).Name, schema.Field(1).Name})
+			pos, err := file.Seek(0, io.SeekCurrent)
+			require.NoError(t, err)
+			assert.Zero(t, pos, "the schema read rewinds the file")
+
+			ds := NewDatastreamContext(context.Background(), nil)
+			require.NoError(t, ds.ConsumeArrowReaderSeeker(file))
+			data, err := ds.Collect(0)
+			require.NoError(t, err)
+			assert.Equal(t, rows, data.Rows)
+		})
+	}
+}
+
+// TestArrowRecordChnlWritesIPCFile checks that the lane file writer writes
+// the IPC file format, as the row path does.
+func TestArrowRecordChnlWritesIPCFile(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	t.Cleanup(func() { alloc.AssertSize(t, 0) })
+
+	schema := dsArrowTestSchema()
+	path := cdcArrowTestFile(t, alloc, schema, [][][]any{{{int64(1), "a"}, {int64(2), nil}}})
+	file, err := os.Open(path)
+	require.NoError(t, err)
+
+	ds := NewDatastreamContext(context.Background(), ArrowSchemaToColumns(schema))
+	require.NoError(t, ds.ConsumeArrowRecords(file, &openFakeLane{alloc: alloc}))
+
+	var out []byte
+	for br := range ds.NewArrowRecordChnl(StreamConfig{}) {
+		data, err := io.ReadAll(br.Reader)
+		require.NoError(t, err)
+		out = append(out, data...)
+	}
+	ds.Close()
+
+	require.Greater(t, len(out), 6)
+	assert.Equal(t, "ARROW1", string(out[:6]))
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer reader.Close()
+	assert.Equal(t, 1, reader.NumRecords())
+}
+
+// a decimal precision that is not from the source DDL gets the max, so that
+// later rows fit (SLING-135)
+func TestColumnsFileDecimals(t *testing.T) {
+	cols := Columns{
+		{Name: "unsourced", Type: DecimalType, DbPrecision: 23, DbScale: 15},
+		{Name: "sourced", Type: DecimalType, DbPrecision: 25, DbScale: 8, Sourced: true},
+		{Name: "small", Type: DecimalType, DbPrecision: 10, DbScale: 2, Sourced: true},
+		{Name: "wide", Type: DecimalType, DbPrecision: 50, DbScale: 10, Sourced: true},
+		{Name: "s", Type: StringType},
+	}
+	out := cols.FileDecimals()
+	assert.Equal(t, [2]int{38, 15}, [2]int{out[0].DbPrecision, out[0].DbScale})
+	assert.Equal(t, [2]int{25, 8}, [2]int{out[1].DbPrecision, out[1].DbScale})
+	assert.Equal(t, [2]int{10, 2}, [2]int{out[2].DbPrecision, out[2].DbScale})
+	assert.Equal(t, [2]int{50, 10}, [2]int{out[3].DbPrecision, out[3].DbScale})
+	assert.Equal(t, 23, cols[0].DbPrecision, "the input columns do not change")
+
+	asString, wide := out.DecimalsAsString(38)
+	assert.Equal(t, []string{"wide (decimal(50,10))"}, wide)
+	assert.Equal(t, StringType, asString[3].Type)
+	assert.Equal(t, DecimalType, asString[0].Type)
+	assert.Equal(t, DecimalType, out[3].Type, "the input columns do not change")
+}
+
+func TestArrowDecimalIntDigits(t *testing.T) {
+	cases := map[string]int{
+		"0":                       0,
+		"0.5":                     0,
+		"-0.000001":               0,
+		"123.45":                  3,
+		"-99999999999999999999.5": 20,
+		"+007.1":                  1,
+		"$1,234.5":                4,
+		"1e21":                    22,
+		"-1.5E3":                  4,
+		"NaN":                     0,
+		"Infinity":                0,
+	}
+	for val, want := range cases {
+		assert.Equal(t, want, decimalIntDigits(val), val)
+	}
+}
+
+// a value with more integer digits than the Arrow type holds is an error,
+// not a value that is not valid (SLING-135)
+func TestArrowWriterDecimalOverflow(t *testing.T) {
+	// precision from the source: the value does not fit
+	columns := Columns{{Name: "d", Type: DecimalType, DbPrecision: 25, DbScale: 8, Sourced: true}}
+	aw, err := NewArrowWriter(&bytes.Buffer{}, columns)
+	require.NoError(t, err)
+	require.NoError(t, aw.WriteRow([]any{"99999999999999999.12345678"}))
+	err = aw.WriteRow([]any{"999999999999999999.5"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not fit decimal(25,8)")
+
+	// precision from the first rows: the max precision holds the value
+	columns = Columns{{Name: "d", Type: DecimalType, DbPrecision: 23, DbScale: 15}}
+	var buf bytes.Buffer
+	aw, err = NewArrowWriter(&buf, columns)
+	require.NoError(t, err)
+	require.NoError(t, aw.WriteRow([]any{"-99999999999999999999.5"}))
+	require.NoError(t, aw.Close())
+
+	reader, err := ipc.NewFileReader(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	defer reader.Close()
+	rec, err := reader.Record(0)
+	require.NoError(t, err)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 15}, rec.Schema().Field(0).Type)
+	assert.Equal(t, "-99999999999999999999.500000000000000", GetValueFromArrowArray(rec.Column(0), 0))
+}
+
+// ratDecimal128 is the big.Rat reference for parseDecimal128.
+func ratDecimal128(s string, scale int32) (decimal128.Num, bool) {
+	rat, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return decimal128.Num{}, false
+	}
+	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
+	return decimal128.FromBigInt(new(big.Int).Quo(new(big.Int).Mul(rat.Num(), pow), rat.Denom())), true
+}
+
+func TestArrowParseDecimal128(t *testing.T) {
+	rnd := rand.New(rand.NewSource(131))
+	digits := func(n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte('0' + rnd.Intn(10))
+		}
+		return string(b)
+	}
+
+	var vals []string
+	scales := map[string]int32{}
+	add := func(s string, scale int32) { vals = append(vals, s); scales[s] = scale }
+	for p := 1; p <= 38; p++ {
+		for n := 0; n < 200; n++ {
+			s := int32(rnd.Intn(p + 1))
+			v := "0" // the int part is 0 when p == s
+			if p > int(s) {
+				v = digits(1 + rnd.Intn(p-int(s)))
+			}
+			if f := rnd.Intn(int(s) + 1); f > 0 {
+				v += "." + digits(f)
+			}
+			if rnd.Intn(2) == 0 {
+				v = "-" + v
+			}
+			add(v, s)
+		}
+		s := int32(p / 2)
+		max := strings.Repeat("9", p-int(s))
+		if s > 0 {
+			max += "." + strings.Repeat("9", int(s))
+		}
+		add(max, s)
+		add("-"+max, s)
+	}
+
+	for _, v := range vals {
+		got, ok := parseDecimal128(v, scales[v])
+		want, _ := ratDecimal128(v, scales[v])
+		if assert.True(t, ok, v) {
+			assert.Equal(t, want, got, "%s scale %d", v, scales[v])
+		}
+	}
+
+	// the edge cases: fast path or fallback, the result is the same as big.Rat
+	cases := []struct {
+		val  string
+		fast bool
+	}{
+		{"0", true}, {"-0", true}, {"-0.00000000", true}, {"+12.5", true},
+		{"0.00000001", true}, {"-0.00000001", true}, {"00012.50000000", true},
+		{"99999999999999999.99999999", true},
+		{"0.000000019", false}, // more fraction digits than the scale
+		{"1e-5", false}, {"NaN", false}, {"Infinity", false}, {"-Infinity", false},
+		{".5", false}, {"5.", false}, {"1,234.5", false}, {"$12", false}, {"", false}, {"-", false},
+		{"1.2.3", false}, {"1" + strings.Repeat("0", 30), false}, // 31 + 8 digits > 38
+	}
+	mem := memory.NewGoAllocator()
+	col := &Column{Name: "d", Type: DecimalType}
+	for _, c := range cases {
+		got, ok := parseDecimal128(c.val, 8)
+		assert.Equal(t, c.fast, ok, c.val)
+		want, wantOk := ratDecimal128(strings.ReplaceAll(strings.ReplaceAll(c.val, ",", ""), "$", ""), 8)
+		if ok {
+			assert.Equal(t, want, got, c.val)
+		}
+
+		b := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 38, Scale: 8})
+		AppendToBuilder(b, col, c.val)
+		arr := b.NewDecimal128Array()
+		assert.Equal(t, !wantOk, arr.IsNull(0), c.val)
+		if wantOk {
+			assert.Equal(t, want, arr.Value(0), c.val)
+		}
+		arr.Release()
+		b.Release()
+	}
+}
+
+func BenchmarkArrowAppendToBuilderDecimal(b *testing.B) {
+	rnd := rand.New(rand.NewSource(131))
+	vals := make([]string, 1024)
+	for i := range vals {
+		vals[i] = strconv.FormatFloat((rnd.Float64()-0.5)*1e9, 'f', 8, 64)
+	}
+	col := &Column{Name: "d", Type: DecimalType}
+	mem := memory.NewGoAllocator()
+	for _, name := range []string{"fast", "rat"} {
+		b.Run(name, func(b *testing.B) {
+			builder := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 25, Scale: 8})
+			defer builder.Release()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				v := vals[i%len(vals)]
+				if name == "rat" {
+					num, _ := ratDecimal128(v, 8)
+					builder.Append(num)
+				} else {
+					AppendToBuilder(builder, col, v)
+				}
+			}
+		})
 	}
 }

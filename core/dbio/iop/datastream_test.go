@@ -82,6 +82,55 @@ func TestBW(t *testing.T) {
 	}
 }
 
+// The consumer changes the values of each row in place. The byte count must
+// come from the values that the producer pushed (SLING-128).
+func TestBWConsumerChangesRows(t *testing.T) {
+	columns := NewColumnsFromFields("a", "b")
+	ds := NewDatastream(columns)
+	ds.StartBwProcessor()
+
+	long := strings.Repeat("x", 10000)
+	consumed := make(chan int)
+	go func() {
+		n := 0
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows() {
+				row[0], row[1] = long, long
+				n++
+			}
+		}
+		consumed <- n
+	}()
+
+	const rows = 5000
+	for i := range rows {
+		ds.Push([]any{"abc", cast.ToString(i % 10)})
+	}
+	ds.SetReady()
+	ds.Close()
+	require.Equal(t, rows, <-consumed)
+
+	want := uint64(rows * 6) // "abc,9\n"
+	require.Eventually(t, func() bool { return ds.Bytes.Load() >= want }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, want, ds.Bytes.Load())
+}
+
+// TestDataflowBufferAfterClose checks that a small stream which closes before
+// the dataflow takes it still gives its buffer to the dataflow.
+func TestDataflowBufferAfterClose(t *testing.T) {
+	columns := NewColumnsFromFields("a")
+	ds := NewDatastream(columns)
+	ds.Buffer = [][]any{{"1"}, {"2"}, {"3"}}
+	ds.SetReady()
+	ds.Close()
+	require.Nil(t, ds.Buffer)
+
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+	assert.Len(t, df.Buffer, 3)
+}
+
 func TestEncodeRowAsJSONObject(t *testing.T) {
 	stringCol := func(name string) Column { return Column{Name: name, Type: StringType} }
 	jsonCol := func(name string) Column { return Column{Name: name, Type: JsonType} }
@@ -629,9 +678,11 @@ func TestDatastreamArrow_RowConsumerGuard(t *testing.T) {
 	require.ErrorContains(t, e.ds.Context.Err(), guard)
 
 	e2 := dsArrowTestEnvNew(t, 2)
-	rows := e2.ds.Rows()
-	_, ok := <-rows
-	assert.False(t, ok, "Rows yields a closed channel")
+	n := 0
+	for range e2.ds.Rows() {
+		n++
+	}
+	assert.Zero(t, n, "Rows yields no row")
 	require.ErrorContains(t, e2.ds.Context.Err(), guard)
 }
 

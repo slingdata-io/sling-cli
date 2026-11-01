@@ -742,8 +742,9 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 				if len(df.Columns) == 0 {
 					df.Columns = ds.Columns
 				}
-				df.Buffer = ds.Buffer
+				df.Buffer = ds.readyBuffer
 			}
+			ds.readyBuffer = nil
 
 			// push stream, keep retrying
 		tryPush:
@@ -918,7 +919,7 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 					}
 				}
 
-				for row := range batch.Rows {
+				for row := range batch.Rows() {
 					rows <- shaper.Func(row)
 				}
 				if dsN.CurrentBatch != nil {

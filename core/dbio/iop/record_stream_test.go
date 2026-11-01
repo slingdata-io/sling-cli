@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,6 +425,68 @@ func TestRecordStream_Reader(t *testing.T) {
 
 	_, ok := e.rs.Next()
 	assert.False(t, ok, "the reader consumed the stream")
+}
+
+// TestRecordStream_Readers covers the shared readers of concurrent ingests:
+// each record goes to one reader, and a Fail stops all of them.
+func TestRecordStream_Readers(t *testing.T) {
+	const total = 200
+	e := openFakeStream(t, 4)
+	var taken atomic.Int64
+	e.rs.SetOnTake(func(rec arrow.RecordBatch) { taken.Add(rec.NumRows()) })
+
+	go func() {
+		for i := 0; i < total; i++ {
+			e.push(t, int64(i), "v")
+		}
+		e.rs.Close(nil)
+	}()
+
+	readers := e.rs.Readers(4)
+	require.Len(t, readers, 4)
+
+	var mu sync.Mutex
+	seen := map[int64]int{}
+	var wg sync.WaitGroup
+	for _, rdr := range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer rdr.Release()
+			for rdr.Next() {
+				val := openFakeVal(t, rdr.RecordBatch(), 0, 0).(int64)
+				mu.Lock()
+				seen[val]++
+				mu.Unlock()
+			}
+			assert.NoError(t, rdr.Err())
+		}()
+	}
+	wg.Wait()
+
+	assert.Len(t, seen, total)
+	for val, n := range seen {
+		assert.Equal(t, 1, n, "record %d", val)
+	}
+	assert.EqualValues(t, total, taken.Load())
+	assert.Len(t, e.rs.Readers(1), 1)
+
+	// a Fail stops each reader at its next record
+	e2 := openFakeStream(t, 4)
+	e2.push(t, int64(1), "a")
+	e2.push(t, int64(2), "b")
+	readers = e2.rs.Readers(2)
+	require.True(t, readers[0].Next())
+	boom := errors.New("boom")
+	e2.rs.Fail(boom)
+	assert.False(t, readers[1].Next())
+	assert.ErrorIs(t, readers[1].Err(), boom)
+	assert.False(t, readers[0].Next())
+	for _, rdr := range readers {
+		rdr.Release()
+	}
+	e2.rs.Close(nil)
+	e2.rs.Drain()
 }
 
 func TestRecordStream_NilLanePanics(t *testing.T) {

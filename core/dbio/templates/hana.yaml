@@ -1,0 +1,398 @@
+core:
+  # HANA 2.0 has no IF EXISTS: ignore "invalid table/view/index name" (259/321/261).
+  # Anonymous blocks accept only static CREATE/DROP TABLE, so views and indexes use exec.
+  drop_table: |
+    do begin
+      declare exit handler for sql_error_code 259 begin end;
+      drop table {table};
+    end
+  drop_view: |
+    do begin
+      declare exit handler for sql_error_code 321 begin end;
+      exec 'drop view {view}';
+    end
+  drop_index: |
+    do begin
+      declare exit handler for sql_error_code 261 begin end;
+      exec 'drop index {index}';
+    end
+  drop_schema: drop schema {schema} cascade
+  create_schema: create schema {schema}
+  create_table: create column table {table} ({col_types})
+  create_index: create index {index} on {table} ({cols})
+  rename_table: rename table {table} to {new_table}
+  rename_column: rename column {table}."{column}" to "{new_column}"
+  alter_columns: alter table {table} alter ({col_ddl})
+  add_column: alter table {table} add ({column} {type})
+  drop_column: alter table {table} drop ({column})
+  explain: explain plan for {sql}
+  replace: |
+    upsert {table} ({names}) values ({values}) with primary key
+  upsert: |
+    merge into {tgt_table} tgt
+    using (select {src_fields} from {src_table}) src
+    on ({src_tgt_pk_equal})
+    when matched then update set {set_fields}
+    when not matched then insert ({insert_fields}) values ({src_insert_fields})
+
+  merge_insert: |
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+    WHERE NOT EXISTS (
+      SELECT 1 FROM {tgt_table} tgt WHERE {src_tgt_pk_equal}
+    )
+
+  merge_update: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+
+  merge_update_insert: |
+    MERGE INTO {tgt_table} tgt
+    USING (SELECT {src_fields} FROM {src_table}) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_delete_insert: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM {src_table} src
+      WHERE {src_tgt_pk_equal}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM {src_table} src
+
+  merge_change_capture: |
+    DELETE FROM {tgt_table} tgt
+    WHERE EXISTS (
+      SELECT 1 FROM (
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as "_RN"
+        FROM {src_table} src
+      ) src
+      WHERE src."_RN" = 1 AND src."_SLING_SYNCED_OP" = 'D'
+      AND {src_tgt_pk_equal}
+    );
+    MERGE INTO {tgt_table} tgt
+    USING (
+      SELECT * FROM (
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as "_RN"
+        FROM {src_table} src
+        WHERE "_SLING_SYNCED_OP" != 'D'
+      ) sub WHERE "_RN" = 1
+    ) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table} tgt SET "_SLING_SYNCED_AT" = CURRENT_UTCTIMESTAMP, "_SLING_SYNCED_OP" = 'D'
+    WHERE COALESCE("_SLING_SYNCED_OP", '') != 'D'
+    AND EXISTS (
+      SELECT 1 FROM (
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as "_RN"
+        FROM {src_table} src
+      ) src
+      WHERE src."_RN" = 1 AND src."_SLING_SYNCED_OP" = 'D'
+      AND {src_tgt_pk_equal}
+    );
+    MERGE INTO {tgt_table} tgt
+    USING (
+      SELECT * FROM (
+        SELECT src.*, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY "_SLING_CDC_SEQ" DESC) as "_RN"
+        FROM {src_table} src
+        WHERE "_SLING_SYNCED_OP" != 'D'
+      ) sub WHERE "_RN" = 1
+    ) src
+    ON ({src_tgt_pk_equal})
+    WHEN MATCHED THEN UPDATE SET {set_fields}
+    WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
+
+  add_column_comment: COMMENT ON COLUMN {table}."{column}" IS {comment}
+  add_table_comment: COMMENT ON TABLE {table} IS {comment}
+
+metadata:
+  current_database: select database_name from sys.m_database
+
+  databases: select database_name as name from sys.m_database
+
+  schemas: |
+    select schema_name
+    from sys.schemas
+    where schema_name not like '\_SYS%' escape '\'
+      and schema_name not in ('SYS', 'SYSTEM', 'PUBLIC', 'UIS', 'HANA_XS_BASE', 'XSSQLCC_AUTO_USER_')
+    order by schema_name
+
+  tables: |
+    select schema_name, table_name, 'false' as is_view
+    from sys.tables
+    where is_user_defined_type = 'FALSE'
+      {{if .schema -}} and schema_name = '{schema}' {{- end}}
+    order by schema_name, table_name
+
+  views: |
+    select schema_name, view_name as table_name, 'true' as is_view
+    from sys.views
+    where 1=1
+      {{if .schema -}} and schema_name = '{schema}' {{- end}}
+    order by schema_name, view_name
+
+  columns: |
+    select column_name, data_type_name as data_type, length as precision, scale, length as maximum_length
+    from (
+      select column_name, data_type_name, length, scale, position
+      from sys.table_columns
+      where schema_name = '{schema}' and table_name = '{table}'
+      union all
+      select column_name, data_type_name, length, scale, position
+      from sys.view_columns
+      where schema_name = '{schema}' and view_name = '{table}'
+    ) t
+    order by position
+
+  primary_keys: |
+    select constraint_name as pk_name, position, column_name
+    from sys.constraints
+    where schema_name = '{schema}'
+      and table_name = '{table}'
+      and is_primary_key = 'TRUE'
+    order by position
+
+  indexes: |
+    select index_name, column_name
+    from sys.index_columns
+    where schema_name = '{schema}'
+      and table_name = '{table}'
+    order by index_name, position
+
+  columns_extended: |
+    select
+      col.column_name as column_name,
+      case when col.is_nullable = 'TRUE' then 'true' else 'false' end as is_nullable,
+      col.default_value as default_value,
+      case when col.generation_type like '%IDENTITY%' then 'true' else 'false' end as is_auto_increment,
+      '1' as identity_seed,
+      '1' as identity_increment,
+      case when pk.column_name is not null then 'true' else 'false' end as is_primary_key,
+      col.comments as description
+    from sys.table_columns col
+    left join sys.constraints pk
+      on pk.schema_name = col.schema_name and pk.table_name = col.table_name
+      and pk.column_name = col.column_name and pk.is_primary_key = 'TRUE'
+    where col.schema_name = '{schema}' and col.table_name = '{table}'
+    order by col.position
+
+  table_extended: |
+    select comments as description
+    from sys.tables
+    where schema_name = '{schema}' and table_name = '{table}'
+
+  ddl_view: |
+    select definition as ddl
+    from sys.views
+    where schema_name = '{schema}'
+      and view_name = '{table}'
+
+  ddl_table: |
+    select
+      'CREATE COLUMN TABLE "' || schema_name || '"."' || table_name || '" (' ||
+      string_agg(
+        '"' || column_name || '" ' || data_type_name ||
+        case
+          when data_type_name in ('DECIMAL') and scale is not null then '(' || length || ',' || scale || ')'
+          when data_type_name in ('VARCHAR', 'NVARCHAR', 'VARBINARY', 'ALPHANUM', 'SHORTTEXT', 'CHAR', 'NCHAR', 'BINARY') then '(' || length || ')'
+          else ''
+        end ||
+        case when is_nullable = 'FALSE' then ' NOT NULL' else '' end,
+        ', ' order by position
+      ) || ')' as ddl
+    from sys.table_columns
+    where schema_name = '{schema}'
+      and table_name = '{table}'
+    group by schema_name, table_name
+
+  columns_full: |
+    select schema_name, table_name, column_name, data_type_name as data_type, position
+    from sys.table_columns
+    where schema_name = '{schema}'
+      and table_name = '{table}'
+    order by position
+
+  schemata: |
+    select
+      col.schema_name,
+      col.table_name,
+      col.is_view,
+      col.column_name,
+      col.data_type_name as data_type,
+      col.position
+    from (
+      select schema_name, table_name, 'false' as is_view, column_name, data_type_name, position
+      from sys.table_columns
+      union all
+      select schema_name, view_name as table_name, 'true' as is_view, column_name, data_type_name, position
+      from sys.view_columns
+    ) col
+    where 1=1
+      {{if .schema -}} and col.schema_name = '{schema}' {{- end}}
+      {{if .tables -}} and col.table_name in ({tables}) {{- end}}
+      {{if not .schema -}} and col.schema_name not like '\_SYS%' escape '\' and col.schema_name not in ('SYS', 'SYSTEM', 'PUBLIC', 'UIS', 'HANA_XS_BASE') {{- end}}
+    order by col.schema_name, col.table_name, col.position
+
+  sessions: |
+    select connection_id, user_name, client_host, connection_status
+    from sys.m_connections
+    where own = 'FALSE' and connection_status = 'RUNNING'
+
+  session_terminate: alter system disconnect session '{sid}'
+
+analysis:
+  field_stat_deep: |
+    -- field_stat_deep {field}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      '{type}' as type,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*), 1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt,
+      cast(min({field}) as nvarchar(5000)) as f_min,
+      cast(max({field}) as nvarchar(5000)) as f_max,
+      min(length({field})) as f_min_len,
+      max(length({field})) as f_max_len
+    from "{schema}"."{table}"
+
+  distro_field_date: |
+    -- distro_field_date {field}
+    with t1 as (
+        select
+          '{field}' as field,
+          year({field}) as year,
+          month({field}) as month,
+          count(*) cnt
+        from "{schema}"."{table}"
+        group by year({field}), month({field})
+      )
+      , t2 as (
+        select '{field}' as field, count(*) ttl_cnt
+        from "{schema}"."{table}"
+      )
+      select
+        '{schema}' as schema_nm,
+        '{table}' as table_nm,
+        t1.field,
+        t1.year,
+        t1.month,
+        cnt,
+        round(100.0 * cnt / ttl_cnt, 2) as prct
+      from t1
+      join t2
+        on t1.field = t2.field
+      order by t1.year, t1.month
+
+function:
+  string_type: nvarchar(5000)
+  cast_to_string: 'cast({field} as nvarchar(5000))'
+  cast_to_text: 'cast({field} as nclob)'
+  cast_to_integer: 'cast({field} as bigint)'
+  now: current_utctimestamp
+  date_diff_days: days_between({date1}, {date2})
+  date_diff_seconds: seconds_between({date1}, {date2})
+  date_parse_format: to_timestamp({string}, {format})
+  date_format: to_varchar({field}, {format})
+  hash: hash_md5(to_binary({fields}))
+  random: rand()
+  uuid: sysuuid
+  checksum_integer: abs(cast({field} as decimal(38,0)))
+  checksum_decimal: abs(round({field}, 0, ROUND_DOWN))
+  checksum_string: length({field})
+  checksum_json: length(replace({field}, ' ', ''))
+  checksum_boolean: length(cast({field} as nvarchar(5)))
+  checksum_date: cast(seconds_between(to_timestamp('1970-01-01 00:00:00'), {field}) as decimal(38,0)) * 1000000
+  checksum_datetime: cast(round(nano100_between(to_timestamp('1970-01-01 00:00:00'), {field}) / 10, 0, ROUND_DOWN) as decimal(38,0))
+  sleep: "do begin call sys.sleep({seconds}); end"
+
+variable:
+  column_upper: true
+  bind_string: "?"
+  bool_as: bool
+  # one prepared single-row insert is sent with many rows (go-hdb bulk exec)
+  batch_values: 500000
+  max_string_type: nvarchar(5000)
+  max_string_length: 5000
+  max_binary_length: 5000
+  max_binary_type: blob
+  max_column_length: 127
+  error_ignore_drop_table: "invalid table name"
+  error_ignore_drop_view: "invalid view name"
+  error_filter_table_exists: "duplicate table name"
+  timestamp_layout: '2006-01-02 15:04:05.0000000'
+  timestampz_layout: '2006-01-02 15:04:05.0000000'
+  timestamp_layout_str: "to_timestamp('{value}')"
+  timestampz_layout_str: "to_timestamp('{value}')"
+  date_layout_str: "to_date('{value}', 'YYYY-MM-DD')"
+
+native_type_map:
+  alphanum: string
+  bigint: bigint
+  binary: binary
+  bintext: text
+  blob: binary
+  boolean: bool
+  bstring: binary
+  char: string
+  clob: text
+  date: date
+  daydate: date
+  decimal: decimal
+  double: float
+  fixed8: decimal
+  fixed12: decimal
+  fixed16: decimal
+  float: float
+  integer: integer
+  longdate: timestamp
+  nchar: string
+  nclob: text
+  nstring: string
+  nvarchar: string
+  real: float
+  seconddate: datetime
+  secondtime: time
+  shorttext: string
+  smalldecimal: decimal
+  smallint: smallint
+  st_geometry: text
+  st_point: text
+  string: string
+  text: text
+  time: time
+  timestamp: timestamp
+  tinyint: smallint
+  varbinary: binary
+  varchar: string
+
+general_type_map:
+  bigint: bigint
+  binary: "varbinary()"
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: double
+  integer: integer
+  json: nclob
+  smallint: smallint
+  string: "nvarchar()"
+  text: nclob
+  time: time
+  timestamp: timestamp
+  timestampz: timestamp
+  timez: "nvarchar(100)"
+  uuid: "nvarchar(36)"

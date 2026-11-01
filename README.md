@@ -62,7 +62,7 @@ Example [Replication](https://docs.slingdata.io/sling-cli/run/configuration/repl
 ---
 
 Available Connectors:
-- **Databases**: [`adbc`](https://docs.slingdata.io/connections/database-connections/adbc) [`azuredwh`](https://docs.slingdata.io/connections/database-connections/azuredwh) [`azuresql`](https://docs.slingdata.io/connections/database-connections/azuresql) [`azuretable`](https://docs.slingdata.io/connections/database-connections/azuretable) [`bigquery`](https://docs.slingdata.io/connections/database-connections/bigquery) [`bigtable`](https://docs.slingdata.io/connections/database-connections/bigtable) [`clickhouse`](https://docs.slingdata.io/connections/database-connections/clickhouse) [`d1`](https://docs.slingdata.io/connections/database-connections/d1) [`databricks`](https://docs.slingdata.io/connections/database-connections/databricks) [`dbase`](https://docs.slingdata.io/connections/database-connections/dbase) [`duckdb`](https://docs.slingdata.io/connections/database-connections/duckdb) [`dynamodb`](https://docs.slingdata.io/connections/database-connections/dynamodb) [`elasticsearch`](https://docs.slingdata.io/connections/database-connections/elasticsearch) [`opensearch`](https://docs.slingdata.io/connections/database-connections/opensearch) [`exasol`](https://docs.slingdata.io/connections/database-connections/exasol) [`fabric`](https://docs.slingdata.io/connections/database-connections/fabric) [`firebolt`](https://docs.slingdata.io/connections/database-connections/firebolt) [`mariadb`](https://docs.slingdata.io/connections/database-connections/mariadb) [`mongodb`](https://docs.slingdata.io/connections/database-connections/mongodb) [`motherduck`](https://docs.slingdata.io/connections/database-connections/motherduck) [`mysql`](https://docs.slingdata.io/connections/database-connections/mysql) [`odbc`](https://docs.slingdata.io/connections/database-connections/odbc) [`oracle`](https://docs.slingdata.io/connections/database-connections/oracle) [`postgres`](https://docs.slingdata.io/connections/database-connections/postgres) [`prometheus`](https://docs.slingdata.io/connections/database-connections/prometheus) [`proton`](https://docs.slingdata.io/connections/database-connections/proton) [`redshift`](https://docs.slingdata.io/connections/database-connections/redshift) [`scylladb`](https://docs.slingdata.io/connections/database-connections/scylladb) [`snowflake`](https://docs.slingdata.io/connections/database-connections/snowflake) [`sqlite`](https://docs.slingdata.io/connections/database-connections/sqlite) [`sqlserver`](https://docs.slingdata.io/connections/database-connections/sqlserver) [`starrocks`](https://docs.slingdata.io/connections/database-connections/starrocks) [`trino`](https://docs.slingdata.io/connections/database-connections/trino)
+- **Databases**: [`adbc`](https://docs.slingdata.io/connections/database-connections/adbc) [`azuredwh`](https://docs.slingdata.io/connections/database-connections/azuredwh) [`azuresql`](https://docs.slingdata.io/connections/database-connections/azuresql) [`azuretable`](https://docs.slingdata.io/connections/database-connections/azuretable) [`bigquery`](https://docs.slingdata.io/connections/database-connections/bigquery) [`bigtable`](https://docs.slingdata.io/connections/database-connections/bigtable) [`clickhouse`](https://docs.slingdata.io/connections/database-connections/clickhouse) [`d1`](https://docs.slingdata.io/connections/database-connections/d1) [`databricks`](https://docs.slingdata.io/connections/database-connections/databricks) [`dbase`](https://docs.slingdata.io/connections/database-connections/dbase) [`duckdb`](https://docs.slingdata.io/connections/database-connections/duckdb) [`dynamodb`](https://docs.slingdata.io/connections/database-connections/dynamodb) [`elasticsearch`](https://docs.slingdata.io/connections/database-connections/elasticsearch) [`opensearch`](https://docs.slingdata.io/connections/database-connections/opensearch) [`exasol`](https://docs.slingdata.io/connections/database-connections/exasol) [`fabric`](https://docs.slingdata.io/connections/database-connections/fabric) [`firebolt`](https://docs.slingdata.io/connections/database-connections/firebolt) [`hana`](https://docs.slingdata.io/connections/database-connections/hana) [`mariadb`](https://docs.slingdata.io/connections/database-connections/mariadb) [`mongodb`](https://docs.slingdata.io/connections/database-connections/mongodb) [`motherduck`](https://docs.slingdata.io/connections/database-connections/motherduck) [`mysql`](https://docs.slingdata.io/connections/database-connections/mysql) [`odbc`](https://docs.slingdata.io/connections/database-connections/odbc) [`oracle`](https://docs.slingdata.io/connections/database-connections/oracle) [`postgres`](https://docs.slingdata.io/connections/database-connections/postgres) [`prometheus`](https://docs.slingdata.io/connections/database-connections/prometheus) [`proton`](https://docs.slingdata.io/connections/database-connections/proton) [`redshift`](https://docs.slingdata.io/connections/database-connections/redshift) [`scylladb`](https://docs.slingdata.io/connections/database-connections/scylladb) [`snowflake`](https://docs.slingdata.io/connections/database-connections/snowflake) [`sqlite`](https://docs.slingdata.io/connections/database-connections/sqlite) [`sqlserver`](https://docs.slingdata.io/connections/database-connections/sqlserver) [`starrocks`](https://docs.slingdata.io/connections/database-connections/starrocks) [`trino`](https://docs.slingdata.io/connections/database-connections/trino)
 
 - **Data Lakes**:[`athena`](https://docs.slingdata.io/connections/datalake-connections/athena) [`Ducklake`](https://docs.slingdata.io/connections/datalake-connections/ducklake) [`iceberg`](https://docs.slingdata.io/connections/datalake-connections/iceberg) [`S3 Tables`](https://docs.slingdata.io/connections/datalake-connections/iceberg) [`lancedb`](https://docs.slingdata.io/connections/datalake-connections/lancedb)
 
@@ -121,6 +121,27 @@ $ sling conns discover LOCALHOST_DEV
 Databricks: Unity Catalog Volumes are a file connection (`type: databricks-volume`). Direct Delta ingest uses `copy_method: zerobus` on `type: databricks`. See https://docs.slingdata.io/connections/database-connections/databricks
 
 ---
+
+### S3-compatible endpoint addressing
+
+For custom S3 endpoints that require virtual-hosted-style requests, such as
+Alibaba Cloud OSS, set `url_style: vhost` in the connection:
+
+```yaml
+connections:
+  OSS:
+    type: s3
+    bucket: example-bucket
+    endpoint: https://oss-cn-hangzhou.aliyuncs.com
+    region: cn-hangzhou
+    url_style: vhost
+    access_key_id: <access-key-id>
+    secret_access_key: <secret-access-key>
+```
+
+Use the regional endpoint without the bucket name. Requests will address
+`example-bucket.oss-cn-hangzhou.aliyuncs.com`. Omitting `url_style` preserves
+existing custom-endpoint behavior.
 
 ## Installation
 
@@ -278,4 +299,4 @@ When introducing new features or addressing bugs, it's essential to incorporate 
 2. Update the README.md with details of changes to the interface, if applicable.
 3. Create a Pull Request with a clear title and description.
 
-Thank you for contributing to Sling!
+Thank you for contributing to sling-cli!
