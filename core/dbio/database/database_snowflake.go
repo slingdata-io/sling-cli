@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -164,8 +165,26 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 	return err
 }
 
+// pemOneLineRe matches a whole PEM block, to rebuild its line breaks.
+var pemOneLineRe = regexp.MustCompile(`(?s)^(-----BEGIN [A-Z0-9 ]+-----)(.*?)(-----END [A-Z0-9 ]+-----)$`)
+
+// normalizePEM restores a PEM that a secret manager stored on one line,
+// with spaces or a literal `\n` in place of the line breaks.
+func normalizePEM(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "-----BEGIN ") {
+		return s // base64 or raw DER
+	}
+	s = strings.NewReplacer(`\r\n`, "\n", `\n`, "\n").Replace(s)
+	m := pemOneLineRe.FindStringSubmatch(s)
+	if m == nil || strings.Contains(strings.TrimSpace(m[2]), "\n") {
+		return s
+	}
+	return m[1] + "\n" + strings.Join(strings.Fields(m[2]), "") + "\n" + m[3] + "\n"
+}
+
 func getEncodedPrivateKey(keyStr, passphrase string) (epk string, err error) {
-	keyStr = strings.TrimSpace(keyStr)
+	keyStr = normalizePEM(keyStr)
 
 	// Normalize the input into raw DER (PKCS#8) bytes.
 	var derBytes []byte

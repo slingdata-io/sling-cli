@@ -650,7 +650,9 @@ func (c *Connection) setURL() (err error) {
 
 			if g.In(c.Type, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				setIfMissing("sslmode", U.PopParam("sslmode"))
-				setIfMissing("role", U.PopParam("role"))
+				if role := U.PopParam("role"); role != "" {
+					setIfMissing("role", role)
+				}
 			}
 
 			switch c.Type {
@@ -793,7 +795,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("database", c.Data["dbname"])
 		template = "postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
-		if _, ok := c.Data["role"]; ok {
+		if cast.ToString(c.Data["role"]) != "" {
 			template = template + "&role={role}"
 		}
 		if _, ok := c.Data["statement_timeout"]; ok {
@@ -915,7 +917,7 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["warehouse"]; ok {
 			template = template + "&warehouse={warehouse}"
 		}
-		if _, ok := c.Data["role"]; ok {
+		if cast.ToString(c.Data["role"]) != "" {
 			template = template + "&role={role}"
 		}
 		// if _, ok := c.Data["schema"]; ok {
