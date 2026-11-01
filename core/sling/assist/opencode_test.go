@@ -296,6 +296,32 @@ func TestHarnessProviderChoiceKeyedWins(t *testing.T) {
 	}
 }
 
+func TestHarnessProviderChoiceDefaultsNotRetired(t *testing.T) {
+	retired := []string{"claude-sonnet-4-5", "gemini-2.0-flash"}
+	cases := []struct {
+		env  string
+		kind string
+	}{
+		{"ANTHROPIC_API_KEY", "anthropic"},
+		{"GEMINI_API_KEY", "google"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			isolateOpenCodeEnv(t)
+			t.Setenv(tc.env, "test-key")
+			c := HarnessProviderChoice()
+			if c.Kind != tc.kind {
+				t.Fatalf("kind = %s, want %s", c.Kind, tc.kind)
+			}
+			for _, r := range retired {
+				if strings.Contains(c.Model, r) {
+					t.Fatalf("default model %s is retired or retiring", c.Model)
+				}
+			}
+		})
+	}
+}
+
 // The model of each keyed provider must be one that the provider still serves.
 func TestHarnessProviderChoiceKeyedModels(t *testing.T) {
 	cases := []struct {
