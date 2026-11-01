@@ -86,8 +86,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `ifnull(v1, v2, ...)` | Alias of coalesce | `ifnull(null, "default")` → "default" |
 | `null_if(val, sentinel[, …])` | Null if equal | `null_if("N/A", "N/A")` → null |
 | `nullif(val, sentinel[, …])` | Alias of null_if | `nullif(x, "")` → null |
-| `value(v1, v2, ...)` | First non-empty | `value("", "default")` → "default" |
-| `first_valid(v1, v2, ...)` | Alias of value | `first_valid("", "default")` → "default" |
+| `first_valid(v1, v2, ...)` | First non-null and non-empty | `first_valid("", "default")` → "default" |
 | `require(val[, msg])` | Ensure not null | `require(secrets.key, "Key required")` |
 | `cast(val, type)` | Convert type | `cast("42", "int")` → 42 |
 | `try_cast(val, type)` | Convert or null | `try_cast("abc", "int")` → null |
@@ -120,8 +119,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `object_zip(keys, vals)` | Create from arrays | `object_zip(["a"], [1])` → {"a":1} |
 | `filter(array, expr)` | Filter array | `filter([1,2,3], "value > 1")` → [2,3] |
 | `pluck(array, key)` | Extract field from objects | `pluck([{a:1}], "a")` → [1] |
-| `explode(array)` | Explode array values | Used when flattening lists |
-| `map(array, expr)` | Transform array | `map([1,2,3], "value * 2")` → [2,4,6] |
+| `explode(record, field_name)` | Expand a record by unnesting an array field | `explode({"id": 1, "items": [{"k": "a"}]}, "items")` → [{"id": 1, "k": "a"}] |
 | `sort(array[, desc])` | Sort array | `sort([3,1,2])` → [1,2,3] |
 | `chunk(array\|queue, size)` | Split into chunks | `chunk(queue.ids, 50)` |
 
