@@ -1430,3 +1430,21 @@ func TestFlattenRecord(t *testing.T) {
 		assert.NotNil(t, out["owner"])
 	})
 }
+
+func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
+	// Databricks reports ShortType and ByteType as "short" and "byte"
+	cases := map[string]ColumnType{
+		"short":    SmallIntType,
+		"byte":     SmallIntType,
+		"smallint": SmallIntType,
+		"tinyint":  SmallIntType,
+		"int":      IntegerType,
+		"long":     BigIntType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbDatabricks)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
