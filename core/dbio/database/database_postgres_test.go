@@ -1,20 +1,12 @@
 package database
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,25 +15,10 @@ import (
 // TestOpenPgxTunnelVerifyFull checks verify-full through a tunnel on 127.0.0.1,
 // with a certificate that has only a DNS SAN (GitHub issue #733).
 func TestOpenPgxTunnelVerifyFull(t *testing.T) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	tmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "pgtls"},
-		DNSNames:              []string{"pgtls"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	require.NoError(t, err)
-
+	cert, certPEM, _ := newTestCert(t, "pgtls")
 	rootCert := filepath.Join(t.TempDir(), "root.pem")
-	require.NoError(t, os.WriteFile(rootCert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600))
-	serverTLS := &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	require.NoError(t, os.WriteFile(rootCert, certPEM, 0600))
+	serverTLS := &tls.Config{Certificates: []tls.Certificate{cert}}
 
 	// handshake accepts one connection, answers the SSLRequest and gives the TLS result
 	handshake := func(ln net.Listener) (serverName string, err error) {

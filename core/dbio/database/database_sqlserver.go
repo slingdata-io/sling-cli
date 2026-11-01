@@ -136,6 +136,19 @@ func (conn *MsSQLServerConn) GetURL(newURL ...string) string {
 		return connURL
 	}
 
+	// a tunnel changes the host to 127.0.0.1, verify the certificate against the original host
+	if conn.tlsHost != "" {
+		query := url.Query()
+		hasHostName := false
+		for key := range query {
+			hasHostName = hasHostName || strings.EqualFold(key, "hostNameInCertificate") // driver keys ignore case
+		}
+		if !hasHostName {
+			query.Set("hostNameInCertificate", conn.tlsHost)
+			url.RawQuery = query.Encode()
+		}
+	}
+
 	return url.String()
 }
 

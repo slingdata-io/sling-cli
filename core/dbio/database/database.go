@@ -185,6 +185,7 @@ type BaseConn struct {
 	sshClient   *iop.SSHClient
 	Log         []string
 	adbc        Connection
+	tlsHost     string // original host, for TLS verification when a tunnel changes it to 127.0.0.1
 }
 
 // Pool is a pool of connections
@@ -697,7 +698,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	}
 
 	connURL := conn.Self().ConnString()
-	tlsHost := "" // original host, for TLS verification when a tunnel changes it to 127.0.0.1
+	conn.tlsHost = ""
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
@@ -727,7 +728,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			connURL, g.F("@%s:%d", connHost, connPort),
 			g.F("@127.0.0.1:%d", localPort),
 		)
-		tlsHost = connHost
+		conn.tlsHost = connHost
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
@@ -763,8 +764,8 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				connURL, g.F("@%s:%d", connHost, connPort),
 				g.F("@127.0.0.1:%d", localPort),
 			)
-			if tlsHost == "" {
-				tlsHost = connHost
+			if conn.tlsHost == "" {
+				conn.tlsHost = connHost
 			}
 			g.Trace("new connection URL via proxy: " + conn.Self().GetURL(connURL))
 		}
@@ -792,7 +793,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 		if !usePool || !poolOk {
 			if conn.Type == dbio.TypeDbPostgres {
-				db, err = openPgx(connURL, tlsHost)
+				db, err = openPgx(connURL, conn.tlsHost)
 			} else {
 				db, err = sqlx.Open(driver, connURL)
 			}
@@ -3901,11 +3902,6 @@ func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
 		}
 	}
 
-	// legacy only handles files
-	certificate := conn.GetProp("cert_file")
-	certificateKey := conn.GetProp("cert_key_file")
-	certificateCA := conn.GetProp("cert_ca_file")
-
 	// processValue handles files or values
 	processValue := func(val string) (string, error) {
 		// check if file exists
@@ -3927,50 +3923,47 @@ func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
 		return "", g.Error("invalid certificate value or file path")
 	}
 
-	if val := conn.GetProp("certificate"); val != "" {
-		certificate, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load client certificate")
+	// the legacy keys (cert_file, cert_key_file, cert_ca_file) are files or values too
+	var certificate, certificateKey, certificateCA string
+	for _, item := range []struct {
+		key, legacyKey, name string
+		value                *string
+	}{
+		{"certificate", "cert_file", "client certificate", &certificate},
+		{"certificate_key", "cert_key_file", "client certificate key", &certificateKey},
+		{"certificate_ca", "cert_ca_file", "CA certificate", &certificateCA},
+	} {
+		val := conn.GetProp(item.key)
+		if val == "" {
+			val = conn.GetProp(item.legacyKey)
 		}
-		conn.SetProp("certificate", certificate) // overwrite
-	}
-
-	if val := conn.GetProp("certificate_key"); val != "" {
-		certificateKey, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load client certificate key")
+		if val == "" {
+			continue
 		}
-		conn.SetProp("certificate_key", certificateKey) // overwrite
-	}
-
-	if val := conn.GetProp("certificate_ca"); val != "" {
-		certificateCA, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load CA certificate")
+		if *item.value, err = processValue(val); err != nil {
+			return nil, g.Error(err, "Failed to load %s", item.name)
 		}
-		conn.SetProp("certificate_ca", certificateCA) // overwrite
+		if conn.GetProp(item.key) != "" {
+			conn.SetProp(item.key, *item.value) // overwrite
+		}
 	}
 
 	if certificateKey != "" && certificate != "" {
-		cert, err := tls.LoadX509KeyPair(certificate, certificateKey)
+		cert, err := tls.X509KeyPair([]byte(certificate), []byte(certificateKey))
 		if err != nil {
 			return nil, g.Error(err, "Failed to load client certificate")
 		}
-
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{}
 		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
 
-		if certificateCA != "" {
-			caCert, err := os.ReadFile(certificateCA)
-			if err != nil {
-				return nil, g.Error(err, "Failed to load CA certificate")
-			}
-			tlsConfig.RootCAs = x509.NewCertPool()
-			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
-			if !ok {
-				return nil, g.Error("Failed to parse PEM file")
-			}
+	// the CA is used also without a client certificate, but it does not turn on TLS
+	if certificateCA != "" && tlsConfig != nil {
+		tlsConfig.RootCAs = x509.NewCertPool()
+		if !tlsConfig.RootCAs.AppendCertsFromPEM([]byte(certificateCA)) {
+			return nil, g.Error("Failed to parse CA certificate PEM")
 		}
 	}
 
