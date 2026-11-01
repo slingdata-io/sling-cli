@@ -659,10 +659,23 @@ func (conn *PostgresConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable
 
 // openPgx opens a pgx pool that returns timestamptz values in the session
 // time zone, as lib/pq did. By default pgx uses the local zone of the process.
-func openPgx(connURL string) (*sqlx.DB, error) {
+// tlsHost is the original host when a tunnel changed the URL host to 127.0.0.1.
+func openPgx(connURL, tlsHost string) (*sqlx.DB, error) {
 	config, err := pgx.ParseConfig(connURL)
 	if err != nil {
 		return nil, g.Error(err, "could not parse postgres url")
+	}
+
+	// verify-full must check the certificate against the real host, not the tunnel address
+	if tlsHost != "" {
+		if config.TLSConfig != nil {
+			config.TLSConfig.ServerName = tlsHost
+		}
+		for _, fb := range config.Fallbacks {
+			if fb.TLSConfig != nil {
+				fb.TLSConfig.ServerName = tlsHost
+			}
+		}
 	}
 
 	// no named prepared statements, as with lib/pq (PgBouncer in transaction mode)

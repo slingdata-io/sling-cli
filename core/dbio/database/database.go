@@ -697,6 +697,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	}
 
 	connURL := conn.Self().ConnString()
+	tlsHost := "" // original host, for TLS verification when a tunnel changes it to 127.0.0.1
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
@@ -726,6 +727,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			connURL, g.F("@%s:%d", connHost, connPort),
 			g.F("@127.0.0.1:%d", localPort),
 		)
+		tlsHost = connHost
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
@@ -761,6 +763,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				connURL, g.F("@%s:%d", connHost, connPort),
 				g.F("@127.0.0.1:%d", localPort),
 			)
+			if tlsHost == "" {
+				tlsHost = connHost
+			}
 			g.Trace("new connection URL via proxy: " + conn.Self().GetURL(connURL))
 		}
 	}
@@ -787,7 +792,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 		if !usePool || !poolOk {
 			if conn.Type == dbio.TypeDbPostgres {
-				db, err = openPgx(connURL)
+				db, err = openPgx(connURL, tlsHost)
 			} else {
 				db, err = sqlx.Open(driver, connURL)
 			}
