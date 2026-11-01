@@ -794,6 +794,8 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		if !usePool || !poolOk {
 			if conn.Type == dbio.TypeDbPostgres {
 				db, err = openPgx(connURL, conn.tlsHost)
+			} else if conn.Type == dbio.TypeDbClickhouse && conn.tlsHost != "" {
+				db, err = openClickhouseTunnel(connURL, conn.tlsHost)
 			} else {
 				db, err = sqlx.Open(driver, connURL)
 			}

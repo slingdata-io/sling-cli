@@ -125,3 +125,47 @@ func TestSQLServerTunnelURL(t *testing.T) {
 	assert.Contains(t, userURL, "hostnameincertificate=other")
 	assert.NotContains(t, userURL, "mssqltls", "keep the value of the user")
 }
+
+func TestOpenClickhouseTunnel(t *testing.T) {
+	cert, _, _ := newTestCert(t, "chtls")
+
+	for _, tt := range []struct {
+		name, params, tlsHost, sni string
+	}{
+		{"secure", "secure=true", "chtls", "chtls"},
+		{"skip verify", "secure=true&skip_verify=true", "chtls", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sni := make(chan string, 1)
+			serverTLS := &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+					sni <- hello.ServerName
+					return nil, nil
+				},
+			}
+			ln, err := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+			require.NoError(t, err)
+			defer ln.Close()
+			go func() {
+				if c, err := ln.Accept(); err == nil {
+					_ = c.(*tls.Conn).Handshake()
+					c.Close()
+				}
+			}()
+
+			connURL := "clickhouse://default:p@" + ln.Addr().String() + "/default?dial_timeout=2s&" + tt.params
+			db, err := openClickhouseTunnel(connURL, tt.tlsHost)
+			require.NoError(t, err)
+			defer db.Close()
+			_ = db.Ping() // the fake server stops after the handshake
+
+			select {
+			case got := <-sni:
+				assert.Equal(t, tt.sni, got)
+			case <-time.After(5 * time.Second):
+				t.Fatal("no TLS client hello")
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -63,6 +64,19 @@ func (conn *ClickhouseConn) Version() int {
 	return 21
 }
 
+// openClickhouseTunnel opens the DSN through a tunnel on 127.0.0.1. The DSN cannot carry
+// the TLS ServerName, so it is set to the original host here.
+func openClickhouseTunnel(connURL, tlsHost string) (*sqlx.DB, error) {
+	opts, err := clickhouse.ParseDSN(connURL)
+	if err != nil {
+		return nil, g.Error(err, "could not parse clickhouse url")
+	}
+	if opts.TLS != nil && opts.TLS.ServerName == "" && !opts.TLS.InsecureSkipVerify {
+		opts.TLS.ServerName = tlsHost
+	}
+	return sqlx.NewDb(clickhouse.OpenDB(opts), "clickhouse"), nil
+}
+
 func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 	tlsConfig, err := conn.makeTlsConfig()
 	if err != nil {
@@ -105,6 +119,11 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		port = "9000"
 	}
 	addr := host + ":" + port
+
+	// a tunnel changes the address to 127.0.0.1, verify the certificate against the original host
+	if tlsConfig.ServerName == "" && !tlsConfig.InsecureSkipVerify {
+		tlsConfig.ServerName = host
+	}
 
 	// build chOptions
 	chOptions := clickhouse.Options{
@@ -205,6 +224,12 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 
 		g.Trace("SSH tunnel established: %s -> %s", originalAddr, newAddr)
 		conn.SetProp("ssh_tunnel_local_addr", newAddr) // store for potential 3rd party bulk loading
+	} else if proxyURL := cmp.Or(conn.GetProp("PROXY_URL"), os.Getenv("SLING_PROXY")); proxyURL != "" {
+		localPort, err := iop.OpenTunnelProxy(proxyURL, host, cast.ToInt(port))
+		if err != nil {
+			return g.Error(err, "could not establish SOCKS5 proxy tunnel")
+		}
+		chOptions.Addr[0] = g.F("127.0.0.1:%d", localPort)
 	}
 
 	if conn.db == nil {
