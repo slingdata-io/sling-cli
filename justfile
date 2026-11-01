@@ -97,7 +97,7 @@ test-dbio-filesys-local:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio filesys (local)"
-    (cd core/dbio/filesys && go test -v -run 'TestArrowFileSet|TestArrowLane|TestDatabricksVolume|TestMergeReaders|TestExcelRangeFormats|TestFileSysGoogleADC')
+    (cd core/dbio/filesys && go test -v -run 'TestArrowFileSet|TestArrowLane|TestDatabricksVolume|TestMergeReaders|TestExcelRangeFormats|TestFileSysGoogleADC|TestSftpProxy')
 
 # Test dbio types
 test-dbio-types:
