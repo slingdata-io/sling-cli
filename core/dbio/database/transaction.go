@@ -358,6 +358,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processMySqlLikeInsertRow(bColumns, row)
 			case conn.GetType().IsSQLServer():
 				row = processSQLServerInsertRow(bColumns, row)
+			case conn.GetType() == dbio.TypeDbHana:
+				row = processHanaInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}
@@ -438,7 +440,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
 		}
 
-		for row := range batch.Rows {
+		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
 			if len(batchRows) == batchSize {

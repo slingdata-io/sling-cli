@@ -130,6 +130,9 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 		}
 	}
 
+	rd.state.lock()
+	defer rd.state.unlock()
+
 	rd.state.Execution.ID = env.ExecID
 	rd.state.Source = ConnState{Name: rd.Source}
 	rd.state.Target = ConnState{Name: rd.Target}
@@ -163,7 +166,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
-			fMap, err := task.GetFormatMap()
+			fMap, err := task.formatMap(true)
 			if err != nil {
 				return rd.state, err
 			}
@@ -821,11 +824,12 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not parse target object name: %s", stream.name)
 		}
 
-		if chunkExpr != "" {
-			// no update_key needed for chunking by expression
-		} else if stream.config.UpdateKey == "" {
+		// chunking by expression needs no update_key
+		var incrementalVal any
+		var incrementalValStr string
+		if chunkExpr == "" && stream.config.UpdateKey == "" {
 			return g.Error("did not provide update_key for stream chunking: %s", stream.name)
-		} else if stream.config.Mode == IncrementalMode {
+		} else if stream.config.Mode == IncrementalMode && stream.config.UpdateKey != "" {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
 			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name, nil)
@@ -842,6 +846,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			if err != nil {
 				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)
 			}
+
+			// the chunks write to the target in parallel, so each must
+			// read from the max of before the first chunk
+			incrementalVal = tempCfg.IncrementalVal
+			incrementalValStr = lo.Ternary(tempCfg.HasIncrementalVal(), tempCfg.IncrementalValStr, "null")
 
 			// don't use tempCfg.IncrementalValStr due to quotes
 			incrementalMin := cast.ToString(tempCfg.IncrementalVal)
@@ -897,6 +906,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 			// Use expanded object with {stream_table} variables resolved
 			chunkedStream.config.Object = expandedObject
+			if chunkExpr != "" {
+				chunkedStream.config.incrementalVal = incrementalVal
+				chunkedStream.config.incrementalValStr = incrementalValStr
+			}
 
 			// set range in a copy of source options
 			if rangeStr := chunk.Range(); rangeStr != "" {
@@ -970,6 +983,8 @@ func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig)
 	newCfg.dependsOn = g.PtrVal(cfg).dependsOn           // set dependsOn since not marshalled
 	newCfg.overrides = g.PtrVal(cfg).overrides           // set overrides since not marshalled
 	newCfg.queueStreaming = g.PtrVal(cfg).queueStreaming // set since not marshalled
+	newCfg.incrementalVal = g.PtrVal(cfg).incrementalVal
+	newCfg.incrementalValStr = g.PtrVal(cfg).incrementalValStr
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 
@@ -1018,6 +1033,28 @@ func (rd *ReplicationConfig) GetSourceConnection() (conn connection.ConnEntry, e
 	}
 
 	return conn, nil
+}
+
+// checkConnections names all the source and target connections that are not
+// defined, so that the user can add them in one pass.
+func (rd *ReplicationConfig) checkConnections() error {
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+
+	missing := []string{}
+	for _, name := range lo.Uniq([]string{rd.Source, rd.Target}) {
+		if name == "" || strings.Contains(name, "://") || !connection.SchemeType(name).IsUnknown() {
+			continue
+		} else if _, ok := connsMap[strings.ToLower(name)]; !ok {
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) > 0 {
+		return g.Error("could not find connection(s): %s. Add them to the environment", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
@@ -1215,6 +1252,10 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		return nil
 	}
 
+	if err = rd.checkConnections(); err != nil {
+		return err
+	}
+
 	err = rd.ProcessWildcards()
 	if err != nil {
 		return g.Error(err, "could not compile streams")
@@ -1293,8 +1334,8 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// config overwrite
 		taskEnv := g.CastToMapString(rd.Env)
-		var incrementalValStr string
-		var incrementalVal any
+		incrementalValStr := stream.incrementalValStr
+		incrementalVal := stream.incrementalVal
 
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
@@ -1343,8 +1384,10 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			if newFiles := cfgOverwrite.Source.Files; newFiles != nil {
 				stream.Files = newFiles
 			}
-			incrementalVal = cfgOverwrite.IncrementalVal
-			incrementalValStr = cfgOverwrite.IncrementalValStr
+			if cfgOverwrite.IncrementalValStr != "" {
+				incrementalVal = cfgOverwrite.IncrementalVal
+				incrementalValStr = cfgOverwrite.IncrementalValStr
+			}
 
 			// merge to existing replication env, overwrite if key already exists
 			if cfgOverwrite.Env != nil {
@@ -1509,6 +1552,11 @@ type ReplicationStreamConfig struct {
 	replication    *ReplicationConfig       `json:"-" yaml:"-"`
 	dependsOn      []string                 `json:"-" yaml:"-"`
 	queueStreaming bool                     `json:"-" yaml:"-"`
+
+	// the target max that ProcessChunks reads once for the chunks of an
+	// incremental stream ("null" when there is none)
+	incrementalVal    any
+	incrementalValStr string
 }
 
 // SelectColumnsToken, placed first in a stream's `select`, pins the column

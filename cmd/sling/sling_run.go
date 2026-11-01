@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -285,7 +284,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	if taskCfgStr := os.Getenv("SLING_TASK_CONFIG"); taskCfgStr != "" {
-		err = cfg.Unmarshal(taskCfgStr)
+		err = cfg.UnmarshalTaskEnv(taskCfgStr)
 		if err != nil {
 			return ok, g.Error(err, "could not parse task configuration")
 		}
@@ -539,7 +538,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	// try to get project_id
 	setProjectID(cfg.Env["SLING_CONFIG_PATH"])
-	cfg.Env["SLING_PROJECT_ID"] = projectID
+	cfg.SetEnv("SLING_PROJECT_ID", projectID)
 
 	// set working directory path
 	if val := cfg.Env["SLING_WORK_PATH"]; val != "" {
@@ -548,7 +547,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			return
 		}
 	} else {
-		cfg.Env["SLING_WORK_PATH"], _ = os.Getwd()
+		workPath, _ := os.Getwd()
+		cfg.SetEnv("SLING_WORK_PATH", workPath)
 	}
 
 	task = sling.NewTask(env.ExecID, cfg)
@@ -697,7 +697,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	// set pipeline store data
 	if store := sling.GetPipelineStoreEnv(); len(store) > 0 && sling.IsPipelineRunMode() {
 		if state, _ := replication.RuntimeState(); state != nil {
-			maps.Copy(state.Store, store)
+			state.MergeStore(store)
 		}
 	}
 
@@ -782,9 +782,9 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
-		state.Store["_replication_total_rows"] = state.Execution.TotalRows
-		state.Store["_replication_total_bytes"] = state.Execution.TotalBytes
-		sling.SetPipelineStoreEnv(state.Store)
+		state.SetStoreData("_replication_total_rows", state.Execution.TotalRows, false)
+		state.SetStoreData("_replication_total_bytes", state.Execution.TotalBytes, false)
+		sling.SetPipelineStoreEnv(state.GetStore())
 	}
 
 	return eG.Err()

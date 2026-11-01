@@ -228,3 +228,10 @@ func TestSSHHostKeyAlgorithms(t *testing.T) {
 	assert.Subset(t, algorithms, ssh.InsecureAlgorithms().HostKeys)
 	assert.Len(t, algorithms, len(slices.Compact(slices.Sorted(slices.Values(algorithms)))))
 }
+
+func TestOpenTunnelSSHParseErrorHidesPassword(t *testing.T) {
+	_, err := OpenTunnelSSH("localhost", 5432, "ssh_tunnel: ssh://root:s3cr3t@172.19.4.13:22", "", "", SSHOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not parse SSH_TUNNEL URL")
+	assert.NotContains(t, err.Error(), "s3cr3t")
+}

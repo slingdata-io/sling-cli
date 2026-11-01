@@ -215,6 +215,8 @@ func (pl *Pipeline) Execute() (err error) {
 
 	// Execute each step
 	var lastErr error
+	var broke bool
+	skipTo := 0 // steps before this index were jumped over by a forward goto
 	for i := 0; i < len(pl.steps); i++ {
 		// honor context cancellation (e.g., SLING_TIMEOUT deadline) between steps
 		if pl.Context != nil {
@@ -256,29 +258,34 @@ func (pl *Pipeline) Execute() (err error) {
 			pse.Pipeline.outputMux.Unlock()
 		}
 
-		// Execute the step
+		// Execute the step. A skipped step still sends its status, so the
+		// platform does not keep it pending.
+		skip := lastErr != nil || broke || i < skipTo
 		pl.CurrentStep = pse
-		err = pse.Execute(lastErr != nil) // skip if errored
+		err = pse.Execute(skip)
 		if err != nil {
 			lastErr = err // this allows to mark the rest of the steps as skipped
 		}
 
-		// continue to mark rest of steps if already errored
-		if lastErr != nil {
+		if skip || lastErr != nil {
 			continue
 		}
 
-		// Check for break
+		// Check for break, mark the rest of steps as skipped
 		if br, _ := step.Context().Map.Get("break"); br == true {
-			break
+			broke = true
+			continue
 		}
 
 		// Handle goto
 		if gotoID := pse.Map["goto"]; gotoID != nil {
-			if gotoIndex, ok := idStepMap[cast.ToString(gotoID)]; ok {
-				i = gotoIndex - 1 // -1 because i++ will increment it
-			} else {
+			if gotoIndex, ok := idStepMap[cast.ToString(gotoID)]; !ok {
 				g.Warn("did not find step ID (%s) for goto", gotoID)
+			} else if gotoIndex > i {
+				skipTo = gotoIndex // skip the steps in between
+			} else {
+				i = gotoIndex - 1 // -1 because i++ will increment it
+				skipTo = 0
 			}
 		}
 	}

@@ -414,7 +414,7 @@ func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool
 // mysqlLaneExportHook is set by the closed database_mysql_arrow..go. The stub
 // reads through the ADBC driver.
 var mysqlLaneExportHook = func(conn *MySQLConn, adbcConn *ArrowDBConn, sql string) (*iop.Datastream, error) {
-	return adbcConn.laneExportStream(sql)
+	return adbcConn.laneExportStream(sql, nil)
 }
 
 // laneExportStream is the lane's read.

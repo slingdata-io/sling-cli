@@ -1458,6 +1458,9 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	} else if strings.HasPrefix(sqlLower, "declare") && strings.HasSuffix(sqlLower, "end") {
 		// Oracle PL/SQL anonymous block with locals: DECLARE ... BEGIN ... END;
 		return []string{sql}
+	} else if strings.HasPrefix(sqlLower, "do begin") && strings.HasSuffix(sqlLower, "end") {
+		// SAP HANA anonymous block: DO BEGIN ... END
+		return []string{sql}
 	} else if strings.Contains(sqlLower, "prepare ") && strings.Contains(sqlLower, "execute ") {
 		return []string{sql}
 	} else if strings.Contains(sqlLower, "create procedure") || strings.Contains(sqlLower, "create function") {

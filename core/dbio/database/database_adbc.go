@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-adbc/go/adbc/drivermgr"
@@ -1173,6 +1175,7 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	noArrowLane := false
 	arrowRecords := false
 	laneOnly := false
+	var srcCols iop.Columns
 	if len(options) > 0 {
 		if val, ok := options[0]["limit"]; ok {
 			limit = cast.ToUint64(val)
@@ -1189,6 +1192,9 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 		// a connection with its own driver reads here only for the lane
 		if val, ok := options[0]["lane_only"]; ok {
 			laneOnly = cast.ToBool(val)
+		}
+		if val, ok := options[0]["columns"].(iop.Columns); ok {
+			srcCols = val
 		}
 	}
 
@@ -1222,7 +1228,7 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 	// Arrow lane: stage 2 of the gate runs on the real reader schema, before
 	// the datastream starts, so the stream mode never changes after Start.
 	if arrowRecords && !noArrowLane && limit == 0 {
-		ds, err = conn.laneReaderStream(queryContext, sql, reader, func() { stmt.Close() })
+		ds, err = conn.laneReaderStream(queryContext, sql, reader, srcCols, func() { stmt.Close() })
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}
@@ -1252,15 +1258,17 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 // driver's, or a native one. It runs stage 2 of the gate on the reader schema.
 // A decline returns ErrArrowLaneDeclined and keeps the reader open, so the
 // caller can read it on the row path or close it. Otherwise the stream owns
-// the reader, and closeReader runs after the last record.
-func (conn *ArrowDBConn) laneReaderStream(queryContext *g.Context, sql string, reader array.RecordReader, closeReader func()) (ds *iop.Datastream, err error) {
+// the reader, and closeReader runs after the last record. srcCols are the
+// catalog columns of the source, which give the precision and scale of a
+// decimal that the driver gives as text.
+func (conn *ArrowDBConn) laneReaderStream(queryContext *g.Context, sql string, reader array.RecordReader, srcCols iop.Columns, closeReader func()) (ds *iop.Datastream, err error) {
 	if conn.lane == nil || conn.laneCheck == nil {
 		return nil, ErrArrowLaneDeclined
 	}
 
 	// the lane reads the driver's type labels; the row path keeps the
 	// plain columns and infers from the values, as before the lane
-	laneRead := newAdbcLaneRead(reader.Schema())
+	laneRead := newAdbcLaneRead(reader.Schema(), srcCols)
 	ok, _, maxCol := conn.laneCheck(laneRead.schema, laneRead.columns) // the check logs its own decline line
 	if !ok {
 		return nil, ErrArrowLaneDeclined
@@ -1299,6 +1307,16 @@ func (conn *ArrowDBConn) setStreamProps(ds *iop.Datastream, sql string) {
 // pushes records into a RecordStream and the sink pulls them. No []any row is
 // built and no string is cloned.
 func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbcLaneRead, reader array.RecordReader, closeReader func(), maxCol int) *iop.Datastream {
+	// a reader with many sources changes the records in its own goroutines
+	toLane := laneRead.Record
+	if tr, ok := reader.(laneRecordTransformer); ok {
+		tr.SetRecordTransform(laneRead.Record)
+		toLane = func(rec arrow.RecordBatch) (arrow.RecordBatch, error) {
+			rec.Retain()
+			return rec, nil
+		}
+	}
+
 	rs := iop.NewRecordStream(queryContext, conn.lane, laneRead.schema, iop.ArrowLaneBuffer)
 	rs.Columns = laneRead.columns // the labels, which the plain schema does not carry
 	if maxCol >= 0 {
@@ -1314,7 +1332,7 @@ func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbc
 		for reader.Next() {
 			// the reader owns its record until the next Next, so the stream
 			// gets its own reference
-			record, err := laneRead.Record(reader.Record())
+			record, err := toLane(reader.Record())
 			if err != nil {
 				rs.Close(err)
 				return
@@ -1335,6 +1353,13 @@ func (conn *ArrowDBConn) arrowDatastream(queryContext *g.Context, laneRead *adbc
 	}()
 
 	return ds
+}
+
+// laneRecordTransformer is a record reader that changes each record to the
+// lane schema itself. fn returns a record that the caller owns. The reader
+// calls fn before Next returns the record.
+type laneRecordTransformer interface {
+	SetRecordTransform(fn func(arrow.RecordBatch) (arrow.RecordBatch, error))
 }
 
 // setArrowLaneTransforms hands the source transforms to the record stream, so
@@ -1602,36 +1627,108 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		tgtCols = nil
 	}
 
-	for batch := range ds.BatchChan {
-		// Convert batch to Arrow record reader
-		reader, batchRows, err := conn.batchToRecordReader(batch, tgtCols)
-		if err != nil {
-			return count, g.Error(err, "error converting batch to Arrow")
-		}
+	var total atomic.Uint64
+	err = conn.withIngestConns(conn.Context().Ctx, conn.insertConcurrency(), func(ctx context.Context, _ int, c adbc.Connection) error {
+		for batch := range ds.BatchChan {
+			if err := ctx.Err(); err != nil {
+				return err // another worker failed, or the run stops
+			}
 
-		ingested, err := adbc.IngestStream(
-			conn.Context().Ctx,
-			conn.Conn,
-			reader,
-			table.Name,
-			ingestMode,
-			opts,
-		)
-		reader.Release()
+			// Convert batch to Arrow record reader
+			reader, batchRows, err := conn.batchToRecordReader(batch, tgtCols)
+			if err != nil {
+				return g.Error(err, "error converting batch to Arrow")
+			}
 
-		if err != nil {
-			return count, g.Error(err, "error ingesting batch via ADBC")
-		}
+			ingested, err := adbc.IngestStream(ctx, c, reader, table.Name, ingestMode, opts)
+			reader.Release()
 
-		if ingested > 0 {
-			count += uint64(ingested)
-		} else {
-			// some drivers do not report a row count for a bulk ingest
-			count += uint64(batchRows)
+			if err != nil {
+				return g.Error(err, "error ingesting batch via ADBC")
+			}
+
+			if ingested > 0 {
+				total.Add(uint64(ingested))
+			} else {
+				// some drivers do not report a row count for a bulk ingest
+				total.Add(uint64(batchRows))
+			}
 		}
+		return nil
+	})
+
+	return total.Load(), err
+}
+
+// insertConcurrency returns the number of concurrent ingests (target option
+// insert_concurrency). A driver whose staging table lives in one session
+// ingests with one connection.
+func (conn *ArrowDBConn) insertConcurrency() int {
+	n := cast.ToInt(conn.GetProp("insert_concurrency"))
+	if n <= 1 {
+		return 1
+	}
+	switch conn.driverType {
+	case dbio.TypeDbDuckDb, dbio.TypeDbSQLite:
+		g.Warn("insert_concurrency has no effect on %s, using 1", conn.driverType)
+		return 1
+	}
+	return n
+}
+
+// withIngestConns runs fn on n goroutines, each with its own connection. The
+// first goroutine uses the main connection. The first error cancels the
+// context of the others, and withIngestConns returns it.
+func (conn *ArrowDBConn) withIngestConns(parent context.Context, n int, fn func(ctx context.Context, i int, c adbc.Connection) error) error {
+	if n <= 1 {
+		return fn(parent, 0, conn.Conn)
 	}
 
-	return count, nil
+	conns := []adbc.Connection{conn.Conn}
+	defer func() {
+		for _, c := range conns[1:] {
+			c.Close()
+		}
+	}()
+	for len(conns) < n {
+		c, err := conn.db.Open(parent)
+		if err != nil {
+			return g.Error(err, "could not open ADBC connection for concurrent ingest")
+		}
+		conns = append(conns, c)
+	}
+	g.Debug("ingesting with %d concurrent ADBC connections", n)
+
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i, c := range conns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if errs[i] = fn(ctx, i, c); errs[i] != nil {
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// the first real error wins over the cancel errors it caused
+	var first error
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, context.Canceled) {
+			return err
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // ingestOptions targets the catalog and schema of the table, not the
@@ -1697,25 +1794,31 @@ func (conn *ArrowDBConn) ingestRecordStream(tableFName string, ds *iop.Datastrea
 		return 0, g.Error(err, "could not label records for %s", tableFName)
 	}
 
-	reader := rs.Reader()
-	defer reader.Release()
-
 	g.Trace("arrow lane schema => %s", rs.Schema)
 
-	ingested, err := adbc.IngestStream(
-		ds.Context.Ctx,
-		conn.Conn,
-		reader,
-		table.Name,
-		conn.getIngestMode(),
-		conn.ingestOptions(table),
-	)
+	n := conn.insertConcurrency()
+	readers := rs.Readers(n)
+	var ingested atomic.Int64
+	err = conn.withIngestConns(ds.Context.Ctx, n, func(ctx context.Context, i int, c adbc.Connection) error {
+		reader := readers[i]
+		defer reader.Release()
+
+		cnt, err := adbc.IngestStream(ctx, c, reader, table.Name, conn.getIngestMode(), conn.ingestOptions(table))
+		if err != nil {
+			if n > 1 {
+				rs.Fail(err) // stop the readers of the other connections
+			}
+			return g.Error(err, "error ingesting records via ADBC")
+		}
+		ingested.Add(cnt)
+		return nil
+	})
 	if err != nil {
-		return 0, g.Error(err, "error ingesting records via ADBC")
+		return 0, err
 	}
 
-	if ingested != int64(ds.Count) {
-		g.Debug("arrow lane: driver ingested %d rows, stream counted %d", ingested, ds.Count)
+	if ingested.Load() != int64(ds.Count) {
+		g.Debug("arrow lane: driver ingested %d rows, stream counted %d", ingested.Load(), ds.Count)
 	}
 
 	// Return the stream count so the post-load check and the progress bar use
@@ -1801,7 +1904,7 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Colum
 
 	// Consume all rows from the batch channel and append to builder
 	rowCount := 0
-	for row := range batch.Rows {
+	for row := range batch.Rows() {
 		for colIdx, col := range cols {
 			srcCol := srcIdx[colIdx]
 			var val interface{}
@@ -2298,7 +2401,8 @@ type adbcLaneRead struct {
 	mem      memory.Allocator
 }
 
-func newAdbcLaneRead(src *arrow.Schema) *adbcLaneRead {
+func newAdbcLaneRead(src *arrow.Schema, srcCols iop.Columns) *adbcLaneRead {
+	srcColMap := srcCols.FieldMap(true)
 	r := &adbcLaneRead{
 		columns: iop.ArrowSchemaToColumns(src),
 		mem:     memory.NewGoAllocator(),
@@ -2322,6 +2426,12 @@ func newAdbcLaneRead(src *arrow.Schema) *adbcLaneRead {
 			}
 			col.Type = iop.DecimalType
 			col.DbType = "DECIMAL"
+			// the driver gives no typmod. Without a catalog precision that a
+			// decimal128 holds, stage 2 declines, so no value is cut.
+			if j, ok := srcColMap[strings.ToLower(field.Name)]; ok && srcCols[j].IsDecimal() && srcCols[j].DbPrecision <= 38 {
+				col.DbPrecision = srcCols[j].DbPrecision
+				col.DbScale = srcCols[j].DbScale
+			}
 			fields[i] = arrow.Field{
 				Name:     field.Name,
 				Type:     iop.ColumnsToArrowSchema(iop.Columns{*col}).Field(0).Type,
@@ -2507,14 +2617,15 @@ func (conn *BaseConn) arrowLaneReader() (*ArrowDBConn, bool) {
 
 // laneExportStream is the lane's read for a connection that reads with its
 // own driver otherwise. It returns ErrArrowLaneDeclined when stage 2
-// declines, so the caller keeps its own reader for the row path.
-func (conn *ArrowDBConn) laneExportStream(sql string) (*iop.Datastream, error) {
-	return conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "lane_only", true))
+// declines, so the caller keeps its own reader for the row path. srcCols are
+// the catalog columns of the source, or nil.
+func (conn *ArrowDBConn) laneExportStream(sql string, srcCols iop.Columns) (*iop.Datastream, error) {
+	return conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "lane_only", true, "columns", srcCols))
 }
 
 // laneExportFlow is laneExportStream as a dataflow.
 func (conn *ArrowDBConn) laneExportFlow(sql string) (*iop.Dataflow, error) {
-	ds, err := conn.laneExportStream(sql)
+	ds, err := conn.laneExportStream(sql, nil)
 	if err != nil {
 		return nil, err
 	}

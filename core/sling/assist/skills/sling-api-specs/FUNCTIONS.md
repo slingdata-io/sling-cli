@@ -13,7 +13,7 @@ Functions available within `{...}` expressions. Double-quoted strings are prefer
 | `trim(string)` | Remove whitespace | `trim(" hello ")` → "hello" |
 | `contains(str, substr)` | Check substring | `contains("hello", "ell")` → true |
 | `split(str, sep)` | Split to array | `split("a,b,c", ",")` → ["a","b","c"] |
-| `split_part(str, sep, idx)` | Get split part (1-based) | `split_part("a,b,c", ",", 2)` → "b" |
+| `split_part(str, sep, idx)` | Get split part (0-based) | `split_part("a,b,c", ",", 1)` → "b" |
 | `join(array, sep)` | Join array | `join(["a","b"], ", ")` → "a, b" |
 | `length(value)` | Length of string/array/map | `length("hello")` → 5 |
 | `snake(string)` | Snake case | `snake("Hello World")` → "hello_world" |
@@ -86,8 +86,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `ifnull(v1, v2, ...)` | Alias of coalesce | `ifnull(null, "default")` → "default" |
 | `null_if(val, sentinel[, …])` | Null if equal | `null_if("N/A", "N/A")` → null |
 | `nullif(val, sentinel[, …])` | Alias of null_if | `nullif(x, "")` → null |
-| `value(v1, v2, ...)` | First non-empty | `value("", "default")` → "default" |
-| `first_valid(v1, v2, ...)` | Alias of value | `first_valid("", "default")` → "default" |
+| `first_valid(v1, v2, ...)` | First non-null and non-empty | `first_valid("", "default")` → "default" |
 | `require(val[, msg])` | Ensure not null | `require(secrets.key, "Key required")` |
 | `cast(val, type)` | Convert type | `cast("42", "int")` → 42 |
 | `try_cast(val, type)` | Convert or null | `try_cast("abc", "int")` → null |
@@ -120,8 +119,7 @@ range(date_add(now(), -7, "day"), now(), "1d")
 | `object_zip(keys, vals)` | Create from arrays | `object_zip(["a"], [1])` → {"a":1} |
 | `filter(array, expr)` | Filter array | `filter([1,2,3], "value > 1")` → [2,3] |
 | `pluck(array, key)` | Extract field from objects | `pluck([{a:1}], "a")` → [1] |
-| `explode(array)` | Explode array values | Used when flattening lists |
-| `map(array, expr)` | Transform array | `map([1,2,3], "value * 2")` → [2,4,6] |
+| `explode(record, field_name)` | Expand a record by unnesting an array field | `explode({"id": 1, "items": [{"k": "a"}]}, "items")` → [{"id": 1, "k": "a"}] |
 | `sort(array[, desc])` | Sort array | `sort([3,1,2])` → [1,2,3] |
 | `chunk(array\|queue, size)` | Split into chunks | `chunk(queue.ids, 50)` |
 
@@ -155,9 +153,10 @@ chunk(queue.ids, 50)
 | `encode_base64(string)` | Base64 encode | `encode_base64("hello")` |
 | `decode_base64(string)` | Base64 decode | `decode_base64("aGVsbG8=")` |
 | `hash(str[, algo])` | Hash string | `hash("hello", "sha256")` |
+| `hmac(str, key[, algo])` | Keyed HMAC hash | `hmac("hello", "secret")` |
 | `json_parse(string)` | Parse JSON string | `json_parse('{"a":1}')` |
 
-**Hash algorithms**: md5, sha1, sha256
+**Hash algorithms**: md5, sha1, sha256, sha512
 
 ## Utility Functions
 
@@ -212,7 +211,7 @@ expression: 'if(!is_null(record.meta), record.meta.tags, array())'
 
 ```yaml
 # Extract domain
-expression: 'split_part(record.email, "@", 2)'
+expression: 'split_part(record.email, "@", 1)'
 
 # Build URL
 url: '{join([state.base_url, "users", state.user_id], "/")}'

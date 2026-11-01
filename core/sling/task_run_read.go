@@ -152,6 +152,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// make them return hex WKB so duckdb can parse them at export
 	selectFields = sTable.GeometryWKBFields(selectFields)
 
+	// a true condition that the lane makes a ctid range for each reader
+	scanCond := t.parallelScanCond(sTable, srcConn)
+	where := cfg.Source.Where
+
 	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"
@@ -166,7 +170,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if incValStr := cfg.IncrementalValStr; incValStr != "" {
+		if incValStr := cfg.IncrementalValStr; cfg.HasIncrementalVal() {
 			if srcConn.GetType().IsNoSQL() {
 				// escape double quote since this uses JSON
 				incValStr = strings.ReplaceAll(incValStr, `"`, `\"`)
@@ -244,7 +248,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				srcConn.GetTemplateValue(key),
 				"fields", strings.Join(sFields, ", "),
 				"table", sTable.FDQN(),
-				"incremental_where_cond", incrementalWhereCond,
+				"incremental_where_cond", lo.Ternary(scanCond == "", incrementalWhereCond, "("+incrementalWhereCond+") and "+scanCond),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"incremental_value", cfg.IncrementalValStr,
 				"table_name", sTable.Name,
@@ -252,8 +256,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"fields_array", g.Marshal(sFields),
 			)
 		} else {
-			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
-				err = g.Error("Since using %s mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
+			// with a range (chunking) but no placeholder, each chunk reads the same rows
+			needsPlaceholder := g.In(t.Config.Mode, IncrementalMode, BackfillMode) || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange()
+			if needsPlaceholder && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
+				err = g.Error("Since using %s mode + custom SQL, with an `update_key` or a `range` (chunking), the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
 				return t.df, err
 			}
 
@@ -272,6 +278,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			"incremental_value", cfg.IncrementalValStr,
 		)
+		where = cfg.Source.Where
+	} else if scanCond != "" {
+		where = lo.Ternary(where == "", scanCond, "("+where+") and "+scanCond)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
@@ -302,10 +311,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// For definition-only mode, inject WHERE 1=0 to avoid reading data
 	if cfg.Mode == DefinitionOnlyMode {
 		cfg.Source.Where = "1=0"
+		where = cfg.Source.Where
 	}
 
 	// construct select statement for selected fields or where condition
-	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
+	if len(selectFields) > 1 || selectFields[0] != "*" || where != "" || cfg.Source.Limit() > 0 {
 		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() && !strings.Contains(sTable.SQL, "{fields}") {
 			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
 			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.
@@ -314,7 +324,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		sTable.SQL = sTable.Select(database.SelectOptions{
 			Fields: selectFields,
-			Where:  cfg.Source.Where,
+			Where:  where,
 			Limit:  lo.Ternary(cfg.Source.Limit() > 0, g.Ptr(cfg.Source.Limit()), nil),
 			Offset: cfg.Source.Offset(),
 		})
@@ -344,6 +354,38 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	setStage("3 - dataflow-stream")
 
 	return
+}
+
+// parallelScanCond returns the condition that marks a Postgres table read for
+// a parallel scan on the arrow lane, or an empty string. The condition is true,
+// so a read that does not split it reads all the rows.
+func (t *TaskExecution) parallelScanCond(sTable database.Table, srcConn database.Connection) string {
+	cfg := t.Config
+	n := 0
+	if cfg.Source.Options != nil {
+		n = g.PtrVal(cfg.Source.Options.ParallelScan)
+	}
+	if n <= 1 {
+		return ""
+	}
+
+	reason := ""
+	switch {
+	case srcConn.GetType() != dbio.TypeDbPostgres:
+		reason = "the source is not postgres"
+	case sTable.IsQuery():
+		reason = "the stream is a custom SQL query"
+	case cfg.Source.Limit() > 0 || cfg.Source.Offset() > 0:
+		reason = "the stream has a limit or an offset"
+	case srcConn.GetProp("arrow_lane") != "candidate":
+		reason = "the stream reads on the row path, not the arrow lane"
+	}
+	if reason != "" {
+		g.Info("parallel_scan has no effect on stream %s: %s", cfg.StreamName, reason)
+		return ""
+	}
+
+	return database.ParallelScanCond(n)
 }
 
 // ReadFromFile reads from a source file. tgtConn is the live target
@@ -530,6 +572,7 @@ var (
 	setArrowLaneHook = func(t *TaskExecution, src arrowLaneSource, tgtConn database.Connection) error {
 		src.conn.SetProp("arrow_lane", "")
 		src.conn.SetArrowLane(nil, nil)
+		logADBCReadNote(src.conn, t.Config.Source.Stream, arrowLaneStubReason)
 		return arrowLaneStub(src.stream)
 	}
 	readArrowFileDataflowHook = func(t *TaskExecution, fs filesys.FileSysClient, uri string, fsCfg iop.FileStreamConfig, tgtConn database.Connection) (*iop.Dataflow, error) {
@@ -540,14 +583,32 @@ var (
 	}
 )
 
+const arrowLaneStubReason = "the arrow lane requires the official release of sling-cli"
+
 // arrowLaneStub declines the lane, since the open build has none. It fails a
 // run with SLING_ARROW_LANE=force.
 func arrowLaneStub(stream string) error {
-	reason := "the arrow lane requires the official release of sling-cli"
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SLING_ARROW_LANE")), "force") {
-		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, reason)
+		return g.Error("arrow lane: forced but not eligible for stream %q. Reason: %s", stream, arrowLaneStubReason)
 	}
 	return nil
+}
+
+// logADBCReadNote tells the user that use_adbc on a source does not change
+// the row path read.
+func logADBCReadNote(conn database.Connection, stream, reason string) {
+	if note := adbcReadNote(conn, stream, reason); note != "" {
+		g.Info("%s", note)
+	}
+}
+
+// adbcReadNote is empty when the read uses ADBC. Only the arrow lane reads
+// through ADBC, except for DuckDB and adbc connections, which always do.
+func adbcReadNote(conn database.Connection, stream, reason string) string {
+	if conn == nil || !conn.UseADBC() || g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbArrowDBC) {
+		return ""
+	}
+	return g.F("use_adbc has no effect on the read of stream %q: the arrow lane is off (%s), so the %s driver reads the rows", stream, reason, conn.GetType())
 }
 
 // ReadFromApi reads from a source api

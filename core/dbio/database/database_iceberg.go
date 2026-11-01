@@ -1352,7 +1352,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		records := []arrow.Record{}
 		rowCount := 0
 
-		for row := range batch.Rows {
+		for row := range batch.Rows() {
 			// Add row to record builder
 			for i, val := range row {
 				if i >= len(recordBuilder.Fields()) {
@@ -1416,7 +1416,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
 		}
 
-		details := g.M("location", tbl.Location(), "batch_rows", len(batch.Rows))
+		details := g.M("location", tbl.Location(), "batch_rows", arrowTable.NumRows())
 		if currSnapshot := newTable.CurrentSnapshot(); currSnapshot != nil {
 			details["snapshot_id"] = currSnapshot.SnapshotID
 		}
