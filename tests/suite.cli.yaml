@@ -3688,3 +3688,56 @@
   output_contains:
     - '1,1.123456789012345'
     - '2,-99999999999999.000000000000001'
+
+# https://github.com/slingdata-io/sling-cli/issues/831 (SLING-190)
+# DuckDB 2.0.0 renamed its CLI assets to duckdb-cli-<platform>.tar.gz. The old .zip URL gave a 404.
+# Each entry uses an empty SLING_HOME_DIR to force a download. Needs internet access to github.com.
+- id: 839
+  name: 'GH #831: DUCKDB_VERSION=2.0.0 downloads the new tar.gz CLI asset'
+  env:
+    DUCKDB_VERSION: '2.0.0'
+    SLING_HOME_DIR: /tmp/sling_839/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_839/gh831.duckdb'
+    GH831_EXPECT: 'v2.0.0'
+  run: |
+    rm -rf /tmp/sling_839 && mkdir -p /tmp/sling_839/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 2.0.0'
+    - 'gh831 duckdb version => v2.0.0'
+    - 'SUCCESS: gh831 DuckDB v2.0.0 binary downloaded and runs'
+
+# DuckDB has no v2.0 release tag. A short version is padded to three parts (2.0 => 2.0.0).
+- id: 840
+  name: 'GH #831: DUCKDB_VERSION=2.0 is padded to 2.0.0'
+  env:
+    DUCKDB_VERSION: '2.0'
+    SLING_HOME_DIR: /tmp/sling_840/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_840/gh831.duckdb'
+    GH831_EXPECT: 'v2.0.0'
+  run: |
+    rm -rf /tmp/sling_840 && mkdir -p /tmp/sling_840/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 2.0.0'
+    - 'gh831 duckdb version => v2.0.0'
+    - 'SUCCESS: gh831 DuckDB v2.0.0 binary downloaded and runs'
+
+# A version before 2.0 still downloads the old duckdb_cli-<platform>.zip asset.
+- id: 841
+  name: 'GH #831: DUCKDB_VERSION=1.5.5 still downloads the old zip CLI asset'
+  env:
+    DUCKDB_VERSION: '1.5.5'
+    SLING_HOME_DIR: /tmp/sling_841/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_841/gh831.duckdb'
+    GH831_EXPECT: 'v1.5.5'
+  run: |
+    rm -rf /tmp/sling_841 && mkdir -p /tmp/sling_841/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 1.5.5'
+    - 'gh831 duckdb version => v1.5.5'
+    - 'SUCCESS: gh831 DuckDB v1.5.5 binary downloaded and runs'

@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bufio"
 	"compress/gzip"
@@ -133,6 +134,65 @@ func Unzip(src string, dest string) (nodes []map[string]any, err error) {
 		}
 	}
 	return nodes, nil
+}
+
+// UntarGz extracts the folders and regular files of a .tar.gz archive into dest.
+func UntarGz(src string, dest string) (nodes []map[string]any, err error) {
+	file, err := os.Open(src)
+	if err != nil {
+		return nodes, g.Error(err)
+	}
+	defer file.Close()
+
+	gReader, err := gzip.NewReader(file)
+	if err != nil {
+		return nodes, g.Error(err)
+	}
+	defer gReader.Close()
+
+	tr := tar.NewReader(gReader)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nodes, nil
+		} else if err != nil {
+			return nodes, g.Error(err)
+		}
+
+		fpath := filepath.Join(dest, header.Name)
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return nodes, g.Error("%s: illegal file path", fpath)
+		}
+
+		nodes = append(nodes, map[string]any{
+			"uri":     "file://" + fpath,
+			"is_dir":  header.Typeflag == tar.TypeDir,
+			"updated": header.ModTime.Unix(),
+			"size":    header.Size,
+		})
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err = os.MkdirAll(fpath, os.ModePerm); err != nil {
+				return nodes, g.Error(err)
+			}
+		case tar.TypeReg:
+			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+				return nodes, g.Error(err)
+			}
+
+			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, header.FileInfo().Mode())
+			if err != nil {
+				return nodes, g.Error(err)
+			}
+
+			_, err = io.Copy(outFile, tr)
+			outFile.Close()
+			if err != nil {
+				return nodes, g.Error(err)
+			}
+		}
+	}
 }
 
 func NewCompressor(cpType CompressorType) Compressor {

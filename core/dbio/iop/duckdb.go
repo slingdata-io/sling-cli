@@ -1787,6 +1787,12 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 		}
 	}
 
+	// release tags have three parts (v2.0.0), so pad "2.0" to "2.0.0"
+	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if len(strings.Split(version, ".")) == 2 {
+		version += ".0"
+	}
+
 	if duck.version, err = g.VersionNumber(version); err != nil {
 		g.Warn("unable to parse duckdb version (%s): %s", version, err.Error())
 	}
@@ -1847,45 +1853,56 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 
 	if !found {
 		// we need to download it ourselves
-		var downloadURL string
-		zipPath := path.Join(g.UserHomeDir(), "duckdb.zip")
-		defer os.Remove(zipPath)
-
+		var platform string
 		switch runtime.GOOS + "/" + runtime.GOARCH {
-
 		case "windows/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-amd64.zip"
-
+			platform = "windows-amd64"
+		case "windows/arm64":
+			platform = "windows-arm64"
 		case "windows/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-i386.zip"
-
+			platform = "windows-i386"
 		case "darwin/386", "darwin/arm", "darwin/arm64", "darwin/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-osx-universal.zip"
-
+			platform = "osx-universal"
 		case "linux/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-i386.zip"
-
+			platform = "linux-i386"
 		case "linux/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
-
+			platform = "linux-amd64"
 		case "linux/aarch64", "linux/arm64", "linux/arm":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-arm64.zip"
-
+			platform = "linux-arm64"
 		default:
 			return "", g.Error("OS %s/%s not handled", runtime.GOOS, runtime.GOARCH)
 		}
 
-		downloadURL = g.R(downloadURL, "version", version)
-
-		g.Info("downloading duckdb %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
-		err = net.DownloadFile(downloadURL, zipPath)
-		if err != nil {
-			return "", g.Error(err, "Unable to download duckdb binary")
+		// DuckDB 2.0 renamed the CLI asset to duckdb-cli-<platform>.tar.gz.
+		// Try the other name on a 404 (version not parsed, or a pre-release).
+		baseURL := g.F("https://github.com/duckdb/duckdb/releases/download/v%s/", version)
+		assets := []string{"duckdb_cli-" + platform + ".zip", "duckdb-cli-" + platform + ".tar.gz"}
+		if duck.version >= 20000 {
+			assets[0], assets[1] = assets[1], assets[0]
 		}
 
-		paths, err := Unzip(zipPath, folderPath)
-		if err != nil {
-			return "", g.Error(err, "Error unzipping duckdb zip")
+		g.Info("downloading duckdb %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
+		var paths []map[string]any
+		for i, asset := range assets {
+			archivePath := path.Join(g.UserHomeDir(), asset)
+			defer os.Remove(archivePath)
+
+			if err = net.DownloadFile(baseURL+asset, archivePath); err != nil {
+				if i == 0 && strings.Contains(err.Error(), "404") {
+					continue
+				}
+				return "", g.Error(err, "Unable to download duckdb binary")
+			}
+
+			if strings.HasSuffix(asset, ".zip") {
+				paths, err = Unzip(archivePath, folderPath)
+			} else {
+				paths, err = UntarGz(archivePath, folderPath)
+			}
+			if err != nil {
+				return "", g.Error(err, "could not extract duckdb archive %s", asset)
+			}
+			break
 		}
 
 		if !g.PathExists(binPath) {
