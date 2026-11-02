@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -566,6 +567,41 @@ func (dl decimalLimits) Check(row []any) error {
 		}
 	}
 	return nil
+}
+
+// DecimalFit finds the decimal type that holds a set of values with no loss.
+// A column with no precision (Postgres numeric) takes any value, so its
+// values give the Arrow type.
+type DecimalFit struct {
+	intDigits int32
+	scale     int32
+}
+
+// Add counts the digits of a value. A value that is not a number has no effect.
+func (f *DecimalFit) Add(val any) {
+	if val == nil {
+		return
+	}
+	s := strings.ReplaceAll(strings.ReplaceAll(cast.ToString(val), ",", ""), "$", "")
+	d, err := decimal.NewFromString(strings.TrimSpace(s))
+	if err != nil {
+		return
+	}
+	exp := d.Exponent()
+	digits := int32(len(new(big.Int).Abs(d.Coefficient()).String()))
+	f.intDigits = max(f.intDigits, digits+exp)
+	f.scale = max(f.scale, -exp)
+}
+
+// ArrowType gives decimal128 when the values fit in it, else decimal256.
+func (f DecimalFit) ArrowType() (arrow.DataType, error) {
+	switch need := f.intDigits + f.scale; {
+	case need <= decimal128.MaxPrecision:
+		return &arrow.Decimal128Type{Precision: decimal128.MaxPrecision, Scale: f.scale}, nil
+	case need <= decimal256.MaxPrecision:
+		return &arrow.Decimal256Type{Precision: decimal256.MaxPrecision, Scale: f.scale}, nil
+	}
+	return nil, g.Error("a value has %d integer digits and %d fraction digits, more than decimal(%d) holds", f.intDigits, f.scale, decimal256.MaxPrecision)
 }
 
 // decimalIntDigits gives the count of integer digits of a decimal text,

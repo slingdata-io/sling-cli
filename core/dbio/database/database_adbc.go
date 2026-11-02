@@ -1874,6 +1874,7 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Colum
 	for i := range srcIdx {
 		srcIdx[i] = i
 	}
+	onTarget := false
 	if len(tgtCols) > 0 {
 		tgtIdx := map[string]int{}
 		for i, col := range cols {
@@ -1892,17 +1893,39 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Colum
 		if ok {
 			cols = tgtCols
 			schema = iop.ColumnsToArrowSchema(cols)
+			onTarget = true
 		}
 	}
 	schema = conn.ingestSchema(schema, cols)
 
-	// Create memory allocator
+	// A target decimal with no precision (Postgres numeric) takes any value,
+	// so the values of the batch give its type. Else the default decimal(24,6)
+	// cuts the fraction digits.
+	fits := map[int]*iop.DecimalFit{}
+	held := map[int][]any{}
+	if onTarget {
+		for i, col := range cols {
+			if col.IsDecimal() && col.DbPrecision == 0 {
+				fits[i] = &iop.DecimalFit{}
+			}
+		}
+	}
+
 	mem := memory.NewGoAllocator()
+	builders := make([]array.Builder, len(cols))
+	defer func() {
+		for _, b := range builders {
+			if b != nil {
+				b.Release()
+			}
+		}
+	}()
+	for i, field := range schema.Fields() {
+		if fits[i] == nil {
+			builders[i] = array.NewBuilder(mem, field.Type)
+		}
+	}
 
-	// Create record builder
-	builder := array.NewRecordBuilder(mem, schema)
-
-	// Consume all rows from the batch channel and append to builder
 	rowCount := 0
 	for row := range batch.Rows() {
 		for colIdx, col := range cols {
@@ -1911,14 +1934,38 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch, tgtCols iop.Colum
 			if srcCol < len(row) {
 				val = row[srcCol]
 			}
-			iop.AppendToBuilder(builder.Field(colIdx), &col, val)
+			if fit := fits[colIdx]; fit != nil {
+				fit.Add(val)
+				held[colIdx] = append(held[colIdx], val)
+				continue
+			}
+			iop.AppendToBuilder(builders[colIdx], &col, val)
 		}
 		rowCount++
 	}
 
-	// Build the record
-	record := builder.NewRecord()
-	builder.Release()
+	fields := slices.Clone(schema.Fields())
+	for i, fit := range fits {
+		fields[i].Type, err = fit.ArrowType()
+		if err != nil {
+			return nil, 0, g.Error(err, "column %s does not fit a decimal type. Set a string type for the column, for example with `columns: {%s: string}`", cols[i].Name, cols[i].Name)
+		}
+		builders[i] = array.NewBuilder(mem, fields[i].Type)
+		for _, val := range held[i] {
+			iop.AppendToBuilder(builders[i], &cols[i], val)
+		}
+	}
+	if len(fits) > 0 {
+		meta := schema.Metadata()
+		schema = arrow.NewSchema(fields, &meta)
+	}
+
+	arrays := make([]arrow.Array, len(builders))
+	for i, b := range builders {
+		arrays[i] = b.NewArray()
+		defer arrays[i].Release()
+	}
+	record := array.NewRecord(schema, arrays, int64(rowCount))
 
 	if rowCount == 0 {
 		// Return empty reader with schema

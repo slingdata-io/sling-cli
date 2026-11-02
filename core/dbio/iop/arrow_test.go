@@ -838,3 +838,36 @@ func BenchmarkArrowAppendToBuilderDecimal(b *testing.B) {
 		})
 	}
 }
+
+func TestArrowDecimalFit(t *testing.T) {
+	cases := []struct {
+		name  string
+		vals  []any
+		typ   string
+		fails bool
+	}{
+		{"empty", nil, "decimal(38, 0)", false},
+		{"nulls and text", []any{nil, "NaN", "abc"}, "decimal(38, 0)", false},
+		{"fraction", []any{"1.12345678901234567890", "-2.25"}, "decimal(38, 20)", false},
+		{"int and fraction", []any{"12345678901234567890123.5", "0.000001"}, "decimal(38, 6)", false},
+		{"exponent", []any{1e-7, "1.5E+3", 42}, "decimal(38, 7)", false},
+		{"money", []any{"$1,234.50"}, "decimal(38, 2)", false},
+		{"wide", []any{"123456789012345678901234567890.123456789012"}, "decimal256(76, 12)", false},
+		{"too wide", []any{strings.Repeat("9", 70) + "." + strings.Repeat("1", 10)}, "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var fit DecimalFit
+			for _, v := range c.vals {
+				fit.Add(v)
+			}
+			typ, err := fit.ArrowType()
+			if c.fails {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.typ, typ.String())
+		})
+	}
+}

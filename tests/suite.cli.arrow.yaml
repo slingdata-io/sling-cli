@@ -702,17 +702,22 @@
     - 'with 4 readers'
 
 # The lane declines an unconstrained numeric: no decimal128 type holds all of
-# its values (SLING-125). The run takes the row path.
+# its values (SLING-125). The run takes the row path. The row path keeps all
+# the digits of the target numeric, which has no precision (SLING-166): 20
+# fraction digits, and 51 digits in decimal256. The driver drops trailing
+# zeros, so the text of 1.12345678901234567890 has 19 fraction digits.
 - id: 762
   name: 'arrow lane declines: unconstrained numeric'
   run: |
-    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst; create table public.arrow_762_src (id int, d numeric); insert into public.arrow_762_src values (1, 1.5), (2, -2.25)"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst; create table public.arrow_762_src (id int, d numeric); insert into public.arrow_762_src values (1, 1.5), (2, -2.25), (3, 1.12345678901234567890), (4, 12345678901234567890123.5), (5, -123456789012345678901234567890.123456789012345678901), (6, null)"
     sling run -d --src-conn POSTGRES_ADBC --src-stream public.arrow_762_src --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_762_dst --mode full-refresh
-    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'matched_' || count(*) as res from public.arrow_762_src s join public.arrow_762_dst t on t.id = s.id and t.d = s.d"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'matched_' || count(*) as res from public.arrow_762_src s join public.arrow_762_dst t on t.id = s.id and t.d is not distinct from s.d"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'value_' || d::text as res from public.arrow_762_dst where id = 3"
     SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst"
   output_contains:
     - 'falling back to row-based processing for stream "public.arrow_762_src". Reason: decimal column "d" has no precision from 1 to 38'
-    - 'matched_2'
+    - 'matched_6'
+    - 'value_1.1234567890123456789 '
 
 - id: 740
   name: 'arrow lane declines: transform that reads record.'

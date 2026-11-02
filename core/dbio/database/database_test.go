@@ -4054,3 +4054,49 @@ func TestSummarizeBcpOutput(t *testing.T) {
 	assert.Len(t, lines, 21)
 	assert.Equal(t, "... (5 more lines)", lines[20])
 }
+
+// A target numeric with no precision takes the type of its values, so no
+// fraction digit is cut (SLING-166).
+func TestArrowDBConnBatchToRecordReader_OpenDecimal(t *testing.T) {
+	cols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType}}
+	tgtCols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType, DbType: "numeric"}}
+
+	read := func(vals ...any) (arrow.Record, error) {
+		ds := iop.NewDatastream(cols)
+		batch := ds.NewBatch(cols)
+		for i, v := range vals {
+			batch.Push([]any{i + 1, v})
+		}
+		batch.Close()
+
+		conn := &ArrowDBConn{driverType: dbio.TypeDbPostgres}
+		reader, _, err := conn.batchToRecordReader(batch, tgtCols)
+		if err != nil {
+			return nil, err
+		}
+		require.True(t, reader.Next())
+		rec := reader.RecordBatch()
+		rec.Retain()
+		reader.Release()
+		return rec, nil
+	}
+
+	rec, err := read("1.12345678901234567890", "-2.25", nil)
+	require.NoError(t, err)
+	defer rec.Release()
+	dec := rec.Column(1).(*array.Decimal128)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 20}, dec.DataType())
+	assert.Equal(t, "1.1234567890123456789", dec.ValueStr(0)) // ValueStr drops trailing zeros
+	assert.Equal(t, "-2.25", dec.ValueStr(1))
+	assert.True(t, dec.IsNull(2))
+
+	// 23 integer digits and 20 fraction digits need decimal256
+	rec2, err := read("1.12345678901234567890", "12345678901234567890123.5")
+	require.NoError(t, err)
+	defer rec2.Release()
+	assert.Equal(t, &arrow.Decimal256Type{Precision: 76, Scale: 20}, rec2.Column(1).DataType())
+	assert.Equal(t, "12345678901234567890123.5", rec2.Column(1).ValueStr(1))
+
+	_, err = read(strings.Repeat("9", 70) + "." + strings.Repeat("1", 10))
+	assert.ErrorContains(t, err, "column d does not fit a decimal type")
+}
