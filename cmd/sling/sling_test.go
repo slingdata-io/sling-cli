@@ -1137,8 +1137,12 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 
 func TestSuiteDatabasePostgres(t *testing.T) {
 	t.Parallel()
-	// testSuite(t, dbio.Type("postgres_adbc")) // COPY statement: PGRES_FATAL_ERROR ERROR:  invalid scale in external "numeric" value
 	testSuite(t, dbio.TypeDbPostgres)
+}
+
+func TestSuiteDatabasePostgresAdbc(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.Type("postgres_adbc"))
 }
 
 func TestSuiteDatabaseRedshift(t *testing.T) {
