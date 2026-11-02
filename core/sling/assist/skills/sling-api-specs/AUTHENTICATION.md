@@ -57,7 +57,7 @@ authentication:
 
 ### Authorization Code Flow
 
-For user-authorized access. Can use automatic browser flow or manual code:
+For user-authorized access. Sling opens a browser and handles the callback:
 
 ```yaml
 authentication:
@@ -67,40 +67,8 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   authorization_url: "https://api.example.com/oauth/authorize"
-  # Empty redirect_uri = auto browser flow
-  # Custom URI = manual mode with pre-obtained code
-  token: "{secrets.authorization_code}"  # For manual mode
+  redirect_uri: "http://localhost:8080/callback"  # optional; defaults to a random local port
   scopes: ["read:data"]
-```
-
-### Resource Owner Password (Deprecated)
-
-Avoid if possible. Uses username/password directly:
-
-```yaml
-authentication:
-  type: "oauth2"
-  flow: "password"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  username: "{secrets.username}"
-  password: "{secrets.password}"
-  authentication_url: "https://api.example.com/oauth/token"
-  scopes: ["read:user"]
-```
-
-### Refresh Token Flow
-
-Use existing refresh token to get new access token:
-
-```yaml
-authentication:
-  type: "oauth2"
-  flow: "refresh_token"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  refresh_token: "{secrets.refresh_token}"
-  authentication_url: "https://api.example.com/oauth/token"
 ```
 
 ### Device Code Flow (CLI/Headless)
@@ -128,7 +96,6 @@ authentication:
   type: "oauth2"
   # ...
   expires: 3600  # Re-auth interval in seconds
-  refresh_on_expire: true  # Auto-refresh tokens
 ```
 
 ## AWS Signature v4

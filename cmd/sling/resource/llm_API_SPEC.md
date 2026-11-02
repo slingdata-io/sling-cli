@@ -99,7 +99,6 @@ authentication:
   scopes: ["read:data", "write:data"]
 
   expires: 3600  # Re-auth interval in seconds; automatic before each request if expired
-  refresh_on_expire: true  # Auto-refresh OAuth2 tokens (requires refresh_token)
 
 
 # Default settings applied to all endpoints
@@ -417,35 +416,15 @@ authentication:
     - "read:data"
     - "write:data"
 
-  # OAuth2 - Authorization Code (automatic browser or manual with pre-obtained code)
+  # OAuth2 - Authorization Code (browser-based; Sling handles the callback)
   type: "oauth2"
   flow: "authorization_code"
   client_id: "{secrets.oauth_client_id}"
   client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   authorization_url: "https://api.example.com/oauth/authorize"  # Auto-derived if omitted
-  # redirect_uri: "" # Empty/localhost = auto browser flow, custom URI = manual mode
-  token: "{secrets.authorization_code}"  # For manual mode with pre-obtained code
+  # redirect_uri: "http://localhost:8080/callback" # optional; defaults to a random local port
   scopes: ["read:data"]
-
-  # OAuth2 - Resource Owner Password Credentials (deprecated, avoid if possible)
-  type: "oauth2"
-  flow: "password"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  username: "{secrets.username}"
-  password: "{secrets.password}"
-  authentication_url: "https://api.example.com/oauth/token"
-  scopes:
-    - "read:user"
-
-  # OAuth2 - Refresh Token Flow
-  type: "oauth2"
-  flow: "refresh_token"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  refresh_token: "{secrets.refresh_token}"
-  authentication_url: "https://api.example.com/oauth/token"
 
   # OAuth2 - Device Code Flow (for CLI/headless environments - Google, Microsoft, GitHub)
   type: "oauth2"

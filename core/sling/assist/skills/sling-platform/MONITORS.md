@@ -59,14 +59,14 @@ schemata:            # connection-wide schema drift detection
 | `row_count` | bool | `false` | `COUNT(*)`. Also the baseline for row-count anomalies |
 | `body_md5` | bool | `false` | Hash of a view or procedure definition — catches code changes |
 | `freshness_column` | string | — | Column queried with `MAX()` to find data age |
-| `freshness_threshold` | string | — | Max age before a `data_stale` event, e.g. `"24h"`, `"7d"`, `"1d12h"` |
+| `freshness_threshold` | string | — | Max age before a `data_stale` event, e.g. `"24h"`, `"7d"`, `"36h"` |
 | `anomaly_detection` | object | — | Override detection tuning for this object |
 | `alert_on_change` | string[] | — | Which changes alert: `name`, `type`, `timestamp`, `size`, `body`, `count` |
 | `columns` | map | — | Per-column config, keyed by column name or `"*"` |
 
-Duration units: `d`, `h`, `m`, `s`. Combine them (`"1h30m"`).
+Duration units: `d`, `h`, `m`, `s`. A day value stands alone (`"7d"`); otherwise use a Go duration and combine (`"1h30m"`, `"36h"`).
 
-Freshness without `freshness_column` falls back to the object's metadata timestamp — imprecise for tables that take inserts without DDL. Set the column whenever one exists.
+Without `freshness_column`, a database table records no timestamp, so `freshness_threshold` can never fire a `data_stale` event. Set the column on every table. File objects use the file's last-modified time.
 
 ## Column keys
 
@@ -147,7 +147,7 @@ Configured on the monitor **job**, not in the YAML. Four triggers: on schema cha
 
 ## Support by database
 
-Freshness works everywhere. Table size and percentiles do not: SQLite and D1 support neither, MySQL/MariaDB has no percentiles. Postgres, Snowflake, BigQuery (approximate), ClickHouse, DuckDB, SQL Server, Oracle, Redshift, Databricks, Trino and Athena support all three.
+Freshness works wherever a timestamp exists (a `freshness_column`, or a file's modified time). Table size and percentiles depend on the database. SQLite and D1 support neither. Table size is collected for Postgres, ClickHouse, Snowflake, BigQuery, DuckDB/MotherDuck and MySQL/MariaDB, and skipped for Redshift, SQL Server, Oracle, Databricks, Trino and Athena. Percentiles use each dialect's function: Postgres, ClickHouse, Snowflake, BigQuery (approximate), DuckDB, SQL Server, Oracle, Trino, Athena and Databricks (approximate); they are skipped for SQLite/D1, MySQL/MariaDB, Redshift, Proton and MotherDuck.
 
 ## Worked example
 
