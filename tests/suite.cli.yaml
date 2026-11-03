@@ -3742,3 +3742,13 @@
     - 'downloading duckdb 1.5.5'
     - 'gh831 duckdb version => v1.5.5'
     - 'SUCCESS: gh831 DuckDB v1.5.5 binary downloaded and runs'
+
+# pgx COPY encodes only a Go bool into bool. Integer and text values go into an existing bool column.
+- id: 842
+  name: 'Postgres integer and text values into an existing bool column'
+  run: 'sling run -d -r tests/replications/r.144.postgres_int_to_bool.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: integer values load into a Postgres bool column'

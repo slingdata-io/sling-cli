@@ -455,11 +455,23 @@ func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, r
 
 	binary := true
 	for i, field := range sd.Fields {
-		if field.DataTypeOID == pgtype.ByteaOID {
+		switch field.DataTypeOID {
+		case pgtype.ByteaOID:
 			// pgx encodes only []byte into bytea (an empty binary value is a string)
 			for _, row := range rows {
 				if s, ok := row[i].(string); ok {
 					row[i] = []byte(s)
+				}
+			}
+		case pgtype.BoolOID:
+			// pgx encodes only bool into bool (a tinyint(1) source value is an integer)
+			for _, row := range rows {
+				if v := row[i]; v != nil {
+					if _, ok := v.(bool); !ok {
+						if row[i], err = cast.ToBoolE(v); err != nil {
+							return 0, g.Error(err, "could not convert value of column %s to bool", columns[i])
+						}
+					}
 				}
 			}
 		}
