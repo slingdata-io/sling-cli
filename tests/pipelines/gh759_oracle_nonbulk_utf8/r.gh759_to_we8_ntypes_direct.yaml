@@ -1,0 +1,13 @@
+# Non-bulk copy with direct_insert into a WE8ISO8859P1 table that exists with NVARCHAR2 and NCLOB columns.
+source: ORACLE_GH759
+target: ORACLE_GH759_WE8
+
+defaults:
+  mode: truncate
+  target_options:
+    use_bulk: false
+    direct_insert: true
+
+streams:
+  SLING.GH759_NSRC:
+    object: SLING.GH759_NTGT

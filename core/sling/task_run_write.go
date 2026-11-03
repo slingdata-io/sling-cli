@@ -313,7 +313,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Create temp table
-	if _, err := createTable(t, tgtConn, tableTmp, sampleData, true); err != nil {
+	tmpData := sampleData
+	if tgtConn.GetType() == dbio.TypeDbOracle && cfg.Mode != FullRefreshMode {
+		tmpData.Columns = keepOracleNationalTypes(cfg, tgtConn, sampleData.Columns)
+	}
+	if _, err := createTable(t, tgtConn, tableTmp, tmpData, true); err != nil {
 		err = g.Error(err, "could not create table "+tableTmp.FullName())
 		return 0, err
 	}
@@ -935,6 +939,31 @@ func dropTableIfExists(tgtConn database.Connection, tableName string) error {
 		return g.Error(err, "could not drop table "+tableName)
 	}
 	return nil
+}
+
+// keepOracleNationalTypes gives the temp columns the national (N) types of an
+// existing Oracle target. Else a VARCHAR2 temp column loses the text that the
+// database charset cannot hold before it gets to the NVARCHAR2 target.
+func keepOracleNationalTypes(cfg *Config, tgtConn database.Connection, cols iop.Columns) iop.Columns {
+	tgtCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
+	if len(tgtCols) == 0 {
+		return cols
+	}
+
+	tmpCols := cols.Clone()
+	for i, col := range tmpCols {
+		tgtCol := tgtCols.GetColumn(col.Name)
+		if tgtCol == nil {
+			continue
+		}
+		switch strings.ToUpper(tgtCol.DbType) {
+		case "NVARCHAR2", "NCHAR":
+			tmpCols[i].DbType = "NVARCHAR2"
+		case "NCLOB":
+			tmpCols[i].DbType = "NCLOB"
+		}
+	}
+	return tmpCols
 }
 
 func createTable(t *TaskExecution, tgtConn database.Connection, table database.Table, sampleData iop.Dataset, isTemp bool) (created bool, err error) {

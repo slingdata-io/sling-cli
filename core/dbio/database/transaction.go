@@ -360,6 +360,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processSQLServerInsertRow(bColumns, row)
 			case conn.GetType() == dbio.TypeDbHana:
 				row = processHanaInsertRow(bColumns, row)
+			case conn.GetType() == dbio.TypeDbOracle:
+				row = processOracleInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}
