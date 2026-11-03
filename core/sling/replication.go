@@ -671,12 +671,14 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	case HookStageStart:
 		if err = rd.startHooks.Execute(); err != nil {
 			te.Status = ExecStatusError
-			return g.Error(err, "error executing start hooks")
+			te.Err = g.Error(err, "error executing start hooks")
+			return te.Err
 		}
 	case HookStageEnd:
 		if err = rd.endHooks.Execute(); err != nil {
 			te.Status = ExecStatusError
-			return g.Error(err, "error executing end hooks")
+			te.Err = g.Error(err, "error executing end hooks")
+			return te.Err
 		}
 	}
 

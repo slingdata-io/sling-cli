@@ -1102,3 +1102,60 @@ streams:
 	assert.Len(t, state.Runs, 2)
 	assert.Equal(t, 2, state.Execution.Status.Count)
 }
+
+func TestExecuteReplicationHookSetsError(t *testing.T) {
+	// offline token payload, so the hooks run without the license server
+	t.Setenv("SLING_TOKEN_PAYLOAD", `{"plan":"cli_pro","valid":true}`)
+
+	runID := "__sling_replication_hook_end__"
+	cases := []struct {
+		name   string
+		check  string
+		status ExecStatus
+	}{
+		{name: "fail", check: "1 == 2", status: ExecStatusError},
+		{name: "pass", check: "1 == 1", status: ExecStatusSuccess},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rd, err := LoadReplicationConfig(g.F(`
+source: local
+target: local
+hooks:
+  end:
+    - type: check
+      check: "%s"
+streams:
+  none: {}
+`, c.check))
+			if !assert.NoError(t, err) {
+				return
+			}
+			rd.Context = g.NewContext(context.Background())
+			if !assert.NoError(t, rd.ParseReplicationHook(HookStageEnd)) {
+				return
+			}
+
+			err = rd.ExecuteReplicationHook(HookStageEnd)
+
+			state, _ := rd.RuntimeState()
+			run := state.Runs[runID]
+			if !assert.NotNil(t, run, "missing run %s", runID) {
+				return
+			}
+			assert.Equal(t, c.status, run.Status)
+
+			if c.status == ExecStatusError {
+				assert.Error(t, err)
+				if assert.NotNil(t, run.Error) {
+					assert.Contains(t, *run.Error, "check failure")
+					assert.Contains(t, *run.Error, c.check)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Nil(t, run.Error)
+			}
+		})
+	}
+}
