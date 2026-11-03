@@ -266,6 +266,9 @@ func (t *TaskExecution) StateSet() {
 			return
 		}
 
+		// threaded streams share the replication state: write it under its lock
+		state.lock()
+
 		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
 		state.Execution.FileName = path.Base(state.Execution.FilePath)
 		state.Execution.CLIArgs = map[string]any{
@@ -274,7 +277,7 @@ func (t *TaskExecution) StateSet() {
 			g.Unmarshal(args, &state.Execution.CLIArgs)
 		}
 
-		fMap, _ := t.Config.GetFormatMap()
+		fMap, _ := t.Config.formatMap(true)
 
 		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		if id := cast.ToString(fMap["stream_run_id"]); id != "" {
@@ -390,6 +393,7 @@ func (t *TaskExecution) StateSet() {
 
 		// set as active run
 		state.Run = run
+		state.unlock()
 
 		// set log details
 		t.setLogDetails()

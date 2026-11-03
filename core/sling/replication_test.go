@@ -1,8 +1,10 @@
 package sling
 
 import (
+	"context"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/flarco/g"
@@ -1062,4 +1064,41 @@ streams:
 	state, _ = replication.RuntimeState()
 	assert.Equal(t, "1999", state.Env["KEY_9"])
 	assert.Equal(t, 1999, state.GetStore()["merged"])
+}
+
+// Threaded streams call StateSet at the same time on one replication state.
+// Run with -race.
+func TestStateSetConcurrentTasks(t *testing.T) {
+	t.Setenv("SLING_CLI_ARGS_MAP", `{"streams":["a"]}`)
+	replication, err := LoadReplicationConfig(`
+source: local
+target: local
+defaults:
+  mode: full-refresh
+streams:
+  file:///tmp/sling_race_c.csv:
+    object: file:///tmp/sling_race_c_out.csv
+  file:///tmp/sling_race_d.csv:
+    object: file:///tmp/sling_race_d_out.csv
+`)
+	if !assert.NoError(t, err) || !assert.NoError(t, replication.Compile(nil)) {
+		return
+	}
+
+	var wg sync.WaitGroup
+	for _, task := range replication.Tasks {
+		te := &TaskExecution{Config: task, Replication: &replication, Context: g.NewContext(context.Background()), Status: ExecStatusRunning}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				te.StateSet()
+			}
+		}()
+	}
+	wg.Wait()
+
+	state, _ := replication.RuntimeState()
+	assert.Len(t, state.Runs, 2)
+	assert.Equal(t, 2, state.Execution.Status.Count)
 }
