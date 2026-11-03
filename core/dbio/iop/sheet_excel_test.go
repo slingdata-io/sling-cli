@@ -1,8 +1,11 @@
 package iop
 
 import (
+	"bytes"
 	"testing"
 	"time"
+
+	"github.com/xuri/excelize/v2"
 )
 
 func TestExcelDateToTime(t *testing.T) {
@@ -136,5 +139,30 @@ func TestExcelDateToTime(t *testing.T) {
 				t.Errorf("Second mismatch for %s: got %d, want %d", tc.name, result.Second(), tc.expectedSecond)
 			}
 		})
+	}
+}
+
+func TestNewExcelDatasetMissingSheet(t *testing.T) {
+	f := excelize.NewFile()
+	f.SetCellValue("Sheet1", "A1", "id")
+	f.SetCellValue("Sheet1", "A2", 1)
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// an existing sheet works
+	data, err := NewExcelDataset(bytes.NewReader(buf.Bytes()), map[string]string{"sheet": "Sheet1"})
+	if err != nil {
+		t.Fatalf("unexpected error for existing sheet: %v", err)
+	}
+	if len(data.Rows) == 0 {
+		t.Fatalf("expected rows, got %d", len(data.Rows))
+	}
+
+	// a misspelled sheet must return an error instead of an empty dataset
+	_, err = NewExcelDataset(bytes.NewReader(buf.Bytes()), map[string]string{"sheet": "Sheet_typo"})
+	if err == nil {
+		t.Fatal("expected an error for a sheet that does not exist, got nil")
 	}
 }
