@@ -510,8 +510,15 @@ func (conn *OracleConn) CurrentSchema() (schemaName string, err error) {
 func (conn *OracleConn) getColumnsString(ds *iop.Datastream, tgtColumns ...iop.Columns) string {
 	// build lookup of target column length by name (from GetColumns/metadata)
 	tgtLength := map[string]int{}
+	tgtLob := map[string]bool{}
 	if len(tgtColumns) > 0 {
 		for _, col := range tgtColumns[0] {
+			// Oracle reports data_length=4000 for LOB columns, which are not limited to 4000
+			switch strings.ToUpper(col.DbType) {
+			case "CLOB", "NCLOB", "BLOB", "LONG":
+				tgtLob[strings.ToLower(col.Name)] = true
+				continue
+			}
 			if col.DbPrecision > 0 {
 				tgtLength[strings.ToLower(col.Name)] = col.DbPrecision
 			} else if col.Stats.MaxLen > 0 {
@@ -546,7 +553,8 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream, tgtColumns ...iop.C
 				charSize = p
 			} else if col.DbPrecision > 0 {
 				charSize = col.DbPrecision
-			} else if col.Stats.MaxLen > 0 {
+			} else if col.Stats.MaxLen > 0 && !tgtLob[strings.ToLower(col.Name)] {
+				// a LOB keeps the default: MaxLen is from a sample of rows
 				charSize = col.Stats.MaxLen
 			}
 			expr = g.F("char(%d) NULLIF %s=BLANKS", charSize, colName)

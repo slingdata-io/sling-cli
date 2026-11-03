@@ -1,0 +1,61 @@
+# sqlldr ctl file used char(4000) for CLOB columns (GitHub issue #446).
+# Oracle reports data_length=4000 for a CLOB. The ctl sizing took that value from the
+# target table metadata, so a value longer than 4000 chars failed with
+# "Field in data file exceeds maximum length", also with a text(N) column override.
+#
+# This test loads a 10000-char value into a CLOB column with sqlldr:
+#   1. without a column override (ctl must use the 400000 default)
+#   2. with large_col: text(1000000) (ctl must use char(1000000))
+
+steps:
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_SQLLDR_CLOB'; EXCEPTION WHEN OTHERS THEN NULL; END;
+
+  # 1. no column override
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://tests/files/test_clob_large.csv:
+          object: SYSTEM.TEST_SQLLDR_CLOB
+          target_options:
+            use_bulk: true
+
+  - connection: oracle
+    query: SELECT MAX(DBMS_LOB.GETLENGTH(large_col)) AS max_len, COUNT(*) AS cnt FROM SYSTEM.TEST_SQLLDR_CLOB
+    into: result1
+
+  - check: int_parse(store.result1[0].max_len) == 10000 && int_parse(store.result1[0].cnt) == 2
+    failure_message: "default run: max_len={store.result1[0].max_len}, cnt={store.result1[0].cnt} (expected 10000, 2)"
+
+  - log: "SUCCESS: CLOB value over 4000 chars loaded without column override"
+
+  # 2. with text(1000000) column override
+  - replication:
+      source: local
+      target: oracle
+      defaults:
+        mode: full-refresh
+      streams:
+        file://tests/files/test_clob_large.csv:
+          object: SYSTEM.TEST_SQLLDR_CLOB
+          columns:
+            large_col: text(1000000)
+          target_options:
+            use_bulk: true
+
+  - connection: oracle
+    query: SELECT MAX(DBMS_LOB.GETLENGTH(large_col)) AS max_len, COUNT(*) AS cnt FROM SYSTEM.TEST_SQLLDR_CLOB
+    into: result2
+
+  - check: int_parse(store.result2[0].max_len) == 10000 && int_parse(store.result2[0].cnt) == 2
+    failure_message: "override run: max_len={store.result2[0].max_len}, cnt={store.result2[0].cnt} (expected 10000, 2)"
+
+  - log: "SUCCESS: CLOB value over 4000 chars loaded with text(1000000) override"
+
+  - connection: oracle
+    query: |
+      BEGIN EXECUTE IMMEDIATE 'DROP TABLE SYSTEM.TEST_SQLLDR_CLOB'; EXCEPTION WHEN OTHERS THEN NULL; END;

@@ -3764,3 +3764,15 @@
     - 'GH759 AL32UTF8 target OK'
     - 'GH759 WE8 N-type target OK'
     - 'GH759 non-bulk non-ASCII test PASSED'
+
+# sqlldr ctl used char(4000) for CLOB columns, because Oracle reports data_length=4000 for a LOB.
+# A value over 4000 chars failed, also with a text(N) override. Ref: GitHub issue #446.
+- id: 844
+  name: 'Oracle sqlldr ctl sizes CLOB columns past 4000 chars'
+  run: 'sling run -d -p tests/pipelines/p.61.oracle_sqlldr_clob_size.yaml'
+  output_contains:
+    - 'SUCCESS: CLOB value over 4000 chars loaded without column override'
+    - 'SUCCESS: CLOB value over 4000 chars loaded with text(1000000) override'
+    - '"LARGE_COL" char(1000000)'
+  output_does_not_contain:
+    - 'exceeds maximum length'
