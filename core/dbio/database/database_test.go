@@ -4153,3 +4153,73 @@ func TestArrowDBConnBatchToRecordReader_OpenDecimal(t *testing.T) {
 	_, err = read(strings.Repeat("9", 70) + "." + strings.Repeat("1", 10))
 	assert.ErrorContains(t, err, "column d does not fit a decimal type")
 }
+
+func TestSnowflakeStage(t *testing.T) {
+	t.Run("parseStageURL", func(t *testing.T) {
+		assert.Equal(t, "s3://bucket/path/", parseStageURL(`["s3://bucket/path/"]`))
+		assert.Equal(t, "gcs://bucket/", parseStageURL(`gcs://bucket/`))
+		assert.Equal(t, "", parseStageURL(``))
+		assert.Equal(t, "", parseStageURL(`[]`))
+	})
+
+	t.Run("internal", func(t *testing.T) {
+		assert.False(t, SnowflakeStage{Name: "DB.SCH.STG"}.IsExternal())
+	})
+
+	connProps := []string{
+		"url=snowflake://user@acct/db", "account=acct", "region=us-east-2.aws", "aws_bucket=other",
+		"aws_access_key_id=AK", "key_file=/key.json", "sas_svc_url=https://sas",
+	}
+
+	cases := []struct {
+		url      string
+		fileURL  string
+		expected map[string]string
+		absent   []string
+	}{
+		{
+			url:      "s3://bucket-a/stage/dir",
+			fileURL:  "s3://bucket-a/stage/dir/sling_temp/123",
+			expected: map[string]string{"bucket": "bucket-a", "aws_access_key_id": "AK"},
+			absent:   []string{"url", "account", "region", "aws_bucket"},
+		},
+		{
+			url:      "gcs://bucket-b/stage/",
+			fileURL:  "gs://bucket-b/stage/sling_temp/123",
+			expected: map[string]string{"bucket": "bucket-b", "key_file": "/key.json"},
+			absent:   []string{"url", "region"},
+		},
+		{
+			url:      "azure://myacct.blob.core.windows.net/mycontainer/stage/",
+			fileURL:  "https://myacct.blob.core.windows.net/mycontainer/stage/sling_temp/123",
+			expected: map[string]string{"account": "myacct", "container": "mycontainer", "sas_svc_url": "https://sas"},
+			absent:   []string{"url", "region"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.url, func(t *testing.T) {
+			stage := SnowflakeStage{Name: "DB.SCH.STG", URL: c.url}
+			assert.True(t, stage.IsExternal())
+
+			fileURL, err := stage.FileURL("sling_temp/123")
+			assert.NoError(t, err)
+			assert.Equal(t, c.fileURL, fileURL)
+
+			props, err := stage.FileSysProps(connProps)
+			assert.NoError(t, err)
+			m := g.KVArrToMap(props...)
+			for k, v := range c.expected {
+				assert.Equal(t, v, m[k], k)
+			}
+			for _, k := range c.absent {
+				assert.NotContains(t, m, k)
+			}
+		})
+	}
+
+	t.Run("unsupported", func(t *testing.T) {
+		_, err := SnowflakeStage{Name: "STG", URL: "ftp://host/x"}.FileURL("a")
+		assert.Error(t, err)
+	})
+}

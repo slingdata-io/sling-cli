@@ -2074,3 +2074,67 @@ func TestSuiteFileAzureABFS(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileAzureABFS)
 }
+
+// https://github.com/slingdata-io/sling-cli/issues/716
+// GET and PUT do not work on an external stage, so sling reads the unloaded
+// files directly from the stage location, and refuses to load through it.
+func TestSnowflakeExternalStage(t *testing.T) {
+	c := connection.GetLocalConns().Get("SNOWFLAKE")
+	if c.Name == "" {
+		t.Skip("no SNOWFLAKE connection")
+	}
+	keyID := cast.ToString(c.Connection.Data["aws_access_key_id"])
+	secret := cast.ToString(c.Connection.Data["aws_secret_access_key"])
+	bucket := cast.ToString(c.Connection.Data["aws_bucket"])
+	if keyID == "" || secret == "" || bucket == "" {
+		t.Skip("SNOWFLAKE connection has no aws_access_key_id, aws_secret_access_key or aws_bucket")
+	}
+	os.Unsetenv("SLING_KEEP_TEMP")
+
+	stageName := "SLING.PUBLIC.SLING_TEST_EXT_STAGE"
+	tableName := "SLING.PUBLIC.SLING_TEST_EXT_STAGE_TBL"
+
+	conn, err := c.Connection.AsDatabase(connection.AsConnOptions{Extra: g.M("internal_stage", stageName)})
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NoError(t, conn.Connect()) {
+		return
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecMulti(
+		g.F("CREATE OR REPLACE STAGE %s URL='s3://%s/sling_test/ext_stage/' CREDENTIALS=(AWS_KEY_ID='%s' AWS_SECRET_KEY='%s')", stageName, bucket, keyID, secret),
+		g.F("CREATE OR REPLACE TABLE %s AS SELECT seq4() AS ID, 'name_'||seq4() AS NAME FROM TABLE(GENERATOR(ROWCOUNT=>1000))", tableName),
+	)
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer conn.ExecMulti("DROP STAGE IF EXISTS "+stageName, "DROP TABLE IF EXISTS "+tableName)
+
+	table, _ := database.ParseTableName(tableName, dbio.TypeDbSnowflake)
+
+	// read: unload to the external stage, then read the files from S3
+	df, err := conn.BulkExportFlow(table)
+	if !assert.NoError(t, err) {
+		return
+	}
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1000, len(data.Rows))
+	df.CleanUp()
+
+	listed, err := conn.Query(g.F("LIST @%s/sling_temp", stageName))
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(listed.Rows), "unloaded files must be deleted after the read")
+
+	// write: PUT does not work, so the error must name the external stage
+	df, err = iop.MakeDataFlow(data.Stream())
+	if !assert.NoError(t, err) {
+		return
+	}
+	_, err = conn.BulkImportFlow(tableName, df)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "is an external stage")
+	}
+}
