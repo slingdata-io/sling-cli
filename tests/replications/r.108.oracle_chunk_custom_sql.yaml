@@ -14,6 +14,6 @@ streams:
     sql: |-
       SELECT *
       FROM ORACLE.TEST1K_DUCKDB_PG
-      WHERE ID <= 100
+      WHERE ID <= 100 AND {incremental_where_cond}
     source_options:
       chunk_size: 50
