@@ -126,7 +126,8 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 			if entry.created {
 				return false, nil
 			}
-			return false, tableExistsError{g.Error(err, "Error creating table %s as it already exists. A concurrent process created it, possibly another run of this stream (check for overlapping schedules)", table.FullName())}
+			// the message is in the base text: g.Error drops the stack of a wrapped tableExistsError
+			return false, tableExistsError{g.Error("Error creating table %s as it already exists. A concurrent process created it, possibly another run of this stream (check for overlapping schedules)\n%s", table.FullName(), err.Error())}
 		}
 		return false, g.Error(err, "Error creating table "+table.FullName())
 	}

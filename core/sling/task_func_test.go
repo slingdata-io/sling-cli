@@ -54,7 +54,8 @@ func (c *createTableConn) ExecMulti(sqls ...string) (sql.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.tables[name] {
-		return nil, g.Error("Code: 57. DB::Exception: Table %s already exists. (TABLE_ALREADY_EXISTS)", name)
+		err := g.Error("Code: 57. DB::Exception: Table %s already exists. (TABLE_ALREADY_EXISTS)", name)
+		return nil, g.Error(err, "Could not execute SQL") // as BaseConn.ExecMulti
 	}
 	c.tables[name] = true
 	c.creates++
@@ -126,6 +127,7 @@ func TestCreateTableIfNotExists_Chunks(t *testing.T) {
 
 		_, err = createTable(&TaskExecution{Config: &Config{Source: Source{Options: &SourceOptions{}}}}, conn, table, iop.Dataset{}, false)
 		require.Error(t, err, "a stream without chunks keeps the error")
+		assert.Contains(t, err.Error(), "A concurrent process created it")
 	})
 
 	assert.Empty(t, tableCreates.entries, "an entry stays after its last holder")
