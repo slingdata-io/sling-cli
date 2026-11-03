@@ -1,0 +1,12 @@
+# Self-contained Oracle for GH #759 (non-ASCII text on the non-bulk insert path).
+name: sling-gh759
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    ports:
+      - "${GH759_ORA_PORT:-55759}:1521"
+    environment:
+      ORACLE_PASSWORD: sling_gh759
+      APP_USER: sling
+      APP_USER_PASSWORD: sling_gh759

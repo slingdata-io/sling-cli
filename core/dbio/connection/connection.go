@@ -775,7 +775,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("database", c.Data["sid"])
 		setIfMissing("database", c.Data["service_name"])
 		setIfMissing("port", c.Type.DefPort())
-		setIfMissing("client_charset", "UTF8")
+		// no default client_charset: go-ora then encodes binds in the server charset (GH #759)
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
 			if !strings.HasPrefix(cast.ToString(tns), "(") {
 				c.Data["tns"] = "(" + cast.ToString(tns) + ")"

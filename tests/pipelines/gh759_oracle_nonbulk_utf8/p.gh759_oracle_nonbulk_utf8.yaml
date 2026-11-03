@@ -1,0 +1,72 @@
+# GH #759: Oracle DB-to-DB with use_bulk=false must keep non-ASCII text.
+# Source (AL32UTF8 PDB): U+00E9 U+00C0 in VARCHAR2, NVARCHAR2 and CLOB.
+# Targets: a WE8ISO8859P1 PDB (the defect) and the AL32UTF8 PDB (no regression).
+# run_docker_test.sh sets ORACLE_GH759 and ORACLE_GH759_WE8.
+
+steps:
+  - type: query
+    connection: ORACLE_GH759
+    query: "begin execute immediate 'drop table GH759_SRC purge'; exception when others then null; end;"
+
+  - type: query
+    connection: ORACLE_GH759
+    query: create table GH759_SRC (id number, txt varchar2(20 char), ntxt nvarchar2(20), ctxt clob)
+
+  - type: query
+    connection: ORACLE_GH759
+    query: insert into GH759_SRC values (1, unistr('\00E9\00C0'), unistr('\00E9\00C0'), unistr('\00E9\00C0'))
+
+  # 1. WE8ISO8859P1 target
+  - type: query
+    connection: ORACLE_GH759_WE8
+    query: "begin execute immediate 'drop table GH759_TGT purge'; exception when others then null; end;"
+
+  - type: replication
+    path: tests/pipelines/gh759_oracle_nonbulk_utf8/r.gh759_to_we8.yaml
+
+  - type: query
+    connection: ORACLE_GH759_WE8
+    query: |
+      select asciistr(txt) a_txt, asciistr(ntxt) a_ntxt, asciistr(to_char(ctxt)) a_ctxt,
+             case when asciistr(txt) = '\00E9\00C0' then 'OK' else 'BAD' end txt_ok,
+             case when asciistr(ntxt) = '\00E9\00C0' then 'OK' else 'BAD' end ntxt_ok,
+             case when asciistr(to_char(ctxt)) = '\00E9\00C0' then 'OK' else 'BAD' end ctxt_ok
+      from GH759_TGT
+    into: we8
+
+  - type: log
+    message: 'GH759 WE8 TARGET {store.we8}'
+
+  - type: check
+    check: store.we8[0].txt_ok == "OK" && store.we8[0].ntxt_ok == "OK" && store.we8[0].ctxt_ok == "OK"
+    failure_message: 'GH759 WE8 target corrupted: {store.we8}'
+
+  - type: log
+    message: 'GH759 WE8 target OK'
+
+  # 2. AL32UTF8 target (same PDB as the source)
+  - type: query
+    connection: ORACLE_GH759
+    query: "begin execute immediate 'drop table GH759_TGT purge'; exception when others then null; end;"
+
+  - type: replication
+    path: tests/pipelines/gh759_oracle_nonbulk_utf8/r.gh759_to_utf8.yaml
+
+  - type: query
+    connection: ORACLE_GH759
+    query: |
+      select case when asciistr(txt) = '\00E9\00C0' then 'OK' else 'BAD' end txt_ok,
+             case when asciistr(ntxt) = '\00E9\00C0' then 'OK' else 'BAD' end ntxt_ok,
+             case when asciistr(to_char(ctxt)) = '\00E9\00C0' then 'OK' else 'BAD' end ctxt_ok
+      from GH759_TGT
+    into: utf8
+
+  - type: check
+    check: store.utf8[0].txt_ok == "OK" && store.utf8[0].ntxt_ok == "OK" && store.utf8[0].ctxt_ok == "OK"
+    failure_message: 'GH759 AL32UTF8 target corrupted: {store.utf8}'
+
+  - type: log
+    message: 'GH759 AL32UTF8 target OK'
+
+  - type: log
+    message: 'GH759 non-bulk non-ASCII test PASSED'

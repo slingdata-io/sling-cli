@@ -1,0 +1,12 @@
+# Non-bulk (go-ora INSERT) copy from the AL32UTF8 PDB to ORACLE_GH759_WE8.
+source: ORACLE_GH759
+target: ORACLE_GH759_WE8
+
+defaults:
+  mode: full-refresh
+  target_options:
+    use_bulk: false
+
+streams:
+  SLING.GH759_SRC:
+    object: SLING.GH759_TGT

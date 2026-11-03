@@ -3752,3 +3752,14 @@
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: integer values load into a Postgres bool column'
+
+# https://github.com/slingdata-io/sling-cli/issues/759
+# Sling forces client_charset=UTF8 for Oracle, so go-ora sends UTF-8 bind bytes to a WE8ISO8859P1 target and the non-bulk path stores mojibake.
+- id: 843
+  name: 'Oracle non-bulk insert keeps non-ASCII text in a WE8ISO8859P1 target'
+  group: gh759_oracle
+  run: 'bash tests/pipelines/gh759_oracle_nonbulk_utf8/run_docker_test.sh'
+  output_contains:
+    - 'GH759 WE8 target OK'
+    - 'GH759 AL32UTF8 target OK'
+    - 'GH759 non-bulk non-ASCII test PASSED'
