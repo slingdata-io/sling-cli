@@ -138,8 +138,8 @@ metadata:
 
   columns: |
     select name as column_name, type as data_type,
-      if(position(type, 'Decimal') > 0, numeric_precision, null) as precision,
-      if(position(type, 'Decimal') > 0, numeric_scale, null) as scale
+      toUInt32OrNull(extract(type, 'Decimal\\((\\d+)')) as precision,
+      toUInt32OrNull(extract(type, 'Decimal\\(\\d+, *(\\d+)\\)')) as scale
     from system.columns
     where database = '{schema}'
       and table = '{table}'
