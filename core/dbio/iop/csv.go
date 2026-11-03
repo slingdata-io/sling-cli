@@ -67,12 +67,13 @@ func CleanHeaderRow(header []string) []string {
 		// avoid duplicates
 		j := 1
 		newField := field
-		for fieldMap[newField] != "" {
+		// compare case-insensitively since the header is lowercased below
+		for fieldMap[strings.ToLower(newField)] != "" {
 			newField = g.F("%s%d", field, j)
 			j++
 		}
 
-		fieldMap[newField] = field
+		fieldMap[strings.ToLower(newField)] = field
 		header[i] = strings.ToLower(newField)
 	}
 
