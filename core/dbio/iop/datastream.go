@@ -818,7 +818,8 @@ func (ds *Datastream) SetFileURI() {
 // Collect reads a stream and return a dataset
 // limit of 0 is unlimited
 func (ds *Datastream) Collect(limit int) (Dataset, error) {
-	data := NewDataset(ds.Columns)
+	// do not read ds.Columns until the rows loop ends: the producer writes it
+	data := NewDataset(nil)
 
 	// wait for first ds to start streaming.
 	// columns/buffer need to be populated
@@ -839,7 +840,8 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 		}
 	}
 
-	data.Columns = ds.Columns
+	// a copy: NewColumns writes into its input
+	data.Columns = NewColumns(slices.Clone(ds.Columns)...)
 
 	if !limited {
 		ds.SetEmpty()
@@ -1150,6 +1152,14 @@ skipBuffer:
 				it.Row[i] = f(it)
 			}
 			return it.Row
+		}
+	}
+
+	// a column without a valid type is a string (as in NewColumns). Set it
+	// before other goroutines read ds.Columns.
+	for i := range ds.Columns {
+		if !ds.Columns[i].Type.IsValid() {
+			ds.Columns[i].Type = StringType
 		}
 	}
 

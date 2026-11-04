@@ -924,3 +924,32 @@ func TestArrowIPCFileSchema_Rewinds(t *testing.T) {
 	assert.Equal(t, [][]any{{int64(1), "a"}, {int64(2), nil}}, cdcArrowTestRows(t, ds.RecordStream()))
 	ds.Close()
 }
+
+func TestDatastreamCollectUntypedColumns(t *testing.T) {
+	// like the DuckDB stream: no inference, so the header columns have no type
+	var csvData strings.Builder
+	csvData.WriteString("name,num\n")
+	for i := range 2000 {
+		csvData.WriteString(g.F("n%d,%d\n", i, i))
+	}
+
+	ds := NewDatastream(nil)
+	ds.SetConfig(map[string]string{"header": "true"})
+	ds.Inferred = true
+	if !assert.NoError(t, ds.ConsumeCsvReader(strings.NewReader(csvData.String()))) {
+		return
+	}
+
+	data, err := ds.Collect(0)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Equal(t, []string{"name", "num"}, data.Columns.Names())
+	for _, col := range data.Columns {
+		assert.Equal(t, StringType, col.Type, col.Name)
+	}
+	if assert.Len(t, data.Rows, 2000) {
+		assert.Equal(t, []any{"n0", "0"}, data.Rows[0])
+		assert.Equal(t, []any{"n1999", "1999"}, data.Rows[1999])
+	}
+}

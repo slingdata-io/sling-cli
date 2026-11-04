@@ -62,17 +62,12 @@ func (f *fakePromAPI) QueryRange(ctx context.Context, query string, r v1.Range, 
 }
 
 // collect reads the whole datastream, and fails the test if it does not finish.
-// It does not use ds.Collect, which writes into ds.Columns while the stream runs.
 func collect(t *testing.T, ds *iop.Datastream) iop.Dataset {
 	t.Helper()
 	done := make(chan iop.Dataset, 1)
 	go func() {
-		assert.NoError(t, ds.WaitReady())
-		data := iop.Dataset{Columns: ds.Columns}
-		for row := range ds.Rows() {
-			data.Rows = append(data.Rows, row)
-		}
-		assert.NoError(t, ds.Err())
+		data, err := ds.Collect(0)
+		assert.NoError(t, err)
 		done <- data
 	}()
 	select {
@@ -100,8 +95,7 @@ func TestPrometheusChunkedRelativeDurations(t *testing.T) {
 		ds, err := conn.StreamRowsChunked(qctx, query, map[string]interface{}{})
 		require.NoError(t, err, start)
 		go func() { // drain so the producer keeps going
-			for range ds.Rows() {
-			}
+			ds.Collect(0)
 		}()
 
 		require.Eventually(t, func() bool { return api.count() >= 24 }, 20*time.Second, 50*time.Millisecond, start)
