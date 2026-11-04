@@ -3,6 +3,12 @@
 
 set shell := ["bash", "-lc"]
 
+# Run base tests
+test-base: test-cli test-connections test-dbio test-core test-python
+    #!/usr/bin/env bash
+    set -e
+    echo "✓ All base tests passed!"
+
 # Run all tests
 test-all: test-cli test-connections test-dbio test-core test-python test-cdc test-eval
     #!/usr/bin/env bash
