@@ -287,22 +287,37 @@ metadata:
       and not pg_attribute.attisdropped
     ORDER BY pg_attribute.attnum
 
+  # pg_catalog is readable by all roles. information_schema hides
+  # constraints from a role that has only SELECT on the table.
   primary_keys: |
-    select tco.constraint_name as pk_name,
-           kcu.ordinal_position as position,
-           kcu.column_name as column_name
-    from information_schema.table_constraints tco
-    join information_schema.key_column_usage kcu 
-         on kcu.constraint_name = tco.constraint_name
-         and kcu.constraint_schema = tco.constraint_schema
-         and kcu.constraint_name = tco.constraint_name
-         and kcu.table_name = tco.table_name
-    where tco.constraint_type = 'PRIMARY KEY'
-      and kcu.table_schema = '{schema}'
-      and kcu.table_name = '{table}'
-    order by kcu.table_schema,
-             kcu.table_name,
-             position
+    select con.conname as pk_name,
+           k.ord as position,
+           a.attname as column_name
+    from pg_constraint con
+    join pg_class c on c.oid = con.conrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    cross join lateral unnest(con.conkey) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+    where con.contype = 'p'
+      and n.nspname = '{schema}'
+      and c.relname = '{table}'
+    order by k.ord
+
+  # Columns of the index set by REPLICA IDENTITY USING INDEX (the key that
+  # logical replication logs for UPDATE and DELETE).
+  replica_identity_keys: |
+    select i.indexrelid::regclass::text as pk_name,
+           k.ord as position,
+           a.attname as column_name
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    join pg_index i on i.indrelid = c.oid and i.indisreplident
+    cross join lateral unnest(i.indkey::int2[]) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = c.oid and a.attnum = k.attnum
+    where c.relreplident = 'i'
+      and n.nspname = '{schema}'
+      and c.relname = '{table}'
+    order by k.ord
 
   indexes: |
     select

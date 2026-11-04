@@ -1,0 +1,14 @@
+# A table with no key and REPLICA IDENTITY FULL must fail fast.
+source: POSTGRES_CDC_PK_RO
+target: POSTGRES_CDC_PK
+
+defaults:
+  mode: change-capture
+  object: 'tgt.{stream_table}'
+  change_capture_options:
+    snapshot_start: beginning
+    change_feed: sling_cdc_pk
+    run_max_duration: 30s
+
+streams:
+  src.no_key:

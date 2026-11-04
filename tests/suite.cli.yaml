@@ -3827,3 +3827,19 @@
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
   output_does_not_contain:
     - 'created table'
+
+# CDC key detection on a Postgres source with no primary_key in the config.
+# The source role has only REPLICATION and SELECT (information_schema hides the
+# constraints from it). Covers a key with two columns, REPLICA IDENTITY USING
+# INDEX with and without a primary key, and the fail-fast check.
+- id: 849
+  name: 'CDC primary key from Postgres source, SELECT-only role and replica identity index'
+  group: cdc_pg_pk
+  run: 'bash tests/pipelines/cdc_pg_pk/run_docker_test.sh'
+  output_contains:
+    - 'CDC primary key for src.orders from source: ["order_id","tenant_id"]'
+    - 'CDC primary key for src.events_ri from replica identity index: ["event_id"]'
+    - 'CDC primary key for src.items_alt from replica identity index: ["code"]'
+    - 'CDC PG key test: orders=3 events=2 items=1'
+    - 'CDC PG key test PASSED'
+    - 'CDC PG no-key test PASSED'

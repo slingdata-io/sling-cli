@@ -1,0 +1,26 @@
+# Postgres source with wal_level=logical for CDC key detection tests.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sling-cdc-pk-pg
+    ports:
+      - "55434:5432"
+    environment:
+      POSTGRES_PASSWORD: sling_cdc_test
+      POSTGRES_DB: cdc_pk_db
+      POSTGRES_USER: postgres
+    command:
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "cdc_pk_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
