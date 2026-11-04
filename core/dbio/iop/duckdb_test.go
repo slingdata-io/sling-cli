@@ -20,6 +20,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
+	"github.com/flarco/g/process"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -299,6 +300,22 @@ func TestDuckDbProcessDeathStderrTail(t *testing.T) {
 	assert.True(t, IsDuckDbProcDeath(err), err.Error())
 	assert.Contains(t, err.Error(), "last duckdb stderr output")
 	assert.Contains(t, err.Error(), "table_that_is_not_there_xyz")
+}
+
+// A killed sidecar can stop the stdout scanner before its exit is recorded.
+// That is still a process death, so the task retry applies (CLI test 622).
+func TestDuckDbProcDeathErrScanErr(t *testing.T) {
+	scanErr := fmt.Errorf("io: read/write on closed pipe")
+
+	dead := &DuckDb{Proc: &process.Proc{HideCmdInErr: true, ScanErr: scanErr, ExitCode: g.Ptr(137)}}
+	err := dead.procDeathErr()
+	assert.True(t, IsDuckDbProcDeath(err), err.Error())
+	assert.Contains(t, err.Error(), "exit code 137")
+
+	alive := &DuckDb{Proc: &process.Proc{HideCmdInErr: true, ScanErr: scanErr}}
+	err = alive.procDeathErr()
+	assert.False(t, IsDuckDbProcDeath(err), err.Error())
+	assert.Contains(t, err.Error(), "stdout scanner stopped")
 }
 
 // KillChildProcs must stop every live sidecar, since they are not in the

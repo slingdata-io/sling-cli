@@ -1073,7 +1073,12 @@ func (duck *DuckDb) abortQuery(dq *duckDbQuery, err error) {
 func (duck *DuckDb) procDeathErr() error {
 	time.Sleep(100 * time.Millisecond) // let the stderr scanner drain the last lines
 
-	if scanErr := duck.Proc.GetScanErr(); scanErr != nil {
+	// a killed process can stop the scanner before its exit is recorded
+	scanErr := duck.Proc.GetScanErr()
+	for deadline := time.Now().Add(2 * time.Second); scanErr != nil && !duck.Proc.Exited() && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if scanErr != nil && !duck.Proc.Exited() {
 		return g.Error(scanErr, "duckdb stdout scanner stopped before query completed")
 	}
 
