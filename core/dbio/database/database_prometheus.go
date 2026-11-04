@@ -782,8 +782,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 	reader := newPromChunkReader(queryContext.Ctx, conn, query, start, end, step)
 
-	// read up to the first rows before the producer goroutine starts,
-	// so that ds.Columns and ds.Ready are set without a data race
+	// read up to the first rows, to get the columns
 	var rows [][]any
 	for len(rows) == 0 && !reader.Done() {
 		if rows, err = reader.Read(); err != nil {
@@ -801,45 +800,42 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 		}
 	}
 
-	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
-
 	props := conn.Props()
 	if transformsOpt := opts["transforms"]; transformsOpt != nil {
 		props["transforms"] = cast.ToString(transformsOpt)
 	}
-	ds.SetConfig(props)
 
-	// Start the bytes-written processor to prevent blocking on bwRows channel
-	ds.StartBwProcessor()
-
-	ds.Columns = slices.Clone(columns) // the reader keeps its own copy
-	ds.SetReady()
-
-	go func() {
-		defer ds.Close()
-
-		for {
-			for _, row := range rows {
-				select {
-				case <-queryContext.Ctx.Done():
-					return
-				default:
-					ds.Push(row)
-				}
+	// ds.Start reads the first rows through the transforms before SetReady,
+	// so the column types and the buffer are final when the dataflow gets them
+	i := 0
+	nextFunc := func(it *iop.Iterator) bool {
+		for i >= len(rows) {
+			if reader.Done() || it.Context.Err() != nil {
+				return false
 			}
-
-			if reader.Done() {
-				return
-			}
-
 			next, err := reader.Read()
 			if err != nil {
-				ds.Context.CaptureErr(err)
-				return
+				it.Context.CaptureErr(err)
+				return false
 			}
-			rows = next
+			rows, i = next, 0
 		}
-	}()
+		it.Row = rows[i]
+		i++
+		return true
+	}
+
+	ds = iop.NewDatastreamIt(queryContext.Ctx, slices.Clone(columns), nextFunc) // the reader keeps its own copy
+	ds.SetConfig(props)
+
+	// a cast transform sets the types, as in applyTransformsToData
+	if t := ds.Sp.Config.Transforms; t != nil && t.Casted() {
+		ds.Inferred = true
+	}
+
+	if err = ds.Start(); err != nil {
+		return nil, g.Error(err, "could not start prometheus datastream")
+	}
 
 	return ds, nil
 }
