@@ -3816,15 +3816,19 @@
     - 'CDC primary key for test_db.cdc_pk_test from source: ["id"]'
     - 'CDC primary key from source test PASSED'
 
-# CDC on a source table with no key and no primary_key fails before it makes a target table.
+# CDC checks the key of all streams before any snapshot. A unique index on
+# NOT NULL columns is a key. A nullable unique index is not. One error names
+# all the streams with no key, and Sling makes no target table.
 - id: 847
-  name: 'CDC fails fast when the source table has no primary key'
+  name: 'CDC fails fast when source tables have no primary key or unique index'
   run: 'sling run -d -r tests/replications/r.145.cdc_no_pk_fail.yaml'
   err: true
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_pk
   output_contains:
+    - 'CDC primary key for test_db.cdc_pk_uq from unique index id: ["id"]'
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
+    - 'change-capture mode needs a primary key for test_db.cdc_pk_nullable_uq'
   output_does_not_contain:
     - 'created table'
 

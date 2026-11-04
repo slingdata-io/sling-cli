@@ -303,6 +303,37 @@ metadata:
       and c.relname = '{table}'
     order by k.ord
 
+  # The unique index with the fewest columns, all NOT NULL. CDC uses it as
+  # the key when the table has no primary key.
+  unique_keys: |
+    with pick as (
+      select i.indexrelid, i.indrelid, i.indkey, i.indnkeyatts
+      from pg_index i
+      join pg_class c on c.oid = i.indrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = '{schema}'
+        and c.relname = '{table}'
+        and i.indisunique and not i.indisprimary
+        and i.indisvalid and i.indimmediate
+        and i.indpred is null and i.indexprs is null
+        and not exists (
+          select 1
+          from unnest(i.indkey::int2[]) with ordinality as k(attnum, ord)
+          join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
+          where k.ord <= i.indnkeyatts and not a.attnotnull
+        )
+      order by i.indnkeyatts, i.indexrelid::regclass::text
+      limit 1
+    )
+    select p.indexrelid::regclass::text as pk_name,
+           k.ord as position,
+           a.attname as column_name
+    from pick p
+    cross join lateral unnest(p.indkey::int2[]) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = p.indrelid and a.attnum = k.attnum
+    where k.ord <= p.indnkeyatts
+    order by k.ord
+
   # Columns of the index set by REPLICA IDENTITY USING INDEX (the key that
   # logical replication logs for UPDATE and DELETE).
   replica_identity_keys: |
@@ -315,6 +346,7 @@ metadata:
     cross join lateral unnest(i.indkey::int2[]) with ordinality as k(attnum, ord)
     join pg_attribute a on a.attrelid = c.oid and a.attnum = k.attnum
     where c.relreplident = 'i'
+      and k.ord <= i.indnkeyatts
       and n.nspname = '{schema}'
       and c.relname = '{table}'
     order by k.ord

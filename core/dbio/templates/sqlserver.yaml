@@ -230,6 +230,40 @@ metadata:
              kcu.table_name,
              position
 
+  # The unique index with the fewest columns, all NOT NULL. CDC uses it as
+  # the key when the table has no primary key.
+  # A unique index named as @index_name of the CDC capture instance comes first.
+  unique_keys: |
+    with cand as (
+      select i.object_id, i.index_id, i.name,
+             count(*) as n_cols,
+             sum(case when c.is_nullable = 1 then 1 else 0 end) as n_null
+      from sys.indexes i
+      join sys.index_columns ic on ic.object_id = i.object_id and ic.index_id = i.index_id and ic.is_included_column = 0
+      join sys.columns c on c.object_id = ic.object_id and c.column_id = ic.column_id
+      where i.object_id = object_id('[{schema}].[{table}]')
+        and i.is_unique = 1 and i.is_primary_key = 0
+        and i.has_filter = 0 and i.is_disabled = 0 and i.is_hypothetical = 0
+      group by i.object_id, i.index_id, i.name
+    ), pick as (
+      select top 1 cand.object_id, cand.index_id, cand.name
+      from cand
+      where cand.n_null = 0
+      order by
+        case when exists (
+          select 1 from cdc.change_tables ct
+          where ct.source_object_id = cand.object_id and ct.index_name = cand.name
+        ) then 0 else 1 end,
+        cand.n_cols, cand.name
+    )
+    select p.name as pk_name,
+           ic.key_ordinal as position,
+           c.name as column_name
+    from pick p
+    join sys.index_columns ic on ic.object_id = p.object_id and ic.index_id = p.index_id and ic.is_included_column = 0
+    join sys.columns c on c.object_id = ic.object_id and c.column_id = ic.column_id
+    order by ic.key_ordinal
+
   indexes: |
     SELECT
       ind.name as index_name,

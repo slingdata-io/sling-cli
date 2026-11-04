@@ -144,6 +144,33 @@ metadata:
              kcu.table_name,
              position
 
+  # The unique index with the fewest columns, all NOT NULL. CDC uses it as
+  # the key when the table has no primary key.
+  unique_keys: |
+    select s.index_name as pk_name,
+           s.seq_in_index as position,
+           s.column_name as column_name
+    from information_schema.statistics s
+    where s.table_schema = '{schema}'
+      and s.table_name = '{table}'
+      and s.index_name = (
+        select s2.index_name
+        from information_schema.statistics s2
+        left join information_schema.columns c
+          on c.table_schema = s2.table_schema
+          and c.table_name = s2.table_name
+          and c.column_name = s2.column_name
+        where s2.table_schema = '{schema}'
+          and s2.table_name = '{table}'
+          and s2.non_unique = 0
+          and s2.index_name <> 'PRIMARY'
+        group by s2.index_name
+        having sum(case when c.column_name is null or c.is_nullable = 'YES' then 1 else 0 end) = 0
+        order by count(*), s2.index_name
+        limit 1
+      )
+    order by s.seq_in_index
+
   indexes: |
     select
       index_name as index_name,
