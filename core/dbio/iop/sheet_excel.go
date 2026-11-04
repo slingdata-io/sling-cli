@@ -46,7 +46,11 @@ func NewExcelDataset(reader io.Reader, props map[string]string) (data Dataset, e
 			return data, err
 		}
 	} else {
-		data = xls.GetDataset(sheetName)
+		rows, err := xls.File.GetRows(sheetName)
+		if err != nil {
+			return data, g.Error(err, "Unable to get rows for sheet %s", sheetName)
+		}
+		data = xls.makeDatasetAuto(rows)
 	}
 	return
 }
