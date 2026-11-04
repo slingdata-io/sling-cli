@@ -813,3 +813,18 @@
     - '"name":"staging.stg_events"'
     - '"ok":2'
     - '"failed":0'
+
+- id: 462
+  name: 'sling build clickhouse model hooks render {model.*} and run KILL MUTATION'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS default.hook_vars"
+    sling build run tests/build/clickhouse_hooks_project --target CLICKHOUSE --debug
+  output_contains:
+    - 'name=hook_vars schema=default database=[] full_name=default.hook_vars mode=incremental update_key=ts unique_key=id, k'
+    - "KILL MUTATION WHERE database = 'default' AND table = 'hook_vars'"
+    - 'OK'
+    - 'Build Completed'
+  output_does_not_contain:
+    - '{model.'
+    - 'bad connection'
