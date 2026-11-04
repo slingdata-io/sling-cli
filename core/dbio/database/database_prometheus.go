@@ -230,6 +230,33 @@ func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 	return
 }
 
+// toHourDuration converts the d (day), w (week) and M (month) suffixes, which
+// time.ParseDuration does not understand, into hours.
+func toHourDuration(duration string) string {
+	switch {
+	case strings.HasSuffix(duration, "d"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "d"))
+		duration = g.F("%dh", num*24)
+	case strings.HasSuffix(duration, "w"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "w"))
+		duration = g.F("%dh", num*24*7)
+	case strings.HasSuffix(duration, "M"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "M"))
+		duration = g.F("%dh", num*24*31)
+	}
+	return duration
+}
+
+// parseRelativeOffset parses the offset of a "now-<duration>" value (e.g. "-2M",
+// "-7d", "-30m"), accepting the same d/w/M suffixes as the non-chunked path.
+func parseRelativeOffset(offset string) (time.Duration, error) {
+	if strings.HasPrefix(offset, "-") {
+		d, err := time.ParseDuration(toHourDuration(strings.TrimPrefix(offset, "-")))
+		return -d, err
+	}
+	return time.ParseDuration(toHourDuration(offset))
+}
+
 func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string, Opts ...map[string]interface{}) (ds *iop.Datastream, err error) {
 	opts := getQueryOptions(Opts)
 	Limit := int(0) // infinite
@@ -254,7 +281,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				start := time.Now().Add(-30 * time.Minute)
 				if val, ok := queryOpts["start"]; ok {
 					if strings.HasPrefix(val, "now") && strings.Contains(val, "-") {
-						duration, _ := time.ParseDuration(strings.TrimPrefix(val, "now"))
+						duration, _ := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 						start = time.Now().Add(duration)
 					} else if !strings.HasPrefix(val, "now") {
 						start, _ = time.Parse(time.RFC3339, val)
@@ -264,7 +291,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				end := time.Now()
 				if val, ok := queryOpts["end"]; ok {
 					if strings.HasPrefix(val, "now") && strings.Contains(val, "-") {
-						duration, _ := time.ParseDuration(strings.TrimPrefix(val, "now"))
+						duration, _ := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 						end = time.Now().Add(duration)
 					} else if !strings.HasPrefix(val, "now") {
 						end, _ = time.Parse(time.RFC3339, val)
@@ -282,21 +309,6 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 
 	start := time.Now().Add(-24 * 30 * time.Hour)
 	end := time.Now()
-
-	toHourDuration := func(duration string) string {
-		switch {
-		case strings.HasSuffix(duration, "d"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "d"))
-			duration = g.F("%dh", num*24)
-		case strings.HasSuffix(duration, "w"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "w"))
-			duration = g.F("%dh", num*24*7)
-		case strings.HasSuffix(duration, "M"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "M"))
-			duration = g.F("%dh", num*24*31)
-		}
-		return duration
-	}
 
 	if startVal := cast.ToString(opts["start"]); strings.HasPrefix(startVal, "now-") {
 		duration := strings.TrimPrefix(startVal, "now-")
@@ -720,7 +732,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	if val, ok := queryOpts["start"]; ok {
 		if strings.HasPrefix(val, "now") {
 			if strings.Contains(val, "-") {
-				duration, err := time.ParseDuration(strings.TrimPrefix(val, "now"))
+				duration, err := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 				if err != nil {
 					return nil, g.Error(err, "could not parse start duration: %s", val)
 				}
@@ -740,7 +752,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	if val, ok := queryOpts["end"]; ok {
 		if strings.HasPrefix(val, "now") {
 			if strings.Contains(val, "-") {
-				duration, err := time.ParseDuration(strings.TrimPrefix(val, "now"))
+				duration, err := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 				if err != nil {
 					return nil, g.Error(err, "could not parse end duration: %s", val)
 				}
