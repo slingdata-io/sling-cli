@@ -1882,10 +1882,17 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 		}
 
 		g.Info("downloading duckdb %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
+		// a unique folder, so parallel processes do not share the archive
+		var tmpDir string
+		tmpDir, err = os.MkdirTemp("", "sling-duckdb-")
+		if err != nil {
+			return "", g.Error(err, "could not create temp folder for duckdb download")
+		}
+		defer os.RemoveAll(tmpDir)
+
 		var paths []map[string]any
 		for i, asset := range assets {
-			archivePath := path.Join(g.UserHomeDir(), asset)
-			defer os.Remove(archivePath)
+			archivePath := path.Join(tmpDir, asset)
 
 			if err = net.DownloadFile(baseURL+asset, archivePath); err != nil {
 				if i == 0 && strings.Contains(err.Error(), "404") {
