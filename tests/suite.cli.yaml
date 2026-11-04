@@ -219,7 +219,7 @@
 - id: 34
   name: Run sling with Prometheus source and custom query
   run: >
-    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
+    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M", "step": "1h"}' --stdout  -d
   output_contains:
     - quantile
 

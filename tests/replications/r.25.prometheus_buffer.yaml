@@ -13,5 +13,5 @@ streams:
       - '*': cast(value, "string")
       - event_date: date_format(now(), "%Y-%m-%d")
     sql: |
-      sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}
+      sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M", "step": "1h"}
     object: '/tmp/output/prometheus_test.parquet'
