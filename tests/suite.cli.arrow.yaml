@@ -1051,25 +1051,28 @@
   output_does_not_contain:
     - 'arrow lane: enabled'
 
-- id: 760
-  name: 'arrow lane declines: Databricks copy_method zerobus'
-  env:
-    SOURCE: 'POSTGRES_ADBC'
-    TARGET: 'DATABRICKS'
-    SCHEMA: 'public'
-  rows: 10000
-  # The row path would then load through the zerobus ingest, which needs a UC
-  # token this suite does not carry, so the run is forced: the decline itself
-  # is the assertion, and it fires before the read.
-  err: true
-  run: |
-    bash tests/pipelines/arrow/seed.sh
-    SLING_ROW_CNT= sling conns exec "$SOURCE" "drop table if exists $SCHEMA.arrow_zerobus_src"
-    SLING_ARROW_LANE=force sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_760" --mode full-refresh
-    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_760"
-  output_contains:
-    - 'zerobus'
-    - 'forced but not eligible'
+# Commented out: the DATABRICKS workspace is inactive (Databricks denies all
+# resources since 2026-10-13). TestArrowLane_Gate covers the zerobus decline.
+# Uncomment when the workspace is active again.
+# - id: 760
+#   name: 'arrow lane declines: Databricks copy_method zerobus'
+#   env:
+#     SOURCE: 'POSTGRES_ADBC'
+#     TARGET: 'DATABRICKS'
+#     SCHEMA: 'public'
+#   rows: 10000
+#   # The row path would then load through the zerobus ingest, which needs a UC
+#   # token this suite does not carry, so the run is forced: the decline itself
+#   # is the assertion, and it fires before the read.
+#   err: true
+#   run: |
+#     bash tests/pipelines/arrow/seed.sh
+#     SLING_ROW_CNT= sling conns exec "$SOURCE" "drop table if exists $SCHEMA.arrow_zerobus_src"
+#     SLING_ARROW_LANE=force sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_760" --mode full-refresh
+#     SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_760"
+#   output_contains:
+#     - 'zerobus'
+#     - 'forced but not eligible'
 
 - id: 770
   name: 'arrow lane quiet: native Postgres source'

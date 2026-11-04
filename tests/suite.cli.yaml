@@ -242,7 +242,7 @@
 - id: 38
   name: Run sling with replication configuration 07
   run: sling run -r tests/replications/r.07.yaml
-  streams: 18
+  streams: 19
   group: sqlite
 
 - id: 39
@@ -662,6 +662,7 @@
 
 - id: 84
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
+  group: oracle_number_scale
   run: sling run -r tests/replications/r.28.oracle_number_scale.yaml
   env:
     SCHEMA: ORACLE
@@ -672,6 +673,7 @@
 
 - id: 85
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
+  group: oracle_number_scale
   run: sling run -r tests/replications/r.28.oracle_number_scale.yaml
   env:
     SCHEMA: ORACLE
@@ -3795,6 +3797,7 @@
 # The MySQL/MariaDB merge must not add duplicate rows on update (no ON DUPLICATE KEY).
 - id: 845
   name: 'CDC primary key from source, MySQL to MariaDB target'
+  group: cdc_pk_from_source
   run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_pk
@@ -3807,6 +3810,7 @@
 
 - id: 846
   name: 'CDC primary key from source, MySQL to DuckDB target'
+  group: cdc_pk_from_source
   run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_pk
