@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -770,27 +771,38 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 	step := 1 * time.Minute
 	if val, ok := queryOpts["step"]; ok {
-		step, err = time.ParseDuration(val)
+		step, err = time.ParseDuration(toHourDuration(val))
 		if err != nil {
 			return nil, g.Error(err, "could not parse step duration: %s", val)
 		}
 	}
-
-	// Calculate chunk size - max 1 hour per chunk to avoid memory issues
-	chunkDuration := 1 * time.Hour
-	if totalDuration := end.Sub(start); totalDuration < chunkDuration {
-		// If total duration is less than chunk size, use original method
-		return conn.StreamRowsContext(queryContext.Ctx, query, opts)
+	if step <= 0 {
+		return nil, g.Error("step must be positive: %s", step)
 	}
 
-	// Initialize columns and datastream
-	var columns iop.Columns
-	columnsInitialized := false
+	reader := newPromChunkReader(queryContext.Ctx, conn, query, start, end, step)
 
-	// Create the datastream
+	// read up to the first rows before the producer goroutine starts,
+	// so that ds.Columns and ds.Ready are set without a data race
+	var rows [][]any
+	for len(rows) == 0 && !reader.Done() {
+		if rows, err = reader.Read(); err != nil {
+			return nil, err
+		}
+	}
+
+	columns := reader.columns
+	if len(columns) == 0 && opts["columns"] != nil {
+		switch cols := opts["columns"].(type) {
+		case iop.Columns:
+			columns = cols
+		default:
+			g.JSONConvert(opts["columns"], &columns)
+		}
+	}
+
 	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
 
-	// Set connection properties and transforms
 	props := conn.Props()
 	if transformsOpt := opts["transforms"]; transformsOpt != nil {
 		props["transforms"] = cast.ToString(transformsOpt)
@@ -800,165 +812,175 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	// Start the bytes-written processor to prevent blocking on bwRows channel
 	ds.StartBwProcessor()
 
-	// Process in chunks
+	ds.Columns = slices.Clone(columns) // the reader keeps its own copy
+	ds.SetReady()
+
 	go func() {
 		defer ds.Close()
 
-		chunkStart := start
-		chunkNum := 0
-		for chunkStart.Before(end) {
-			chunkEnd := chunkStart.Add(chunkDuration)
-			if chunkEnd.After(end) {
-				chunkEnd = end
+		for {
+			for _, row := range rows {
+				select {
+				case <-queryContext.Ctx.Done():
+					return
+				default:
+					ds.Push(row)
+				}
 			}
 
-			chunkNum++
-			g.Debug("Processing chunk %d: %s to %s", chunkNum, chunkStart.Format(time.RFC3339), chunkEnd.Format(time.RFC3339))
-
-			// Query this chunk
-			chunkRange := v1.Range{
-				Start: chunkStart,
-				End:   chunkEnd,
-				Step:  step,
-			}
-
-			result, warnings, err := conn.Client.QueryRange(queryContext.Ctx, query, chunkRange)
-			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error querying Prometheus chunk: %s", query))
+			if reader.Done() {
 				return
 			}
 
-			for _, warning := range warnings {
-				g.Warn(warning)
+			next, err := reader.Read()
+			if err != nil {
+				ds.Context.CaptureErr(err)
+				return
 			}
-
-			// Process chunk results
-			if matrix, ok := result.(model.Matrix); ok {
-				for _, sample := range matrix {
-					metricMap := map[string]string{}
-					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
-
-					// Initialize columns on first data
-					if !columnsInitialized {
-						columns = createPrometheusColumns(metricMap, sample)
-						ds.Columns = columns
-						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
-					}
-
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					// Stream values
-					for _, value := range sample.Values {
-						row := make([]any, len(columns))
-						for k, v := range metricMap {
-							row[index(k)] = v
-						}
-						row[index("timestamp")] = value.Timestamp.Unix()
-						row[index("value")] = conn.toFloat(value.Value)
-
-						select {
-						case <-queryContext.Ctx.Done():
-							return
-						default:
-							ds.Push(row)
-						}
-					}
-
-					// Stream histogram data if present
-					for _, hist := range sample.Histograms {
-						for i, bucket := range hist.Histogram.Buckets {
-							row := make([]any, len(columns))
-							for k, v := range metricMap {
-								row[index(k)] = v
-							}
-							row[index("timestamp")] = hist.Timestamp.Unix()
-							row[index("count")] = conn.toFloat(hist.Histogram.Count)
-							row[index("sum")] = conn.toFloat(hist.Histogram.Sum)
-							row[index("bucket_boundaries")] = i
-							row[index("bucket_count")] = conn.toFloat(bucket.Count)
-							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
-							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
-
-							select {
-							case <-queryContext.Ctx.Done():
-								return
-							default:
-								ds.Push(row)
-							}
-						}
-					}
-				}
-			} else if vector, ok := result.(model.Vector); ok {
-				// Handle vector results similarly
-				for _, sample := range vector {
-					metricMap := map[string]string{}
-					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
-
-					if !columnsInitialized {
-						columns = createPrometheusColumnsFromVector(metricMap, sample)
-						ds.Columns = columns
-						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
-					}
-
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					row := make([]any, len(columns))
-					for k, v := range metricMap {
-						row[index(k)] = v
-					}
-
-					if sample.Histogram != nil {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("count")] = conn.toFloat(sample.Histogram.Count)
-						row[index("sum")] = conn.toFloat(sample.Histogram.Sum)
-
-						for _, bucket := range sample.Histogram.Buckets {
-							row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-							row[index("bucket_count")] = conn.toFloat(bucket.Count)
-							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
-							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
-						}
-					} else {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("value")] = conn.toFloat(sample.Value)
-					}
-
-					select {
-					case <-queryContext.Ctx.Done():
-						return
-					default:
-						ds.Push(row)
-					}
-				}
-			}
-
-			// Move to next chunk
-			chunkStart = chunkEnd
-
-			// Add a small delay between chunks to avoid overwhelming the API
-			time.Sleep(100 * time.Millisecond)
-		}
-
-		// If no columns were initialized (no data), use columns from options if available
-		if !columnsInitialized {
-			if opts["columns"] != nil {
-				switch cols := opts["columns"].(type) {
-				case iop.Columns:
-					ds.Columns = cols
-				default:
-					// Try to convert from options
-					g.JSONConvert(opts["columns"], &ds.Columns)
-				}
-			}
-			ds.SetReady()
+			rows = next
 		}
 	}()
 
 	return ds, nil
+}
+
+// promChunkReader reads a Prometheus range query in chunks of about 60 points per series.
+type promChunkReader struct {
+	ctx     context.Context
+	conn    *PrometheusConn
+	query   string
+	step    time.Duration
+	size    time.Duration
+	delay   time.Duration // between chunks, to not overwhelm the API
+	next    time.Time
+	end     time.Time
+	num     int
+	columns iop.Columns // from the first sample
+}
+
+func newPromChunkReader(ctx context.Context, conn *PrometheusConn, query string, start, end time.Time, step time.Duration) *promChunkReader {
+	// a multiple of step keeps the evaluation times of one full range query
+	points := max(60, int64((time.Hour+step-1)/step))
+	return &promChunkReader{
+		ctx:   ctx,
+		conn:  conn,
+		query: query,
+		step:  step,
+		size:  step * time.Duration(points),
+		delay: 100 * time.Millisecond,
+		next:  start,
+		end:   end,
+	}
+}
+
+// Done is true when no chunk is left. Prometheus includes both range ends,
+// so a chunk that starts at end is still read.
+func (r *promChunkReader) Done() bool {
+	return r.next.After(r.end)
+}
+
+// Read queries the next chunk and returns its rows.
+func (r *promChunkReader) Read() (rows [][]any, err error) {
+	if r.num > 0 && r.delay > 0 {
+		time.Sleep(r.delay)
+	}
+
+	// end one step before the next chunk, so that boundary points do not repeat
+	chunk := v1.Range{Start: r.next, End: r.next.Add(r.size - r.step), Step: r.step}
+	if chunk.End.After(r.end) {
+		chunk.End = r.end
+	}
+	r.next = r.next.Add(r.size)
+	r.num++
+
+	g.Debug("Processing chunk %d: %s to %s", r.num, chunk.Start.Format(time.RFC3339), chunk.End.Format(time.RFC3339))
+
+	result, warnings, err := r.conn.Client.QueryRange(r.ctx, r.query, chunk)
+	if err != nil {
+		return nil, g.Error(err, "Error querying Prometheus chunk: %s", r.query)
+	}
+
+	for _, warning := range warnings {
+		g.Warn(warning)
+	}
+
+	switch result := result.(type) {
+	case model.Matrix:
+		for _, sample := range result {
+			metricMap := map[string]string{}
+			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+			if len(r.columns) == 0 {
+				r.columns = createPrometheusColumns(metricMap, sample)
+			}
+
+			fieldMap := r.columns.FieldMap(true)
+			index := func(k string) int { return fieldMap[strings.ToLower(k)] }
+
+			for _, value := range sample.Values {
+				row := make([]any, len(r.columns))
+				for k, v := range metricMap {
+					row[index(k)] = v
+				}
+				row[index("timestamp")] = value.Timestamp.Unix()
+				row[index("value")] = r.conn.toFloat(value.Value)
+				rows = append(rows, row)
+			}
+
+			for _, hist := range sample.Histograms {
+				for i, bucket := range hist.Histogram.Buckets {
+					row := make([]any, len(r.columns))
+					for k, v := range metricMap {
+						row[index(k)] = v
+					}
+					row[index("timestamp")] = hist.Timestamp.Unix()
+					row[index("count")] = r.conn.toFloat(hist.Histogram.Count)
+					row[index("sum")] = r.conn.toFloat(hist.Histogram.Sum)
+					row[index("bucket_boundaries")] = i
+					row[index("bucket_count")] = r.conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = r.conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = r.conn.toFloat(bucket.Upper)
+					rows = append(rows, row)
+				}
+			}
+		}
+	case model.Vector:
+		for _, sample := range result {
+			metricMap := map[string]string{}
+			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+			if len(r.columns) == 0 {
+				r.columns = createPrometheusColumnsFromVector(metricMap, sample)
+			}
+
+			fieldMap := r.columns.FieldMap(true)
+			index := func(k string) int { return fieldMap[strings.ToLower(k)] }
+
+			row := make([]any, len(r.columns))
+			for k, v := range metricMap {
+				row[index(k)] = v
+			}
+
+			if sample.Histogram != nil {
+				row[index("timestamp")] = sample.Timestamp.Unix()
+				row[index("count")] = r.conn.toFloat(sample.Histogram.Count)
+				row[index("sum")] = r.conn.toFloat(sample.Histogram.Sum)
+
+				for _, bucket := range sample.Histogram.Buckets {
+					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
+					row[index("bucket_count")] = r.conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = r.conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = r.conn.toFloat(bucket.Upper)
+				}
+			} else {
+				row[index("timestamp")] = sample.Timestamp.Unix()
+				row[index("value")] = r.conn.toFloat(sample.Value)
+			}
+			rows = append(rows, row)
+		}
+	}
+
+	return rows, nil
 }
 
 // Helper function to create columns for matrix data

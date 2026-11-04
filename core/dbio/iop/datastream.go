@@ -845,7 +845,10 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 		ds.SetEmpty()
 	}
 
-	ds.Buffer = nil // clear buffer
+	ds.Context.Lock() // Close also clears the buffer
+	ds.Buffer = nil
+	ds.Context.Unlock()
+
 	if ds.Err() != nil {
 		return data, g.Error(ds.Err())
 	}
