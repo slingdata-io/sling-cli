@@ -799,10 +799,7 @@ func (cfg *Config) Prepare() (err error) {
 				return g.Error("for mode '%s' with iceberg target, must provide update-key and/or primary-key", cfg.Mode)
 			}
 			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
-		case ChangeCaptureMode:
-			if !cfg.Source.HasPrimaryKey() {
-				return g.Error("for mode '%s' with iceberg target, must provide primary-key", cfg.Mode)
-			}
+			// change-capture: the key comes from the source table when not set (resolveCDCPrimaryKey)
 		}
 	}
 

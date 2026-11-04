@@ -222,7 +222,9 @@ metadata:
          on kcu.constraint_name = tco.constraint_name
          and kcu.constraint_schema = tco.constraint_schema
          and kcu.constraint_name = tco.constraint_name
-    where kcu.table_schema = '{schema}'
+         and kcu.table_name = tco.table_name
+    where tco.constraint_type = 'PRIMARY KEY'
+      and kcu.table_schema = '{schema}'
       and kcu.table_name = '{table}'
     order by kcu.table_schema,
              kcu.table_name,

@@ -2010,8 +2010,22 @@
 - id: 207
   name: CDC merge_cdc strategy - MySQL target
   run: 'sling run -d -p tests/pipelines/cdc/p.31.cdc_merge_mysql.yaml'
+  env:
+    TARGET: mysql
+    SCHEMA: mysql
   output_contains:
     - 'CDC merge_cdc MySQL test PASSED'
+    - 'CDC soft merge: rows=5 ids=5 deleted=2'
+
+- id: 848
+  name: CDC merge_cdc strategy - MariaDB target
+  run: 'sling run -d -p tests/pipelines/cdc/p.31.cdc_merge_mysql.yaml'
+  env:
+    TARGET: mariadb
+    SCHEMA: mariadb
+  output_contains:
+    - 'CDC merge_cdc MySQL test PASSED'
+    - 'CDC soft merge: rows=5 ids=5 deleted=2'
 
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
@@ -3776,3 +3790,40 @@
     - '"LARGE_COL" char(1000000)'
   output_does_not_contain:
     - 'exceeds maximum length'
+
+# CDC with no primary_key gets the key from the source table (PK only, not a UNIQUE column).
+# The MySQL/MariaDB merge must not add duplicate rows on update (no ON DUPLICATE KEY).
+- id: 845
+  name: 'CDC primary key from source, MySQL to MariaDB target'
+  run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+    TARGET: MARIADB
+    SCHEMA: mariadb
+  output_contains:
+    - 'CDC primary key for test_db.cdc_pk_test from source: ["id"]'
+    - 'cdc_pk_test rows=2 distinct ids=2'
+    - 'CDC primary key from source test PASSED'
+
+- id: 846
+  name: 'CDC primary key from source, MySQL to DuckDB target'
+  run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+    TARGET: DUCKDB
+    SCHEMA: main
+  output_contains:
+    - 'CDC primary key for test_db.cdc_pk_test from source: ["id"]'
+    - 'CDC primary key from source test PASSED'
+
+# CDC on a source table with no key and no primary_key fails before it makes a target table.
+- id: 847
+  name: 'CDC fails fast when the source table has no primary key'
+  run: 'sling run -d -r tests/replications/r.145.cdc_no_pk_fail.yaml'
+  err: true
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+  output_contains:
+    - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
+  output_does_not_contain:
+    - 'created table'

@@ -1,0 +1,88 @@
+# CDC with no primary_key in the config.
+# Sling gets the key from the source table. The second run merges inserts,
+# updates and deletes. MySQL/MariaDB targets have no unique key, so an
+# update must not add a duplicate row.
+# Needs MYSQL_GTID (binlog on) and SLING_STATE=POSTGRES/sling_state_cdc_pk.
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}
+
+steps:
+  - connection: MYSQL_GTID
+    query: |
+      DROP TABLE IF EXISTS test_db.cdc_pk_test;
+      CREATE TABLE test_db.cdc_pk_test (id INT PRIMARY KEY, note VARCHAR(50), code VARCHAR(10) UNIQUE);
+      INSERT INTO test_db.cdc_pk_test VALUES (1, 'a', 'c1'), (2, 'b', 'c2'), (4, 'd', 'c4');
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_pk_test
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS sling_state_cdc_pk._sling_state
+
+  # run 1: initial snapshot
+  - type: replication
+    id: run1
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_pk_test:
+
+  - connection: MYSQL_GTID
+    query: |
+      INSERT INTO test_db.cdc_pk_test VALUES (3, 'c', 'c3');
+      UPDATE test_db.cdc_pk_test SET note = 'a2' WHERE id = 1;
+      DELETE FROM test_db.cdc_pk_test WHERE id = 2;
+      UPDATE test_db.cdc_pk_test SET note = 'd2' WHERE id = 4;
+      DELETE FROM test_db.cdc_pk_test WHERE id = 4;
+
+  # run 2: merge the binlog changes
+  - type: replication
+    id: run2
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_pk_test:
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) AS cnt, count(DISTINCT id) AS ids FROM {env.SCHEMA}.cdc_pk_test
+    into: counts
+
+  - type: log
+    message: 'cdc_pk_test rows={store.counts[0].cnt} distinct ids={store.counts[0].ids}'
+
+  - type: check
+    check: int_parse(store.counts[0].cnt) == 2 && int_parse(store.counts[0].ids) == 2
+    failure_message: 'expected 2 rows (ids 1, 3), got {store.counts[0].cnt} rows and {store.counts[0].ids} ids'
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT id, note FROM {env.SCHEMA}.cdc_pk_test ORDER BY id
+    into: rows
+
+  - type: check
+    check: int_parse(store.rows[0].id) == 1 && store.rows[0].note == "a2" && int_parse(store.rows[1].id) == 3
+    failure_message: 'unexpected rows: {store.rows}'
+
+  - type: log
+    message: 'CDC primary key from source test PASSED'
+
+  - connection: MYSQL_GTID
+    query: DROP TABLE IF EXISTS test_db.cdc_pk_test
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_pk_test

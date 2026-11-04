@@ -1,0 +1,25 @@
+# CDC on a source table with no key and no primary_key must fail fast,
+# before sling makes a target table. The read_cdc hook fails, so end hooks do
+# not run: the suite entry checks the output.
+source: MYSQL_GTID
+target: MARIADB
+
+hooks:
+  start:
+    - type: query
+      connection: MYSQL_GTID
+      query: |
+        DROP TABLE IF EXISTS test_db.cdc_pk_nokey;
+        CREATE TABLE test_db.cdc_pk_nokey (id INT, note VARCHAR(50));
+        INSERT INTO test_db.cdc_pk_nokey VALUES (1, 'a');
+    - type: query
+      connection: MARIADB
+      query: DROP TABLE IF EXISTS mariadb.cdc_pk_nokey
+
+
+defaults:
+  mode: change-capture
+  object: mariadb.{stream_table}
+
+streams:
+  test_db.cdc_pk_nokey:
