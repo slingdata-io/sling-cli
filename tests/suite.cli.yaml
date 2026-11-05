@@ -3833,6 +3833,7 @@
     - 'CDC primary key for test_db.cdc_pk_uq from unique index id: ["id"]'
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nullable_uq'
+    - 'CDC no-key end hook: errors=4'
   output_does_not_contain:
     - 'created table'
 
@@ -4035,3 +4036,19 @@
     TGT_EXPR: "HEX(c)"
   output_contains:
     - 'CDC value fidelity dec_maria PASSED'
+
+# A failed replication step must not cancel the pipeline context (SLING-227).
+# A read_cdc failure and a stream pre hook abort fail only their step. The
+# replication end hook runs, the later steps run, and on_failure: warn exits 0.
+- id: 862
+  name: 'Failed replication step does not cancel the pipeline'
+  run: 'sling run -d -p tests/pipelines/p.63.replication_failure_isolated.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+  output_contains:
+    - 'change-capture mode needs a primary key for test_db.cdc_pl_nokey'
+    - 'CDC end hook ran after read_cdc failure'
+    - 'after steps: cdc=warning after_cdc=success rows=1 hook=warning after_hook=success'
+  output_does_not_contain:
+    - 'context canceled'
+    - 'fatal'

@@ -577,7 +577,11 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	// set context
-	task.Context = ctx
+	taskCtx := ctx
+	if replication != nil && replication.Context != nil {
+		taskCtx = replication.Context
+	}
+	task.Context = taskCtx
 
 	// set into store after
 	defer func() { task.StateSet() }()
@@ -592,7 +596,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		g.Warn("duckdb process died, retrying the task once: %s", g.ErrMsgSimple(err))
 		task = sling.NewTask(env.ExecID, cfg)
 		task.Replication = replication
-		task.Context = ctx
+		task.Context = taskCtx
 		err = task.Execute()
 	}
 
@@ -679,7 +683,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	eG := g.ErrorGroup{}
 	successes := 0
-	replication.Context = ctx
+	replication.Context = childContext(ctx)
 
 	// get final stream count
 	streamCnt := 0
@@ -819,6 +823,9 @@ func runPipeline(pipelineCfgPath string, overlay map[string]string) (err error) 
 
 		if err != nil {
 			env.SetTelVal("error", getErrString(err))
+		} else {
+			// a step error that on_failure handled is not a pipeline error
+			delete(env.TelMap, "error")
 		}
 		env.SetTelVal("pipeline", g.Marshal(pipelineMap))
 
@@ -1033,6 +1040,17 @@ func setTimeout(values ...string) (deadline time.Time) {
 		break
 	}
 	return deadline
+}
+
+// childContext returns a context that the parent cancels, but that cannot
+// cancel the parent. A replication in a pipeline step uses it, so that a
+// failure in the replication does not cancel the pipeline.
+func childContext(parent *g.Context) *g.Context {
+	child := g.NewContext(parent.Ctx)
+	if deadline, ok := parent.Map.Get("timeout-deadline"); ok {
+		child.Map.Set("timeout-deadline", deadline)
+	}
+	return child
 }
 
 func dumpRuntimeStack() string {

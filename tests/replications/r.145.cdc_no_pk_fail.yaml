@@ -4,7 +4,8 @@
 #   - cdc_pk_nokey has no key, and cdc_pk_nullable_uq has only a unique index
 #     on a nullable column. Both must be in one error.
 # cdc_pk_uq comes first, so a late check would snapshot it and make its table.
-# The read_cdc hook fails, so end hooks do not run: the suite entry checks the output.
+# The read_cdc hook fails. The end hook still runs and sees the three failed
+# streams and the failed start hooks.
 source: MYSQL_GTID
 target: MARIADB
 
@@ -28,6 +29,9 @@ hooks:
         DROP TABLE IF EXISTS mariadb.cdc_pk_uq;
         DROP TABLE IF EXISTS mariadb.cdc_pk_nokey;
         DROP TABLE IF EXISTS mariadb.cdc_pk_nullable_uq
+  end:
+    - type: log
+      message: 'CDC no-key end hook: errors={execution.status.error}'
 
 defaults:
   mode: change-capture
