@@ -588,6 +588,137 @@
   output_does_not_contain:
     - 'falling back to row-based'
 
+- id: 738
+  name: 'arrow lane: arrow file source, format from the path or set (SLING-126, SLING-127)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --select 'c_int8,c_str,c_ts' --tgt-object file:///tmp/arrow_lane_738.arrow --mode full-refresh
+    echo "magic: $(head -c 6 /tmp/arrow_lane_738.arrow)"
+    sling run -d --src-stream file:///tmp/arrow_lane_738.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_738" --mode full-refresh
+    sling run -d --src-stream file:///tmp/arrow_lane_738.arrow --src-options '{format: arrow}' --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_738" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_738"
+    rm -f /tmp/arrow_lane_738.arrow
+  output_contains:
+    - 'arrow lane: enabled (postgres -> file/file)'
+    - 'magic: ARROW1'
+    - 'arrow lane: enabled (file -> postgres/adbc)'
+  output_does_not_contain:
+    - 'falling back to row-based'
+    - 'unsupported arrow file format'
+
+- id: 739
+  name: 'arrow lane: arrow file in the IPC stream format reads on the lane and the row path (SLING-127)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  rows: 10000
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    SLING_ROW_CNT= sling conns exec "$SOURCE" "select c_int8, c_str, c_ts from $SCHEMA.arrow_src" --output arrow --limit 0 > /tmp/arrow_lane_739.arrow
+    echo "magic: $(head -c 4 /tmp/arrow_lane_739.arrow | xxd -p)"
+    sling run -d --src-stream file:///tmp/arrow_lane_739.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_739" --mode full-refresh
+    SLING_ARROW_LANE=false sling run -d --src-stream file:///tmp/arrow_lane_739.arrow --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_739" --mode full-refresh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_739"
+    rm -f /tmp/arrow_lane_739.arrow
+  output_contains:
+    - 'magic: ffffffff'
+    - 'arrow lane: enabled (file -> postgres/adbc)'
+    - 'reading datastream from /tmp/arrow_lane_739.arrow [format=arrow]'
+  output_does_not_contain:
+    - 'unsupported arrow file format'
+    - 'could not read arrow file'
+
+# parallel_scan splits a Postgres table read into ctid ranges, one ADBC
+# connection each, in one snapshot (SLING-132). The rows must be the same as
+# on the row path.
+- id: 736
+  name: 'arrow lane: parallel_scan reads the same rows (verify)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    VERIFY_MODE: 'except'
+    VERIFY_PROJECTION: 'c_bool, c_int2, c_int4, c_int8, c_float, c_str, c_str_uni, c_bin, c_date, c_ts, c_tsz, c_time, c_json, c_null'
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --src-options '{parallel_scan: 4}' --select '-c_dec' --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_736" --mode full-refresh
+    SLING_ROW_CNT=10000 SLING_ARROW_LANE=false sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --select '-c_dec' --tgt-object "$SCHEMA.arrow_dst_736_row" --mode full-refresh
+    TABLE_A=public.arrow_dst_736 TABLE_B=public.arrow_dst_736_row sling run -d -p tests/pipelines/arrow/verify.yaml
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_736; drop table if exists $SCHEMA.arrow_dst_736_row"
+  output_contains:
+    - 'parallel_scan: reading "public"."arrow_src" with 4 readers'
+    - "ctid >= '(48,0)'::tid and ctid < '(96,0)'::tid"
+    - 'arrow lane: enabled'
+    - 'arrow lane verify'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+# parallel_scan with an update key: the ctid range goes into the incremental
+# where condition of each reader.
+- id: 737
+  name: 'arrow lane: parallel_scan with an incremental update key (verify)'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    TARGET: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+    VERIFY_MODE: 'except'
+    VERIFY_PROJECTION: 'c_bool, c_int2, c_int4, c_int8, c_float, c_str, c_str_uni, c_bin, c_date, c_ts, c_tsz, c_time, c_json, c_null'
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_737; drop table if exists $SCHEMA.arrow_dst_737_row"
+    SLING_ROW_CNT=10000 sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --src-options '{parallel_scan: 3}' --select '-c_dec' --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_737" --mode incremental --primary-key c_int8 --update-key c_int8
+    SLING_ROW_CNT=10000 SLING_ARROW_LANE=false sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --select '-c_dec' --tgt-object "$SCHEMA.arrow_dst_737_row" --mode full-refresh
+    TABLE_A=public.arrow_dst_737 TABLE_B=public.arrow_dst_737_row sling run -d -p tests/pipelines/arrow/verify.yaml
+    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_737; drop table if exists $SCHEMA.arrow_dst_737_row"
+  output_contains:
+    - 'parallel_scan: reading "public"."arrow_src" with 3 readers'
+    - "ctid >= '(128,0)'::tid"
+    - 'arrow lane: enabled'
+    - 'arrow lane verify'
+  output_does_not_contain:
+    - 'falling back to row-based'
+
+# parallel_scan has no effect on a custom SQL stream or on the row path. The
+# run reads with one reader and says why.
+- id: 761
+  name: 'parallel_scan: no effect on custom SQL or the row path'
+  env:
+    SOURCE: 'POSTGRES_ADBC'
+    SCHEMA: 'public'
+  run: |
+    bash tests/pipelines/arrow/seed.sh
+    sling run --src-conn POSTGRES_ADBC --src-stream "select 1 as id" --src-options '{parallel_scan: 4}' --tgt-object file:///tmp/sling_arrow_761.csv
+    SLING_ARROW_LANE=false sling run --src-conn POSTGRES_ADBC --src-stream public.arrow_src --src-options '{parallel_scan: 4}' --tgt-object file:///tmp/sling_arrow_761.csv
+  output_contains:
+    - 'parallel_scan has no effect on stream select 1 as id: the stream is a custom SQL query'
+    - 'parallel_scan has no effect on stream public.arrow_src: the stream reads on the row path, not the arrow lane'
+  output_does_not_contain:
+    - 'with 4 readers'
+
+# The lane declines an unconstrained numeric: no decimal128 type holds all of
+# its values (SLING-125). The run takes the row path. The row path keeps all
+# the digits of the target numeric, which has no precision (SLING-166): 20
+# fraction digits, and 51 digits in decimal256. The driver drops trailing
+# zeros, so the text of 1.12345678901234567890 has 19 fraction digits.
+- id: 762
+  name: 'arrow lane declines: unconstrained numeric'
+  run: |
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst; create table public.arrow_762_src (id int, d numeric); insert into public.arrow_762_src values (1, 1.5), (2, -2.25), (3, 1.12345678901234567890), (4, 12345678901234567890123.5), (5, -123456789012345678901234567890.123456789012345678901), (6, null)"
+    sling run -d --src-conn POSTGRES_ADBC --src-stream public.arrow_762_src --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_762_dst --mode full-refresh
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'matched_' || count(*) as res from public.arrow_762_src s join public.arrow_762_dst t on t.id = s.id and t.d is not distinct from s.d"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "select 'value_' || d::text as res from public.arrow_762_dst where id = 3"
+    SLING_ROW_CNT= sling conns exec POSTGRES_ADBC "drop table if exists public.arrow_762_src; drop table if exists public.arrow_762_dst"
+  output_contains:
+    - 'falling back to row-based processing for stream "public.arrow_762_src". Reason: decimal column "d" has no precision from 1 to 38'
+    - 'matched_6'
+    - 'value_1.1234567890123456789 '
+
 - id: 740
   name: 'arrow lane declines: transform that reads record.'
   group: arrow_740_file
@@ -920,25 +1051,28 @@
   output_does_not_contain:
     - 'arrow lane: enabled'
 
-- id: 760
-  name: 'arrow lane declines: Databricks copy_method zerobus'
-  env:
-    SOURCE: 'POSTGRES_ADBC'
-    TARGET: 'DATABRICKS'
-    SCHEMA: 'public'
-  rows: 10000
-  # The row path would then load through the zerobus ingest, which needs a UC
-  # token this suite does not carry, so the run is forced: the decline itself
-  # is the assertion, and it fires before the read.
-  err: true
-  run: |
-    bash tests/pipelines/arrow/seed.sh
-    SLING_ROW_CNT= sling conns exec "$SOURCE" "drop table if exists $SCHEMA.arrow_zerobus_src"
-    SLING_ARROW_LANE=force sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_760" --mode full-refresh
-    SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_760"
-  output_contains:
-    - 'zerobus'
-    - 'forced but not eligible'
+# Commented out: the DATABRICKS workspace is inactive (Databricks denies all
+# resources since 2026-10-13). TestArrowLane_Gate covers the zerobus decline.
+# Uncomment when the workspace is active again.
+# - id: 760
+#   name: 'arrow lane declines: Databricks copy_method zerobus'
+#   env:
+#     SOURCE: 'POSTGRES_ADBC'
+#     TARGET: 'DATABRICKS'
+#     SCHEMA: 'public'
+#   rows: 10000
+#   # The row path would then load through the zerobus ingest, which needs a UC
+#   # token this suite does not carry, so the run is forced: the decline itself
+#   # is the assertion, and it fires before the read.
+#   err: true
+#   run: |
+#     bash tests/pipelines/arrow/seed.sh
+#     SLING_ROW_CNT= sling conns exec "$SOURCE" "drop table if exists $SCHEMA.arrow_zerobus_src"
+#     SLING_ARROW_LANE=force sling run -d --src-conn "$SOURCE" --src-stream "$SCHEMA.arrow_src" --tgt-conn "$TARGET" --tgt-object "$SCHEMA.arrow_dst_760" --mode full-refresh
+#     SLING_ROW_CNT= sling conns exec "$TARGET" "drop table if exists $SCHEMA.arrow_dst_760"
+#   output_contains:
+#     - 'zerobus'
+#     - 'forced but not eligible'
 
 - id: 770
   name: 'arrow lane quiet: native Postgres source'
@@ -1143,7 +1277,7 @@
   name: 'arrow lane: postgres numeric and jsonb keep their types and values'
   run: |
     sling conns exec POSTGRES "drop table if exists public.arrow_790"
-    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, -0.5::numeric as c_dec2, null::numeric as c_dec3, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_790 --mode full-refresh
+    sling run -d --src-conn POSTGRES_ADBC --src-stream "select 1 as id, 12.34::numeric(10,2) as c_dec, (-0.5)::numeric(10,1) as c_dec2, null::numeric(10,2) as c_dec3, '{\"a\":1}'::jsonb as c_json" --tgt-conn POSTGRES_ADBC --tgt-object public.arrow_790 --mode full-refresh
     sling conns exec POSTGRES "select 'res=' || c_dec::text || '|' || c_dec2::text || '|' || (c_dec3 is null)::text || '|' || (c_json->>'a') || '|' || pg_typeof(c_json)::text as res from public.arrow_790"
     sling conns exec POSTGRES "drop table if exists public.arrow_790"
   output_contains:

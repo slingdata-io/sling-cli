@@ -287,8 +287,8 @@ func IsDummy(columns []Column) bool {
 // NewColumns normalizes Columns: defaults missing/invalid Type to StringType
 // and assigns 1-based Position.
 func NewColumns(cols ...Column) Columns {
-	for i, col := range cols {
-		if string(col.Type) == "" || !col.Type.IsValid() {
+	for i := range cols {
+		if string(cols[i].Type) == "" || !cols[i].Type.IsValid() {
 			cols[i].Type = StringType
 		}
 		cols[i].Position = i + 1
@@ -467,6 +467,38 @@ func (cols Columns) IsDummy() bool {
 		}
 	}
 	return true
+}
+
+// FileDecimals gives a copy of the columns with the decimal precision and
+// scale that an Arrow or Parquet file declares. The precision of a decimal
+// that is not from the source DDL comes from the first rows, so it gets the
+// max precision: then a later row with more digits fits too.
+func (cols Columns) FileDecimals() Columns {
+	cols = cols.Clone()
+	for i, col := range cols {
+		if !col.IsDecimal() || (col.Sourced && col.DbPrecision > 0) {
+			continue // the source DDL gives the type, and Arrow lane records keep it
+		}
+		if !col.Sourced {
+			cols[i].DbPrecision = max(col.DbPrecision, env.DdlMaxDecLength)
+		}
+		cols[i].DbPrecision = max(cols[i].DbPrecision, env.DdlMinDecLength)
+		cols[i].DbScale = max(col.DbScale, env.DdlMinDecScale)
+	}
+	return cols
+}
+
+// DecimalsAsString gives a copy of the columns in which a decimal with a
+// precision above maxPrecision is a string. wide has the names of those columns.
+func (cols Columns) DecimalsAsString(maxPrecision int) (out Columns, wide []string) {
+	out = cols.Clone()
+	for i, col := range out {
+		if col.IsDecimal() && col.DbPrecision > maxPrecision {
+			out[i].Type = StringType
+			wide = append(wide, g.F("%s (decimal(%d,%d))", col.Name, col.DbPrecision, col.DbScale))
+		}
+	}
+	return out, wide
 }
 
 // Names return the column names

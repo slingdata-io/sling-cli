@@ -229,6 +229,33 @@ metadata:
     ORDER BY cons.owner, cols.table_name, cols.position
 
 
+  # The unique index with the fewest columns, all NOT NULL. CDC uses it as
+  # the key when the table has no primary key.
+  unique_keys: |
+    select ic.index_name as pk_name,
+           ic.column_position as position,
+           ic.column_name as column_name
+    from all_ind_columns ic
+    where ic.table_owner = '{schema}'
+      and ic.table_name = '{table}'
+      and ic.index_name = (
+        select index_name from (
+          select i.index_name
+          from all_indexes i
+          join all_ind_columns c on c.index_owner = i.owner and c.index_name = i.index_name
+          join all_tab_columns t on t.owner = c.table_owner and t.table_name = c.table_name and t.column_name = c.column_name
+          where i.table_owner = '{schema}'
+            and i.table_name = '{table}'
+            and i.uniqueness = 'UNIQUE'
+            and i.index_type = 'NORMAL'
+            and i.status in ('VALID', 'N/A')
+          group by i.index_name
+          having sum(case when t.nullable = 'Y' then 1 else 0 end) = 0
+          order by count(*), i.index_name
+        ) where rownum = 1
+      )
+    order by ic.column_position
+
   indexes: |
     select
       index_name,

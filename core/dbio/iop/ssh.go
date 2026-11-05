@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cast"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/net/proxy"
 )
 
 const sshHostKeyDocsURL = "https://docs.slingdata.io/concepts/ssh-host-keys"
@@ -51,6 +52,7 @@ type SSHOptions struct {
 	HostKey      SSHHostKey
 	Ciphers      []string // nil: the default list
 	KeyExchanges []string // nil: the default list
+	ProxyURL     string   // SOCKS5 proxy for the TCP connection to the SSH server
 }
 
 // NewSSHOptions creates SSHOptions from the ssh_* connection properties
@@ -361,11 +363,39 @@ func (s *SSHClient) Connect() (err error) {
 		Config:            config,
 	}
 
-	// Connect to the remote server and perform the SSH handshake.
-	s.client, err = ssh.Dial("tcp", sshAddr, s.config)
-	if err != nil {
-		return g.Error(err, "unable to connect to ssh server "+sshAddr)
+	if s.Options.ProxyURL == "" {
+		s.client, err = ssh.Dial("tcp", sshAddr, s.config)
+		if err != nil {
+			return g.Error(err, "unable to connect to ssh server "+sshAddr)
+		}
+		return nil
 	}
+
+	proxyU, err := url.Parse(s.Options.ProxyURL)
+	if err != nil {
+		// url.Error embeds the raw URL, which can hold the password
+		if uErr, ok := err.(*url.Error); ok {
+			err = uErr.Err
+		}
+		return g.Error(err, "could not parse proxy URL")
+	}
+	dialer, err := proxy.FromURL(proxyU, proxy.Direct)
+	if err != nil {
+		return g.Error(err, "could not create dialer from proxy URL")
+	}
+
+	g.Debug("connecting to ssh server %s via proxy %s", sshAddr, proxyU.Host)
+	conn, err := dialer.Dial("tcp", sshAddr)
+	if err != nil {
+		return g.Error(err, "unable to connect to ssh server %s via proxy %s", sshAddr, proxyU.Host)
+	}
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, sshAddr, s.config)
+	if err != nil {
+		conn.Close()
+		return g.Error(err, "unable to connect to ssh server %s via proxy %s", sshAddr, proxyU.Host)
+	}
+	s.client = ssh.NewClient(sshConn, chans, reqs)
 	return nil
 }
 
@@ -474,6 +504,10 @@ func OpenTunnelSSH(tgtHost string, tgtPort int, tunnelURL, privateKey, passphras
 
 	sshU, err := url.Parse(tunnelURL)
 	if err != nil {
+		// url.Error embeds the raw URL, which can hold the password
+		if uErr, ok := err.(*url.Error); ok {
+			err = uErr.Err
+		}
 		return 0, g.Error(err, "could not parse SSH_TUNNEL URL")
 	}
 

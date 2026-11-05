@@ -219,7 +219,7 @@
 - id: 34
   name: Run sling with Prometheus source and custom query
   run: >
-    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
+    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M", "step": "1h"}' --stdout  -d
   output_contains:
     - quantile
 
@@ -242,7 +242,7 @@
 - id: 38
   name: Run sling with replication configuration 07
   run: sling run -r tests/replications/r.07.yaml
-  streams: 18
+  streams: 19
   group: sqlite
 
 - id: 39
@@ -662,6 +662,7 @@
 
 - id: 84
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
+  group: oracle_number_scale
   run: sling run -r tests/replications/r.28.oracle_number_scale.yaml
   env:
     SCHEMA: ORACLE
@@ -672,6 +673,7 @@
 
 - id: 85
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
+  group: oracle_number_scale
   run: sling run -r tests/replications/r.28.oracle_number_scale.yaml
   env:
     SCHEMA: ORACLE
@@ -2010,8 +2012,22 @@
 - id: 207
   name: CDC merge_cdc strategy - MySQL target
   run: 'sling run -d -p tests/pipelines/cdc/p.31.cdc_merge_mysql.yaml'
+  env:
+    TARGET: mysql
+    SCHEMA: mysql
   output_contains:
     - 'CDC merge_cdc MySQL test PASSED'
+    - 'CDC soft merge: rows=5 ids=5 deleted=2'
+
+- id: 848
+  name: CDC merge_cdc strategy - MariaDB target
+  run: 'sling run -d -p tests/pipelines/cdc/p.31.cdc_merge_mysql.yaml'
+  env:
+    TARGET: mariadb
+    SCHEMA: mariadb
+  output_contains:
+    - 'CDC merge_cdc MySQL test PASSED'
+    - 'CDC soft merge: rows=5 ids=5 deleted=2'
 
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
@@ -2372,7 +2388,7 @@
   name: 'Test Postgres binary fidelity'
   run: 'sling run -d -r tests/replications/r.113.postgres_binary_fidelity.yaml'
   streams: 1
-  rows: 4
+  rows: 5
   output_contains:
     - 'execution succeeded'
     - 'SUCCESS: Postgres binary fidelity test passed'
@@ -2607,18 +2623,19 @@
   run: |
     set -o pipefail
     sling run -d -p tests/pipelines/p.44.batch_max_duration_pg_clickhouse.yaml 2>&1 | tee /tmp/sling_cli_test_313.out
-    closes=$(grep -c 'committed clickhouse batch by max_duration' /tmp/sling_cli_test_313.out || true)
-    echo "duration_batch_commits=$closes"
+    # Each batch commits when it closes, so a batch closed by max_duration is a mid-stream commit
+    closes=$(grep -c 'by max_duration=1s rows=' /tmp/sling_cli_test_313.out || true)
+    echo "duration_batch_closes=$closes"
     test "$closes" -ge 1
-    # Prove the commit was mid-stream (not only at EOS): rows_so_far < final count
-    mid=$(grep -oE 'rows_so_far=[0-9]+' /tmp/sling_cli_test_313.out | head -1 | cut -d= -f2)
-    echo "mid_stream_rows_so_far=$mid"
+    # Prove the close was mid-stream (not only at EOS): batch rows < final count
+    mid=$(grep -oE 'by max_duration=1s rows=[0-9]+' /tmp/sling_cli_test_313.out | head -1 | cut -d= -f3)
+    echo "mid_stream_batch_rows=$mid"
     test -n "$mid"
     test "$mid" -lt 500000
   output_contains:
-    - 'committed clickhouse batch by max_duration=1s'
-    - 'duration_batch_commits='
-    - 'mid_stream_rows_so_far='
+    - 'by max_duration=1s rows='
+    - 'duration_batch_closes='
+    - 'mid_stream_batch_rows='
     - 'SUCCESS: batch_max_duration committed multiple batches'
 
 - id: 314
@@ -3149,10 +3166,10 @@
 # rows are gone, so sling runs the task again with a new sidecar.
 - id: 622
   name: 'duckdb sidecar killed during parquet write recovers'
-  rows: 1000000
+  rows: 5000000
   run: |
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 5000000) g' --tgt-object 'file://temp/duck_death/out_622.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""
@@ -3182,7 +3199,7 @@
   run: |
     set -m
     mkdir -p temp/duck_death
-    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 1000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
+    sling run -d --src-conn POSTGRES --src-stream 'select g as id, md5(g::text) as val, now() as ts from generate_series(1, 5000000) g' --tgt-object 'file://temp/duck_death/out_623.parquet' &
     PID=$!
     # sling starts short-lived duckdb processes first; wait for one that lives 2s
     DUCK=""
@@ -3527,6 +3544,112 @@
     - 'SUCCESS: StarRocks handled reserved column names'
     - 'execution succeeded'
 
+# SAP HANA: large insert batches (go-hdb bulk exec) and upsert merge.
+- id: 812
+  name: Test SAP HANA large CSV file ingestion (100K rows)
+  run: sling run -d -r tests/replications/r.142.hana_large_csv.yaml
+  conns:
+    - hana
+  streams: 1
+  rows: 100000
+  output_contains:
+    - 'inserted 100000 rows'
+    - 'Row count: 100000'
+    - 'execution succeeded'
+
+- id: 813
+  name: Test SAP HANA incremental upsert runs twice
+  run: |
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-conn hana --tgt-object 'sling.test1_upsert' --mode full-refresh
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-conn hana --tgt-object 'sling.test1_upsert' --mode incremental --primary-key id
+    sling conns exec hana 'drop table sling.test1_upsert'
+  conns:
+    - hana
+  output_contains:
+    - 'MERGE INTO "SLING"."TEST1_UPSERT"'
+    - 'inserted 1000 rows'
+  output_does_not_contain:
+    - 'execution failed'
+
+# A step that a break or a forward goto skips must send a "skipped" status.
+# Else the platform keeps the step pending and marks it "stalled"
+# (exec 3L9h5czBxVXLzls21YaQOg34GPQ on staging).
+- id: 814
+  name: 'Pipeline break and goto send skipped status for the steps that do not run'
+  run: |
+    LOG=$(mktemp)
+    python3 tests/files/status_capture_server.py > "$LOG" 2>&1 &
+    PID=$!
+    PORT=""
+    for _ in $(seq 1 40); do
+      PORT=$(sed -n 's/^PORT=//p' "$LOG")
+      [ -n "$PORT" ] && break
+      sleep 0.25
+    done
+    SLING_STATUS_URL="http://127.0.0.1:$PORT/status" sling run -p tests/pipelines/p.59.break_marks_skipped.yaml
+    sleep 0.5
+    kill "$PID" 2>/dev/null || true
+    grep '^status ' "$LOG" | sort -u
+  output_contains:
+    - 'break-test before break'
+    - 'status step=jump => success'
+    - 'status step=jumped_over => skipped'
+    - 'status step=stop_here => success'
+    - 'status step=after_break_1 => skipped'
+    - 'status step=after_break_2 => skipped'
+  output_does_not_contain:
+    - 'should-not-reach'
+
+# A threaded replication to an unreachable target must not dial once per
+# stream. The first failed connect fails the streams that did not start
+# (exec 3L1aEVlx72sm4DSDiKBj22azq4w on staging parked until SLING_TIMEOUT).
+- id: 815
+  name: 'Threaded replication fails pending streams after a target connect failure'
+  run: PG_UNREACHABLE='postgres://u:p@127.0.0.1:1/db' sling run -r tests/replications/r.143.unreachable_target_threads.yaml
+  err: true
+  output_contains:
+    - 'target unreachable: stream'
+    - 'Replication failure (4 streams failed)'
+
+# pgx reads timestamptz as UTC (binary). Sling must give it in the session time zone, as lib/pq did.
+- id: 816
+  name: 'Postgres timestamptz in the session time zone'
+  run: PGTZ=America/New_York sling run --src-conn POSTGRES --src-stream "select timestamptz '2026-01-15 12:00:00.123456Z' as winter, timestamptz '2026-07-15 12:00:00Z' as summer, timestamp '2026-01-15 12:00:00' as no_zone" --stdout
+  output_contains:
+    - '2026-01-15 07:00:00.123456 -05,2026-07-15 08:00:00 -04,2026-01-15 12:00:00'
+
+# A task config larger than 128 KiB must reach the child process on Linux.
+# It went in SLING_TASK_CONFIG as inline JSON: "argument list too long" (SLING-155).
+# The SQL is inline: a file:// SQL stays a path in the task config.
+- id: 817
+  name: 'Replication with retries and a task config larger than 128 KiB'
+  run: |
+    X=$(head -c 150000 /dev/zero | tr '\0' x)
+    SQL="select 1 as id, length('$X') as sql_len"
+    printf 'source: POSTGRES\ntarget: LOCAL\nenv:\n  SLING_RETRIES: 1\ndefaults:\n  mode: full-refresh\n  object: file:///tmp/sling_817/{stream_name}.csv\nstreams:\n  large_task_1:\n    sql: "%s"\n  large_task_2:\n    sql: "%s"\n' "$SQL" "$SQL" > /tmp/sling_817.yaml
+    sling run -r /tmp/sling_817.yaml
+    cat /tmp/sling_817/large_task_1.csv /tmp/sling_817/large_task_2.csv
+  output_contains:
+    - '2 Successes'
+    - '1,150000'
+  output_does_not_contain:
+    - 'argument list too long'
+
+- id: 833
+  name: 'insert_concurrency: postgres → clickhouse native, ADBC row path and arrow lane'
+  # Needs a ClickHouse with system.columns.numeric_precision (CLICKHOUSE_MINI).
+  # The pipeline exits 1 by design: its failure cases end in a failed task.
+  run: |
+    sling run -d -p tests/pipelines/p.133.insert_concurrency_pg_clickhouse.yaml 2>&1 || true
+  output_contains:
+    - 'with 3 concurrent inserts'
+    - 'ingesting with 3 concurrent ADBC connections'
+    - 'arrow lane: enabled (postgres -> clickhouse/adbc)'
+    - 'OK: default.sling_ins_conc_native matches the source'
+    - 'OK: default.sling_ins_conc_adbc matches the source'
+    - 'OK: default.sling_ins_conc_lane matches the source'
+    - 'SUCCESS: insert_concurrency kept all rows and left no partial table'
+
 # Nested CLI suites. Loader in sling_cli_test.go merges these in.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
@@ -3535,3 +3658,196 @@
 - suite: suite.cli.secrets.yaml
 - suite: suite.cli.arrow.yaml
 - suite: suite.cli.project.yaml
+
+# An unconstrained Postgres numeric has no precision from the source: the row
+# path gave it decimal(24,15) from the first rows, and a wider value overflowed
+# in Parquet (SLING-135). A numeric(50,10) failed in Parquet, as DuckDB and
+# Parquet have no decimal above 38 digits: it is now a string, with a warning (SLING-136).
+- id: 835
+  name: 'Row path to Parquet (DuckDB) keeps unconstrained and wide numeric values'
+  run: |
+    SLING_ARROW_LANE=false sling run --src-conn POSTGRES --src-stream "select 1 as id, -99999999999999999999.5::numeric as d, 1234567890123456789012345678901234567890.0123456789::numeric(50,10) as d50 union all select 2, 1.123456789012345, -1.5" --tgt-object file:///tmp/sling_835/dec.parquet
+    sling run --src-stream file:///tmp/sling_835/dec.parquet --stdout
+  output_contains:
+    - 'written as strings: d50 (decimal('
+    - '1,-99999999999999999999.500000000000000,1234567890123456789012345678901234567890.0123456789'
+    - '2,1.123456789012345,'
+
+- id: 836
+  name: 'Row path to Parquet (Go writer) keeps unconstrained and wide numeric values'
+  run: |
+    SLING_ARROW_LANE=false SLING_DUCKDB_COMPUTE=false sling run --src-conn POSTGRES --src-stream "select 1 as id, -99999999999999999999.5::numeric as d, 1234567890123456789012345678901234567890.0123456789::numeric(50,10) as d50 union all select 2, 1.123456789012345, -1.5" --tgt-object file:///tmp/sling_836/dec.parquet
+    sling run --src-stream file:///tmp/sling_836/dec.parquet --stdout
+  output_contains:
+    - 'written as strings: d50 (decimal('
+    - '1,-99999999999999999999.500000000000000,1234567890123456789012345678901234567890.0123456789'
+    - '2,1.123456789012345,'
+
+# A value wider than decimal(38,s) fails the run with a clear error. It must not
+# write a value that is not valid (SLING-135).
+- id: 837
+  name: 'Row path to Parquet fails on a numeric value wider than decimal(38,s)'
+  run: |
+    SLING_ARROW_LANE=false sling run --src-conn POSTGRES --src-stream "select g as id, case when g = 2000 then 12345678901234567890123456789012345.123456::numeric else g::numeric / 3 end as d from generate_series(1, 3000) g" --tgt-object file:///tmp/sling_837/dec.parquet
+  err: true
+  output_contains:
+    - 'of column d does not fit decimal(38,20)'
+
+# The native ClickHouse driver cut decimals to 11 digits (max_decimals 11):
+# 1.123456789012345 became 1.12345678901 (SLING-137).
+# Uses CLICKHOUSE_MINI: the local CLICKHOUSE has no numeric_precision in system.columns.
+- id: 838
+  name: 'Postgres to native ClickHouse keeps all decimals of an unconstrained numeric'
+  run: |
+    sling run --src-conn POSTGRES --src-stream "select 1 as id, 1.123456789012345::numeric as d union all select 2, -99999999999999.000000000000001" --tgt-conn CLICKHOUSE_MINI --tgt-object default.sling_838_dec --mode full-refresh
+    sling conns exec CLICKHOUSE_MINI -o csv "select id, toString(d) as dv from default.sling_838_dec order by id"
+    sling conns exec CLICKHOUSE_MINI "drop table if exists default.sling_838_dec"
+  output_contains:
+    - '1,1.123456789012345'
+    - '2,-99999999999999.000000000000001'
+
+# https://github.com/slingdata-io/sling-cli/issues/831 (SLING-190)
+# DuckDB 2.0.0 renamed its CLI assets to duckdb-cli-<platform>.tar.gz. The old .zip URL gave a 404.
+# Each entry uses an empty SLING_HOME_DIR to force a download. Needs internet access to github.com.
+- id: 839
+  name: 'GH #831: DUCKDB_VERSION=2.0.0 downloads the new tar.gz CLI asset'
+  env:
+    DUCKDB_VERSION: '2.0.0'
+    SLING_HOME_DIR: /tmp/sling_839/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_839/gh831.duckdb'
+    GH831_EXPECT: 'v2.0.0'
+  run: |
+    rm -rf /tmp/sling_839 && mkdir -p /tmp/sling_839/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 2.0.0'
+    - 'gh831 duckdb version => v2.0.0'
+    - 'SUCCESS: gh831 DuckDB v2.0.0 binary downloaded and runs'
+
+# DuckDB has no v2.0 release tag. A short version is padded to three parts (2.0 => 2.0.0).
+- id: 840
+  name: 'GH #831: DUCKDB_VERSION=2.0 is padded to 2.0.0'
+  env:
+    DUCKDB_VERSION: '2.0'
+    SLING_HOME_DIR: /tmp/sling_840/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_840/gh831.duckdb'
+    GH831_EXPECT: 'v2.0.0'
+  run: |
+    rm -rf /tmp/sling_840 && mkdir -p /tmp/sling_840/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 2.0.0'
+    - 'gh831 duckdb version => v2.0.0'
+    - 'SUCCESS: gh831 DuckDB v2.0.0 binary downloaded and runs'
+
+# A version before 2.0 still downloads the old duckdb_cli-<platform>.zip asset.
+- id: 841
+  name: 'GH #831: DUCKDB_VERSION=1.5.5 still downloads the old zip CLI asset'
+  env:
+    DUCKDB_VERSION: '1.5.5'
+    SLING_HOME_DIR: /tmp/sling_841/home
+    GH831_DUCKDB: 'duckdb:///tmp/sling_841/gh831.duckdb'
+    GH831_EXPECT: 'v1.5.5'
+  run: |
+    rm -rf /tmp/sling_841 && mkdir -p /tmp/sling_841/home
+    sling run -d -p tests/pipelines/p.60.gh831_duckdb_version_download.yaml
+  group: duckdb
+  output_contains:
+    - 'downloading duckdb 1.5.5'
+    - 'gh831 duckdb version => v1.5.5'
+    - 'SUCCESS: gh831 DuckDB v1.5.5 binary downloaded and runs'
+
+# pgx COPY encodes only a Go bool into bool. Integer and text values go into an existing bool column.
+- id: 842
+  name: 'Postgres integer and text values into an existing bool column'
+  run: 'sling run -d -r tests/replications/r.144.postgres_int_to_bool.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - 'SUCCESS: integer values load into a Postgres bool column'
+
+# https://github.com/slingdata-io/sling-cli/issues/759
+# Sling forces client_charset=UTF8 for Oracle, so go-ora sends UTF-8 bind bytes to a WE8ISO8859P1 target and the non-bulk path stores mojibake.
+- id: 843
+  name: 'Oracle non-bulk insert keeps non-ASCII text in a WE8ISO8859P1 target (also NVARCHAR2/NCLOB)'
+  group: gh759_oracle
+  run: 'bash tests/pipelines/gh759_oracle_nonbulk_utf8/run_docker_test.sh'
+  output_contains:
+    - 'GH759 WE8 target OK'
+    - 'GH759 AL32UTF8 target OK'
+    - 'GH759 WE8 N-type target OK'
+    - 'GH759 non-bulk non-ASCII test PASSED'
+
+# sqlldr ctl used char(4000) for CLOB columns, because Oracle reports data_length=4000 for a LOB.
+# A value over 4000 chars failed, also with a text(N) override. Ref: GitHub issue #446.
+- id: 844
+  name: 'Oracle sqlldr ctl sizes CLOB columns past 4000 chars'
+  run: 'sling run -d -p tests/pipelines/p.61.oracle_sqlldr_clob_size.yaml'
+  output_contains:
+    - 'SUCCESS: CLOB value over 4000 chars loaded without column override'
+    - 'SUCCESS: CLOB value over 4000 chars loaded with text(1000000) override'
+    - '"LARGE_COL" char(1000000)'
+  output_does_not_contain:
+    - 'exceeds maximum length'
+
+# CDC with no primary_key gets the key from the source table (PK only, not a UNIQUE column).
+# The MySQL/MariaDB merge must not add duplicate rows on update (no ON DUPLICATE KEY).
+- id: 845
+  name: 'CDC primary key from source, MySQL to MariaDB target'
+  group: cdc_pk_from_source
+  run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+    TARGET: MARIADB
+    SCHEMA: mariadb
+  output_contains:
+    - 'CDC primary key for test_db.cdc_pk_test from source: ["id"]'
+    - 'cdc_pk_test rows=2 distinct ids=2'
+    - 'CDC primary key from source test PASSED'
+
+- id: 846
+  name: 'CDC primary key from source, MySQL to DuckDB target'
+  group: cdc_pk_from_source
+  run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+    TARGET: DUCKDB
+    SCHEMA: main
+  output_contains:
+    - 'CDC primary key for test_db.cdc_pk_test from source: ["id"]'
+    - 'CDC primary key from source test PASSED'
+
+# CDC checks the key of all streams before any snapshot. A unique index on
+# NOT NULL columns is a key. A nullable unique index is not. One error names
+# all the streams with no key, and Sling makes no target table.
+- id: 847
+  name: 'CDC fails fast when source tables have no primary key or unique index'
+  run: 'sling run -d -r tests/replications/r.145.cdc_no_pk_fail.yaml'
+  err: true
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+  output_contains:
+    - 'CDC primary key for test_db.cdc_pk_uq from unique index id: ["id"]'
+    - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
+    - 'change-capture mode needs a primary key for test_db.cdc_pk_nullable_uq'
+  output_does_not_contain:
+    - 'created table'
+
+# CDC key detection on a Postgres source with no primary_key in the config.
+# The source role has only REPLICATION and SELECT (information_schema hides the
+# constraints from it). Covers a key with two columns, REPLICA IDENTITY USING
+# INDEX with and without a primary key, and the fail-fast check.
+- id: 849
+  name: 'CDC primary key from Postgres source, SELECT-only role and replica identity index'
+  group: cdc_pg_pk
+  run: 'bash tests/pipelines/cdc_pg_pk/run_docker_test.sh'
+  output_contains:
+    - 'CDC primary key for src.orders from source: ["order_id","tenant_id"]'
+    - 'CDC primary key for src.events_ri from replica identity index: ["event_id"]'
+    - 'CDC primary key for src.items_alt from replica identity index: ["code"]'
+    - 'CDC PG key test: orders=3 events=2 items=1'
+    - 'CDC PG key test PASSED'
+    - 'CDC PG no-key test PASSED'

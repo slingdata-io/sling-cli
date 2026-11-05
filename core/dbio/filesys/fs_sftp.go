@@ -89,6 +89,7 @@ func (fs *SftpFileSysClient) Connect() (err error) {
 	}
 
 	sshOptions := iop.NewSSHOptions(func(key string) string { return fs.GetProp(key) })
+	sshOptions.ProxyURL = fs.GetProp("proxy_url")
 	fs.sshClient = &iop.SSHClient{
 		Host:       fs.GetProp("HOST"),
 		Port:       cast.ToInt(fs.GetProp("PORT")),
@@ -113,6 +114,7 @@ func (fs *SftpFileSysClient) Connect() (err error) {
 		fs.sshClient.HostKeyAddr = g.F("%s:%d", fs.sshClient.Host, fs.sshClient.Port)
 		fs.sshClient.Host = "127.0.0.1"
 		fs.sshClient.Port = localPort
+		fs.sshClient.Options.ProxyURL = "" // the proxy is for the tunnel server only
 	}
 
 	err = fs.sshClient.Connect()

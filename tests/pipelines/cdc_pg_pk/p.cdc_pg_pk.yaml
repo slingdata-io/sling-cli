@@ -1,0 +1,91 @@
+# CDC key detection on a Postgres source, with no primary_key in the config.
+#   - src.orders:    key with two columns, read as a role with only SELECT.
+#   - src.events_ri: no primary key, REPLICA IDENTITY USING INDEX.
+#   - src.items_alt: primary key id, but the replica identity is the code index.
+#
+# Connections (exported by run_docker_test.sh):
+#   POSTGRES_CDC_PK_RO : source, role cdc_reader (REPLICATION + SELECT)
+#   POSTGRES_CDC_PK    : target and state, role postgres
+
+env:
+  SOURCE: POSTGRES_CDC_PK_RO
+  TARGET: POSTGRES_CDC_PK
+
+steps:
+  - connection: '{env.TARGET}'
+    query: |
+      INSERT INTO src.orders (tenant_id, order_id, name) VALUES (1, 10, 'a'), (1, 11, 'b'), (2, 10, 'c');
+      INSERT INTO src.events_ri (event_id, payload) VALUES (1, 'e1'), (2, 'e2'), (3, 'e3');
+      INSERT INTO src.items_alt (id, code, name) VALUES (1, 'A', 'x'), (2, 'B', 'y');
+
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: 'tgt.{stream_table}'
+        change_capture_options:
+          snapshot_start: beginning
+          change_feed: sling_cdc_pk
+          run_max_events: 100000
+          run_max_duration: 1m
+      streams:
+        src.orders:
+        src.events_ri:
+        src.items_alt:
+      env:
+        SLING_THREADS: 1
+    on_failure: abort
+
+  - connection: '{env.TARGET}'
+    query: |
+      UPDATE src.orders SET name = 'a2' WHERE tenant_id = 1 AND order_id = 10;
+      DELETE FROM src.orders WHERE tenant_id = 1 AND order_id = 11;
+      INSERT INTO src.orders (tenant_id, order_id, name) VALUES (3, 10, 'd');
+      UPDATE src.events_ri SET payload = 'e1b' WHERE event_id = 1;
+      DELETE FROM src.events_ri WHERE event_id = 2;
+      UPDATE src.items_alt SET name = 'x2' WHERE code = 'A';
+      DELETE FROM src.items_alt WHERE code = 'B';
+
+  - replication:
+      source: '{env.SOURCE}'
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: 'tgt.{stream_table}'
+        change_capture_options:
+          change_feed: sling_cdc_pk
+          run_max_events: 100000
+          run_max_duration: 30s
+      streams:
+        src.orders:
+        src.events_ri:
+        src.items_alt:
+      env:
+        SLING_THREADS: 1
+    on_failure: abort
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT
+        (SELECT count(*) FROM tgt.orders) AS orders,
+        (SELECT name FROM tgt.orders WHERE tenant_id = 1 AND order_id = 10) AS orders_name,
+        (SELECT count(*) FROM tgt.events_ri) AS events,
+        (SELECT payload FROM tgt.events_ri WHERE event_id = 1) AS events_payload,
+        (SELECT count(*) FROM tgt.items_alt) AS items,
+        (SELECT name FROM tgt.items_alt WHERE code = 'A') AS items_name
+    into: res
+
+  - type: log
+    message: 'CDC PG key test: orders={store.res[0].orders} events={store.res[0].events} items={store.res[0].items}'
+
+  - type: check
+    check: >
+      int_parse(store.res[0].orders) == 3 && store.res[0].orders_name == "a2" &&
+      int_parse(store.res[0].events) == 2 && store.res[0].events_payload == "e1b" &&
+      int_parse(store.res[0].items) == 1 && store.res[0].items_name == "x2"
+    failure_message: 'unexpected target state: {store.res}'
+
+  - type: log
+    message: 'CDC PG key test PASSED'

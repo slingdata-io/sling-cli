@@ -296,6 +296,57 @@ func TestHarnessProviderChoiceKeyedWins(t *testing.T) {
 	}
 }
 
+func TestHarnessProviderChoiceDefaultsNotRetired(t *testing.T) {
+	retired := []string{"claude-sonnet-4-5", "gemini-2.0-flash"}
+	cases := []struct {
+		env  string
+		kind string
+	}{
+		{"ANTHROPIC_API_KEY", "anthropic"},
+		{"GEMINI_API_KEY", "google"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			isolateOpenCodeEnv(t)
+			t.Setenv(tc.env, "test-key")
+			c := HarnessProviderChoice()
+			if c.Kind != tc.kind {
+				t.Fatalf("kind = %s, want %s", c.Kind, tc.kind)
+			}
+			for _, r := range retired {
+				if strings.Contains(c.Model, r) {
+					t.Fatalf("default model %s is retired or retiring", c.Model)
+				}
+			}
+		})
+	}
+}
+
+// The model of each keyed provider must be one that the provider still serves.
+func TestHarnessProviderChoiceKeyedModels(t *testing.T) {
+	cases := []struct {
+		env   string
+		kind  string
+		model string
+	}{
+		{"ANTHROPIC_API_KEY", "anthropic", "anthropic/claude-sonnet-5-5"},
+		{"OPENAI_API_KEY", "openai", "openai/gpt-4o"},
+		{"GEMINI_API_KEY", "google", "google/gemini-3.8-flash"},
+		{"GOOGLE_API_KEY", "google", "google/gemini-3.8-flash"},
+		{"XAI_API_KEY", "xai", "xai/grok-3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			isolateOpenCodeEnv(t)
+			t.Setenv(tc.env, "key-test")
+			c := HarnessProviderChoice()
+			if c.Kind != tc.kind || c.Model != tc.model {
+				t.Fatalf("got %s %s, want %s %s", c.Kind, c.Model, tc.kind, tc.model)
+			}
+		})
+	}
+}
+
 func TestApplyHarnessProviderConfigWritesModel(t *testing.T) {
 	isolateOpenCodeEnv(t)
 	if err := ApplyHarnessProviderConfig(); err != nil {

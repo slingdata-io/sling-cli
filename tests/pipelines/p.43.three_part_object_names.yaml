@@ -232,6 +232,11 @@ steps:
   - type: command
     command: rm -rf /tmp/sling_xdb_wildcard
 
+  # the wildcard reads only xdb_* tables: other tests change sling_test at the same time
+  - type: query
+    connection: BIGQUERY
+    query: CREATE OR REPLACE TABLE `{env.bq_project}.{env.bq_dataset}.xdb_extra` AS SELECT 1 AS id
+
   - type: replication
     id: bq_wildcard
     on_failure: abort
@@ -242,7 +247,7 @@ steps:
         mode: full-refresh
         object: 'file:///tmp/sling_xdb_wildcard/{stream_table}.csv'
       streams:
-        sling_test.*:
+        sling_test.xdb_*:
         sling_test.xdb_orders:
           disabled: true
 
@@ -317,6 +322,10 @@ steps:
   - type: query
     connection: BIGQUERY
     query: DROP TABLE IF EXISTS `{env.bq_project}.{env.bq_dataset}.xdb_orders`
+
+  - type: query
+    connection: BIGQUERY
+    query: DROP TABLE IF EXISTS `{env.bq_project}.{env.bq_dataset}.xdb_extra`
 
   - type: command
     command: rm -rf /tmp/sling_xdb_wildcard

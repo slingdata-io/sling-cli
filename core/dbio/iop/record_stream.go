@@ -669,6 +669,22 @@ func (rs *RecordStream) Reader() array.RecordReader {
 	return &recordStreamReader{rs: rs}
 }
 
+// Readers returns n readers that share the stream, for concurrent ingests.
+// Each record goes to one reader. The readers take turns on Next, so the
+// stream work (transforms, counts) runs in one goroutine at a time. After a
+// Fail, each reader stops at its next record.
+func (rs *RecordStream) Readers(n int) []array.RecordReader {
+	if n <= 1 {
+		return []array.RecordReader{rs.Reader()}
+	}
+	mu := &sync.Mutex{}
+	readers := make([]array.RecordReader, n)
+	for i := range readers {
+		readers[i] = &recordStreamReader{rs: rs, mu: mu}
+	}
+	return readers
+}
+
 // Normalize returns a stream whose records carry the target schema. It is
 // lazy: the lane runs once per record. Returns the receiver when the schema
 // already matches.
@@ -826,6 +842,7 @@ func (rs *RecordStream) Drain() {
 
 type recordStreamReader struct {
 	rs  *RecordStream
+	mu  *sync.Mutex // shared by the readers of Readers
 	cur arrow.RecordBatch
 	err error
 }
@@ -843,6 +860,14 @@ func (r *recordStreamReader) Schema() *arrow.Schema { return r.rs.Schema }
 
 func (r *recordStreamReader) Next() bool {
 	r.Release()
+	if r.mu != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if err := r.rs.Err(); err != nil {
+			r.err = err
+			return false
+		}
+	}
 	rec, ok := r.rs.Next()
 	if !ok {
 		r.err = r.rs.Err()

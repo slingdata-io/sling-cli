@@ -1,0 +1,39 @@
+# CDC with no primary_key in the config. Sling checks the key of each stream
+# before any snapshot:
+#   - cdc_pk_uq has a unique index on a NOT NULL column, so it has a key.
+#   - cdc_pk_nokey has no key, and cdc_pk_nullable_uq has only a unique index
+#     on a nullable column. Both must be in one error.
+# cdc_pk_uq comes first, so a late check would snapshot it and make its table.
+# The read_cdc hook fails, so end hooks do not run: the suite entry checks the output.
+source: MYSQL_GTID
+target: MARIADB
+
+hooks:
+  start:
+    - type: query
+      connection: MYSQL_GTID
+      query: |
+        DROP TABLE IF EXISTS test_db.cdc_pk_uq;
+        DROP TABLE IF EXISTS test_db.cdc_pk_nokey;
+        DROP TABLE IF EXISTS test_db.cdc_pk_nullable_uq;
+        CREATE TABLE test_db.cdc_pk_uq (id INT NOT NULL UNIQUE, note VARCHAR(50));
+        CREATE TABLE test_db.cdc_pk_nokey (id INT, note VARCHAR(50));
+        CREATE TABLE test_db.cdc_pk_nullable_uq (id INT UNIQUE, note VARCHAR(50));
+        INSERT INTO test_db.cdc_pk_uq VALUES (1, 'a');
+        INSERT INTO test_db.cdc_pk_nokey VALUES (1, 'a');
+        INSERT INTO test_db.cdc_pk_nullable_uq VALUES (1, 'a');
+    - type: query
+      connection: MARIADB
+      query: |
+        DROP TABLE IF EXISTS mariadb.cdc_pk_uq;
+        DROP TABLE IF EXISTS mariadb.cdc_pk_nokey;
+        DROP TABLE IF EXISTS mariadb.cdc_pk_nullable_uq
+
+defaults:
+  mode: change-capture
+  object: mariadb.{stream_table}
+
+streams:
+  test_db.cdc_pk_uq:
+  test_db.cdc_pk_nokey:
+  test_db.cdc_pk_nullable_uq:

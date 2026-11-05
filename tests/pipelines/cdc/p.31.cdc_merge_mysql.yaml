@@ -1,27 +1,31 @@
-# CDC merge_cdc Template Test: MySQL target
-# Tests: INSERT, UPDATE, DELETE ops via merge_cdc strategy with staging table approach
+# CDC merge_cdc Template Test: MySQL / MariaDB target
+# Tests: INSERT, UPDATE, DELETE ops via merge_cdc strategy with staging table approach,
+# then the same batch with change_capture_soft.
+# Sling makes the target table, so it has no PRIMARY KEY or UNIQUE key (as in a real CDC run).
+# The merge must not depend on ON DUPLICATE KEY, and must not add duplicate rows.
 
 env:
-  TARGET: mysql
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}
 
 steps:
   # Clean up
   - connection: '{env.TARGET}'
-    query: DROP TABLE IF EXISTS mysql.cdc_merge_test;
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_merge_test;
 
-  # Create target table with initial data
-  - connection: '{env.TARGET}'
-    query: |
-      CREATE TABLE mysql.cdc_merge_test (
-        id INT PRIMARY KEY,
-        name VARCHAR(100),
-        amount INT,
-        _sling_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      INSERT INTO mysql.cdc_merge_test (id, name, amount) VALUES
-        (1, 'Alice', 100),
-        (2, 'Bob', 200),
-        (3, 'Charlie', 300);
+  # Sling makes the target table with initial data
+  - replication:
+      source: postgres
+      target: '{env.TARGET}'
+      defaults:
+        mode: full-refresh
+      streams:
+        cdc_seed:
+          sql: |
+            SELECT 1 as id, 'Alice' as name, 100 as amount
+            UNION ALL SELECT 2, 'Bob', 200
+            UNION ALL SELECT 3, 'Charlie', 300
+          object: '{env.SCHEMA}.cdc_merge_test'
 
   # Run replication with CDC-like source data
   - replication:
@@ -39,26 +43,30 @@ steps:
             UNION ALL SELECT 2, 'Bob', 200, 'D', 2, CURRENT_TIMESTAMP
             UNION ALL SELECT 4, 'Diana', 400, 'I', 3, CURRENT_TIMESTAMP
             UNION ALL SELECT 1, 'Alice Final', 175, 'U', 4, CURRENT_TIMESTAMP
-          object: mysql.cdc_merge_test
+            UNION ALL SELECT 3, 'Charlie Updated', 350, 'U', 5, CURRENT_TIMESTAMP
+            UNION ALL SELECT 3, 'Charlie Updated', 350, 'D', 6, CURRENT_TIMESTAMP
+            UNION ALL SELECT 5, 'Eve', 500, 'I', 7, CURRENT_TIMESTAMP
+            UNION ALL SELECT 5, 'Eve Updated', 550, 'U', 8, CURRENT_TIMESTAMP
+          object: '{env.SCHEMA}.cdc_merge_test'
           target_options:
             merge_strategy: change_capture
 
   # Verify results
   - type: query
     connection: '{env.TARGET}'
-    query: SELECT count(*) as cnt FROM mysql.cdc_merge_test
+    query: SELECT count(*) as cnt, count(DISTINCT id) as ids FROM {env.SCHEMA}.cdc_merge_test
     into: row_count
 
   - type: log
-    message: "CDC merge row count: {store.row_count[0].cnt}"
+    message: "CDC merge row count: {store.row_count[0].cnt}, distinct ids: {store.row_count[0].ids}"
 
   - type: check
-    check: int_parse(store.row_count[0].cnt) == 3
-    failure_message: "Expected 3 rows, got {store.row_count[0].cnt}"
+    check: int_parse(store.row_count[0].cnt) == 3 && int_parse(store.row_count[0].ids) == 3
+    failure_message: "Expected 3 rows with distinct ids (1, 4, 5), got {store.row_count[0].cnt} rows and {store.row_count[0].ids} ids"
 
   - type: query
     connection: '{env.TARGET}'
-    query: SELECT name, amount FROM mysql.cdc_merge_test WHERE id = 1
+    query: SELECT name, amount FROM {env.SCHEMA}.cdc_merge_test WHERE id = 1
     into: row_1
 
   - type: check
@@ -67,7 +75,7 @@ steps:
 
   - type: query
     connection: '{env.TARGET}'
-    query: SELECT count(*) as cnt FROM mysql.cdc_merge_test WHERE id = 2
+    query: SELECT count(*) as cnt FROM {env.SCHEMA}.cdc_merge_test WHERE id = 2
     into: row_2
 
   - type: check
@@ -76,16 +84,92 @@ steps:
 
   - type: query
     connection: '{env.TARGET}'
-    query: SELECT name FROM mysql.cdc_merge_test WHERE id = 4
+    query: SELECT name FROM {env.SCHEMA}.cdc_merge_test WHERE id = 4
     into: row_4
 
   - type: check
     check: store.row_4[0].name == "Diana"
     failure_message: "id=4 should be inserted with name='Diana'"
 
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT count(*) as cnt FROM {env.SCHEMA}.cdc_merge_test WHERE id = 3
+    into: row_3
+
+  - type: check
+    check: int_parse(store.row_3[0].cnt) == 0
+    failure_message: "id=3 should be deleted (update then delete in one batch)"
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT name FROM {env.SCHEMA}.cdc_merge_test WHERE id = 5
+    into: row_5
+
+  - type: check
+    check: store.row_5[0].name == "Eve Updated"
+    failure_message: "id=5 should have name='Eve Updated', got '{store.row_5[0].name}'"
+
+  # Soft delete: the same batch with change_capture_soft keeps deleted rows as 'D'
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_merge_soft_test;
+
+  - replication:
+      source: postgres
+      target: '{env.TARGET}'
+      defaults:
+        mode: full-refresh
+      streams:
+        cdc_seed:
+          sql: |
+            SELECT 1 as id, 'Alice' as name, 100 as amount
+            UNION ALL SELECT 2, 'Bob', 200
+            UNION ALL SELECT 3, 'Charlie', 300
+          object: '{env.SCHEMA}.cdc_merge_soft_test'
+
+  - replication:
+      source: postgres
+      target: '{env.TARGET}'
+      defaults:
+        mode: incremental
+        primary_key: id
+      streams:
+        cdc_staging:
+          sql: |
+            SELECT 1 as id, 'Alice Updated' as name, 150 as amount, 'U' as _sling_synced_op, 1::bigint as _sling_cdc_seq, CURRENT_TIMESTAMP as _sling_synced_at
+            UNION ALL SELECT 2, 'Bob', 200, 'D', 2, CURRENT_TIMESTAMP
+            UNION ALL SELECT 4, 'Diana', 400, 'I', 3, CURRENT_TIMESTAMP
+            UNION ALL SELECT 1, 'Alice Final', 175, 'U', 4, CURRENT_TIMESTAMP
+            UNION ALL SELECT 3, 'Charlie Updated', 350, 'U', 5, CURRENT_TIMESTAMP
+            UNION ALL SELECT 3, 'Charlie Updated', 350, 'D', 6, CURRENT_TIMESTAMP
+            UNION ALL SELECT 5, 'Eve', 500, 'I', 7, CURRENT_TIMESTAMP
+            UNION ALL SELECT 5, 'Eve Updated', 550, 'U', 8, CURRENT_TIMESTAMP
+          object: '{env.SCHEMA}.cdc_merge_soft_test'
+          target_options:
+            merge_strategy: change_capture_soft
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: |
+      SELECT count(*) as cnt, count(DISTINCT id) as ids,
+        sum(CASE WHEN _sling_synced_op = 'D' THEN 1 ELSE 0 END) as deleted,
+        sum(CASE WHEN id = 1 AND name = 'Alice Final' THEN 1 ELSE 0 END) as alice,
+        sum(CASE WHEN id = 5 AND name = 'Eve Updated' THEN 1 ELSE 0 END) as eve
+      FROM {env.SCHEMA}.cdc_merge_soft_test
+    into: soft
+
+  - type: log
+    message: "CDC soft merge: rows={store.soft[0].cnt} ids={store.soft[0].ids} deleted={store.soft[0].deleted}"
+
+  - type: check
+    check: int_parse(store.soft[0].cnt) == 5 && int_parse(store.soft[0].ids) == 5 && int_parse(store.soft[0].deleted) == 2 && int_parse(store.soft[0].alice) == 1 && int_parse(store.soft[0].eve) == 1
+    failure_message: "soft merge: expected 5 rows (ids 2 and 3 marked D), got {store.soft[0]}"
+
   - type: log
     message: "CDC merge_cdc MySQL test PASSED"
 
   # Clean up
   - connection: '{env.TARGET}'
-    query: DROP TABLE IF EXISTS mysql.cdc_merge_test;
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_merge_test;
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_merge_soft_test;

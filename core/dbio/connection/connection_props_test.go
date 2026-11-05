@@ -92,6 +92,29 @@ func TestSecretRefDerivedURL(t *testing.T) {
 
 }
 
+// A copy parses the derived URL again. That must not add an empty role.
+func TestSecretRefDerivedURLNoEmptyRole(t *testing.T) {
+	secretFile := filepath.Join(t.TempDir(), "pw.txt")
+	require.NoError(t, os.WriteFile(secretFile, []byte("secret"), 0600))
+	ref := "ref+file://" + secretFile
+
+	conn, err := NewConnection("SECRET_PG", "postgres", g.M("host", "h", "user", "u", "database", "d", "password", ref))
+	require.NoError(t, err)
+	copied, err := NewConnection(conn.Name, conn.Type, g.AsMap(conn.Data))
+	require.NoError(t, err)
+
+	rc, err := copied.Resolved(context.Background())
+	require.NoError(t, err)
+	assert.NotContains(t, rc.URL(), "role=")
+	assert.Contains(t, rc.URL(), "postgresql://u:secret@h:")
+
+	conn, err = NewConnection("SECRET_PG_ROLE", "postgres", g.M("host", "h", "user", "u", "database", "d", "password", ref, "role", "admin"))
+	require.NoError(t, err)
+	rc, err = conn.Resolved(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, rc.URL(), "role=admin")
+}
+
 func TestSecretRefLazyType(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {

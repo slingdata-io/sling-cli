@@ -33,41 +33,42 @@ core:
   merge_update: null
   merge_update_insert: null
 
+  # Delete every key of the batch, then insert the last row of each key that is
+  # not deleted. No ON DUPLICATE KEY UPDATE: the target table can have no unique key.
   merge_change_capture: |
     DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM {src_table}
+    );
+    INSERT INTO {tgt_table} ({insert_fields})
+    SELECT {src_fields} FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
+      FROM {src_table}
+    ) sub WHERE _rn = 1 AND _sling_synced_op != 'D'
+
+  merge_change_capture_soft: |
+    UPDATE {tgt_table}
+    SET _sling_synced_at = CURRENT_TIMESTAMP, _sling_synced_op = 'D'
     WHERE ({tgt_pk_fields}) IN (
       SELECT {pk_fields} FROM (
         SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn, _sling_synced_op
         FROM {src_table}
       ) sub
       WHERE _rn = 1 AND _sling_synced_op = 'D'
+    ) AND COALESCE(_sling_synced_op, '') != 'D';
+    DELETE FROM {tgt_table}
+    WHERE ({tgt_pk_fields}) IN (
+      SELECT {pk_fields} FROM (
+        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn, _sling_synced_op
+        FROM {src_table}
+      ) sub
+      WHERE _rn = 1 AND _sling_synced_op != 'D'
     );
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
       FROM {src_table}
-      WHERE _sling_synced_op != 'D'
-    ) sub WHERE _rn = 1
-    ON DUPLICATE KEY UPDATE {set_fields_values}
-
-  merge_change_capture_soft: |
-    UPDATE {tgt_table} tgt
-    INNER JOIN (
-      SELECT {pk_fields} FROM (
-        SELECT {pk_fields}, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn, _sling_synced_op
-        FROM {src_table}
-      ) sub
-      WHERE _rn = 1 AND _sling_synced_op = 'D'
-    ) src ON {src_tgt_pk_equal}
-    SET tgt._sling_synced_at = CURRENT_TIMESTAMP, tgt._sling_synced_op = 'D'
-    WHERE COALESCE(tgt._sling_synced_op, '') != 'D';
-    INSERT INTO {tgt_table} ({insert_fields})
-    SELECT {src_fields} FROM (
-      SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
-      FROM {src_table}
-      WHERE _sling_synced_op != 'D'
-    ) sub WHERE _rn = 1
-    ON DUPLICATE KEY UPDATE {set_fields_values}
+    ) sub WHERE _rn = 1 AND _sling_synced_op != 'D'
 
   load_data_local_reader: |
     LOAD DATA LOCAL INFILE 'Reader::{handler_name}'
@@ -135,11 +136,40 @@ metadata:
       and kcu.constraint_schema = tco.constraint_schema
       and kcu.table_schema = tco.table_schema
       and kcu.table_name = tco.table_name
-    where kcu.table_schema = '{schema}'
+      and kcu.constraint_name = tco.constraint_name
+    where tco.constraint_type = 'PRIMARY KEY'
+      and kcu.table_schema = '{schema}'
       and kcu.table_name = '{table}'
     order by kcu.table_schema,
              kcu.table_name,
              position
+
+  # The unique index with the fewest columns, all NOT NULL. CDC uses it as
+  # the key when the table has no primary key.
+  unique_keys: |
+    select s.index_name as pk_name,
+           s.seq_in_index as position,
+           s.column_name as column_name
+    from information_schema.statistics s
+    where s.table_schema = '{schema}'
+      and s.table_name = '{table}'
+      and s.index_name = (
+        select s2.index_name
+        from information_schema.statistics s2
+        left join information_schema.columns c
+          on c.table_schema = s2.table_schema
+          and c.table_name = s2.table_name
+          and c.column_name = s2.column_name
+        where s2.table_schema = '{schema}'
+          and s2.table_name = '{table}'
+          and s2.non_unique = 0
+          and s2.index_name <> 'PRIMARY'
+        group by s2.index_name
+        having sum(case when c.column_name is null or c.is_nullable = 'YES' then 1 else 0 end) = 0
+        order by count(*), s2.index_name
+        limit 1
+      )
+    order by s.seq_in_index
 
   indexes: |
     select

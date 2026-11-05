@@ -1817,6 +1817,82 @@ endpoints:
 	assert.Equal(t, "test-value", cast.ToString(customHeader), "custom_header should be test-value")
 }
 
+// Over HTTP/2, a retry of a consumed body sends Content-Length with no bytes.
+func TestRetryResendsPostBody(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		attempt := len(bodies)
+		mu.Unlock()
+		if attempt == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": 1}}})
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_retry_body
+authentication:
+  type: none
+endpoints:
+  query:
+    request:
+      url: %s/sql
+      method: POST
+      payload: "SELECT 1"
+    response:
+      records:
+        jmespath: data
+      rules:
+        - action: retry
+          condition: response.status == 429
+          max_attempts: 3
+`, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	ac.State.Auth.Authenticated = true
+
+	ep := ac.Spec.EndpointMap["query"]
+	ep.client.Transport = server.Client().Transport // trust the test cert, use HTTP/2
+	ac.Spec.EndpointMap["query"] = ep
+
+	df, err := ac.ReadDataflow("query", APIStreamConfig{Limit: 10})
+	if !assert.NoError(t, err) {
+		return
+	}
+	data, err := df.Collect()
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Equal(t, 1, len(data.Rows))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if assert.Equal(t, 2, len(bodies)) {
+		assert.Equal(t, bodies[0], bodies[1], "retry must resend the same body")
+		assert.Contains(t, bodies[1], "SELECT 1")
+	}
+}
+
 func TestHMACAuthentication(t *testing.T) {
 	tests := []struct {
 		name           string

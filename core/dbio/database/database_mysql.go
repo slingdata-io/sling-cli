@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -31,6 +32,7 @@ type MySQLConn struct {
 	isCloudSQL         bool
 	localInfileEnabled bool
 	cloudSQLCleanup    func()
+	tlsRegistered      bool // a tls config is registered under sling_conn_id
 }
 
 // Init initiates the object
@@ -132,8 +134,8 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 		}
 	}
 
-	// make tls
-	if query.Get("tls") == "custom" {
+	// use the tls config registered in Connect, it has the original host as ServerName
+	if val := strings.ToLower(query.Get("tls")); val == "custom" || (val == "true" && conn.tlsRegistered) {
 		query.Set("tls", conn.GetProp("sling_conn_id"))
 	}
 
@@ -162,7 +164,12 @@ func (conn *MySQLConn) Connect(timeOut ...int) (err error) {
 	if err != nil {
 		return g.Error(err, "could not register tls")
 	} else if tlsConfig != nil {
+		// the driver takes ServerName from the address, which is 127.0.0.1 through a tunnel
+		if u, err := url.Parse(conn.Self().ConnString()); err == nil && tlsConfig.ServerName == "" && !tlsConfig.InsecureSkipVerify {
+			tlsConfig.ServerName = u.Hostname()
+		}
 		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
+		conn.tlsRegistered = true
 	}
 
 	err = conn.BaseConn.Connect(timeOut...)
@@ -414,7 +421,7 @@ func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool
 // mysqlLaneExportHook is set by the closed database_mysql_arrow..go. The stub
 // reads through the ADBC driver.
 var mysqlLaneExportHook = func(conn *MySQLConn, adbcConn *ArrowDBConn, sql string) (*iop.Datastream, error) {
-	return adbcConn.laneExportStream(sql)
+	return adbcConn.laneExportStream(sql, nil)
 }
 
 // laneExportStream is the lane's read.

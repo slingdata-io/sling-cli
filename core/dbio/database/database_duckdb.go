@@ -416,6 +416,7 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, forma
 		sql := strings.Join(sqlLines, ";\n")
 
 		result, err := conn.duck.ExecContext(conn.Context().Ctx, sql)
+		streamPart.Done()
 		if err != nil {
 			return df.Count(), g.Error(err, "could not insert into %s", tableFName)
 		}

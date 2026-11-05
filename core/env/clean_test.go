@@ -154,3 +154,16 @@ func TestSecretKeysCoverTemplates(t *testing.T) {
 		t.Fatalf("YAML secret keys absent from SecretKeys: %v", missing)
 	}
 }
+
+func TestCleanRedactsHanaURL(t *testing.T) {
+	secret := "hana-super-secret"
+	props := map[string]string{
+		"type":     "hana",
+		"password": secret,
+	}
+	line := "connecting to hdb://SLING:" + secret + "@host:39041?databaseName=HXE"
+	got := Clean(props, line)
+	if strings.Contains(got, secret) {
+		t.Fatalf("hana password not redacted: %q", got)
+	}
+}

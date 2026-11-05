@@ -1,0 +1,61 @@
+# Integer values into an existing Postgres bool column (pgx COPY).
+# CDC sends a MySQL tinyint(1) value as an integer.
+
+source: POSTGRES
+target: POSTGRES
+
+defaults:
+  mode: truncate
+  target_options:
+    direct_insert: true
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.int_bool_src;
+        CREATE TABLE public.int_bool_src (id int PRIMARY KEY, flag smallint, flag_txt text);
+        INSERT INTO public.int_bool_src VALUES (1, 0, 'false'), (2, 1, 'true'), (3, NULL, NULL);
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.int_bool_dest;
+        CREATE TABLE public.int_bool_dest (id int PRIMARY KEY, flag boolean, flag_txt boolean);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT count(*) filter (where id = 1 and not flag and not flag_txt) as f,
+               count(*) filter (where id = 2 and flag and flag_txt) as t,
+               count(*) filter (where id = 3 and flag is null and flag_txt is null) as n
+        FROM public.int_bool_dest
+      into: res
+
+    - type: log
+      message: "int_bool_dest => {store.res[0]}"
+
+    - type: check
+      check: int_parse(store.res[0].f) == 1 && int_parse(store.res[0].t) == 1 && int_parse(store.res[0].n) == 1
+      failure_message: "bool values are wrong: {store.res[0]}"
+
+    - type: log
+      message: "SUCCESS: integer values load into a Postgres bool column"
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.int_bool_src
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.int_bool_dest
+
+streams:
+  public.int_bool_src:
+    object: public.int_bool_dest

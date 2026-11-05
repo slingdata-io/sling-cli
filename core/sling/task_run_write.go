@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path"
 	"strings"
@@ -225,7 +226,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set direct insert mode
-	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
+	directInsert := cfg.Target.Options.IsDirectInsert()
 
 	// write directly to the final table (no temp table)
 	if directInsert || writeDirectly {
@@ -290,7 +291,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 
 		// Create the final table with inferred schema
-		if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+		if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return 0, err
 		}
@@ -312,7 +313,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Create temp table
-	if err := createTable(t, tgtConn, tableTmp, sampleData, true); err != nil {
+	tmpData := sampleData
+	if tgtConn.GetType() == dbio.TypeDbOracle && cfg.Mode != FullRefreshMode {
+		tmpData.Columns = keepOracleNationalTypes(cfg, tgtConn, sampleData.Columns)
+	}
+	if _, err := createTable(t, tgtConn, tableTmp, tmpData, true); err != nil {
 		err = g.Error(err, "could not create table "+tableTmp.FullName())
 		return 0, err
 	}
@@ -557,7 +562,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// Create final table
-	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+	if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 		return 0, err
 	}
 
@@ -727,7 +732,7 @@ func (t *TaskExecution) writeToIcebergMerge(cfg *Config, df *iop.Dataflow, tgtCo
 		return 0, err
 	}
 
-	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+	if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
 		return 0, err
 	}
 
@@ -818,7 +823,7 @@ func determineTxOptions(cfg *Config, dbType dbio.Type) sql.TxOptions {
 	switch dbType {
 	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		return sql.TxOptions{}
-	case dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbOracle, dbio.TypeDbExasol:
+	case dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbOracle, dbio.TypeDbExasol, dbio.TypeDbHana:
 		return sql.TxOptions{Isolation: sql.LevelDefault}
 	default:
 		return sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
@@ -936,15 +941,44 @@ func dropTableIfExists(tgtConn database.Connection, tableName string) error {
 	return nil
 }
 
-func createTable(t *TaskExecution, tgtConn database.Connection, table database.Table, sampleData iop.Dataset, isTemp bool) error {
-	created, err := createTableIfNotExists(tgtConn, sampleData, &table, isTemp)
-	if err != nil {
-		return g.Error(err, "could not create table "+table.FullName())
+// keepOracleNationalTypes gives the temp columns the national (N) types of an
+// existing Oracle target. Else a VARCHAR2 temp column loses the text that the
+// database charset cannot hold before it gets to the NVARCHAR2 target.
+func keepOracleNationalTypes(cfg *Config, tgtConn database.Connection, cols iop.Columns) iop.Columns {
+	tgtCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
+	if len(tgtCols) == 0 {
+		return cols
+	}
+
+	tmpCols := cols.Clone()
+	for i, col := range tmpCols {
+		tgtCol := tgtCols.GetColumn(col.Name)
+		if tgtCol == nil {
+			continue
+		}
+		switch strings.ToUpper(tgtCol.DbType) {
+		case "NVARCHAR2", "NCHAR":
+			tmpCols[i].DbType = "NVARCHAR2"
+		case "NCLOB":
+			tmpCols[i].DbType = "NCLOB"
+		}
+	}
+	return tmpCols
+}
+
+func createTable(t *TaskExecution, tgtConn database.Connection, table database.Table, sampleData iop.Dataset, isTemp bool) (created bool, err error) {
+	created, err = createTableIfNotExists(tgtConn, sampleData, &table, isTemp)
+	if errors.As(err, new(tableExistsError)) && !isTemp && t.Config.WithChunking() {
+		// a chunk in a different process created it
+		g.Debug("table %s was created by a different chunk", table.FullName())
+		return false, nil
+	} else if err != nil {
+		return false, g.Error(err, "could not create table "+table.FullName())
 	}
 	if created {
 		t.SetProgress("created table %s", table.FullName())
 	}
-	return nil
+	return created, nil
 }
 
 func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tgtConn database.Connection, table database.Table) error {
@@ -1053,12 +1087,10 @@ func prepareFinal(
 	sample.Rows = df.Buffer
 	sample.Inferred = true // already inferred with SyncStats
 
-	created, err := createTableIfNotExists(tgtConn, sample, &targetTable, false)
+	created, err := createTable(t, tgtConn, targetTable, sample, false)
 	if err != nil {
-		return g.Error(err, "could not create table "+targetTable.FullName())
-	} else if created {
-		t.SetProgress("created table %s", targetTable.FullName())
-	} else if cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
+		return err
+	} else if !created && cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
 		// Truncate table since it exists
 		// Don't truncate if refreshing with range, will already have been truncated
 		if err := database.TruncateTable(tgtConn, targetTable.FullName()); err != nil {

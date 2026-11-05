@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"maps"
 	"os"
 	"path"
 	"sync"
@@ -72,8 +73,20 @@ func (rs *ReplicationState) rlock() {
 
 func (rs *ReplicationState) runlock() { rs.mu.RUnlock() }
 
+// GetStore returns a copy of the store, safe to read without the lock.
 func (rs *ReplicationState) GetStore() map[string]any {
-	return rs.Store
+	rs.rlock()
+	defer rs.runlock()
+	return maps.Clone(rs.Store)
+}
+
+func (rs *ReplicationState) MergeStore(store map[string]any) {
+	rs.lock()
+	defer rs.unlock()
+	if rs.Store == nil {
+		rs.Store = map[string]any{}
+	}
+	maps.Copy(rs.Store, store)
 }
 
 func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {
@@ -253,6 +266,9 @@ func (t *TaskExecution) StateSet() {
 			return
 		}
 
+		// threaded streams share the replication state: write it under its lock
+		state.lock()
+
 		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
 		state.Execution.FileName = path.Base(state.Execution.FilePath)
 		state.Execution.CLIArgs = map[string]any{
@@ -261,7 +277,7 @@ func (t *TaskExecution) StateSet() {
 			g.Unmarshal(args, &state.Execution.CLIArgs)
 		}
 
-		fMap, _ := t.Config.GetFormatMap()
+		fMap, _ := t.Config.formatMap(true)
 
 		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		if id := cast.ToString(fMap["stream_run_id"]); id != "" {
@@ -377,6 +393,7 @@ func (t *TaskExecution) StateSet() {
 
 		// set as active run
 		state.Run = run
+		state.unlock()
 
 		// set log details
 		t.setLogDetails()

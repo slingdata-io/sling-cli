@@ -18,7 +18,7 @@ Resolve each row before you write YAML, in this order: the user's request, exist
 |------|----------|------|
 | Database | postgres, mysql, snowflake, bigquery | `database` |
 | Datalake | iceberg, ducklake, lancedb, athena, s3 tables | `database` |
-| File System | s3, gcs, azure, sftp, local | `file` |
+| File System | s3, gs, azure, sftp, local | `file` |
 | API | Custom REST APIs via specs | `api` |
 
 ## MCP Operations
@@ -131,7 +131,7 @@ connections:
 
 | Property | Description |
 |----------|-------------|
-| `type` | File system type (s3, gcs, etc.) |
+| `type` | File system type (s3, gs, azure, etc.) |
 | `bucket` | Bucket/container name |
 | `access_key_id` | Access key |
 | `secret_access_key` | Secret key |

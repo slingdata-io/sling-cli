@@ -50,6 +50,7 @@ func TestConnectionDiscover(t *testing.T) {
 				"../../../tests/files/test6.csv",
 				"../../../tests/files/test7.csv",
 				"../../../tests/files/test8.csv",
+				"../../../tests/files/test_clob_large.csv",
 				"../../../tests/files/test_wide_columns.csv",
 			},
 		},

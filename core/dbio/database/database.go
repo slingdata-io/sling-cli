@@ -26,6 +26,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
+	_ "github.com/SAP/go-hdb/driver"
 	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
@@ -184,6 +185,7 @@ type BaseConn struct {
 	sshClient   *iop.SSHClient
 	Log         []string
 	adbc        Connection
+	tlsHost     string // original host, for TLS verification when a tunnel changes it to 127.0.0.1
 }
 
 // Pool is a pool of connections
@@ -310,6 +312,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ClickhouseConn{URL: URL}
 	} else if strings.HasPrefix(URL, "exasol:") {
 		conn = &ExasolConn{URL: URL}
+	} else if strings.HasPrefix(URL, "hdb:") || strings.HasPrefix(URL, "hana:") {
+		conn = &HanaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
@@ -408,6 +412,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
+	case dbio.TypeDbHana:
+		driverName = "hdb"
 	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
 	case dbio.TypeDbODBC:
@@ -692,6 +698,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	}
 
 	connURL := conn.Self().ConnString()
+	conn.tlsHost = ""
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
@@ -721,6 +728,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			connURL, g.F("@%s:%d", connHost, connPort),
 			g.F("@127.0.0.1:%d", localPort),
 		)
+		conn.tlsHost = connHost
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
 		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
@@ -756,6 +764,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				connURL, g.F("@%s:%d", connHost, connPort),
 				g.F("@127.0.0.1:%d", localPort),
 			)
+			if conn.tlsHost == "" {
+				conn.tlsHost = connHost
+			}
 			g.Trace("new connection URL via proxy: " + conn.Self().GetURL(connURL))
 		}
 	}
@@ -781,7 +792,13 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		}
 
 		if !usePool || !poolOk {
-			db, err = sqlx.Open(driver, connURL)
+			if conn.Type == dbio.TypeDbPostgres {
+				db, err = openPgx(connURL, conn.tlsHost)
+			} else if conn.Type == dbio.TypeDbClickhouse && conn.tlsHost != "" {
+				db, err = openClickhouseTunnel(connURL, conn.tlsHost)
+			} else {
+				db, err = sqlx.Open(driver, connURL)
+			}
 			if err != nil {
 				return g.Error(err, "Could not connect to DB: %s", driver)
 			}
@@ -960,7 +977,7 @@ func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err err
 	// row is built. The fidelity reason above still holds for the row path,
 	// so a stage 2 decline reads with the native driver.
 	if adbcConn, ok := conn.arrowLaneReader(); ok {
-		ds, err = adbcConn.laneExportStream(table.Select())
+		ds, err = adbcConn.laneExportStream(table.Select(), table.Columns)
 		if !errors.Is(err, ErrArrowLaneDeclined) {
 			return ds, err
 		}
@@ -982,6 +999,7 @@ func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (c
 		if err = conn.Commit(); err != nil {
 			return 0, g.Error(err, "could not commit before ADBC bulk import")
 		}
+		conn.adbc.SetProp("insert_concurrency", conn.GetProp("insert_concurrency"))
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 	g.Trace("BulkImportStream not implemented for %s", conn.GetType())
@@ -1067,6 +1085,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				}
 			}
 
+			// pgx gives the oid of a type that it does not know (enum, extension)
+			if conn.Type == dbio.TypeDbPostgres && dataType != "" && strings.Trim(dataType, "0123456789") == "" {
+				dataType = ""
+			}
+
 			colType := ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
@@ -1098,6 +1121,15 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
 
+	var timetzCols []int
+	if conn.Type == dbio.TypeDbPostgres {
+		for i, ct := range colTypes {
+			if ct.DatabaseTypeName == "TIMETZ" {
+				timetzCols = append(timetzCols, i)
+			}
+		}
+	}
+
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
@@ -1115,7 +1147,16 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		next := result.Next()
 		if next {
 			// add row
-			it.Row, err = result.SliceScan()
+			if conn.Type == dbio.TypeDbHana {
+				it.Row, err = scanHanaRow(result, colTypes)
+			} else {
+				it.Row, err = result.SliceScan()
+				for _, i := range timetzCols {
+					if val, ok := it.Row[i].(string); ok {
+						it.Row[i] = formatTimetz(val)
+					}
+				}
+			}
 			if err != nil {
 				it.Context.CaptureErr(g.Error(err, "failed to scan"))
 			} else {
@@ -2478,7 +2519,7 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else {col_as_int} end`
 		selectStr = g.R(sql, "col", qName, "col_as_int", castExpr)
 	case srcCol.IsInteger() && tgtCol.IsString():
-		// assume bool-as-int, convert from 1/0 to true/false
+		// plain cast, keep the numeric value (1 stays '1', not 'true')
 		stringType := conn.GetType().GetTemplateValue("general_type_map.string")
 		if g.In(conn.GetType(), dbio.TypeDbMySQL, dbio.TypeDbMariaDB) {
 			// MySQL/MariaDB needs `CAST(column AS CHAR(length))`
@@ -2486,9 +2527,7 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 		}
 
 		stringType = strings.ReplaceAll(stringType, "()", "(100)")
-		castExpr := g.R(castFunc, "field", qName, "type", stringType)
-		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col_as_string} end`
-		selectStr = g.R(sql, "col", qName, "col_as_string", castExpr)
+		selectStr = g.R(castFunc, "field", qName, "type", stringType)
 	case srcCol.IsBool() && tgtCol.IsString():
 		// Genuine boolean: PG-family rejects `boolean = integer`, and Redshift
 		// rejects `CAST(boolean AS varchar)`. Use truthiness (no = 1 / no cast).
@@ -3865,11 +3904,6 @@ func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
 		}
 	}
 
-	// legacy only handles files
-	certificate := conn.GetProp("cert_file")
-	certificateKey := conn.GetProp("cert_key_file")
-	certificateCA := conn.GetProp("cert_ca_file")
-
 	// processValue handles files or values
 	processValue := func(val string) (string, error) {
 		// check if file exists
@@ -3891,50 +3925,47 @@ func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
 		return "", g.Error("invalid certificate value or file path")
 	}
 
-	if val := conn.GetProp("certificate"); val != "" {
-		certificate, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load client certificate")
+	// the legacy keys (cert_file, cert_key_file, cert_ca_file) are files or values too
+	var certificate, certificateKey, certificateCA string
+	for _, item := range []struct {
+		key, legacyKey, name string
+		value                *string
+	}{
+		{"certificate", "cert_file", "client certificate", &certificate},
+		{"certificate_key", "cert_key_file", "client certificate key", &certificateKey},
+		{"certificate_ca", "cert_ca_file", "CA certificate", &certificateCA},
+	} {
+		val := conn.GetProp(item.key)
+		if val == "" {
+			val = conn.GetProp(item.legacyKey)
 		}
-		conn.SetProp("certificate", certificate) // overwrite
-	}
-
-	if val := conn.GetProp("certificate_key"); val != "" {
-		certificateKey, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load client certificate key")
+		if val == "" {
+			continue
 		}
-		conn.SetProp("certificate_key", certificateKey) // overwrite
-	}
-
-	if val := conn.GetProp("certificate_ca"); val != "" {
-		certificateCA, err = processValue(val)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load CA certificate")
+		if *item.value, err = processValue(val); err != nil {
+			return nil, g.Error(err, "Failed to load %s", item.name)
 		}
-		conn.SetProp("certificate_ca", certificateCA) // overwrite
+		if conn.GetProp(item.key) != "" {
+			conn.SetProp(item.key, *item.value) // overwrite
+		}
 	}
 
 	if certificateKey != "" && certificate != "" {
-		cert, err := tls.LoadX509KeyPair(certificate, certificateKey)
+		cert, err := tls.X509KeyPair([]byte(certificate), []byte(certificateKey))
 		if err != nil {
 			return nil, g.Error(err, "Failed to load client certificate")
 		}
-
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{}
 		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
 
-		if certificateCA != "" {
-			caCert, err := os.ReadFile(certificateCA)
-			if err != nil {
-				return nil, g.Error(err, "Failed to load CA certificate")
-			}
-			tlsConfig.RootCAs = x509.NewCertPool()
-			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
-			if !ok {
-				return nil, g.Error("Failed to parse PEM file")
-			}
+	// the CA is used also without a client certificate, but it does not turn on TLS
+	if certificateCA != "" && tlsConfig != nil {
+		tlsConfig.RootCAs = x509.NewCertPool()
+		if !tlsConfig.RootCAs.AppendCertsFromPEM([]byte(certificateCA)) {
+			return nil, g.Error("Failed to parse CA certificate PEM")
 		}
 	}
 
@@ -4293,6 +4324,8 @@ func PrintSessionID(conn Connection) {
 		sql = "SELECT @@SPID"
 	case dbio.TypeDbExasol:
 		sql = "SELECT SESSION_ID FROM EXA_ALL_SESSIONS WHERE SESSION_ID = CURRENT_SESSION"
+	case dbio.TypeDbHana:
+		sql = "SELECT CURRENT_CONNECTION FROM DUMMY"
 	}
 
 	if sql != "" {

@@ -139,8 +139,8 @@ func (cfg *Config) SetDefault() {
 			}
 		}
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
-		// the ADBC driver writes typed decimals, the cap is for the native driver
-		if !cast.ToBool(cfg.TgtConn.Data["use_adbc"]) {
+		// the ClickHouse drivers keep all decimals, the cap is for Proton
+		if cfg.TgtConn.Type == dbio.TypeDbProton {
 			cfg.Source.Options.MaxDecimals = g.Int(11)
 			cfg.Target.Options.MaxDecimals = g.Int(11)
 		}
@@ -202,6 +202,20 @@ func (cfg *Config) SetDefault() {
 	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
 		iop.SampleSize = cast.ToInt(val)
 	}
+}
+
+// UnmarshalTaskEnv parses the SLING_TASK_CONFIG value: config text, a file path, or a file:// path.
+// The file content is parsed as config text, so env vars expand the same way as inline.
+func (cfg *Config) UnmarshalTaskEnv(val string) (err error) {
+	path := strings.TrimPrefix(val, "file://")
+	if strings.HasPrefix(val, "file://") || g.PathExists(path) {
+		bytes, err := os.ReadFile(path)
+		if err != nil {
+			return g.Error(err, "could not read task config: "+path)
+		}
+		val = string(bytes)
+	}
+	return cfg.Unmarshal(val)
 }
 
 // Unmarshal parse a configuration file path or config text
@@ -266,6 +280,27 @@ func (cfg *Config) Unmarshal(cfgStr string) (err error) {
 	}
 
 	return nil
+}
+
+// runtimeState returns the state of the parent replication, or nil.
+func (cfg *Config) runtimeState() *ReplicationState {
+	if rs := cfg.ReplicationStream; rs != nil && rs.replication != nil {
+		return rs.replication.state
+	}
+	return nil
+}
+
+// SetEnv sets an env value under the replication state lock,
+// because RuntimeState reads the Env of each task from other goroutines.
+func (cfg *Config) SetEnv(key, value string) {
+	if rs := cfg.runtimeState(); rs != nil {
+		rs.lock()
+		defer rs.unlock()
+	}
+	if cfg.Env == nil {
+		cfg.Env = map[string]string{}
+	}
+	cfg.Env[key] = value
 }
 
 func (cfg *Config) sourceIsFile() bool {
@@ -573,8 +608,15 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Env = map[string]string{}
 	}
 
+	rs := cfg.runtimeState()
+	if rs != nil {
+		rs.lock()
+	}
 	for k, v := range cfg.Env {
 		cfg.Env[k] = os.ExpandEnv(v)
+	}
+	if rs != nil {
+		rs.unlock()
 	}
 
 	// Set Target
@@ -757,10 +799,7 @@ func (cfg *Config) Prepare() (err error) {
 				return g.Error("for mode '%s' with iceberg target, must provide update-key and/or primary-key", cfg.Mode)
 			}
 			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
-		case ChangeCaptureMode:
-			if !cfg.Source.HasPrimaryKey() {
-				return g.Error("for mode '%s' with iceberg target, must provide primary-key", cfg.Mode)
-			}
+			// change-capture: the key comes from the source table when not set (resolveCDCPrimaryKey)
 		}
 	}
 
@@ -1069,6 +1108,16 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 // GetFormatMap returns a map to format a string with provided with variables
 func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
+	return cfg.formatMap(false)
+}
+
+// formatMap builds the format map. Set stateLocked when the caller holds the replication state lock.
+func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
+	// the lock guards the state maps and Env against concurrent writers
+	if rs := cfg.runtimeState(); rs != nil && !stateLocked {
+		rs.rlock()
+		defer rs.runlock()
+	}
 
 	m = g.M(
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
@@ -1760,6 +1809,7 @@ type SourceOptions struct {
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 	ChunkCount     *int                `json:"chunk_count,omitempty" yaml:"chunk_count,omitempty"`
 	ChunkExpr      *string             `json:"chunk_expr,omitempty" yaml:"chunk_expr,omitempty"`
+	ParallelScan   *int                `json:"parallel_scan,omitempty" yaml:"parallel_scan,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	// columns & transforms were moved out of source_options
@@ -1800,6 +1850,10 @@ type TargetOptions struct {
 	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
 	Encoding         *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 	DirectInsert     *bool               `json:"direct_insert,omitempty" yaml:"direct_insert,omitempty"`
+
+	// InsertConcurrency is the number of concurrent inserts into a database
+	// target (ADBC and native ClickHouse). Default 1.
+	InsertConcurrency *int `json:"insert_concurrency,omitempty" yaml:"insert_concurrency,omitempty"`
 
 	TableKeys      database.TableKeys       `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp       string                   `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1909,6 +1963,12 @@ func (dmc *DeleteMissingConfig) GetTargetWhere() string {
 
 // GetDeleteMissingConfig parses the delete_missing field into a structured config
 // Returns nil if delete_missing is not set
+// IsDirectInsert is true when the direct_insert option or SLING_DIRECT_INSERT
+// is set.
+func (o *TargetOptions) IsDirectInsert() bool {
+	return g.PtrVal(o.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
+}
+
 func (o *TargetOptions) GetDeleteMissingConfig() *DeleteMissingConfig {
 	if o == nil || o.DeleteMissing == nil {
 		return nil
@@ -2083,6 +2143,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.ChunkCount == nil {
 		o.ChunkCount = sourceOptions.ChunkCount
 	}
+	if o.ParallelScan == nil {
+		o.ParallelScan = sourceOptions.ParallelScan
+	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = sourceOptions.DatetimeFormat
 	}
@@ -2185,6 +2248,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.DirectInsert == nil {
 		o.DirectInsert = targetOptions.DirectInsert
+	}
+	if o.InsertConcurrency == nil {
+		o.InsertConcurrency = targetOptions.InsertConcurrency
 	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = targetOptions.DatetimeFormat

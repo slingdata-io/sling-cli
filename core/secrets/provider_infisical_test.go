@@ -8,6 +8,7 @@ import (
 )
 
 func TestInfisicalProvider(t *testing.T) {
+	t.Setenv("INFISICAL_TOKEN", "") // a shell token skips the universal-auth login
 	var logins int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

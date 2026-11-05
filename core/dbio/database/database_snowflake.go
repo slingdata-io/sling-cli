@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -164,8 +166,26 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 	return err
 }
 
+// pemOneLineRe matches a whole PEM block, to rebuild its line breaks.
+var pemOneLineRe = regexp.MustCompile(`(?s)^(-----BEGIN [A-Z0-9 ]+-----)(.*?)(-----END [A-Z0-9 ]+-----)$`)
+
+// normalizePEM restores a PEM that a secret manager stored on one line,
+// with spaces or a literal `\n` in place of the line breaks.
+func normalizePEM(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "-----BEGIN ") {
+		return s // base64 or raw DER
+	}
+	s = strings.NewReplacer(`\r\n`, "\n", `\n`, "\n").Replace(s)
+	m := pemOneLineRe.FindStringSubmatch(s)
+	if m == nil || strings.Contains(strings.TrimSpace(m[2]), "\n") {
+		return s
+	}
+	return m[1] + "\n" + strings.Join(strings.Fields(m[2]), "") + "\n" + m[3] + "\n"
+}
+
 func getEncodedPrivateKey(keyStr, passphrase string) (epk string, err error) {
-	keyStr = strings.TrimSpace(keyStr)
+	keyStr = normalizePEM(keyStr)
 
 	// Normalize the input into raw DER (PKCS#8) bytes.
 	var derBytes []byte
@@ -314,6 +334,7 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 	}
 
 	filePath := ""
+	fsProps := conn.PropArrExclude("url")
 	fileFormat := dbio.FileType(conn.GetProp("format"))
 	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
 		fileFormat = dbio.FileTypeCsv
@@ -335,18 +356,29 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 				return
 			}
 		default:
-			if stage := conn.getOrCreateStage(table.Schema, table.Database); stage != "" {
-				var unloaded int64
-				filePath, unloaded, err = conn.UnloadViaStage(fileFormat, table)
+			if stageName := conn.getOrCreateStage(table.Schema, table.Database); stageName != "" {
+				stage, err := conn.describeStage(stageName)
 				if err != nil {
-					err = g.Error(err, "Could not unload to stage.")
-					return
+					g.Debug("assuming internal stage: %s", g.ErrMsgSimple(err))
+				}
+
+				var unloaded int64
+				filePath, unloaded, err = conn.UnloadViaStage(stage, fileFormat, table)
+				if err != nil {
+					return df, g.Error(err, "Could not unload to stage.")
 				} else if unloaded == 0 {
 					// since no rows, return empty dataflow
 					data := iop.NewDataset(columns)
 					return iop.MakeDataFlow(data.Stream())
 				}
-				filePath = "file://" + filePath // add scheme
+
+				if stage.IsExternal() {
+					if fsProps, err = stage.FileSysProps(fsProps); err != nil {
+						return df, g.Error(err, "Could not get props for external stage")
+					}
+				} else {
+					filePath = "file://" + filePath // add scheme
+				}
 			} else {
 				return conn.BaseConn.BulkExportFlow(table)
 			}
@@ -355,7 +387,7 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		return conn.BaseConn.BulkExportFlow(table)
 	}
 
-	fs, err := filesys.NewFileSysClientFromURL(filePath, conn.PropArrExclude("url")...)
+	fs, err := filesys.NewFileSysClientFromURL(filePath, fsProps...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client")
 		return
@@ -747,20 +779,22 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 	return nil
 }
 
-func (conn *SnowflakeConn) UnloadViaStage(format dbio.FileType, tables ...Table) (filePath string, unloaded int64, err error) {
+// UnloadViaStage unloads tables into the stage. For an internal stage, it
+// downloads the files and returns the local folder. For an external stage,
+// it returns the cloud URL of the files, because GET does not work there.
+func (conn *SnowflakeConn) UnloadViaStage(stage SnowflakeStage, format dbio.FileType, tables ...Table) (filePath string, unloaded int64, err error) {
 
-	stageFolderPath := fmt.Sprintf(
-		"@%s/%s/%s",
-		conn.GetProp("internal_stage"),
-		tempCloudStorageFolder,
-		cast.ToString(g.Now()),
-	)
+	stagePath := fmt.Sprintf("%s/%s", tempCloudStorageFolder, cast.ToString(g.Now()))
+	stageFolderPath := fmt.Sprintf("@%s/%s", stage.Name, stagePath)
 
 	context := g.NewContext(conn.Context().Ctx)
 
-	// Write the each stage file to temp file, read to ds
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
-	if err = os.MkdirAll(folderPath, 0777); err != nil {
+	if stage.IsExternal() {
+		if folderPath, err = stage.FileURL(stagePath); err != nil {
+			return "", 0, err
+		}
+	} else if err = os.MkdirAll(folderPath, 0777); err != nil {
 		return "", 0, g.Error(err, "could not create temp directory: %s", folderPath)
 	}
 
@@ -789,7 +823,12 @@ func (conn *SnowflakeConn) UnloadViaStage(format dbio.FileType, tables ...Table)
 	}
 
 	conn.Exec("REMOVE " + stageFolderPath)
-	defer conn.Exec("REMOVE " + stageFolderPath)
+	defer func() {
+		// the reader deletes the files of an external stage after it reads them
+		if !stage.IsExternal() || err != nil || unloaded == 0 {
+			conn.Exec("REMOVE " + stageFolderPath)
+		}
+	}()
 	for i, table := range tables {
 		stagePathPart := fmt.Sprintf("%s/%02d_", stageFolderPath, i+1)
 		context.Wg.Write.Add()
@@ -818,6 +857,11 @@ func (conn *SnowflakeConn) UnloadViaStage(format dbio.FileType, tables ...Table)
 	}
 	g.Trace("\n" + data.PrettyTable())
 
+	if stage.IsExternal() {
+		g.Debug("reading unloaded files of external stage from %s", folderPath)
+		return folderPath, unloadedRows.Load(), nil
+	}
+
 	// copies the folder level
 	_, err = conn.StageGET(stageFolderPath, folderPath)
 	if err != nil {
@@ -837,6 +881,13 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 
 	if conn.GetProp("internal_stage") == "" {
 		return 0, g.Error("Prop internal_stage is required")
+	}
+
+	if stage, err := conn.describeStage(conn.GetProp("internal_stage")); err == nil && stage.IsExternal() {
+		return 0, g.Error(
+			"internal_stage %s is an external stage (%s). Snowflake does not allow PUT to an external stage. Set internal_stage to an internal stage to load data into Snowflake.",
+			stage.Name, stage.URL,
+		)
 	}
 
 	if conn.GetProp("schema") == "" {
@@ -1312,4 +1363,103 @@ func parseSnowflakeDataType(rec map[string]any) (dataType string, precision, sca
 		}
 	}
 	return
+}
+
+// SnowflakeStage is the stage that the `internal_stage` prop names.
+type SnowflakeStage struct {
+	Name string
+	URL  string // location of an external stage (s3://, gcs://, azure://). Empty for an internal stage.
+}
+
+// IsExternal tells if the stage points to cloud storage. GET and PUT do not work on it.
+func (s SnowflakeStage) IsExternal() bool {
+	return s.URL != ""
+}
+
+// FileURL returns the sling URL of a path in the external stage.
+func (s SnowflakeStage) FileURL(stagePath string) (string, error) {
+	base := strings.TrimSuffix(s.URL, "/") + "/"
+	stagePath = strings.TrimPrefix(stagePath, "/")
+
+	switch {
+	case strings.HasPrefix(base, "s3://"):
+	case strings.HasPrefix(base, "gcs://"):
+		base = "gs://" + strings.TrimPrefix(base, "gcs://")
+	case strings.HasPrefix(base, "azure://"):
+		base = "https://" + strings.TrimPrefix(base, "azure://")
+	default:
+		return "", g.Error("unsupported location for external stage %s: %s", s.Name, s.URL)
+	}
+
+	return base + stagePath, nil
+}
+
+// FileSysProps returns the props of a file system client for the stage location.
+// The bucket, account and container come from the stage URL. The other props
+// (credentials) come from the Snowflake connection.
+func (s SnowflakeStage) FileSysProps(connProps []string) ([]string, error) {
+	fileURL, err := s.FileURL("")
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(fileURL)
+	if err != nil {
+		return nil, g.Error(err, "could not parse location of stage %s", s.Name)
+	}
+
+	props := map[string]string{}
+	for k, v := range g.KVArrToMap(connProps...) {
+		props[strings.ToLower(k)] = v
+	}
+
+	// these Snowflake props have a different meaning for a file system client
+	for _, key := range []string{"url", "region", "account", "container", "bucket", "aws_bucket"} {
+		delete(props, key)
+	}
+
+	switch u.Scheme {
+	case "s3", "gs":
+		props["bucket"] = u.Host
+	case "https":
+		props["account"] = strings.Split(u.Host, ".")[0]
+		props["container"] = strings.Split(strings.TrimPrefix(u.Path, "/"), "/")[0]
+	}
+
+	arr := make([]string, 0, len(props))
+	for k, v := range props {
+		arr = append(arr, k+"="+v)
+	}
+	return arr, nil
+}
+
+// describeStage reads the location of a stage with DESC STAGE.
+func (conn *SnowflakeConn) describeStage(name string) (stage SnowflakeStage, err error) {
+	stage.Name = name
+
+	data, err := conn.Query("DESC STAGE " + name)
+	if err != nil {
+		return stage, g.Error(err, "could not describe stage %s", name)
+	}
+
+	for _, rec := range data.Records(true) {
+		if strings.EqualFold(cast.ToString(rec["parent_property"]), "STAGE_LOCATION") &&
+			strings.EqualFold(cast.ToString(rec["property"]), "URL") {
+			stage.URL = parseStageURL(cast.ToString(rec["property_value"]))
+		}
+	}
+
+	return stage, nil
+}
+
+// parseStageURL reads the STAGE_LOCATION.URL value, a JSON array such as ["s3://bucket/path/"].
+func parseStageURL(val string) string {
+	val = strings.TrimSpace(val)
+	var urls []string
+	if err := g.Unmarshal(val, &urls); err == nil {
+		if len(urls) > 0 {
+			return strings.TrimSpace(urls[0])
+		}
+		return ""
+	}
+	return strings.Trim(val, `"[]`)
 }

@@ -1,11 +1,14 @@
 package database
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -61,6 +64,19 @@ func (conn *ClickhouseConn) Version() int {
 	return 21
 }
 
+// openClickhouseTunnel opens the DSN through a tunnel on 127.0.0.1. The DSN cannot carry
+// the TLS ServerName, so it is set to the original host here.
+func openClickhouseTunnel(connURL, tlsHost string) (*sqlx.DB, error) {
+	opts, err := clickhouse.ParseDSN(connURL)
+	if err != nil {
+		return nil, g.Error(err, "could not parse clickhouse url")
+	}
+	if opts.TLS != nil && opts.TLS.ServerName == "" && !opts.TLS.InsecureSkipVerify {
+		opts.TLS.ServerName = tlsHost
+	}
+	return sqlx.NewDb(clickhouse.OpenDB(opts), "clickhouse"), nil
+}
+
 func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 	tlsConfig, err := conn.makeTlsConfig()
 	if err != nil {
@@ -103,6 +119,11 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		port = "9000"
 	}
 	addr := host + ":" + port
+
+	// a tunnel changes the address to 127.0.0.1, verify the certificate against the original host
+	if tlsConfig.ServerName == "" && !tlsConfig.InsecureSkipVerify {
+		tlsConfig.ServerName = host
+	}
 
 	// build chOptions
 	chOptions := clickhouse.Options{
@@ -203,6 +224,12 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 
 		g.Trace("SSH tunnel established: %s -> %s", originalAddr, newAddr)
 		conn.SetProp("ssh_tunnel_local_addr", newAddr) // store for potential 3rd party bulk loading
+	} else if proxyURL := cmp.Or(conn.GetProp("PROXY_URL"), os.Getenv("SLING_PROXY")); proxyURL != "" {
+		localPort, err := iop.OpenTunnelProxy(proxyURL, host, cast.ToInt(port))
+		if err != nil {
+			return g.Error(err, "could not establish SOCKS5 proxy tunnel")
+		}
+		chOptions.Addr[0] = g.F("127.0.0.1:%d", localPort)
 	}
 
 	if conn.db == nil {
@@ -439,6 +466,7 @@ func (conn *ClickhouseConn) injectInlineIndexes(ddl string, table *Table, column
 // BulkImportStream inserts a stream into a table
 func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	if conn.UseADBC() {
+		conn.adbc.SetProp("insert_concurrency", conn.GetProp("insert_concurrency"))
 		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 
@@ -474,6 +502,16 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 		}
 	}
 
+	if n := cast.ToInt(conn.GetProp("insert_concurrency")); n > 1 {
+		count, err = conn.bulkImportConcurrent(table, tableFName, ds, n)
+		if err != nil {
+			return count, err
+		}
+		ds.SetEmpty()
+		return count, nil
+	}
+
+	tx := &chInsertTx{conn: conn}
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
@@ -482,175 +520,8 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 			}
 		}
 
-		err = func() error {
-			// COPY needs a transaction
-			if conn.Tx() == nil {
-				err = conn.Begin(&sql.TxOptions{Isolation: sql.LevelDefault})
-				if err != nil {
-					return g.Error(err, "could not begin")
-				}
-				defer conn.Rollback()
-			}
-
-			insCols, err := conn.ValidateColumnNames(columns, batch.Columns.Names())
-			if err != nil {
-				return g.Error(err, "columns mismatch")
-			}
-
-			insertStatement := conn.GenerateInsertStatement(
-				table.FullName(),
-				insCols,
-				1,
-			)
-
-			stmt, err := conn.Prepare(insertStatement)
-			if err != nil {
-				g.Trace("%s: %#v", table, columns.Names())
-				return g.Error(err, "could not prepare statement")
-			}
-
-			var decimalCols, intCols, jsonCols, int64Cols, floatCols, boolCols []int
-			insColMap := insCols.Map()
-			for i, col := range batch.Columns {
-				insCol := g.PtrVal(insColMap[col.Name])
-				switch {
-				case col.Type == iop.DecimalType:
-					decimalCols = append(decimalCols, i)
-				case col.Type == iop.SmallIntType:
-					intCols = append(intCols, i)
-				case col.Type == iop.JsonType:
-					// jsonCols = append(jsonCols, i) // disable cause it gives issues (2025-05-01)
-				case col.Type.IsInteger():
-					int64Cols = append(int64Cols, i)
-				case col.Type == iop.FloatType:
-					floatCols = append(floatCols, i)
-				case col.Type == iop.BoolType:
-					// only set as bool if target column type is boolean/int
-					// need to maintain string booleans for existing replications
-					// see https://github.com/slingdata-io/sling-cli/issues/626
-					if insCol.IsBool() || insCol.IsInteger() {
-						boolCols = append(boolCols, i)
-					}
-				}
-			}
-
-			batchStart := time.Now()
-			maxDur := ds.Sp.Config.BatchMaxDuration
-
-			for row := range batch.Rows {
-				var eG g.ErrorGroup
-
-				// set decimals correctly
-				for _, colI := range decimalCols {
-					if row[colI] != nil {
-						val, err := decimal.NewFromString(cast.ToString(row[colI]))
-						if err == nil {
-							row[colI] = val
-						}
-						eG.Capture(err)
-					}
-				}
-
-				// set JSON correctly
-				for _, colI := range jsonCols {
-					if row[colI] != nil {
-						sVal := cast.ToString(row[colI])
-						mVal, _ := g.UnmarshalMap(sVal)
-						val := chcol.NewJSON()
-						err := val.Scan(mVal)
-						if !g.LogError(err, "could not convert value `%s` for clickhouse JSON", sVal) {
-							row[colI] = val
-						} else {
-							row[colI] = nil
-						}
-					}
-				}
-
-				// set Int32 correctly
-				for _, colI := range intCols {
-					if row[colI] != nil {
-						row[colI], err = cast.ToIntE(row[colI])
-						eG.Capture(err)
-					}
-				}
-
-				// set Int64 correctly
-				for _, colI := range int64Cols {
-					if row[colI] != nil {
-						row[colI], err = cast.ToInt64E(row[colI])
-						eG.Capture(err)
-					}
-				}
-
-				// set Float64 correctly
-				for _, colI := range floatCols {
-					if row[colI] != nil {
-						row[colI], err = cast.ToFloat64E(row[colI])
-						eG.Capture(err)
-					}
-				}
-
-				// set Bool correctly if target column is not string
-				for _, colI := range boolCols {
-					if row[colI] != nil {
-						row[colI], err = cast.ToBoolE(row[colI])
-						eG.Capture(err)
-					}
-				}
-
-				if err = eG.Err(); err != nil {
-					err = g.Error(err, "could not convert value for COPY into table %s", tableFName)
-					ds.Context.CaptureErr(err)
-					return err
-				}
-
-				count++
-				// Do insert
-				ds.Context.Lock()
-				_, err := stmt.Exec(row...)
-				ds.Context.Unlock()
-				if err != nil {
-					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
-					g.Trace("error for row: %#v", row)
-					return g.Error(err, "could not execute statement")
-				}
-
-				// clickhouse-go may buffer Exec inside the TX and only flush on
-				// Commit — so producer-side batch_max_duration alone can miss.
-				// Commit on a wall-clock ceiling here so slow/long loads still
-				// release the connection periodically.
-				if maxDur > 0 && time.Since(batchStart) >= maxDur {
-					if err = stmt.Close(); err != nil {
-						return g.Error(err, "could not close statement before duration commit")
-					}
-					if err = conn.Commit(); err != nil {
-						return g.Error(err, "could not commit transaction (max_duration)")
-					}
-					g.Debug("committed clickhouse batch by max_duration=%s rows_so_far=%d", maxDur, count)
-					if err = conn.Begin(&sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
-						return g.Error(err, "could not begin after duration commit")
-					}
-					stmt, err = conn.Prepare(insertStatement)
-					if err != nil {
-						return g.Error(err, "could not prepare statement after duration commit")
-					}
-					batchStart = time.Now()
-				}
-			}
-
-			err = stmt.Close()
-			if err != nil {
-				return g.Error(err, "could not close statement")
-			}
-
-			err = conn.Commit()
-			if err != nil {
-				return g.Error(err, "could not commit transaction")
-			}
-
-			return nil
-		}()
-
+		cnt, err := conn.insertBatch(tx, table, tableFName, batch, columns, ds)
+		count += cnt
 		if err != nil {
 			return count, g.Error(err, "could not copy data")
 		}
@@ -659,6 +530,278 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 	ds.SetEmpty()
 
 	g.Trace("COPY %d ROWS", count)
+	return count, nil
+}
+
+// bulkImportConcurrent inserts the batches with n workers. Each worker takes
+// whole batches and writes them in its own transaction, so the commit of one
+// batch does not stop the read of the next.
+func (conn *ClickhouseConn) bulkImportConcurrent(table Table, tableFName string, ds *iop.Datastream, n int) (count uint64, err error) {
+	g.Debug("inserting into %s with %d concurrent inserts", tableFName, n)
+
+	var (
+		total    atomic.Uint64
+		failed   atomic.Bool
+		colsMu   sync.Mutex
+		errMu    sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tx := &chInsertTx{conn: conn, own: true}
+			for batch := range ds.BatchChan {
+				if failed.Load() {
+					return
+				}
+
+				colsMu.Lock()
+				columns, err := conn.GetColumns(tableFName, batch.Columns.Names()...)
+				colsMu.Unlock()
+				if err != nil {
+					err = g.Error(err, "could not get matching list of columns from table")
+				} else {
+					var cnt uint64
+					cnt, err = conn.insertBatch(tx, table, tableFName, batch, columns, ds)
+					total.Add(cnt)
+				}
+
+				if err != nil {
+					failed.Store(true)
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = g.Error(err, "could not copy data")
+					}
+					errMu.Unlock()
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	return total.Load(), firstErr
+}
+
+// chInsertTx is the transaction that one insert worker writes in. A shared
+// one uses the connection-wide transaction. An own one has a transaction on a
+// separate pool connection, for concurrent inserts.
+type chInsertTx struct {
+	conn *ClickhouseConn
+	own  bool
+	tx   *sqlx.Tx
+}
+
+func (t *chInsertTx) needsBegin() bool {
+	return t.own || t.conn.Tx() == nil
+}
+
+func (t *chInsertTx) begin() (err error) {
+	opts := &sql.TxOptions{Isolation: sql.LevelDefault}
+	if !t.own {
+		return t.conn.Begin(opts)
+	}
+	t.tx, err = t.conn.Db().BeginTxx(t.conn.Context().Ctx, opts)
+	return err
+}
+
+func (t *chInsertTx) prepare(query string) (*sql.Stmt, error) {
+	if !t.own {
+		return t.conn.Prepare(query)
+	}
+	return t.tx.PrepareContext(t.conn.Context().Ctx, query)
+}
+
+func (t *chInsertTx) commit() error {
+	if !t.own {
+		return t.conn.Commit()
+	}
+	tx := t.tx
+	t.tx = nil
+	return tx.Commit()
+}
+
+func (t *chInsertTx) rollback() {
+	if !t.own {
+		t.conn.Rollback()
+		return
+	}
+	if t.tx != nil {
+		t.tx.Rollback()
+		t.tx = nil
+	}
+}
+
+// insertBatch inserts the rows of one batch and commits them.
+func (conn *ClickhouseConn) insertBatch(tx *chInsertTx, table Table, tableFName string, batch *iop.Batch, columns iop.Columns, ds *iop.Datastream) (count uint64, err error) {
+	// COPY needs a transaction
+	if tx.needsBegin() {
+		err = tx.begin()
+		if err != nil {
+			return count, g.Error(err, "could not begin")
+		}
+		defer tx.rollback()
+	}
+
+	insCols, err := conn.ValidateColumnNames(columns, batch.Columns.Names())
+	if err != nil {
+		return count, g.Error(err, "columns mismatch")
+	}
+
+	insertStatement := conn.GenerateInsertStatement(
+		table.FullName(),
+		insCols,
+		1,
+	)
+
+	stmt, err := tx.prepare(insertStatement)
+	if err != nil {
+		g.Trace("%s: %#v", table, columns.Names())
+		return count, g.Error(err, "could not prepare statement")
+	}
+
+	var decimalCols, intCols, jsonCols, int64Cols, floatCols, boolCols []int
+	insColMap := insCols.Map()
+	for i, col := range batch.Columns {
+		insCol := g.PtrVal(insColMap[col.Name])
+		switch {
+		case col.Type == iop.DecimalType:
+			decimalCols = append(decimalCols, i)
+		case col.Type == iop.SmallIntType:
+			intCols = append(intCols, i)
+		case col.Type == iop.JsonType:
+			// jsonCols = append(jsonCols, i) // disable cause it gives issues (2025-05-01)
+		case col.Type.IsInteger():
+			int64Cols = append(int64Cols, i)
+		case col.Type == iop.FloatType:
+			floatCols = append(floatCols, i)
+		case col.Type == iop.BoolType:
+			// only set as bool if target column type is boolean/int
+			// need to maintain string booleans for existing replications
+			// see https://github.com/slingdata-io/sling-cli/issues/626
+			if insCol.IsBool() || insCol.IsInteger() {
+				boolCols = append(boolCols, i)
+			}
+		}
+	}
+
+	batchStart := time.Now()
+	maxDur := ds.Sp.Config.BatchMaxDuration
+
+	for row := range batch.Rows() {
+		var eG g.ErrorGroup
+
+		// set decimals correctly
+		for _, colI := range decimalCols {
+			if row[colI] != nil {
+				val, err := decimal.NewFromString(cast.ToString(row[colI]))
+				if err == nil {
+					row[colI] = val
+				}
+				eG.Capture(err)
+			}
+		}
+
+		// set JSON correctly
+		for _, colI := range jsonCols {
+			if row[colI] != nil {
+				sVal := cast.ToString(row[colI])
+				mVal, _ := g.UnmarshalMap(sVal)
+				val := chcol.NewJSON()
+				err := val.Scan(mVal)
+				if !g.LogError(err, "could not convert value `%s` for clickhouse JSON", sVal) {
+					row[colI] = val
+				} else {
+					row[colI] = nil
+				}
+			}
+		}
+
+		// set Int32 correctly
+		for _, colI := range intCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToIntE(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		// set Int64 correctly
+		for _, colI := range int64Cols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToInt64E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		// set Float64 correctly
+		for _, colI := range floatCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToFloat64E(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		// set Bool correctly if target column is not string
+		for _, colI := range boolCols {
+			if row[colI] != nil {
+				row[colI], err = cast.ToBoolE(row[colI])
+				eG.Capture(err)
+			}
+		}
+
+		if err = eG.Err(); err != nil {
+			err = g.Error(err, "could not convert value for COPY into table %s", tableFName)
+			ds.Context.CaptureErr(err)
+			return count, err
+		}
+
+		count++
+		// Do insert
+		ds.Context.Lock()
+		_, err := stmt.Exec(row...)
+		ds.Context.Unlock()
+		if err != nil {
+			ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
+			g.Trace("error for row: %#v", row)
+			return count, g.Error(err, "could not execute statement")
+		}
+
+		// clickhouse-go may buffer Exec inside the TX and only flush on
+		// Commit — so producer-side batch_max_duration alone can miss.
+		// Commit on a wall-clock ceiling here so slow/long loads still
+		// release the connection periodically.
+		if maxDur > 0 && time.Since(batchStart) >= maxDur {
+			if err = stmt.Close(); err != nil {
+				return count, g.Error(err, "could not close statement before duration commit")
+			}
+			if err = tx.commit(); err != nil {
+				return count, g.Error(err, "could not commit transaction (max_duration)")
+			}
+			g.Debug("committed clickhouse batch by max_duration=%s rows_so_far=%d", maxDur, count)
+			if err = tx.begin(); err != nil {
+				return count, g.Error(err, "could not begin after duration commit")
+			}
+			stmt, err = tx.prepare(insertStatement)
+			if err != nil {
+				return count, g.Error(err, "could not prepare statement after duration commit")
+			}
+			batchStart = time.Now()
+		}
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		return count, g.Error(err, "could not close statement")
+	}
+
+	err = tx.commit()
+	if err != nil {
+		return count, g.Error(err, "could not commit transaction")
+	}
+
 	return count, nil
 }
 

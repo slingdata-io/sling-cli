@@ -1,0 +1,20 @@
+# GH #831: DuckDB 2.0.0 ships its CLI as duckdb-cli-<platform>.tar.gz, before 2.0 as duckdb_cli-<platform>.zip.
+# Each suite entry sets DUCKDB_VERSION and an empty SLING_HOME_DIR, so the run must download the binary.
+# GH831_EXPECT is the version that DuckDB must report (for example v2.0.0).
+steps:
+  - type: query
+    id: ver
+    connection: GH831_DUCKDB
+    query: select version() as v
+    on_failure: abort
+
+  - type: log
+    message: "gh831 duckdb version => {state.ver.result[0].v}"
+
+  - type: check
+    check: state.ver.result[0].v == env.GH831_EXPECT
+    failure_message: "expected DuckDB {env.GH831_EXPECT}, got {state.ver.result[0].v}"
+    on_failure: abort
+
+  - type: log
+    message: "SUCCESS: gh831 DuckDB {env.GH831_EXPECT} binary downloaded and runs"

@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"io"
+	"iter"
 	"os"
 	"path"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,7 +50,8 @@ type Datastream struct {
 	BatchChan     chan *Batch
 	Batches       []*Batch
 	CurrentBatch  *Batch
-	Count         uint64
+	Count         uint64 // rows taken by the consumer
+	pushed        uint64 // rows pushed by the producer
 	Context       *g.Context
 	Ready         bool
 	Bytes         atomic.Uint64
@@ -63,8 +66,12 @@ type Datastream struct {
 	it            *Iterator
 	config        StreamConfig
 	df            *Dataflow
-	bwRows        chan []any // for correct byte written
+	bwRows        chan [][]any // for correct byte written
+	bwMu          sync.Mutex
+	bwClosed      bool
+	bwOn          bool // SLING_PROCESS_BW
 	readyChn      chan struct{}
+	readyBuffer   [][]any // the Buffer at SetReady: Close can clear Buffer before the dataflow reads it
 	schemaChgChan chan schemaChg
 	bwCsv         *csv.Writer // for correct byte written
 	ID            string
@@ -225,7 +232,8 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		config:        StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
-		bwRows:        make(chan []any, 100),
+		bwRows:        make(chan [][]any, 100),
+		bwOn:          bwEnabled(),
 		readyChn:      make(chan struct{}, 1),
 		schemaChgChan: make(chan schemaChg, 1000),
 		pauseChan:     make(chan struct{}),
@@ -351,7 +359,7 @@ func (ds *Datastream) startArrow() (err error) {
 }
 
 func (ds *Datastream) Limited(limit ...int) bool {
-	count := atomic.LoadUint64(&ds.Count)
+	count := max(atomic.LoadUint64(&ds.pushed), atomic.LoadUint64(&ds.Count))
 	if len(limit) > 0 && count >= uint64(limit[0]) {
 		return true
 	}
@@ -362,10 +370,7 @@ func (ds *Datastream) Limited(limit ...int) bool {
 }
 
 func (ds *Datastream) processBwRows() {
-	processBw := true
-	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
-		processBw = cast.ToBool(val)
-	}
+	processBw := bwEnabled()
 
 	done := false
 	process := func() {
@@ -377,9 +382,11 @@ func (ds *Datastream) processBwRows() {
 			}
 		}()
 
-		for row := range ds.bwRows {
+		for rows := range ds.bwRows {
 			if processBw {
-				ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+				for _, row := range rows {
+					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+				}
 				ds.bwCsv.Flush()
 			}
 		}
@@ -392,6 +399,39 @@ func (ds *Datastream) processBwRows() {
 		if done {
 			break
 		}
+	}
+}
+
+func bwEnabled() bool {
+	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
+		return cast.ToBool(val)
+	}
+	return true
+}
+
+// copyBwRows copies the rows for the bytes-written processor. The consumer
+// changes the values of a row in place, so the processor must not read the
+// rows that the consumer gets. Call it before the consumer can get the rows.
+func (ds *Datastream) copyBwRows(rows [][]any) [][]any {
+	if len(rows) == 0 || !ds.bwOn {
+		return nil
+	}
+	copied := make([][]any, len(rows))
+	for i, row := range rows {
+		copied[i] = slices.Clone(row)
+	}
+	return copied
+}
+
+// sendBwRows gives rows to the bytes-written processor
+func (ds *Datastream) sendBwRows(rows [][]any) {
+	if len(rows) == 0 {
+		return
+	}
+	ds.bwMu.Lock()
+	defer ds.bwMu.Unlock()
+	if !ds.bwClosed {
+		ds.bwRows <- rows
 	}
 }
 
@@ -418,6 +458,7 @@ func (ds *Datastream) DrainReprocess() []any {
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {
 		ds.Ready = true
+		ds.readyBuffer = ds.Buffer
 		go func() { ds.readyChn <- struct{}{} }()
 	}
 }
@@ -546,26 +587,22 @@ func (ds *Datastream) Close() {
 	ds.Context.Lock()
 
 	if !ds.closed {
-		close(ds.bwRows)
 		close(ds.BatchChan)
 
 		if batch := ds.LatestBatch(); batch != nil {
 			batch.Close()
 		}
 
-		for _, batch := range ds.Batches {
-			select {
-			case <-batch.closeChan: // clean up
-			default:
-			}
-		}
+		ds.bwMu.Lock()
+		ds.bwClosed = true
+		close(ds.bwRows)
+		ds.bwMu.Unlock()
 
 	loop:
 		for {
 			select {
 			case <-ds.pauseChan:
 				<-ds.unpauseChan // wait for unpause
-			case <-ds.readyChn:
 			case <-ds.schemaChgChan:
 			default:
 				break loop
@@ -587,11 +624,6 @@ func (ds *Datastream) Close() {
 	}
 	ds.closed = true
 	ds.Context.Unlock()
-
-	select {
-	case <-ds.readyChn:
-	default:
-	}
 }
 
 // SetColumns sets the columns
@@ -786,7 +818,8 @@ func (ds *Datastream) SetFileURI() {
 // Collect reads a stream and return a dataset
 // limit of 0 is unlimited
 func (ds *Datastream) Collect(limit int) (Dataset, error) {
-	data := NewDataset(ds.Columns)
+	// do not read ds.Columns until the rows loop ends: the producer writes it
+	data := NewDataset(nil)
 
 	// wait for first ds to start streaming.
 	// columns/buffer need to be populated
@@ -807,13 +840,17 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 		}
 	}
 
-	data.Columns = ds.Columns
+	// a copy: NewColumns writes into its input
+	data.Columns = NewColumns(slices.Clone(ds.Columns)...)
 
 	if !limited {
 		ds.SetEmpty()
 	}
 
-	ds.Buffer = nil // clear buffer
+	ds.Context.Lock() // Close also clears the buffer
+	ds.Buffer = nil
+	ds.Context.Unlock()
+
 	if ds.Err() != nil {
 		return data, g.Error(ds.Err())
 	}
@@ -1118,6 +1155,14 @@ skipBuffer:
 		}
 	}
 
+	// a column without a valid type is a string (as in NewColumns). Set it
+	// before other goroutines read ds.Columns.
+	for i := range ds.Columns {
+		if !ds.Columns[i].Type.IsValid() {
+			ds.Columns[i].Type = StringType
+		}
+	}
+
 	go ds.processBwRows()
 
 	if !ds.NoDebug && ds.Metadata.StreamURL.Value != nil {
@@ -1266,28 +1311,23 @@ skipBuffer:
 	return
 }
 
-func (ds *Datastream) Rows() chan []any {
-	if ds.ArrowOnly {
-		// A sink took the row branch on an Arrow stream. Do not panic: the
-		// error names the wiring bug and ends the run with a useful message.
-		ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
-		rows := MakeRowsChan()
-		close(rows)
-		return rows
-	}
+func (ds *Datastream) Rows() iter.Seq[[]any] {
+	return func(yield func([]any) bool) {
+		if ds.ArrowOnly {
+			// A sink took the row branch on an Arrow stream. Do not panic: the
+			// error names the wiring bug and ends the run with a useful message.
+			ds.Context.CaptureErr(g.Error("arrow lane: row consumer on an Arrow stream"))
+			return
+		}
 
-	rows := MakeRowsChan()
-
-	go func() {
-		defer close(rows)
 		for batch := range ds.BatchChan {
-			for row := range batch.Rows {
-				rows <- row
+			for row := range batch.Rows() {
+				if !yield(row) {
+					return
+				}
 			}
 		}
-	}()
-
-	return rows
+	}
 }
 
 func (ds *Datastream) SetMetadata(jsonStr string) {
@@ -2013,6 +2053,13 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 // ConsumeArrowReaderSeeker uses the provided reader to stream rows
 func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
+	// a .arrow file can have the IPC stream format (older lane output)
+	if isFile, err := IsArrowIPCFile(reader); err != nil {
+		return err
+	} else if !isFile {
+		return ds.ConsumeArrowReaderStream(reader)
+	}
+
 	selected := ds.Columns.Names()
 
 	a, err := NewArrowFileReader(reader, selected)
@@ -2079,23 +2126,52 @@ func (ds *Datastream) ConsumeArrowRecords(file *os.File, lane ArrowLane) (err er
 	return
 }
 
-// ArrowIPCFileSchema returns the schema of an Arrow IPC file from its footer
-// and rewinds the file, so the same handle can be read afterwards. Only the
-// footer is read.
+// ArrowIPCFileSchema returns the schema of an Arrow IPC file and rewinds the
+// file, so the same handle can be read afterwards. The file format gives the
+// footer schema. The stream format (older lane output) gives the schema
+// message at the start.
 func ArrowIPCFileSchema(file *os.File) (schema *arrow.Schema, err error) {
-	reader, err := ipc.NewFileReader(file)
+	isFile, err := IsArrowIPCFile(file)
 	if err != nil {
-		return nil, g.Error(err, "could not read arrow file footer")
+		return nil, err
 	}
 
-	schema = reader.Schema()
-	reader.Close()
+	if isFile {
+		reader, err := ipc.NewFileReader(file)
+		if err != nil {
+			return nil, g.Error(err, "could not read arrow file footer")
+		}
+		schema = reader.Schema()
+		reader.Close()
+	} else {
+		reader, err := ipc.NewReader(file)
+		if err != nil {
+			return nil, g.Error(err, "could not read arrow stream schema")
+		}
+		schema = reader.Schema()
+		reader.Release()
+	}
 
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return nil, g.Error(err, "could not rewind arrow file")
 	}
 
 	return schema, nil
+}
+
+// IsArrowIPCFile reports whether the file has the magic bytes of the Arrow
+// IPC file format (ARROW1). It is false for the IPC stream format. The file
+// is rewound.
+func IsArrowIPCFile(file *os.File) (bool, error) {
+	magic := make([]byte, 6)
+	n, err := io.ReadFull(file, magic)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return false, g.Error(err, "could not read arrow file magic")
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return false, g.Error(err, "could not rewind arrow file")
+	}
+	return n == 6 && string(magic) == "ARROW1", nil
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
@@ -2637,7 +2713,7 @@ func (ds *Datastream) Map(newColumns Columns, transf func([]any) []any) (nDs *Da
 	go func() {
 		defer close(rows)
 		for batch0 := range ds.BatchChan {
-			for row := range batch0.Rows {
+			for row := range batch0.Rows() {
 				rows <- transf(row)
 			}
 		}
@@ -2649,67 +2725,6 @@ func (ds *Datastream) Map(newColumns Columns, transf func([]any) []any) (nDs *Da
 	}
 
 	return nDs
-}
-
-// MapParallel applies the provided function to every row in parallel and returns the result. Order is not maintained.
-func (ds *Datastream) MapParallel(transf func([]any) []any, numWorkers int) (nDs *Datastream) {
-	var wg sync.WaitGroup
-	nDs = NewDatastreamContext(ds.Context.Ctx, ds.Columns)
-
-	transform := func(wDs *Datastream, wg *sync.WaitGroup) {
-		defer wg.Done()
-
-	loop:
-		for row := range wDs.Rows() {
-			select {
-			case <-nDs.Context.Ctx.Done():
-				break loop
-			case <-wDs.Context.Ctx.Done():
-				break loop
-			default:
-				nDs.Rows() <- transf(row)
-				atomic.AddUint64(&nDs.Count, 1)
-			}
-		}
-	}
-
-	wStreams := map[int]*Datastream{}
-	for i := 0; i < numWorkers; i++ {
-		wStream := NewDatastreamContext(ds.Context.Ctx, ds.Columns)
-		wStreams[i] = wStream
-
-		wg.Add(1)
-		go transform(wStream, &wg)
-	}
-
-	go func() {
-		wi := 0
-
-	loop:
-		for row := range ds.Rows() {
-			select {
-			case <-nDs.Context.Ctx.Done():
-				break loop
-			default:
-				wStreams[wi].Push(row)
-			}
-			if wi == numWorkers-1 {
-				wi = -1 // cycle through workers
-			}
-			wi++
-		}
-
-		for i := 0; i < numWorkers; i++ {
-			close(wStreams[i].Rows())
-			wStreams[i].closed = true
-		}
-
-		wg.Wait()
-		close(nDs.Rows())
-		nDs.closed = true
-	}()
-
-	return
 }
 
 // NewCsvBytesChnl returns a channel yield chunk of bytes of csv
@@ -2831,7 +2846,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 				}
 			}
 
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				// g.PP(batch.Columns.MakeRec(row0))
 				br.Counter++
 				// convert to csv string
@@ -2930,7 +2945,7 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 		tbw = tbw + cast.ToInt64(bw)
 
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				c++
 
 				b, err := encodeRowAsJSONObject(row0, batch.Columns)
@@ -3082,7 +3097,7 @@ func (ds *Datastream) newGeojsonFromRowsReaderChnl(sc StreamConfig, geometryColI
 
 		rowCount := 0
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				rowCount++
 				if !firstFeature {
 					pipe.Writer.Write([]byte{','})
@@ -3178,7 +3193,7 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 		c := int64(0) // local counter
 
 		for batch := range ds.BatchChan {
-			for row0 := range batch.Rows {
+			for row0 := range batch.Rows() {
 				c++
 
 				b, err := encodeRowAsJSONObject(row0, batch.Columns)
@@ -3247,6 +3262,7 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 		var aw *ArrowWriter
 		var br *BatchReader
 		var err error
+		var warnedWide bool
 
 		defer close(readerChn)
 
@@ -3269,10 +3285,20 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 			// new reader
 			pipeR, pipeW = io.Pipe()
 
-			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			columns := batch.Columns
+			if sc.MaxDecPrecision > 0 {
+				var wide []string
+				columns, wide = columns.FileDecimals().DecimalsAsString(sc.MaxDecPrecision)
+				if len(wide) > 0 && !warnedWide {
+					g.Warn("these columns have a decimal above %d digits, so they are written as strings: %s", sc.MaxDecPrecision, strings.Join(wide, ", "))
+					warnedWide = true
+				}
+			}
+
+			br = &BatchReader{batch, columns, pipeR, 0}
 			readerChn <- br
 
-			aw, err = NewArrowWriter(pipeW, batch.Columns)
+			aw, err = NewArrowWriter(pipeW, columns)
 			if err != nil {
 				return g.Error(err, "could not create arrow writer")
 			}
@@ -3289,7 +3315,7 @@ func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *Batch
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err := aw.WriteRow(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
@@ -3379,7 +3405,7 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 				err := pw.WriteRow(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
@@ -3607,9 +3633,9 @@ func (ds *Datastream) NewArrowRecordChnl(sc StreamConfig) (readerChn chan *Batch
 			readerChn <- br
 
 			var err error
-			// the pipe is not seekable, so the IPC stream format is the one
-			// that works here (the file format needs WriteAt for its footer)
-			aw, err = NewArrowStreamWriter(pipeW, ds.Columns)
+			// the IPC file format, as the row path writes: the file writer
+			// counts its own offsets, so a pipe is enough for the footer
+			aw, err = NewArrowWriter(pipeW, ds.Columns)
 			if err != nil {
 				return g.Error(err, "could not create arrow writer")
 			}
@@ -3785,7 +3811,7 @@ func (ds *Datastream) NewParquetReaderChnl(sc StreamConfig) (readerChn chan *Bat
 				}
 			}
 
-			for row := range batch.Rows {
+			for row := range batch.Rows() {
 
 				err := pw.WriteRec(row)
 				if err != nil {
@@ -3835,8 +3861,10 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 		// only process current batch
 		var batch *Batch
 		select {
-		case batch = <-ds.BatchChan:
+		case batch = <-ds.BatchChan: // nil when the stream is already closed
 		default:
+		}
+		if batch == nil {
 			batch = ds.LatestBatch()
 		}
 		if batch == nil {
@@ -3859,7 +3887,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 			}
 		}
 
-		for row0 := range batch.Rows {
+		for row0 := range batch.Rows() {
 			c++
 			// convert to csv string
 			row := make([]string, len(row0))

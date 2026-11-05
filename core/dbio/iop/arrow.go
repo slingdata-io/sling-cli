@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"math/bits"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -399,6 +401,7 @@ type ArrowWriter struct {
 	mem          memory.Allocator
 	builders     []array.Builder
 	rowsBuffered int
+	decimals     decimalLimits
 
 	// record path (WriteRecord): the record buffers go straight to the writer
 	recordsWritten int64
@@ -410,15 +413,8 @@ type ArrowWriter struct {
 // ipc.NewFileWriter.
 func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowWriter, err error) {
 
-	// set minimum decimal precision/scale, on a copy: the caller's columns
-	// give the target DDL
-	columns = columns.Clone()
-	for i, col := range columns {
-		if col.IsDecimal() {
-			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-		}
-	}
+	// on a copy: the caller's columns give the target DDL
+	columns = columns.FileDecimals()
 
 	a = &ArrowWriter{
 		columns: columns,
@@ -427,6 +423,7 @@ func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowW
 
 	// Create arrow schema from columns
 	a.arrowSchema = ColumnsToArrowSchema(columns)
+	a.decimals = newDecimalLimits(a.arrowSchema)
 
 	// Create arrow file writer
 	writerOpts := append([]ipc.Option{ipc.WithSchema(a.arrowSchema), ipc.WithAllocator(a.mem)}, opts...)
@@ -451,12 +448,7 @@ func NewArrowWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowW
 // pyarrow.ipc.open_stream / arrow::ipc::RecordBatchStreamReader.
 func NewArrowStreamWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *ArrowWriter, err error) {
 
-	for i, col := range columns {
-		if col.IsDecimal() {
-			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-		}
-	}
+	columns = columns.FileDecimals()
 
 	a = &ArrowWriter{
 		columns: columns,
@@ -464,6 +456,7 @@ func NewArrowStreamWriter(w io.Writer, columns Columns, opts ...ipc.Option) (a *
 	}
 
 	a.arrowSchema = ColumnsToArrowSchema(columns)
+	a.decimals = newDecimalLimits(a.arrowSchema)
 
 	writerOpts := append([]ipc.Option{ipc.WithSchema(a.arrowSchema), ipc.WithAllocator(a.mem)}, opts...)
 	a.Writer = ipc.NewWriter(w, writerOpts...)
@@ -510,6 +503,9 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 }
 
 func (a *ArrowWriter) WriteRow(row []any) error {
+	if err := a.decimals.Check(row); err != nil {
+		return err
+	}
 	for i, val := range row {
 		if i >= len(a.builders) {
 			continue
@@ -533,6 +529,102 @@ func (a *ArrowWriter) WriteRow(row []any) error {
 	}
 
 	return nil
+}
+
+// decimalLimit is the Arrow decimal type of a column.
+type decimalLimit struct {
+	index     int
+	name      string
+	precision int32
+	scale     int32
+}
+
+// decimalLimits rejects a decimal value with more integer digits than its
+// Arrow type holds. Such a value makes a file that is not valid, or a wrong
+// value in Parquet.
+type decimalLimits []decimalLimit
+
+func newDecimalLimits(schema *arrow.Schema) (dl decimalLimits) {
+	for i, f := range schema.Fields() {
+		switch t := f.Type.(type) {
+		case *arrow.Decimal128Type:
+			dl = append(dl, decimalLimit{i, f.Name, t.Precision, t.Scale})
+		case *arrow.Decimal256Type:
+			dl = append(dl, decimalLimit{i, f.Name, t.Precision, t.Scale})
+		}
+	}
+	return dl
+}
+
+func (dl decimalLimits) Check(row []any) error {
+	for _, l := range dl {
+		if l.index >= len(row) || row[l.index] == nil {
+			continue
+		}
+		val := cast.ToString(row[l.index])
+		if n := decimalIntDigits(val); n > int(l.precision-l.scale) {
+			return g.Error("value %s of column %s does not fit decimal(%d,%d). Set a wider type for the column, for example with `columns: {%s: string}`", val, l.name, l.precision, l.scale, l.name)
+		}
+	}
+	return nil
+}
+
+// DecimalFit finds the decimal type that holds a set of values with no loss.
+// A column with no precision (Postgres numeric) takes any value, so its
+// values give the Arrow type.
+type DecimalFit struct {
+	intDigits int32
+	scale     int32
+}
+
+// Add counts the digits of a value. A value that is not a number has no effect.
+func (f *DecimalFit) Add(val any) {
+	if val == nil {
+		return
+	}
+	s := strings.ReplaceAll(strings.ReplaceAll(cast.ToString(val), ",", ""), "$", "")
+	d, err := decimal.NewFromString(strings.TrimSpace(s))
+	if err != nil {
+		return
+	}
+	exp := d.Exponent()
+	digits := int32(len(new(big.Int).Abs(d.Coefficient()).String()))
+	f.intDigits = max(f.intDigits, digits+exp)
+	f.scale = max(f.scale, -exp)
+}
+
+// ArrowType gives decimal128 when the values fit in it, else decimal256.
+func (f DecimalFit) ArrowType() (arrow.DataType, error) {
+	switch need := f.intDigits + f.scale; {
+	case need <= decimal128.MaxPrecision:
+		return &arrow.Decimal128Type{Precision: decimal128.MaxPrecision, Scale: f.scale}, nil
+	case need <= decimal256.MaxPrecision:
+		return &arrow.Decimal256Type{Precision: decimal256.MaxPrecision, Scale: f.scale}, nil
+	}
+	return nil, g.Error("a value has %d integer digits and %d fraction digits, more than decimal(%d) holds", f.intDigits, f.scale, decimal256.MaxPrecision)
+}
+
+// decimalIntDigits gives the count of integer digits of a decimal text,
+// without leading zeros.
+func decimalIntDigits(val string) (n int) {
+	if strings.ContainsAny(val, "eE") {
+		f, ok := new(big.Float).SetString(strings.TrimSpace(val))
+		if !ok || f.IsInf() {
+			return 0
+		}
+		i, _ := f.Int(nil)
+		val = i.String()
+	}
+	for _, c := range val {
+		switch {
+		case c == '.':
+			return n
+		case c == '0' && n == 0:
+		case c >= '0' && c <= '9':
+			n++
+		}
+	}
+	return n
 }
 
 func (a *ArrowWriter) flushBatch() error {
@@ -743,16 +835,19 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		case FloatType:
 			arrowType = arrow.PrimitiveTypes.Float64
 		case DecimalType:
-			// Use minimum scale/precision when not set, matching AppendToBuilder logic
-			scale := col.DbScale
-			if scale == 0 {
-				scale = env.DdlMinDecScale
-			}
-			precision := col.DbPrecision
+			// a scale of 0 is real only when the precision is set
+			precision, scale := col.DbPrecision, col.DbScale
 			if precision == 0 {
 				precision = env.DdlMinDecLength
+				if scale == 0 {
+					scale = env.DdlMinDecScale
+				}
 			}
-			arrowType = &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}
+			if precision > 38 {
+				arrowType = &arrow.Decimal256Type{Precision: int32(precision), Scale: int32(scale)}
+			} else {
+				arrowType = &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}
+			}
 		case DateType:
 			arrowType = arrow.FixedWidthTypes.Date32
 		case DatetimeType, TimestampType, TimestampzType:
@@ -863,6 +958,11 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 		b.Append(arrow.DayTimeInterval{Days: days, Milliseconds: millis})
 	case *array.Decimal128Builder:
 		valStr := cast.ToString(val)
+		if num, ok := parseDecimal128(valStr, b.Type().(*arrow.Decimal128Type).Scale); ok {
+			b.Append(num)
+			return
+		}
+
 		// Clean value (remove currency symbols, commas)
 		cleanValue := strings.ReplaceAll(strings.ReplaceAll(valStr, ",", ""), "$", "")
 
@@ -873,16 +973,13 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places - use default if not set
-			scaleToUse := col.DbScale
-			if scaleToUse == 0 {
-				scaleToUse = env.DdlMinDecScale
-			}
+			// the builder type gives the scale
+			scaleToUse := b.Type().(*arrow.Decimal128Type).Scale
 			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
-			// Calculate scaled value: num * scale / denom
+			// Calculate scaled value: num * scale / denom, truncated toward zero
 			scaledNum := new(big.Int).Mul(num, scale)
-			scaledVal := new(big.Int).Div(scaledNum, denom)
+			scaledVal := new(big.Int).Quo(scaledNum, denom)
 
 			// Convert to Decimal128
 			dec128 := decimal128.FromBigInt(scaledVal)
@@ -902,16 +999,13 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places - use default if not set
-			scaleToUse := col.DbScale
-			if scaleToUse == 0 {
-				scaleToUse = env.DdlMinDecScale
-			}
+			// the builder type gives the scale
+			scaleToUse := b.Type().(*arrow.Decimal256Type).Scale
 			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
-			// Calculate scaled value: num * scale / denom
+			// Calculate scaled value: num * scale / denom, truncated toward zero
 			scaledNum := new(big.Int).Mul(num, scale)
-			scaledVal := new(big.Int).Div(scaledNum, denom)
+			scaledVal := new(big.Int).Quo(scaledNum, denom)
 
 			// Convert to Decimal256
 			dec256 := decimal256.FromBigInt(scaledVal)
@@ -1449,6 +1543,69 @@ func GetValueFromArrowArray(arr arrow.Array, idx int) any {
 	}
 
 	return nil
+}
+
+// parseDecimal128 parses a plain decimal text ([+-]digits[.digits]) to a
+// value with the given scale, without big.Rat. It returns false for other
+// forms (exponents, NaN, separators), for more fraction digits than scale,
+// and for more than 38 digits. The caller then uses big.Rat.
+func parseDecimal128(s string, scale int32) (decimal128.Num, bool) {
+	neg := false
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+
+	var hi, lo uint64
+	digits, intDigits, fracDigits := 0, 0, -1
+	mul10Add := func(d uint64) {
+		if hi == 0 && lo <= (math.MaxUint64-9)/10 {
+			lo = lo*10 + d
+			return
+		}
+		h, l := bits.Mul64(lo, 10)
+		l, c := bits.Add64(l, d, 0)
+		hi, lo = hi*10+h+c, l
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			if fracDigits >= 0 {
+				fracDigits++
+			} else {
+				intDigits++
+			}
+			if digits > 0 || ch != '0' {
+				digits++
+			}
+			mul10Add(uint64(ch - '0'))
+		case ch == '.' && fracDigits < 0:
+			fracDigits = 0
+		default:
+			return decimal128.Num{}, false
+		}
+	}
+
+	if fracDigits < 0 {
+		fracDigits = 0
+	} else if fracDigits == 0 {
+		return decimal128.Num{}, false
+	}
+	pad := int(scale) - fracDigits
+	if intDigits == 0 || pad < 0 || digits+pad > 38 {
+		return decimal128.Num{}, false
+	}
+	for ; pad > 0; pad-- {
+		mul10Add(0)
+	}
+
+	num := decimal128.New(int64(hi), lo)
+	if neg {
+		num = num.Negate()
+	}
+	return num, true
 }
 
 // decimal128ToString converts a Decimal128 value to its string representation

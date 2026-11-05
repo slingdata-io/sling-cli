@@ -2,6 +2,8 @@ package sling
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,4 +126,39 @@ func TestGetFormatMapAPISourceStreamTable(t *testing.T) {
 	if !strings.Contains(strings.ToLower(cfg.Target.Options.TableTmp), "users") {
 		t.Fatalf("temp table should include endpoint name, got %s", cfg.Target.Options.TableTmp)
 	}
+}
+
+func TestUnmarshalTaskEnv(t *testing.T) {
+	t.Setenv("SLING_TEST_TASK_SCHEMA", "dbo")
+
+	// larger than the 128 KiB limit of one env value on Linux
+	sql := "select * from $SLING_TEST_TASK_SCHEMA.t where c in ('" + strings.Repeat("x", 140*1024) + "')"
+	task := Config{
+		Source:            Source{Conn: "MSSQL", Stream: sql},
+		Target:            Target{Conn: "POSTGRES", Object: "public.t"},
+		Mode:              FullRefreshMode,
+		StreamName:        "dbo.t",
+		ReplicationStream: &ReplicationStreamConfig{SQL: sql},
+	}
+	payload := g.Marshal(task)
+
+	var inline Config
+	if !assert.NoError(t, inline.UnmarshalTaskEnv(payload)) {
+		return
+	}
+	assert.Equal(t, "dbo.t", inline.StreamName)
+	assert.True(t, strings.HasPrefix(inline.Source.Stream, "select * from dbo.t "))
+
+	path := filepath.Join(t.TempDir(), "task_config.json")
+	assert.NoError(t, os.WriteFile(path, []byte(payload), 0600))
+
+	for _, val := range []string{path, "file://" + path} {
+		var cfg Config
+		if assert.NoError(t, cfg.UnmarshalTaskEnv(val), val) {
+			assert.Equal(t, g.Marshal(inline), g.Marshal(cfg), val)
+		}
+	}
+
+	var missing Config
+	assert.Error(t, missing.UnmarshalTaskEnv("file://"+path+".missing"))
 }

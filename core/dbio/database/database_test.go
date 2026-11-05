@@ -3,7 +3,11 @@ package database
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +30,7 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet/file"
@@ -34,6 +39,7 @@ import (
 	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -1075,6 +1081,38 @@ func TestPrivateKeySSH(t *testing.T) {
 	}
 }
 
+// Secret managers can store a PEM on one line (the Azure portal does this).
+func TestGetEncodedPrivateKeyOneLine(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	pemStr := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+
+	want, err := getEncodedPrivateKey(pemStr, "")
+	require.NoError(t, err)
+
+	trimmed := strings.TrimSpace(pemStr)
+	cases := map[string]string{
+		"spaces":       strings.ReplaceAll(trimmed, "\n", " "),
+		"no separator": strings.ReplaceAll(trimmed, "\n", ""),
+		"escaped":      strings.ReplaceAll(trimmed, "\n", `\n`),
+		"escaped crlf": strings.ReplaceAll(trimmed, "\n", `\r\n`),
+		"crlf":         strings.ReplaceAll(trimmed, "\n", "\r\n"),
+	}
+	for name, in := range cases {
+		got, err := getEncodedPrivateKey(in, "")
+		if assert.NoError(t, err, name) {
+			assert.Equal(t, want, got, name)
+		}
+	}
+
+	pkcs1 := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	_, err = getEncodedPrivateKey(strings.ReplaceAll(strings.TrimSpace(pkcs1), "\n", " "), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PKCS#1")
+}
+
 func testOracleClob(t *testing.T) {
 	conn, err := NewConn("ORACLE_URL")
 	g.AssertNoError(t, err)
@@ -1604,7 +1642,7 @@ func TestSoftMergeGuardIsNullSafe(t *testing.T) {
 		dbio.TypeDbBigQuery, dbio.TypeDbSQLServer, dbio.TypeDbDuckDb,
 		dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbClickhouse,
 		dbio.TypeDbSQLite, dbio.TypeDbOracle, dbio.TypeDbDatabricks,
-		dbio.TypeDbStarRocks, dbio.TypeDbD1, dbio.TypeDbExasol,
+		dbio.TypeDbStarRocks, dbio.TypeDbD1, dbio.TypeDbExasol, dbio.TypeDbHana,
 	}
 
 	for _, ty := range types {
@@ -3334,7 +3372,7 @@ func pgReaderSchema() *arrow.Schema {
 }
 
 func TestAdbcLaneRead_Labels(t *testing.T) {
-	r := newAdbcLaneRead(pgReaderSchema())
+	r := newAdbcLaneRead(pgReaderSchema(), nil)
 
 	types := map[string]iop.ColumnType{}
 	for _, col := range r.columns {
@@ -3346,8 +3384,10 @@ func TestAdbcLaneRead_Labels(t *testing.T) {
 	assert.Equal(t, iop.UUIDType, types["c_uuid"])
 	assert.Equal(t, iop.StringType, types["c_str"])
 
-	// numeric is carried as the decimal the row path builds
+	// numeric is carried as the decimal the row path builds. Without the
+	// catalog columns, the precision is unknown, and stage 2 declines.
 	assert.Equal(t, arrow.DECIMAL128, r.schema.Field(1).Type.ID())
+	assert.Equal(t, 0, r.columns[1].DbPrecision)
 	assert.Equal(t, []int{1}, r.decimals)
 	// the other fields keep the driver's type
 	assert.True(t, arrow.TypeEqual(arrow.BinaryTypes.String, r.schema.Field(2).Type))
@@ -3356,16 +3396,18 @@ func TestAdbcLaneRead_Labels(t *testing.T) {
 
 func TestAdbcLaneRead_Record(t *testing.T) {
 	src := pgReaderSchema()
-	r := newAdbcLaneRead(src)
+	srcCols := iop.Columns{{Name: "C_DEC", Type: iop.DecimalType, DbPrecision: 25, DbScale: 8}}
+	r := newAdbcLaneRead(src, srcCols)
 	mem := memory.NewGoAllocator()
 
 	b := array.NewRecordBuilder(mem, src)
 	defer b.Release()
 	b.Field(0).(*array.Int32Builder).AppendValues([]int32{1, 2}, nil)
-	b.Field(1).(*array.StringBuilder).AppendValues([]string{"12.34", ""}, []bool{true, false})
-	b.Field(2).(*array.StringBuilder).AppendValues([]string{`{"a": 1}`, "null"}, nil)
-	b.Field(3).(*array.BinaryBuilder).AppendValues([][]byte{make([]byte, 16), make([]byte, 16)}, nil)
-	b.Field(4).(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+	b.Field(0).(*array.Int32Builder).AppendValues([]int32{3, 4}, nil)
+	b.Field(1).(*array.StringBuilder).AppendValues([]string{"12.34", "", "12345678901234567.12345678", "-0.00000001"}, []bool{true, false, true, true})
+	b.Field(2).(*array.StringBuilder).AppendValues([]string{`{"a": 1}`, "null", "1", "2"}, nil)
+	b.Field(3).(*array.BinaryBuilder).AppendValues([][]byte{make([]byte, 16), make([]byte, 16), make([]byte, 16), make([]byte, 16)}, nil)
+	b.Field(4).(*array.StringBuilder).AppendValues([]string{"a", "b", "c", "d"}, nil)
 	rec := b.NewRecordBatch()
 	defer rec.Release()
 
@@ -3374,16 +3416,19 @@ func TestAdbcLaneRead_Record(t *testing.T) {
 	defer out.Release()
 
 	assert.True(t, out.Schema().Equal(r.schema))
+	// the catalog columns give the precision and scale, so no digit is cut
 	dec := out.Column(1).(*array.Decimal128)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 25, Scale: 8}, dec.DataType())
 	assert.Equal(t, "12.34", dec.ValueStr(0))
-	assert.EqualValues(t, 6, dec.DataType().(*arrow.Decimal128Type).Scale)
 	assert.True(t, dec.IsNull(1))
+	assert.Equal(t, "12345678901234567.12345678", dec.ValueStr(2))
+	assert.Equal(t, decimal128.FromI64(-1), dec.Value(3)) // -0.00000001
 	assert.Equal(t, `{"a": 1}`, out.Column(2).(*array.String).Value(0))
 }
 
 func TestAdbcLaneRead_NoLabels(t *testing.T) {
 	src := arrow.NewSchema([]arrow.Field{{Name: "c_str", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
-	r := newAdbcLaneRead(src)
+	r := newAdbcLaneRead(src, nil)
 	assert.True(t, r.schema.Equal(src))
 	assert.Empty(t, r.decimals)
 }
@@ -3845,4 +3890,336 @@ func TestD1StreamRowsPaged(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCastColumnsForSelectIntegerToString(t *testing.T) {
+	conn, err := NewConn("redshift://user:pass@localhost:5439/db")
+	g.AssertNoError(t, err)
+
+	srcColumns := iop.Columns{{Name: "flag", Type: iop.IntegerType, DbType: "bigint"}}
+	tgtColumns := iop.Columns{{Name: "flag", Type: iop.StringType, DbType: "varchar"}}
+
+	srcFields := conn.CastColumnsForSelect(srcColumns, tgtColumns)
+	assert.Len(t, srcFields, 1)
+	assert.NotContains(t, srcFields[0], "'true'")
+	assert.NotContains(t, srcFields[0], "'false'")
+	assert.Equal(t, `cast("flag" as varchar(100)) as "flag"`, srcFields[0])
+}
+
+func TestHanaGetURL(t *testing.T) {
+	cases := []struct {
+		name   string
+		url    string
+		props  []string
+		expect map[string]string
+	}{
+		{
+			name:   "basic",
+			url:    "hana://user:pass@host:39041",
+			props:  []string{"database=HXE", "schema=SLING"},
+			expect: map[string]string{"databaseName": "HXE", "defaultSchema": "SLING"},
+		},
+		{
+			name:   "hdb alias and unknown keys removed",
+			url:    "hdb://user:pass@host:39041?sslmode=disable",
+			expect: map[string]string{"sslmode": ""},
+		},
+		{
+			name:   "encrypt sets server name",
+			url:    "hana://user:pass@abc.hanacloud.ondemand.com:443",
+			props:  []string{"encrypt=true"},
+			expect: map[string]string{"TLSServerName": "abc.hanacloud.ondemand.com"},
+		},
+		{
+			name:   "tls props",
+			url:    "hana://user:pass@host:443",
+			props:  []string{"encrypt=true", "tls_server_name=other", "tls_skip_verify=true", "tls_root_ca_file=/ca.pem"},
+			expect: map[string]string{"TLSServerName": "other", "TLSInsecureSkipVerify": "true", "TLSRootCAFile": "/ca.pem"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn, err := NewConnContext(context.Background(), c.url, c.props...)
+			require.NoError(t, err)
+			hana, ok := conn.(*HanaConn)
+			require.True(t, ok, "expected *HanaConn, got %T", conn)
+
+			u, err := url.Parse(hana.GetURL())
+			require.NoError(t, err)
+			assert.Equal(t, "hdb", u.Scheme)
+			assert.Empty(t, u.Path)
+			for key, val := range c.expect {
+				assert.Equal(t, val, u.Query().Get(key), key)
+			}
+		})
+	}
+}
+
+func TestHanaGetURLTunnel(t *testing.T) {
+	conn, err := NewConnContext(context.Background(), "hana://user:pass@abc.hanacloud.ondemand.com:443", "encrypt=true")
+	require.NoError(t, err)
+
+	u, err := url.Parse(conn.(*HanaConn).GetURL("hana://user:pass@127.0.0.1:50001"))
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:50001", u.Host)
+	assert.Equal(t, "abc.hanacloud.ondemand.com", u.Query().Get("TLSServerName"))
+}
+
+func TestHanaGetURLSpecialPassword(t *testing.T) {
+	conn, err := NewConnContext(context.Background(), "hana://host:39041", "user=SLING", "password=p@ss:w/rd?#")
+	require.NoError(t, err)
+
+	u, err := url.Parse(conn.(*HanaConn).GetURL())
+	require.NoError(t, err)
+	pass, _ := u.User.Password()
+	assert.Equal(t, "SLING", u.User.Username())
+	assert.Equal(t, "p@ss:w/rd?#", pass)
+}
+
+func TestHanaInsertRow(t *testing.T) {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+	cols := iop.Columns{
+		{Name: "s", DbType: "NVARCHAR"},
+		{Name: "t", DbType: "nvarchar"},
+		{Name: "j", DbType: "NCLOB"},
+		{Name: "b", DbType: "BOOLEAN"},
+		{Name: "bin", DbType: "VARBINARY"},
+		{Name: "i", DbType: "INTEGER"},
+		{Name: "n", DbType: "NVARCHAR"},
+	}
+	row := processHanaInsertRow(cols, []any{123, ts, map[string]any{"a": 1}, "true", "ab", 5, nil})
+
+	assert.Equal(t, "123", row[0])
+	assert.Equal(t, ts.Format(time.RFC3339Nano), row[1])
+	assert.Equal(t, `{"a":1}`, row[2])
+	assert.Equal(t, true, row[3])
+	assert.Equal(t, []byte("ab"), row[4])
+	assert.Equal(t, 5, row[5])
+	assert.Nil(t, row[6])
+}
+
+func TestHanaTemplate(t *testing.T) {
+	tmpl, err := dbio.TypeDbHana.Template()
+	require.NoError(t, err)
+
+	assert.Equal(t, "nvarchar()", tmpl.GeneralTypeMap["string"])
+	assert.Equal(t, "nclob", tmpl.GeneralTypeMap["text"])
+	assert.Equal(t, "timestamp", tmpl.GeneralTypeMap["timestampz"])
+	assert.Equal(t, "decimal", tmpl.NativeTypeMap["decimal"])
+	assert.Equal(t, "datetime", tmpl.NativeTypeMap["seconddate"])
+	assert.Equal(t, "bool", tmpl.NativeTypeMap["boolean"])
+
+	// drop statements are anonymous blocks: they must stay one statement
+	for _, key := range []string{"drop_table", "drop_view", "drop_index"} {
+		stmts := ParseSQLMultiStatements(tmpl.Core[key], dbio.TypeDbHana)
+		assert.Len(t, stmts, 1, key)
+	}
+}
+
+func TestProcessOracleInsertRow(t *testing.T) {
+	cols := iop.Columns{
+		{Name: "v", DbType: "VARCHAR2"},
+		{Name: "nv", DbType: "NVARCHAR2"},
+		{Name: "nc", DbType: "NCHAR"},
+		{Name: "ncl", DbType: "nclob"},
+		{Name: "nnull", DbType: "NVARCHAR2"},
+		{Name: "nnum", DbType: "NVARCHAR2"},
+	}
+	row := processOracleInsertRow(cols, []any{"ł", "ł", "ł", "ł", nil, 5, "extra"})
+
+	assert.Equal(t, "ł", row[0])
+	assert.Equal(t, go_ora.NVarChar("ł"), row[1])
+	assert.Equal(t, go_ora.NVarChar("ł"), row[2])
+	assert.Equal(t, go_ora.NVarChar("ł"), row[3])
+	assert.Nil(t, row[4])
+	assert.Equal(t, 5, row[5])
+	assert.Equal(t, "extra", row[6])
+}
+
+func TestOracleNationalTypes(t *testing.T) {
+	conn, err := NewConn("oracle://u:p@localhost:1521/FREEPDB1")
+	require.NoError(t, err)
+
+	nativeType := func(col iop.Column) string {
+		nt, err := conn.GetNativeType(col)
+		require.NoError(t, err)
+		return nt
+	}
+
+	str := iop.Column{Name: "s", Type: iop.StringType, DbPrecision: 40, Sourced: true}
+	assert.Equal(t, "varchar(40)", nativeType(str))
+
+	// go-ora reports VARCHAR2 result columns as NCHAR: no national type
+	str.DbType = "NCHAR"
+	assert.Equal(t, "varchar(40)", nativeType(str))
+
+	str.DbType = "NVARCHAR2"
+	assert.Equal(t, "nvarchar2(40)", nativeType(str))
+
+	str.DbPrecision = 3000
+	assert.Equal(t, "nclob", nativeType(str))
+
+	text := iop.Column{Name: "t", Type: iop.TextType, DbType: "NCLOB"}
+	assert.Equal(t, "nclob", nativeType(text))
+
+	// a CLOB temp column goes into an NCLOB target without a varchar2 cast
+	src := iop.Column{Name: "c", Type: iop.TextType, DbType: "CLOB"}
+	assert.Equal(t, `"c"`, conn.CastColumnForSelect(src, iop.Column{Name: "c", Type: iop.TextType, DbType: "NCLOB"}))
+	assert.Equal(t, `cast("c" as varchar2(100))`, conn.CastColumnForSelect(src, iop.Column{Name: "c", Type: iop.StringType, DbType: "VARCHAR2", DbPrecision: 100}))
+}
+
+func TestNormalizeMsUUID(t *testing.T) {
+	cases := map[string]string{
+		"6f9619ff8b86d011b42d00c04fc964ff":     "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+		"6F9619FF8B86D011B42D00C04FC964FF":     "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+		"6F9619FF-8B86-D011-B42D-00C04FC964FF": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+		"zz9619ff8b86d011b42d00c04fc964ff":     "zz9619ff8b86d011b42d00c04fc964ff",
+		"":                                     "",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, normalizeMsUUID(in), in)
+	}
+}
+
+func TestSummarizeBcpOutput(t *testing.T) {
+	out := "Starting copy...\n" +
+		strings.Repeat("SQLState = 22018, NativeError = 0\nError = Invalid character value for cast specification\n", 1000) +
+		"1000 rows sent to SQL Server. Total sent: 1000\n" +
+		"#@ Row 1, Column 3: bad @#\n1,secret,a\n" +
+		strings.Repeat("y", 2000) + "\n" +
+		"BCP copy in failed\n"
+
+	got := summarizeBcpOutput(out)
+	assert.Equal(t, []string{
+		"SQLState = 22018, NativeError = 0",
+		"Error = Invalid character value for cast specification",
+		"#@ Row 1, Column 3: bad @#",
+		strings.Repeat("y", 500) + "...",
+		"BCP copy in failed",
+	}, strings.Split(got, "\n"))
+
+	var many []string
+	for i := 0; i < 25; i++ {
+		many = append(many, strings.Repeat("e", i+1))
+	}
+	lines := strings.Split(summarizeBcpOutput(strings.Join(many, "\n")), "\n")
+	assert.Len(t, lines, 21)
+	assert.Equal(t, "... (5 more lines)", lines[20])
+}
+
+// A target numeric with no precision takes the type of its values, so no
+// fraction digit is cut (SLING-166).
+func TestArrowDBConnBatchToRecordReader_OpenDecimal(t *testing.T) {
+	cols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType}}
+	tgtCols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType, DbType: "numeric"}}
+
+	read := func(vals ...any) (arrow.Record, error) {
+		ds := iop.NewDatastream(cols)
+		batch := ds.NewBatch(cols)
+		for i, v := range vals {
+			batch.Push([]any{i + 1, v})
+		}
+		batch.Close()
+
+		conn := &ArrowDBConn{driverType: dbio.TypeDbPostgres}
+		reader, _, err := conn.batchToRecordReader(batch, tgtCols)
+		if err != nil {
+			return nil, err
+		}
+		require.True(t, reader.Next())
+		rec := reader.RecordBatch()
+		rec.Retain()
+		reader.Release()
+		return rec, nil
+	}
+
+	rec, err := read("1.12345678901234567890", "-2.25", nil)
+	require.NoError(t, err)
+	defer rec.Release()
+	dec := rec.Column(1).(*array.Decimal128)
+	assert.Equal(t, &arrow.Decimal128Type{Precision: 38, Scale: 20}, dec.DataType())
+	assert.Equal(t, "1.1234567890123456789", dec.ValueStr(0)) // ValueStr drops trailing zeros
+	assert.Equal(t, "-2.25", dec.ValueStr(1))
+	assert.True(t, dec.IsNull(2))
+
+	// 23 integer digits and 20 fraction digits need decimal256
+	rec2, err := read("1.12345678901234567890", "12345678901234567890123.5")
+	require.NoError(t, err)
+	defer rec2.Release()
+	assert.Equal(t, &arrow.Decimal256Type{Precision: 76, Scale: 20}, rec2.Column(1).DataType())
+	assert.Equal(t, "12345678901234567890123.5", rec2.Column(1).ValueStr(1))
+
+	_, err = read(strings.Repeat("9", 70) + "." + strings.Repeat("1", 10))
+	assert.ErrorContains(t, err, "column d does not fit a decimal type")
+}
+
+func TestSnowflakeStage(t *testing.T) {
+	t.Run("parseStageURL", func(t *testing.T) {
+		assert.Equal(t, "s3://bucket/path/", parseStageURL(`["s3://bucket/path/"]`))
+		assert.Equal(t, "gcs://bucket/", parseStageURL(`gcs://bucket/`))
+		assert.Equal(t, "", parseStageURL(``))
+		assert.Equal(t, "", parseStageURL(`[]`))
+	})
+
+	t.Run("internal", func(t *testing.T) {
+		assert.False(t, SnowflakeStage{Name: "DB.SCH.STG"}.IsExternal())
+	})
+
+	connProps := []string{
+		"url=snowflake://user@acct/db", "account=acct", "region=us-east-2.aws", "aws_bucket=other",
+		"aws_access_key_id=AK", "key_file=/key.json", "sas_svc_url=https://sas",
+	}
+
+	cases := []struct {
+		url      string
+		fileURL  string
+		expected map[string]string
+		absent   []string
+	}{
+		{
+			url:      "s3://bucket-a/stage/dir",
+			fileURL:  "s3://bucket-a/stage/dir/sling_temp/123",
+			expected: map[string]string{"bucket": "bucket-a", "aws_access_key_id": "AK"},
+			absent:   []string{"url", "account", "region", "aws_bucket"},
+		},
+		{
+			url:      "gcs://bucket-b/stage/",
+			fileURL:  "gs://bucket-b/stage/sling_temp/123",
+			expected: map[string]string{"bucket": "bucket-b", "key_file": "/key.json"},
+			absent:   []string{"url", "region"},
+		},
+		{
+			url:      "azure://myacct.blob.core.windows.net/mycontainer/stage/",
+			fileURL:  "https://myacct.blob.core.windows.net/mycontainer/stage/sling_temp/123",
+			expected: map[string]string{"account": "myacct", "container": "mycontainer", "sas_svc_url": "https://sas"},
+			absent:   []string{"url", "region"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.url, func(t *testing.T) {
+			stage := SnowflakeStage{Name: "DB.SCH.STG", URL: c.url}
+			assert.True(t, stage.IsExternal())
+
+			fileURL, err := stage.FileURL("sling_temp/123")
+			assert.NoError(t, err)
+			assert.Equal(t, c.fileURL, fileURL)
+
+			props, err := stage.FileSysProps(connProps)
+			assert.NoError(t, err)
+			m := g.KVArrToMap(props...)
+			for k, v := range c.expected {
+				assert.Equal(t, v, m[k], k)
+			}
+			for _, k := range c.absent {
+				assert.NotContains(t, m, k)
+			}
+		})
+	}
+
+	t.Run("unsupported", func(t *testing.T) {
+		_, err := SnowflakeStage{Name: "STG", URL: "ftp://host/x"}.FileURL("a")
+		assert.Error(t, err)
+	})
 }

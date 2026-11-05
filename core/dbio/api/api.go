@@ -88,6 +88,11 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 }
 
 func (ac *APIConnection) GetReplicationStore() (store map[string]any) {
+	// endpoints write the store under the context lock
+	if ac.Context != nil {
+		ac.Context.Lock()
+		defer ac.Context.Unlock()
+	}
 	err := g.JSONConvert(ac.State.Store, &store)
 	if err != nil {
 		g.Warn("could not unmarshal from API state replication store: " + err.Error())

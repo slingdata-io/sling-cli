@@ -650,7 +650,9 @@ func (c *Connection) setURL() (err error) {
 
 			if g.In(c.Type, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				setIfMissing("sslmode", U.PopParam("sslmode"))
-				setIfMissing("role", U.PopParam("role"))
+				if role := U.PopParam("role"); role != "" {
+					setIfMissing("role", role)
+				}
 			}
 
 			switch c.Type {
@@ -773,7 +775,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("database", c.Data["sid"])
 		setIfMissing("database", c.Data["service_name"])
 		setIfMissing("port", c.Type.DefPort())
-		setIfMissing("client_charset", "UTF8")
+		// no default client_charset: go-ora then encodes binds in the server charset (GH #759)
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
 			if !strings.HasPrefix(cast.ToString(tns), "(") {
 				c.Data["tns"] = "(" + cast.ToString(tns) + ")"
@@ -793,7 +795,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("database", c.Data["dbname"])
 		template = "postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
-		if _, ok := c.Data["role"]; ok {
+		if cast.ToString(c.Data["role"]) != "" {
 			template = template + "&role={role}"
 		}
 		if _, ok := c.Data["statement_timeout"]; ok {
@@ -915,7 +917,7 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["warehouse"]; ok {
 			template = template + "&warehouse={warehouse}"
 		}
-		if _, ok := c.Data["role"]; ok {
+		if cast.ToString(c.Data["role"]) != "" {
 			template = template + "&role={role}"
 		}
 		// if _, ok := c.Data["schema"]; ok {
@@ -1153,6 +1155,11 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
 			template = template + "&schema={schema}"
 		}
+	case dbio.TypeDbHana:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		template = "hdb://{username}:{password}@{host}:{port}?"
 	case dbio.TypeDbArrowDBC:
 		// ADBC connections use a driver path and driver-specific properties
 		// Set a simple URL scheme for connection identification

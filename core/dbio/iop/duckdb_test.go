@@ -3,11 +3,16 @@ package iop
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +20,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
+	"github.com/flarco/g/process"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -296,6 +302,22 @@ func TestDuckDbProcessDeathStderrTail(t *testing.T) {
 	assert.Contains(t, err.Error(), "table_that_is_not_there_xyz")
 }
 
+// A killed sidecar can stop the stdout scanner before its exit is recorded.
+// That is still a process death, so the task retry applies (CLI test 622).
+func TestDuckDbProcDeathErrScanErr(t *testing.T) {
+	scanErr := fmt.Errorf("io: read/write on closed pipe")
+
+	dead := &DuckDb{Proc: &process.Proc{HideCmdInErr: true, ScanErr: scanErr, ExitCode: g.Ptr(137)}}
+	err := dead.procDeathErr()
+	assert.True(t, IsDuckDbProcDeath(err), err.Error())
+	assert.Contains(t, err.Error(), "exit code 137")
+
+	alive := &DuckDb{Proc: &process.Proc{HideCmdInErr: true, ScanErr: scanErr}}
+	err = alive.procDeathErr()
+	assert.False(t, IsDuckDbProcDeath(err), err.Error())
+	assert.Contains(t, err.Error(), "stdout scanner stopped")
+}
+
 // KillChildProcs must stop every live sidecar, since they are not in the
 // process group of sling and get no console signal.
 func TestDuckDbKillChildProcs(t *testing.T) {
@@ -445,7 +467,7 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 				// Verify part structure
 				assert.NotEmpty(t, part.FromExpr)
 				assert.Contains(t, part.FromExpr, "read_csv")
-				assert.Contains(t, part.FromExpr, "http://localhost:")
+				assert.Contains(t, part.FromExpr, "http://127.0.0.1:")
 				assert.NotNil(t, part.Columns)
 				assert.Equal(t, 3, len(part.Columns))
 
@@ -541,7 +563,7 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 				// Verify part structure for Arrow format
 				assert.NotEmpty(t, part.FromExpr)
 				assert.Contains(t, part.FromExpr, "read_arrow")
-				assert.Contains(t, part.FromExpr, "http://localhost:")
+				assert.Contains(t, part.FromExpr, "http://127.0.0.1:")
 				assert.NotNil(t, part.Columns)
 				assert.Equal(t, 2, len(part.Columns))
 
@@ -1277,5 +1299,168 @@ func TestDuckDbStreamParallelScan(t *testing.T) {
 		data, err := ds.Collect(0)
 		require.NoError(t, err)
 		assert.Len(t, data.Rows, 160000)
+	})
+}
+
+// TestDuckDbHttpStreamListenerReady checks that the local data server answers
+// as soon as a stream part is handed out, while other code in the process
+// binds and frees ephemeral ports (parallel streams, ssh tunnels, proxies).
+func TestDuckDbHttpStreamListenerReady(t *testing.T) {
+	iterations := 100
+	if testing.Short() {
+		iterations = 20
+	}
+
+	stop := make(chan struct{})
+	var churn sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		churn.Add(1)
+		go func() {
+			defer churn.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if ln, err := net.Listen("tcp", "localhost:0"); err == nil {
+					time.Sleep(time.Millisecond)
+					ln.Close()
+				}
+			}
+		}()
+	}
+	defer func() { close(stop); churn.Wait() }()
+
+	urlRe := regexp.MustCompile(`http://[^']+`)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	failures := 0
+	for i := 0; i < iterations; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		columns := NewColumnsFromFields("id")
+		columns[0].Type = IntegerType
+		ds := NewDatastreamContext(ctx, columns)
+		ds.SetConfig(map[string]string{})
+		ds.Buffer = append(ds.Buffer, []any{int64(i)})
+		ds.Count = 1
+		ds.Ready = true
+
+		df := NewDataflow()
+		df.Columns = columns
+		df.Ready = true
+		df.Streams = append(df.Streams, ds)
+		go func() {
+			defer close(df.StreamCh)
+			df.StreamCh <- ds
+			ds.Close()
+		}()
+
+		duck := NewDuckDb(ctx)
+		parts, err := duck.DataflowToHttpStream(df, StreamConfig{Format: dbio.FileTypeCsv, BatchLimit: 10})
+		require.NoError(t, err)
+
+		part := <-parts
+		url := urlRe.FindString(part.FromExpr)
+		require.NotEmpty(t, url, part.FromExpr)
+
+		err = func() error {
+			resp, err := client.Head(url)
+			if err != nil {
+				return err
+			}
+			resp.Body.Close()
+			resp, err = client.Get(url)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			_, err = io.Copy(io.Discard, resp.Body)
+			return err
+		}()
+		if err != nil {
+			failures++
+			t.Logf("iteration %d: %s: %v", i, url, err)
+		}
+
+		cancel()
+		for range parts {
+		}
+	}
+	assert.Zero(t, failures, "requests failed in %d of %d iterations", failures, iterations)
+}
+
+// TestDuckDbHttpStreamReread checks that duckdb can read the source of one
+// query again (MotherDuck does), also after it dropped the first response.
+func TestDuckDbHttpStreamReread(t *testing.T) {
+	const rows = 50000
+	urlRe := regexp.MustCompile(`http://[^']+`)
+
+	stream := func(t *testing.T) (HttpStreamPart, chan HttpStreamPart, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		columns := NewColumnsFromFields("id", "name")
+		columns[0].Type = IntegerType
+		columns[1].Type = StringType
+		data := NewDataset(columns)
+		for i := 0; i < rows; i++ {
+			data.Rows = append(data.Rows, []any{int64(i), "name-" + cast.ToString(i)})
+		}
+		df, err := MakeDataFlow(data.Stream())
+		require.NoError(t, err)
+
+		duck := NewDuckDb(ctx)
+		parts, err := duck.DataflowToHttpStream(df, StreamConfig{Format: dbio.FileTypeCsv})
+		require.NoError(t, err)
+		return <-parts, parts, cancel
+	}
+
+	get := func(t *testing.T, url string, limit int64) string {
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(url)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+		require.NoError(t, err)
+		return string(body)
+	}
+
+	finish := func(t *testing.T, part HttpStreamPart, parts chan HttpStreamPart) {
+		part.Done()
+		select {
+		case _, ok := <-parts:
+			assert.False(t, ok, "expected one part only")
+		case <-time.After(10 * time.Second):
+			t.Fatal("producer did not finish after Done")
+		}
+	}
+
+	t.Run("read again after a full read", func(t *testing.T) {
+		part, parts, cancel := stream(t)
+		defer cancel()
+		url := urlRe.FindString(part.FromExpr)
+
+		first := get(t, url, math.MaxInt64)
+		assert.Equal(t, rows, strings.Count(first, "\n"))
+
+		resp, err := http.Head(url)
+		require.NoError(t, err)
+		resp.Body.Close()
+		assert.Equal(t, first, get(t, url, math.MaxInt64))
+
+		finish(t, part, parts)
+	})
+
+	t.Run("read again after a dropped response", func(t *testing.T) {
+		part, parts, cancel := stream(t)
+		defer cancel()
+		url := urlRe.FindString(part.FromExpr)
+
+		assert.Len(t, get(t, url, 100), 100)
+		again := get(t, url, math.MaxInt64)
+		assert.Equal(t, rows, strings.Count(again, "\n"))
+		assert.True(t, strings.HasSuffix(again, "name-"+cast.ToString(rows-1)+"\n"), again[len(again)-50:])
+
+		finish(t, part, parts)
 	})
 }

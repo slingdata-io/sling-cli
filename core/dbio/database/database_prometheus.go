@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -230,6 +231,33 @@ func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 	return
 }
 
+// toHourDuration converts the d (day), w (week) and M (month) suffixes, which
+// time.ParseDuration does not understand, into hours.
+func toHourDuration(duration string) string {
+	switch {
+	case strings.HasSuffix(duration, "d"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "d"))
+		duration = g.F("%dh", num*24)
+	case strings.HasSuffix(duration, "w"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "w"))
+		duration = g.F("%dh", num*24*7)
+	case strings.HasSuffix(duration, "M"):
+		num := cast.ToInt(strings.TrimSuffix(duration, "M"))
+		duration = g.F("%dh", num*24*31)
+	}
+	return duration
+}
+
+// parseRelativeOffset parses the offset of a "now-<duration>" value (e.g. "-2M",
+// "-7d", "-30m"), accepting the same d/w/M suffixes as the non-chunked path.
+func parseRelativeOffset(offset string) (time.Duration, error) {
+	if strings.HasPrefix(offset, "-") {
+		d, err := time.ParseDuration(toHourDuration(strings.TrimPrefix(offset, "-")))
+		return -d, err
+	}
+	return time.ParseDuration(toHourDuration(offset))
+}
+
 func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string, Opts ...map[string]interface{}) (ds *iop.Datastream, err error) {
 	opts := getQueryOptions(Opts)
 	Limit := int(0) // infinite
@@ -254,7 +282,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				start := time.Now().Add(-30 * time.Minute)
 				if val, ok := queryOpts["start"]; ok {
 					if strings.HasPrefix(val, "now") && strings.Contains(val, "-") {
-						duration, _ := time.ParseDuration(strings.TrimPrefix(val, "now"))
+						duration, _ := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 						start = time.Now().Add(duration)
 					} else if !strings.HasPrefix(val, "now") {
 						start, _ = time.Parse(time.RFC3339, val)
@@ -264,7 +292,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				end := time.Now()
 				if val, ok := queryOpts["end"]; ok {
 					if strings.HasPrefix(val, "now") && strings.Contains(val, "-") {
-						duration, _ := time.ParseDuration(strings.TrimPrefix(val, "now"))
+						duration, _ := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 						end = time.Now().Add(duration)
 					} else if !strings.HasPrefix(val, "now") {
 						end, _ = time.Parse(time.RFC3339, val)
@@ -282,21 +310,6 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 
 	start := time.Now().Add(-24 * 30 * time.Hour)
 	end := time.Now()
-
-	toHourDuration := func(duration string) string {
-		switch {
-		case strings.HasSuffix(duration, "d"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "d"))
-			duration = g.F("%dh", num*24)
-		case strings.HasSuffix(duration, "w"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "w"))
-			duration = g.F("%dh", num*24*7)
-		case strings.HasSuffix(duration, "M"):
-			num := cast.ToInt(strings.TrimSuffix(duration, "M"))
-			duration = g.F("%dh", num*24*31)
-		}
-		return duration
-	}
 
 	if startVal := cast.ToString(opts["start"]); strings.HasPrefix(startVal, "now-") {
 		duration := strings.TrimPrefix(startVal, "now-")
@@ -720,7 +733,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	if val, ok := queryOpts["start"]; ok {
 		if strings.HasPrefix(val, "now") {
 			if strings.Contains(val, "-") {
-				duration, err := time.ParseDuration(strings.TrimPrefix(val, "now"))
+				duration, err := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 				if err != nil {
 					return nil, g.Error(err, "could not parse start duration: %s", val)
 				}
@@ -740,7 +753,7 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 	if val, ok := queryOpts["end"]; ok {
 		if strings.HasPrefix(val, "now") {
 			if strings.Contains(val, "-") {
-				duration, err := time.ParseDuration(strings.TrimPrefix(val, "now"))
+				duration, err := parseRelativeOffset(strings.TrimPrefix(val, "now"))
 				if err != nil {
 					return nil, g.Error(err, "could not parse end duration: %s", val)
 				}
@@ -758,195 +771,212 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 	step := 1 * time.Minute
 	if val, ok := queryOpts["step"]; ok {
-		step, err = time.ParseDuration(val)
+		step, err = time.ParseDuration(toHourDuration(val))
 		if err != nil {
 			return nil, g.Error(err, "could not parse step duration: %s", val)
 		}
 	}
-
-	// Calculate chunk size - max 1 hour per chunk to avoid memory issues
-	chunkDuration := 1 * time.Hour
-	if totalDuration := end.Sub(start); totalDuration < chunkDuration {
-		// If total duration is less than chunk size, use original method
-		return conn.StreamRowsContext(queryContext.Ctx, query, opts)
+	if step <= 0 {
+		return nil, g.Error("step must be positive: %s", step)
 	}
 
-	// Initialize columns and datastream
-	var columns iop.Columns
-	columnsInitialized := false
+	reader := newPromChunkReader(queryContext.Ctx, conn, query, start, end, step)
 
-	// Create the datastream
-	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
+	// read up to the first rows, to get the columns
+	var rows [][]any
+	for len(rows) == 0 && !reader.Done() {
+		if rows, err = reader.Read(); err != nil {
+			return nil, err
+		}
+	}
 
-	// Set connection properties and transforms
+	columns := reader.columns
+	if len(columns) == 0 && opts["columns"] != nil {
+		switch cols := opts["columns"].(type) {
+		case iop.Columns:
+			columns = cols
+		default:
+			g.JSONConvert(opts["columns"], &columns)
+		}
+	}
+
 	props := conn.Props()
 	if transformsOpt := opts["transforms"]; transformsOpt != nil {
 		props["transforms"] = cast.ToString(transformsOpt)
 	}
+
+	// ds.Start reads the first rows through the transforms before SetReady,
+	// so the column types and the buffer are final when the dataflow gets them
+	i := 0
+	nextFunc := func(it *iop.Iterator) bool {
+		for i >= len(rows) {
+			if reader.Done() || it.Context.Err() != nil {
+				return false
+			}
+			next, err := reader.Read()
+			if err != nil {
+				it.Context.CaptureErr(err)
+				return false
+			}
+			rows, i = next, 0
+		}
+		it.Row = rows[i]
+		i++
+		return true
+	}
+
+	ds = iop.NewDatastreamIt(queryContext.Ctx, slices.Clone(columns), nextFunc) // the reader keeps its own copy
 	ds.SetConfig(props)
 
-	// Start the bytes-written processor to prevent blocking on bwRows channel
-	ds.StartBwProcessor()
+	// a cast transform sets the types, as in applyTransformsToData
+	if t := ds.Sp.Config.Transforms; t != nil && t.Casted() {
+		ds.Inferred = true
+	}
 
-	// Process in chunks
-	go func() {
-		defer ds.Close()
+	if err = ds.Start(); err != nil {
+		return nil, g.Error(err, "could not start prometheus datastream")
+	}
 
-		chunkStart := start
-		chunkNum := 0
-		for chunkStart.Before(end) {
-			chunkEnd := chunkStart.Add(chunkDuration)
-			if chunkEnd.After(end) {
-				chunkEnd = end
+	return ds, nil
+}
+
+// promChunkReader reads a Prometheus range query in chunks of about 60 points per series.
+type promChunkReader struct {
+	ctx     context.Context
+	conn    *PrometheusConn
+	query   string
+	step    time.Duration
+	size    time.Duration
+	delay   time.Duration // between chunks, to not overwhelm the API
+	next    time.Time
+	end     time.Time
+	num     int
+	columns iop.Columns // from the first sample
+}
+
+func newPromChunkReader(ctx context.Context, conn *PrometheusConn, query string, start, end time.Time, step time.Duration) *promChunkReader {
+	// a multiple of step keeps the evaluation times of one full range query
+	points := max(60, int64((time.Hour+step-1)/step))
+	return &promChunkReader{
+		ctx:   ctx,
+		conn:  conn,
+		query: query,
+		step:  step,
+		size:  step * time.Duration(points),
+		delay: 100 * time.Millisecond,
+		next:  start,
+		end:   end,
+	}
+}
+
+// Done is true when no chunk is left. Prometheus includes both range ends,
+// so a chunk that starts at end is still read.
+func (r *promChunkReader) Done() bool {
+	return r.next.After(r.end)
+}
+
+// Read queries the next chunk and returns its rows.
+func (r *promChunkReader) Read() (rows [][]any, err error) {
+	if r.num > 0 && r.delay > 0 {
+		time.Sleep(r.delay)
+	}
+
+	// end one step before the next chunk, so that boundary points do not repeat
+	chunk := v1.Range{Start: r.next, End: r.next.Add(r.size - r.step), Step: r.step}
+	if chunk.End.After(r.end) {
+		chunk.End = r.end
+	}
+	r.next = r.next.Add(r.size)
+	r.num++
+
+	g.Debug("Processing chunk %d: %s to %s", r.num, chunk.Start.Format(time.RFC3339), chunk.End.Format(time.RFC3339))
+
+	result, warnings, err := r.conn.Client.QueryRange(r.ctx, r.query, chunk)
+	if err != nil {
+		return nil, g.Error(err, "Error querying Prometheus chunk: %s", r.query)
+	}
+
+	for _, warning := range warnings {
+		g.Warn(warning)
+	}
+
+	switch result := result.(type) {
+	case model.Matrix:
+		for _, sample := range result {
+			metricMap := map[string]string{}
+			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+			if len(r.columns) == 0 {
+				r.columns = createPrometheusColumns(metricMap, sample)
 			}
 
-			chunkNum++
-			g.Debug("Processing chunk %d: %s to %s", chunkNum, chunkStart.Format(time.RFC3339), chunkEnd.Format(time.RFC3339))
+			fieldMap := r.columns.FieldMap(true)
+			index := func(k string) int { return fieldMap[strings.ToLower(k)] }
 
-			// Query this chunk
-			chunkRange := v1.Range{
-				Start: chunkStart,
-				End:   chunkEnd,
-				Step:  step,
-			}
-
-			result, warnings, err := conn.Client.QueryRange(queryContext.Ctx, query, chunkRange)
-			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error querying Prometheus chunk: %s", query))
-				return
-			}
-
-			for _, warning := range warnings {
-				g.Warn(warning)
-			}
-
-			// Process chunk results
-			if matrix, ok := result.(model.Matrix); ok {
-				for _, sample := range matrix {
-					metricMap := map[string]string{}
-					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
-
-					// Initialize columns on first data
-					if !columnsInitialized {
-						columns = createPrometheusColumns(metricMap, sample)
-						ds.Columns = columns
-						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
-					}
-
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					// Stream values
-					for _, value := range sample.Values {
-						row := make([]any, len(columns))
-						for k, v := range metricMap {
-							row[index(k)] = v
-						}
-						row[index("timestamp")] = value.Timestamp.Unix()
-						row[index("value")] = conn.toFloat(value.Value)
-
-						select {
-						case <-queryContext.Ctx.Done():
-							return
-						default:
-							ds.Push(row)
-						}
-					}
-
-					// Stream histogram data if present
-					for _, hist := range sample.Histograms {
-						for i, bucket := range hist.Histogram.Buckets {
-							row := make([]any, len(columns))
-							for k, v := range metricMap {
-								row[index(k)] = v
-							}
-							row[index("timestamp")] = hist.Timestamp.Unix()
-							row[index("count")] = conn.toFloat(hist.Histogram.Count)
-							row[index("sum")] = conn.toFloat(hist.Histogram.Sum)
-							row[index("bucket_boundaries")] = i
-							row[index("bucket_count")] = conn.toFloat(bucket.Count)
-							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
-							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
-
-							select {
-							case <-queryContext.Ctx.Done():
-								return
-							default:
-								ds.Push(row)
-							}
-						}
-					}
+			for _, value := range sample.Values {
+				row := make([]any, len(r.columns))
+				for k, v := range metricMap {
+					row[index(k)] = v
 				}
-			} else if vector, ok := result.(model.Vector); ok {
-				// Handle vector results similarly
-				for _, sample := range vector {
-					metricMap := map[string]string{}
-					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+				row[index("timestamp")] = value.Timestamp.Unix()
+				row[index("value")] = r.conn.toFloat(value.Value)
+				rows = append(rows, row)
+			}
 
-					if !columnsInitialized {
-						columns = createPrometheusColumnsFromVector(metricMap, sample)
-						ds.Columns = columns
-						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
-					}
-
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					row := make([]any, len(columns))
+			for _, hist := range sample.Histograms {
+				for i, bucket := range hist.Histogram.Buckets {
+					row := make([]any, len(r.columns))
 					for k, v := range metricMap {
 						row[index(k)] = v
 					}
-
-					if sample.Histogram != nil {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("count")] = conn.toFloat(sample.Histogram.Count)
-						row[index("sum")] = conn.toFloat(sample.Histogram.Sum)
-
-						for _, bucket := range sample.Histogram.Buckets {
-							row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-							row[index("bucket_count")] = conn.toFloat(bucket.Count)
-							row[index("bucket_lower")] = conn.toFloat(bucket.Lower)
-							row[index("bucket_upper")] = conn.toFloat(bucket.Upper)
-						}
-					} else {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("value")] = conn.toFloat(sample.Value)
-					}
-
-					select {
-					case <-queryContext.Ctx.Done():
-						return
-					default:
-						ds.Push(row)
-					}
+					row[index("timestamp")] = hist.Timestamp.Unix()
+					row[index("count")] = r.conn.toFloat(hist.Histogram.Count)
+					row[index("sum")] = r.conn.toFloat(hist.Histogram.Sum)
+					row[index("bucket_boundaries")] = i
+					row[index("bucket_count")] = r.conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = r.conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = r.conn.toFloat(bucket.Upper)
+					rows = append(rows, row)
 				}
 			}
-
-			// Move to next chunk
-			chunkStart = chunkEnd
-
-			// Add a small delay between chunks to avoid overwhelming the API
-			time.Sleep(100 * time.Millisecond)
 		}
+	case model.Vector:
+		for _, sample := range result {
+			metricMap := map[string]string{}
+			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
 
-		// If no columns were initialized (no data), use columns from options if available
-		if !columnsInitialized {
-			if opts["columns"] != nil {
-				switch cols := opts["columns"].(type) {
-				case iop.Columns:
-					ds.Columns = cols
-				default:
-					// Try to convert from options
-					g.JSONConvert(opts["columns"], &ds.Columns)
-				}
+			if len(r.columns) == 0 {
+				r.columns = createPrometheusColumnsFromVector(metricMap, sample)
 			}
-			ds.SetReady()
-		}
-	}()
 
-	return ds, nil
+			fieldMap := r.columns.FieldMap(true)
+			index := func(k string) int { return fieldMap[strings.ToLower(k)] }
+
+			row := make([]any, len(r.columns))
+			for k, v := range metricMap {
+				row[index(k)] = v
+			}
+
+			if sample.Histogram != nil {
+				row[index("timestamp")] = sample.Timestamp.Unix()
+				row[index("count")] = r.conn.toFloat(sample.Histogram.Count)
+				row[index("sum")] = r.conn.toFloat(sample.Histogram.Sum)
+
+				for _, bucket := range sample.Histogram.Buckets {
+					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
+					row[index("bucket_count")] = r.conn.toFloat(bucket.Count)
+					row[index("bucket_lower")] = r.conn.toFloat(bucket.Lower)
+					row[index("bucket_upper")] = r.conn.toFloat(bucket.Upper)
+				}
+			} else {
+				row[index("timestamp")] = sample.Timestamp.Unix()
+				row[index("value")] = r.conn.toFloat(sample.Value)
+			}
+			rows = append(rows, row)
+		}
+	}
+
+	return rows, nil
 }
 
 // Helper function to create columns for matrix data

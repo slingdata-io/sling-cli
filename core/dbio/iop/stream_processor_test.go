@@ -1,7 +1,12 @@
 package iop
 
 import (
+	"math/big"
+	"strings"
 	"testing"
+
+	"github.com/spf13/cast"
+	"github.com/stretchr/testify/assert"
 )
 
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessDecimal'
@@ -398,4 +403,41 @@ func TestStreamProcessor_TruncateDecimalString(t *testing.T) {
 			}
 		})
 	}
+}
+
+type testDecomposer struct {
+	form     byte
+	negative bool
+	coef     []byte
+	exp      int32
+}
+
+func (d testDecomposer) Decompose(buf []byte) (byte, bool, []byte, int32) {
+	return d.form, d.negative, d.coef, d.exp
+}
+
+func TestDecomposedToRat(t *testing.T) {
+	cases := []struct {
+		dec    testDecomposer
+		expect string
+	}{
+		{testDecomposer{coef: big.NewInt(35987).Bytes(), exp: -3}, "35.987"},
+		{testDecomposer{coef: big.NewInt(12).Bytes(), negative: true, exp: -1}, "-1.2"},
+		{testDecomposer{coef: big.NewInt(5).Bytes(), exp: 2}, "500"},
+		{testDecomposer{coef: nil, exp: 0}, "0"},
+	}
+	for _, c := range cases {
+		r := decomposedToRat(c.dec)
+		if assert.NotNil(t, r) {
+			assert.Equal(t, c.expect, strings.TrimRight(strings.TrimRight(r.FloatString(6), "0"), "."), c.expect)
+		}
+	}
+
+	assert.Nil(t, decomposedToRat(testDecomposer{form: 2})) // NaN
+
+	sp := NewStreamProcessor()
+	col := &Column{Name: "d", Type: DecimalType, DbScale: 3}
+	assert.Equal(t, DecimalType, sp.CheckType(testDecomposer{}))
+	val := sp.CastVal(0, testDecomposer{coef: big.NewInt(35987).Bytes(), exp: -3}, col)
+	assert.Equal(t, "35.987", cast.ToString(val))
 }

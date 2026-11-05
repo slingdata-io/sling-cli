@@ -208,6 +208,46 @@ func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns
 	return
 }
 
+// GetNativeType keeps the national types NVARCHAR2 and NCLOB, which hold text
+// that a non-Unicode database charset cannot. Not NCHAR: go-ora reports
+// VARCHAR2 result columns as NCHAR.
+func (conn *OracleConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	nativeType, err = conn.BaseConn.GetNativeType(col)
+	if err != nil || !col.IsString() || col.IsBinary() {
+		return
+	}
+
+	switch strings.ToUpper(col.DbType) {
+	case "NCLOB":
+		return "nclob", nil
+	case "NVARCHAR2":
+		length := 0
+		if _, scanErr := fmt.Sscanf(nativeType, "varchar(%d)", &length); scanErr == nil && length <= 2000 {
+			return g.F("nvarchar2(%d)", length), nil
+		}
+		return "nclob", nil // above the NVARCHAR2 limit of 2000 chars
+	}
+	return
+}
+
+// processOracleInsertRow binds strings for national (N) columns in the
+// national charset. go-ora binds a plain string in the database charset.
+func processOracleInsertRow(columns iop.Columns, row []any) []any {
+	for i := range row {
+		if i >= len(columns) {
+			break
+		}
+		v, ok := row[i].(string)
+		if !ok {
+			continue
+		}
+		if dbType := columns[i].DbType; strings.EqualFold(dbType, "NVARCHAR2") || strings.EqualFold(dbType, "NCHAR") || strings.EqualFold(dbType, "NCLOB") {
+			row[i] = go_ora.NVarChar(v)
+		}
+	}
+	return row
+}
+
 func (conn *OracleConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
 
 	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
@@ -470,8 +510,15 @@ func (conn *OracleConn) CurrentSchema() (schemaName string, err error) {
 func (conn *OracleConn) getColumnsString(ds *iop.Datastream, tgtColumns ...iop.Columns) string {
 	// build lookup of target column length by name (from GetColumns/metadata)
 	tgtLength := map[string]int{}
+	tgtLob := map[string]bool{}
 	if len(tgtColumns) > 0 {
 		for _, col := range tgtColumns[0] {
+			// Oracle reports data_length=4000 for LOB columns, which are not limited to 4000
+			switch strings.ToUpper(col.DbType) {
+			case "CLOB", "NCLOB", "BLOB", "LONG":
+				tgtLob[strings.ToLower(col.Name)] = true
+				continue
+			}
 			if col.DbPrecision > 0 {
 				tgtLength[strings.ToLower(col.Name)] = col.DbPrecision
 			} else if col.Stats.MaxLen > 0 {
@@ -506,7 +553,8 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream, tgtColumns ...iop.C
 				charSize = p
 			} else if col.DbPrecision > 0 {
 				charSize = col.DbPrecision
-			} else if col.Stats.MaxLen > 0 {
+			} else if col.Stats.MaxLen > 0 && !tgtLob[strings.ToLower(col.Name)] {
+				// a LOB keeps the default: MaxLen is from a sample of rows
 				charSize = col.Stats.MaxLen
 			}
 			expr = g.F("char(%d) NULLIF %s=BLANKS", charSize, colName)
@@ -642,7 +690,7 @@ func (conn *OracleConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column
 		selectStr = g.F("(%s).getclobval()", qName)
 	case srcDbType != "clob" && tgtDbType == "clob":
 		selectStr = g.F("to_clob(%s)", qName)
-	case srcDbType == "clob" && tgtCol.IsString() && tgtDbType != "clob":
+	case srcDbType == "clob" && tgtCol.IsString() && tgtDbType != "clob" && tgtDbType != "nclob":
 		selectStr = g.F("cast(%s as varchar2(%d))", qName, tgtCol.DbPrecision)
 	default:
 		selectStr = qName

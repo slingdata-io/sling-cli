@@ -72,12 +72,15 @@ type BuildState struct {
 }
 
 // BuildModelState holds model metadata available in hooks.
+// No omitempty: a missing key leaves the placeholder unrendered.
 type BuildModelState struct {
-	Name     string `json:"name,omitempty"`
-	Schema   string `json:"schema,omitempty"`
-	Database string `json:"database,omitempty"`
-	FullName string `json:"full_name,omitempty"`
-	Mode     string `json:"mode,omitempty"`
+	Name      string `json:"name"`
+	Schema    string `json:"schema"`
+	Database  string `json:"database"`
+	FullName  string `json:"full_name"`
+	Mode      string `json:"mode"`
+	UpdateKey string `json:"update_key"`
+	UniqueKey string `json:"unique_key"` // comma-joined when composite
 }
 
 // BuildTargetState holds target connection metadata available in hooks.
@@ -614,11 +617,13 @@ func (e *Executor) parseModelHooks(model *Model, mode string) error {
 		Store: map[string]any{},
 		Env:   map[string]any{},
 		Model: BuildModelState{
-			Name:     model.Name,
-			Schema:   model.Schema,
-			Database: model.Database,
-			FullName: model.FullTableName,
-			Mode:     mode,
+			Name:      model.Name,
+			Schema:    model.Schema,
+			Database:  model.Database,
+			FullName:  model.FullTableName,
+			Mode:      mode,
+			UpdateKey: model.Config.UpdateKey,
+			UniqueKey: strings.Join(getUniqueKeys(model), ", "),
 		},
 		Target: BuildTargetState{
 			Name: e.ConnName,

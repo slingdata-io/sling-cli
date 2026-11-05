@@ -62,7 +62,7 @@ func (ce ConnEntries) List() (fields []string, rows [][]any) {
 
 func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, endpoints api.Endpoints, err error) {
 	conn := ce.Get(name)
-	if name == "" {
+	if conn.Name == "" {
 		return nodes, schemata, endpoints, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 

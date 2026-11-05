@@ -103,6 +103,12 @@ func TestCleanHeaderRow(t *testing.T) {
 	assert.Equal(t, "_1seller_s____cool", newHeader[5])
 }
 
+func TestCleanHeaderRowCaseInsensitiveDuplicates(t *testing.T) {
+	header := []string{"ID", "id", "Name", "name", "NAME"}
+	newHeader := CleanHeaderRow(header)
+	assert.Equal(t, []string{"id", "id1", "name", "name1", "name2"}, newHeader)
+}
+
 func TestSplitCarrRet1(t *testing.T) {
 	// An artificial input source.
 	const input = "Now is the winter of our discontent,\r\nMade glorious summer by this sun of York.\r"
