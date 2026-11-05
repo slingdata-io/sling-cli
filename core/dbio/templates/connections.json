@@ -194,11 +194,16 @@
           "description": "Use interactive mode instead of reopening connection",
           "default": false
         },
+        "copy_format": {
+          "type": "string",
+          "description": "Format that moves data between Sling and DuckDB",
+          "enum": ["arrow", "csv"],
+          "default": "arrow"
+        },
         "copy_method": {
           "type": "string",
-          "description": "Method for copying data into DuckDB",
-          "enum": ["csv_files", "csv_http", "arrow_http", "named_pipes"],
-          "default": "csv_http"
+          "description": "Deprecated: use copy_format",
+          "enum": ["csv_files", "csv_http", "arrow_http", "named_pipes"]
         }
       }
     },
@@ -1629,10 +1634,15 @@
           "type": "number",
           "description": "Row limit for DATA_INLINING_ROW_LIMIT"
         },
+        "copy_format": {
+          "type": "string",
+          "description": "Format that moves data between Sling and DuckDB",
+          "enum": ["arrow", "csv"],
+          "default": "arrow"
+        },
         "copy_method": {
           "type": "string",
-          "description": "Copy method into DuckDB",
-          "default": "arrow_http",
+          "description": "Deprecated: use copy_format",
           "enum": [
             "csv_http",
             "arrow_http"
