@@ -991,6 +991,14 @@ func TestSpecEndpointDependsOnEdgeCases(t *testing.T) {
 	})
 }
 
+func TestLoadSpecEmptyBody(t *testing.T) {
+	for _, body := range []string{"", "  \n"} {
+		_, err := LoadSpec(body)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec body is empty")
+	}
+}
+
 func TestLoadSpecUnknownDependsOn(t *testing.T) {
 	_, err := LoadSpec(`
 name: "Bad Depends"
