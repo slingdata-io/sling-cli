@@ -3859,7 +3859,7 @@
 - id: 850
   name: "CDC MySQL value fidelity: NUL byte in VARCHAR (Postgres rejects 0x00)"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3874,7 +3874,7 @@
 - id: 851
   name: "CDC MySQL value fidelity: latin1 VARCHAR with accents and cp1252 chars"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3889,7 +3889,7 @@
 - id: 852
   name: "CDC MySQL value fidelity: ENUM value"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3904,7 +3904,7 @@
 - id: 853
   name: "CDC MySQL value fidelity: ENUM with values that contain int"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3919,7 +3919,7 @@
 - id: 854
   name: "CDC MySQL value fidelity: SET value"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3934,7 +3934,7 @@
 - id: 855
   name: "CDC MySQL value fidelity: BINARY(16) with trailing 0x00"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3949,7 +3949,7 @@
 - id: 856
   name: "CDC MySQL value fidelity: DECIMAL(30,10) precision"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3964,7 +3964,7 @@
 - id: 857
   name: "CDC MySQL value fidelity: BIT(3) value"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3979,7 +3979,7 @@
 - id: 858
   name: "CDC MySQL value fidelity: zero DATETIME"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -3994,7 +3994,7 @@
 - id: 859
   name: "CDC MySQL value fidelity: TIME over 24 hours"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
@@ -4009,7 +4009,7 @@
 - id: 860
   name: "CDC MySQL value fidelity: latin1 VARCHAR to MariaDB (no error, bytes replaced)"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: MARIADB
@@ -4024,7 +4024,7 @@
 - id: 861
   name: "CDC MySQL value fidelity: DECIMAL(30,10) to MariaDB"
   group: cdc_value_fidelity
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: MARIADB
