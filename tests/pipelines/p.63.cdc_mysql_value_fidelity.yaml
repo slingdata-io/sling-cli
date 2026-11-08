@@ -1,0 +1,76 @@
+# CDC from MySQL: a value must land the same from the snapshot and the binlog.
+# Row 1 comes from the snapshot, row 2 (same value) from the binlog merge.
+# The suite entry gives the column (COL_DDL), the value (COL_VAL) and the
+# target expression that renders the column as text (TGT_EXPR).
+# Needs MYSQL_GTID (binlog on) and SLING_STATE=POSTGRES/sling_state_cdc_fid.
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}
+  NAME: ${NAME}
+  COL_DDL: ${COL_DDL}
+  COL_VAL: ${COL_VAL}
+  TGT_EXPR: ${TGT_EXPR}
+
+steps:
+  # sql_mode '' allows zero dates
+  - connection: MYSQL_GTID
+    query: |
+      DROP TABLE IF EXISTS test_db.cdc_fid_{env.NAME};
+      CREATE TABLE test_db.cdc_fid_{env.NAME} (id INT PRIMARY KEY, c {env.COL_DDL}) DEFAULT CHARSET=utf8mb4;
+      SET SESSION sql_mode = '';
+      INSERT INTO test_db.cdc_fid_{env.NAME} VALUES (1, {env.COL_VAL});
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_fid_{env.NAME}
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS sling_state_cdc_fid._sling_state
+
+  # run 1: initial snapshot
+  - type: replication
+    id: run1
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_fid_{env.NAME}:
+
+  - connection: MYSQL_GTID
+    query: |
+      SET SESSION sql_mode = '';
+      INSERT INTO test_db.cdc_fid_{env.NAME} VALUES (2, {env.COL_VAL});
+
+  # run 2: merge the binlog insert
+  - type: replication
+    id: run2
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_fid_{env.NAME}:
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT id, {env.TGT_EXPR} AS c FROM {env.SCHEMA}.cdc_fid_{env.NAME} ORDER BY id
+    into: rows
+
+  - type: log
+    message: 'cdc_fid_{env.NAME} rows={store.rows}'
+
+  - type: check
+    check: length(store.rows) == 2 && store.rows[0].c == store.rows[1].c
+    failure_message: 'snapshot and binlog values differ: {store.rows}'
+
+  - type: log
+    message: 'CDC value fidelity {env.NAME} PASSED'

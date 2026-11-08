@@ -3852,17 +3852,186 @@
     - 'CDC PG key test PASSED'
     - 'CDC PG no-key test PASSED'
 
-# CDC from MySQL to Postgres with a NUL byte (0x00) in VARCHAR/TEXT values.
-# Postgres rejects 0x00 in text (SQLSTATE 22021). Sling must remove it.
+# CDC from MySQL: a value must land the same from the snapshot and from the
+# binlog merge. Each entry tests one column type. The binlog path does no
+# charset conversion and decodes ENUM, SET, BIT, BINARY and DECIMAL
+# differently from the snapshot. Postgres also rejects 0x00 in text.
 - id: 850
-  name: 'CDC MySQL to Postgres with NUL byte in text values'
-  group: cdc_nul_byte
-  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_pg_nul_byte.yaml'
+  name: "CDC MySQL value fidelity: NUL byte in VARCHAR (Postgres rejects 0x00)"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
   env:
-    SLING_STATE: POSTGRES/sling_state_cdc_nul
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
     TARGET: POSTGRES
     SCHEMA: public
+    NAME: nul
+    COL_DDL: "VARCHAR(50)"
+    COL_VAL: "CONCAT('a', CHAR(0), 'b')"
+    TGT_EXPR: "c::text"
   output_contains:
-    - 'CDC NUL byte test PASSED'
-  output_does_not_contain:
-    - 'invalid byte sequence for encoding "UTF8": 0x00'
+    - 'CDC value fidelity nul PASSED'
+
+- id: 851
+  name: "CDC MySQL value fidelity: latin1 VARCHAR with accents and cp1252 chars"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: latin1
+    COL_DDL: "VARCHAR(50) CHARACTER SET latin1"
+    COL_VAL: "'Québec été l’électeur €'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity latin1 PASSED'
+
+- id: 852
+  name: "CDC MySQL value fidelity: ENUM value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: enum
+    COL_DDL: "ENUM('oui','non','peut-être')"
+    COL_VAL: "'peut-être'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity enum PASSED'
+
+- id: 853
+  name: "CDC MySQL value fidelity: ENUM with values that contain int"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: enum_int
+    COL_DDL: "ENUM('print','paint')"
+    COL_VAL: "'paint'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity enum_int PASSED'
+
+- id: 854
+  name: "CDC MySQL value fidelity: SET value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: set
+    COL_DDL: "SET('a','b','c')"
+    COL_VAL: "'a,c'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity set PASSED'
+
+- id: 855
+  name: "CDC MySQL value fidelity: BINARY(16) with trailing 0x00"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: bin16
+    COL_DDL: "BINARY(16)"
+    COL_VAL: "UNHEX('0102030405060708090A0B0C0D0E0F00')"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity bin16 PASSED'
+
+- id: 856
+  name: "CDC MySQL value fidelity: DECIMAL(30,10) precision"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: dec
+    COL_DDL: "DECIMAL(30,10)"
+    COL_VAL: "12345678901234567890.1234567890"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity dec PASSED'
+
+- id: 857
+  name: "CDC MySQL value fidelity: BIT(3) value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: bit
+    COL_DDL: "BIT(3)"
+    COL_VAL: "b'101'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity bit PASSED'
+
+- id: 858
+  name: "CDC MySQL value fidelity: zero DATETIME"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: zdate
+    COL_DDL: "DATETIME"
+    COL_VAL: "'0000-00-00 00:00:00'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity zdate PASSED'
+
+- id: 859
+  name: "CDC MySQL value fidelity: TIME over 24 hours"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: time_big
+    COL_DDL: "TIME"
+    COL_VAL: "'100:00:00'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity time_big PASSED'
+
+- id: 860
+  name: "CDC MySQL value fidelity: latin1 VARCHAR to MariaDB (no error, bytes replaced)"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: MARIADB
+    SCHEMA: mariadb
+    NAME: latin1_maria
+    COL_DDL: "VARCHAR(50) CHARACTER SET latin1"
+    COL_VAL: "'Québec été l’électeur €'"
+    TGT_EXPR: "HEX(c)"
+  output_contains:
+    - 'CDC value fidelity latin1_maria PASSED'
+
+- id: 861
+  name: "CDC MySQL value fidelity: DECIMAL(30,10) to MariaDB"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: MARIADB
+    SCHEMA: mariadb
+    NAME: dec_maria
+    COL_DDL: "DECIMAL(30,10)"
+    COL_VAL: "12345678901234567890.1234567890"
+    TGT_EXPR: "HEX(c)"
+  output_contains:
+    - 'CDC value fidelity dec_maria PASSED'
