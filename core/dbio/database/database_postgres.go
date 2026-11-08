@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -474,6 +475,30 @@ func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, r
 					}
 				}
 			}
+		case pgtype.TextOID, pgtype.VarcharOID, pgtype.BPCharOID, pgtype.NameOID, pgtype.JSONOID, pgtype.JSONBOID:
+			// Postgres rejects 0x00 in text (SQLSTATE 22021). MySQL and others allow it.
+			removed := 0
+			for _, row := range rows {
+				if s, ok := row[i].(string); ok && strings.IndexByte(s, 0) >= 0 {
+					row[i] = strings.ReplaceAll(s, "\x00", "")
+					removed++
+				}
+			}
+			if removed > 0 {
+				g.Debug("removed 0x00 bytes from %d values of column %s", removed, columns[i])
+			}
+		case pgtype.TimeOID:
+			// MySQL TIME is a duration (-838:59:59 to 838:59:59). Postgres time is 00:00 to 24:00.
+			nulled := 0
+			for _, row := range rows {
+				if s, ok := row[i].(string); ok && !pgTimeInRange(s) {
+					row[i] = nil
+					nulled++
+				}
+			}
+			if nulled > 0 {
+				g.Warn("set %d values of column %s to NULL: out of the range of the Postgres time type (00:00:00 to 24:00:00)", nulled, columns[i])
+			}
 		}
 		if t, ok := c.TypeMap().TypeForOID(field.DataTypeOID); !ok || !t.Codec.FormatSupported(pgx.BinaryFormatCode) {
 			binary = false
@@ -503,6 +528,28 @@ func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, r
 
 	tag, err := c.PgConn().CopyFrom(ctx, bytes.NewReader(buf), g.F("copy %s (%s) from stdin", tableIdent, colList))
 	return tag.RowsAffected(), err
+}
+
+// pgTimeInRange reports false for a "[-]H:MM:SS[.f]" value outside 00:00:00 to 24:00:00.
+// A value in another format is true: pgx and Postgres validate it.
+func pgTimeInRange(s string) bool {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	hh, rest, ok := strings.Cut(s, ":")
+	if !ok {
+		return true
+	}
+	hours, err := strconv.Atoi(hh)
+	if err != nil {
+		return true
+	}
+	if hours < 24 {
+		return true
+	}
+	// 24:00:00 is the only valid value with hour 24
+	return hours == 24 && strings.Trim(strings.ReplaceAll(rest, ":", ""), "0.") == ""
 }
 
 // bulkImportStreamPgx inserts a stream into a table with pgx COPY

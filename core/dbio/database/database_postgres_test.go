@@ -77,3 +77,21 @@ func TestOpenPgxTunnelVerifyFull(t *testing.T) {
 		})
 	}
 }
+
+func TestPgTimeInRange(t *testing.T) {
+	cases := map[string]bool{
+		"00:00:00":        true,
+		"23:59:59.999999": true,
+		"24:00:00":        true,
+		"24:00:00.000":    true,
+		"24:00:01":        false,
+		"100:00:00":       false,
+		"838:59:59":       false,
+		"-01:00:00":       false,
+		"12:30":           true,
+		"noon":            true, // pgx and Postgres validate other formats
+	}
+	for val, want := range cases {
+		assert.Equal(t, want, pgTimeInRange(val), val)
+	}
+}
