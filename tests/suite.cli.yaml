@@ -3851,3 +3851,18 @@
     - 'CDC PG key test: orders=3 events=2 items=1'
     - 'CDC PG key test PASSED'
     - 'CDC PG no-key test PASSED'
+
+# CDC from MySQL to Postgres with a NUL byte (0x00) in VARCHAR/TEXT values.
+# Postgres rejects 0x00 in text (SQLSTATE 22021). Sling must remove it.
+- id: 850
+  name: 'CDC MySQL to Postgres with NUL byte in text values'
+  group: cdc_nul_byte
+  run: 'sling run -d -p tests/pipelines/p.63.cdc_mysql_pg_nul_byte.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_nul
+    TARGET: POSTGRES
+    SCHEMA: public
+  output_contains:
+    - 'CDC NUL byte test PASSED'
+  output_does_not_contain:
+    - 'invalid byte sequence for encoding "UTF8": 0x00'

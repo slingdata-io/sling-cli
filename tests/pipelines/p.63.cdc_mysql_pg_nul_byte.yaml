@@ -1,0 +1,69 @@
+# CDC from MySQL to Postgres with a NUL byte (0x00) in text values.
+# MySQL keeps 0x00 in VARCHAR/TEXT. Postgres rejects 0x00 in text
+# (SQLSTATE 22021). Covers the snapshot and the binlog merge.
+# Needs MYSQL_GTID (binlog on) and SLING_STATE=POSTGRES/sling_state_cdc_nul.
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}
+
+steps:
+  - connection: MYSQL_GTID
+    query: |
+      DROP TABLE IF EXISTS test_db.cdc_nul_test;
+      CREATE TABLE test_db.cdc_nul_test (id INT PRIMARY KEY, note VARCHAR(50), body TEXT);
+      INSERT INTO test_db.cdc_nul_test VALUES (1, CONCAT('a', CHAR(0), 'b'), CONCAT('x', CHAR(0))), (2, 'plain', 'plain');
+
+  - connection: '{env.TARGET}'
+    query: DROP TABLE IF EXISTS {env.SCHEMA}.cdc_nul_test
+
+  - connection: POSTGRES
+    query: DROP TABLE IF EXISTS sling_state_cdc_nul._sling_state
+
+  # run 1: initial snapshot
+  - type: replication
+    id: run1
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_nul_test:
+
+  - connection: MYSQL_GTID
+    query: |
+      INSERT INTO test_db.cdc_nul_test VALUES (3, CONCAT('c', CHAR(0)), CONCAT(CHAR(0), 'z'));
+      UPDATE test_db.cdc_nul_test SET note = CONCAT('p', CHAR(0), 'q') WHERE id = 2;
+
+  # run 2: merge the binlog changes
+  - type: replication
+    id: run2
+    replication:
+      source: MYSQL_GTID
+      target: '{env.TARGET}'
+      defaults:
+        mode: change-capture
+        object: '{env.SCHEMA}.{stream_table}'
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_nul_test:
+
+  - type: query
+    connection: '{env.TARGET}'
+    query: SELECT id, note, body FROM {env.SCHEMA}.cdc_nul_test ORDER BY id
+    into: rows
+
+  - type: log
+    message: 'cdc_nul_test rows={store.rows}'
+
+  - type: check
+    check: length(store.rows) == 3 && store.rows[0].note == "ab" && store.rows[1].note == "pq" && store.rows[2].body == "z"
+    failure_message: 'unexpected rows: {store.rows}'
+
+  - type: log
+    message: 'CDC NUL byte test PASSED'
