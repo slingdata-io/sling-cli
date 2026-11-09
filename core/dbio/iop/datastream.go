@@ -1072,6 +1072,9 @@ loop:
 				for i, oldVal := range row {
 					col := ds.Columns[i]
 					newVal := newRow[i]
+					if newVal == nil {
+						continue // a null has no type
+					}
 					colType := col.Type
 					oldType := ds.Sp.CheckType(oldVal)
 					newType := ds.Sp.CheckType(newVal)
@@ -1209,6 +1212,10 @@ skipBuffer:
 				break // don't push any rows
 			}
 
+			// a pause or a schema change runs schemaChgLoop again for the same
+			// row, which CastRow already changed: transform it only once
+			transformed := false
+
 		schemaChgLoop:
 			for {
 				// reprocess row if needed (to expand it as needed)
@@ -1217,12 +1224,13 @@ skipBuffer:
 					row = ds.it.Row
 				} else {
 					// evaluate transforms
-					if transforms := ds.Sp.Config.Transforms; transforms != nil {
+					if transforms := ds.Sp.Config.Transforms; transforms != nil && !transformed {
 						// normalize raw values ([]byte -> string) as the sample rows are
 						ds.it.Row, err = transforms.Evaluate(ds.Sp.ProcessRow(ds.it.Row))
 						if ds.Context.CaptureErr(err) {
 							break loop
 						}
+						transformed = true
 					}
 					row = ds.Sp.CastRow(ds.it.Row, ds.Columns)
 				}
