@@ -60,6 +60,9 @@ func (conn *DuckLakeConn) Init() error {
 
 	// Initialize DuckDB instance (inheriting from DuckDbConn)
 	conn.duck = iop.NewDuckDb(conn.Context().Ctx, g.MapToKVArr(conn.properties)...)
+	if conn.duck.GetProp("duckdb_version") == "" && os.Getenv("DUCKDB_VERSION") == "" {
+		conn.duck.SetProp("duckdb_version", iop.DuckDbVersionDuckLake)
+	}
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance

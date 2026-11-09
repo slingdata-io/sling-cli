@@ -4441,3 +4441,19 @@ func TestQuackLiveReconnect(t *testing.T) {
 	require.NoError(t, err, "the session SQL must attach the server again")
 	assert.EqualValues(t, 7, cast.ToInt(res.Rows[0][0]))
 }
+
+// DuckLake stays on DuckDB 1.5.5 by default, so a write does not upgrade a shared catalog file.
+func TestDuckLakeConnDefaultVersion(t *testing.T) {
+	version := func(props ...string) string {
+		conn, err := NewConn("ducklake://", append([]string{"catalog_conn_string=/tmp/c.ducklake", "data_path=/tmp/lake"}, props...)...)
+		require.NoError(t, err)
+		return conn.(*DuckLakeConn).duck.GetProp("duckdb_version")
+	}
+
+	t.Setenv("DUCKDB_VERSION", "")
+	assert.Equal(t, iop.DuckDbVersionDuckLake, version())
+	assert.Equal(t, "2.0.0", version("duckdb_version=2.0.0"))
+
+	t.Setenv("DUCKDB_VERSION", "2.0.0")
+	assert.Equal(t, "", version(), "the env var wins over the DuckLake default")
+}

@@ -29,14 +29,17 @@ import (
 )
 
 var (
-	DuckDbVersion      = "2.0.0"
-	DuckDbVersionMD    = "1.5.5"
-	DuckDbUseTempFile  = false
-	duckDbReadOnlyHint = "/* -readonly */"
-	duckDbSOFMarker    = "___start_of_duckdb_result___"
-	duckDbEOFMarker    = "___end_of_duckdb_result___"
-	DuckDbURISeparator = "|-|+|"
-	duckDbProcDiedMsg  = "duckdb process exited before query completed"
+	DuckDbVersion   = "2.0.0"
+	DuckDbVersionMD = "1.5.5"
+	// a DuckDB 2.0 write upgrades a DuckLake catalog file, and older clients
+	// cannot open it after that, so DuckLake stays on 1.5.5 by default
+	DuckDbVersionDuckLake = "1.5.5"
+	DuckDbUseTempFile     = false
+	duckDbReadOnlyHint    = "/* -readonly */"
+	duckDbSOFMarker       = "___start_of_duckdb_result___"
+	duckDbEOFMarker       = "___end_of_duckdb_result___"
+	DuckDbURISeparator    = "|-|+|"
+	duckDbProcDiedMsg     = "duckdb process exited before query completed"
 )
 
 // IsDuckDbProcDeath reports whether err comes from a duckdb sidecar that died mid-query.

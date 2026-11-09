@@ -688,7 +688,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
-			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version. A DuckDB 2.0 client can migrate the DuckLake catalog to version 1.1, and older clients cannot read it after that. Set `duckdb_version` (or DUCKDB_VERSION) to 2.0 or later."
+			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version. A DuckDB 2.0 write upgrades a DuckLake catalog that is a DuckDB file, and older clients cannot read it after that. Set `duckdb_version` (or DUCKDB_VERSION) to 2.0 or later."
 		case contains("could not load driver template"):
 			helpString = "See https://docs.slingdata.io/ for creating a custom connection template."
 		case contains("CSV") && contains("encountered too many errors"):
