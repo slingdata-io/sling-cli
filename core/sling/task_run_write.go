@@ -12,6 +12,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -348,6 +349,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		conn.Close()
 	})
 
+	if err := t.checkTableDDLColumns(cfg, tgtConn, tableTmp, sampleData.Columns); err != nil {
+		return 0, err
+	}
+
 	// Begin transaction for temp table operations.
 	// Redshift stages the whole stream to S3 before one atomic COPY, so a
 	// transaction would sit open (and bill Serverless RPUs) during extraction.
@@ -581,6 +586,10 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	// Prepare final table operations & handlers
 	if err = prepareFinal(t, cfg, tgtConn, targetTable, df); err != nil {
 		err = g.Error(err, "error preparing final table")
+		return 0, err
+	}
+
+	if err := t.checkTableDDLColumns(cfg, tgtConn, targetTable, df.Columns); err != nil {
 		return 0, err
 	}
 
@@ -828,6 +837,52 @@ func determineTxOptions(cfg *Config, dbType dbio.Type) sql.TxOptions {
 	default:
 		return sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
 	}
+}
+
+// checkTableDDLColumns returns an error when a table made from a custom
+// table_ddl does not have a metadata column (_sling_*) of the stream.
+func (t *TaskExecution) checkTableDDLColumns(cfg *Config, tgtConn database.Connection, table database.Table, streamCols iop.Columns) error {
+	if table.DDL == "" {
+		return nil
+	}
+
+	var metaCols iop.Columns
+	for _, col := range streamCols {
+		if _, ok := col.Metadata["sling_metadata"]; ok {
+			metaCols = append(metaCols, col)
+		}
+	}
+	if len(metaCols) == 0 {
+		return nil
+	}
+
+	tableCols, err := tgtConn.GetColumns(table.FullName())
+	if err != nil {
+		g.Debug("could not get columns of %s to check table_ddl: %s", table.FullName(), err.Error())
+		return nil
+	}
+
+	var names, defs []string
+	for _, col := range metaCols {
+		if tableCols.GetColumn(col.Name) != nil {
+			continue
+		}
+		names = append(names, g.F(`"%s"`, col.Name))
+		if nativeType, err := tgtConn.GetNativeType(col); err == nil && nativeType != "" {
+			defs = append(defs, g.F(`"%s %s"`, col.Name, nativeType))
+		} else {
+			defs = append(defs, g.F(`"%s"`, col.Name))
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	noun := lo.Ternary(len(names) == 1, "column", "columns")
+	return g.Error(
+		"target_options.table_ddl does not define %s %s, which Sling adds to the stream (mode %q). Add %s to table_ddl, or use {col_types}.",
+		noun, strings.Join(names, ", "), string(cfg.Mode), strings.Join(defs, ", "),
+	)
 }
 
 func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.Table, error) {

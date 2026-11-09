@@ -4091,3 +4091,48 @@
     - 'done 864'
   output_does_not_contain:
     - 'UNEXPECTED duckdb 2.0.0 download'
+
+# SLING-237: a custom table_ddl without a metadata column (_sling_*) fails early with a clear message.
+- id: 865
+  name: 'SLING-237: snapshot + table_ddl without _sling_loaded_at fails early (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_no_loaded_at'
+  err: true
+  output_contains:
+    - 'does not define column "_sling_loaded_at"'
+    - 'mode "snapshot"'
+    - 'SLING-237 tmp tables left: 0'
+  output_does_not_contain:
+    - 'provided field'
+    - 'could not insert into'
+
+- id: 866
+  name: 'SLING-237: snapshot + table_ddl with _sling_loaded_at succeeds (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_with_loaded_at'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SLING-237 with_meta loaded_at rows: 2'
+
+- id: 867
+  name: 'SLING-237: direct_insert + full-refresh + table_ddl without the metadata column fails early (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_direct_no_meta'
+  env:
+    SLING_LOADED_AT_COLUMN: 'true'
+  err: true
+  output_contains:
+    - 'does not define column "_sling_loaded_at"'
+    - 'mode "full-refresh"'
+  output_does_not_contain:
+    - 'provided field'
+    - 'could not insert into'
+
+- id: 868
+  name: 'SLING-237: snapshot + table_ddl with {col_types} succeeds (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_col_types'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
