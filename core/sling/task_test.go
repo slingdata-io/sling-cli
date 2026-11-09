@@ -37,4 +37,16 @@ func TestErrorHelper(t *testing.T) {
 		assert.Contains(t, helpString, "UDP 1434")
 		assert.Contains(t, helpString, "instance TCP port")
 	})
+
+	t.Run("duckdb 2.0 hints", func(t *testing.T) {
+		cases := map[string]string{
+			"IO Error: Trying to read a database file with version number 999, but we can only read versions between 64 and 68.\nThe database file was created with an newer version of DuckDB.": "storage_version",
+			"Binder Error: Deprecated lambda arrow (->) detected. Please transition to the new lambda syntax":                                                                                    "lambda x: x + 1",
+			"Invalid Input Error: MERGE INTO command cannot affect the same target row more than once.":                                                                                          "duplicate primary key",
+			"Not implemented Error: Only DuckLake versions 0.1 to 1.0 are supported":                                                                                                             "migrate the DuckLake catalog",
+		}
+		for msg, want := range cases {
+			assert.Contains(t, ErrorHelper(g.Error(msg), dbio.TypeDbDuckDb), want, msg)
+		}
+	})
 }

@@ -83,13 +83,12 @@ func (conn *LanceDBConn) Connect(timeOut ...int) (err error) {
 	}
 	// a local namespace root is created by the extension on first write
 
-	if _, err = conn.Exec(conn.buildAttachSQL() + noDebugKey); err != nil {
+	// ATTACH and USE run again in each new sidecar session. USE makes the
+	// namespace the default catalog, so unqualified tables resolve to it.
+	conn.duck.AddSessionSQL(conn.buildAttachSQL())
+	conn.duck.AddSessionSQL("USE " + lanceDBNamespace)
+	if _, err = conn.Exec("select 1" + noDebugKey); err != nil {
 		return g.Error(err, "could not attach LanceDB namespace: %s", conn.Path)
-	}
-
-	// make the namespace the default catalog, so unqualified tables resolve to it
-	if _, err = conn.Exec("USE " + lanceDBNamespace + ";" + noDebugKey); err != nil {
-		return g.Error(err, "could not use LanceDB namespace")
 	}
 
 	return nil

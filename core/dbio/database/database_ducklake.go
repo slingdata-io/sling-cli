@@ -133,21 +133,15 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 		}
 	}
 
-	// Attach the DuckLake database
-	attachSQL := conn.buildAttachSQL()
-	_, err = conn.Exec(attachSQL + noDebugKey)
-	if err != nil {
+	// ATTACH and USE run again in each new sidecar session
+	conn.duck.AddSessionSQL(conn.buildAttachSQL())
+	conn.duck.AddSessionSQL(fmt.Sprintf("USE %s", conn.Database))
+	if _, err = conn.Exec("select 1" + noDebugKey); err != nil {
 		// hide sensitive strings (password)
-		if strings.Contains(err.Error(), conn.CatalogConnStr) {
+		if conn.CatalogConnStr != "" && strings.Contains(err.Error(), conn.CatalogConnStr) {
 			return g.Error(strings.ReplaceAll(err.Error(), conn.CatalogConnStr, "<REDACTED CONNECTION STRING>"))
 		}
 		return g.Error(err, "could not attach ducklake database")
-	}
-
-	// Use the attached database by default
-	_, err = conn.Exec(fmt.Sprintf("USE %s;", conn.Database) + noDebugKey)
-	if err != nil {
-		return g.Error(err, "could not use ducklake database")
 	}
 
 	return nil

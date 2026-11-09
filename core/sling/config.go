@@ -1077,7 +1077,12 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
 				// for duckdb, ducklake and lancedb, we'll use a temp table, which uses the 'main' schema
-				tableTmp := makeTempTableName(dbType, table, "_sling_duckdb_tmp")
+				suffix := "_sling_duckdb_tmp"
+				if strings.HasPrefix(cast.ToString(cfg.TgtConn.Data["instance"]), "quack:") {
+					// runs on one Quack server must not share a temp table
+					suffix += "_" + strings.ToLower(g.RandString(g.AlphaNumericRunes, 6))
+				}
+				tableTmp := makeTempTableName(dbType, table, suffix)
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else {

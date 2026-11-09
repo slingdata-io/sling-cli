@@ -1882,7 +1882,8 @@ func (conn *IcebergConn) ensureDuckCatalog() (err error) {
 		return g.Error("Unsupported catalog type for DuckDB query: %s", catalogType)
 	}
 
-	if _, err = conn.duck.Exec(attachSQL + env.NoDebugKey); err != nil {
+	conn.duck.AddSessionSQL(attachSQL) // runs again after a sidecar reopen
+	if _, err = conn.duck.Exec("select 1" + env.NoDebugKey); err != nil {
 		conn.duck.Close()
 		conn.duck = nil
 		return g.Error(err, "could not attach Iceberg catalog")

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.5.5"
+	DuckDbVersion      = "2.0.0"
 	DuckDbVersionMD    = "1.5.5"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
@@ -78,6 +79,8 @@ type DuckDb struct {
 	Proc        *process.Proc
 	extensions  []string
 	secrets     []DuckDbSecret
+	sessionSQL  []string // runs in each new sidecar session, after the secrets
+	quackReady  bool     // the quack secret and ATTACH are in the session SQL
 	initialized bool
 	queryMu     sync.RWMutex
 	query       *duckDbQuery // only one active query at a time
@@ -335,7 +338,11 @@ const (
 	DuckDbSecretTypeGCS     DuckDbSecretType = "gcs"
 	DuckDbSecretTypeAzure   DuckDbSecretType = "azure"
 	DuckDbSecretTypeIceberg DuckDbSecretType = "iceberg"
+	DuckDbSecretTypeQuack   DuckDbSecretType = "quack"
 )
+
+// duckSecretRawKeys are secret props whose values are SQL expressions, not strings.
+var duckSecretRawKeys = []string{"provider", "extra_http_headers"}
 
 func NewDuckDbSecret(name string, secretType DuckDbSecretType, props map[string]string) DuckDbSecret {
 
@@ -359,12 +366,16 @@ func (dds *DuckDbSecret) AddProp(key, value string) {
 
 func (dds *DuckDbSecret) Render() string {
 
+	keys := lo.Keys(dds.Props)
+	sort.Strings(keys)
+
 	props := []string{}
-	for k, v := range dds.Props {
-		if g.In(k, "provider") {
+	for _, k := range keys {
+		v := dds.Props[k]
+		if g.In(k, duckSecretRawKeys...) {
 			props = append(props, g.F("%s %s", strings.ToUpper(k), v))
 		} else {
-			props = append(props, g.F("%s '%s'", strings.ToUpper(k), v)) // add quotes
+			props = append(props, g.F("%s '%s'", strings.ToUpper(k), strings.ReplaceAll(v, "'", "''")))
 		}
 	}
 
@@ -590,7 +601,98 @@ func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
 		duck.AddExtension("azure")
 	case DuckDbSecretTypeGCS:
 		duck.AddExtension("httpfs")
+	case DuckDbSecretTypeQuack:
+		duck.AddExtension("quack")
 	}
+}
+
+// DuckMapLiteral returns a DuckDB MAP literal, with sorted keys.
+func DuckMapLiteral(m map[string]string) string {
+	keys := lo.Keys(m)
+	sort.Strings(keys)
+	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
+
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = g.F("'%s': '%s'", esc(k), esc(m[k]))
+	}
+	return "MAP{" + strings.Join(parts, ", ") + "}"
+}
+
+const (
+	duckQuackDefaultPort = "9494"
+	duckQuackSecretName  = "sling_quack_secret"
+)
+
+// QuackURI returns the `quack:<host>:<port>` URI of a remote Quack server
+// instance, with the default port when it has none. Else it returns "".
+func (duck *DuckDb) QuackURI() string {
+	instance := strings.TrimSpace(duck.GetProp("instance"))
+	if !strings.HasPrefix(instance, "quack:") {
+		return ""
+	}
+
+	hostPort := strings.TrimPrefix(instance, "quack:")
+	if _, _, err := stdnet.SplitHostPort(hostPort); err != nil {
+		hostPort = hostPort + ":" + duckQuackDefaultPort
+	}
+	return "quack:" + hostPort
+}
+
+// quackSecret returns the secret with the token, scoped to the Quack endpoint.
+func (duck *DuckDb) quackSecret() DuckDbSecret {
+	props := map[string]string{"scope": duck.QuackURI()}
+	if token := duck.GetProp("token"); token != "" {
+		props["token"] = token
+	}
+
+	if raw := duck.GetProp("extra_http_headers"); raw != "" {
+		headers := map[string]string{}
+		if err := g.Unmarshal(raw, &headers); err != nil {
+			g.Warn("could not parse extra_http_headers for quack connection: %s", err.Error())
+		} else if len(headers) > 0 {
+			props["extra_http_headers"] = DuckMapLiteral(headers)
+		}
+	}
+
+	return NewDuckDbSecret(duckQuackSecretName, DuckDbSecretTypeQuack, props)
+}
+
+// quackAttachSQL returns the ATTACH and USE statements of a Quack connection.
+// USE (not CONNECT) keeps COPY TO and read_arrow on the local client.
+func (duck *DuckDb) quackAttachSQL() string {
+	quote := func(v string) string { return `"` + strings.ReplaceAll(v, `"`, `""`) + `"` }
+	literal := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+
+	alias := lo.Ternary(duck.GetProp("database") != "", duck.GetProp("database"), "quack")
+	schema := lo.Ternary(duck.GetProp("schema") != "", duck.GetProp("schema"), "main")
+
+	options := []string{"TYPE quack", "SECRET " + duckQuackSecretName}
+	if cast.ToBool(duck.GetProp("read_only")) {
+		options = append(options, "READ_ONLY")
+	}
+	if cast.ToBool(duck.GetProp("disable_ssl")) {
+		options = append(options, "DISABLE_SSL true")
+	}
+	if fp := duck.GetProp("ssl_fingerprint"); fp != "" {
+		options = append(options, "SSL_FINGERPRINT "+literal(fp))
+	}
+	if clientID := duck.GetProp("client_id"); clientID != "" {
+		options = append(options, "CLIENT_ID "+literal(clientID))
+	}
+	if timeout := cast.ToInt(duck.GetProp("heartbeat_timeout")); timeout > 0 {
+		options = append(options, g.F("HEARTBEAT_TIMEOUT %d", timeout))
+	}
+
+	return g.F("ATTACH IF NOT EXISTS %s AS %s (%s);\nUSE %s.%s",
+		literal(duck.QuackURI()), quote(alias), strings.Join(options, ", "), quote(alias), quote(schema))
+}
+
+// AddSessionSQL stores SQL (for example ATTACH or USE) that runs at the start of each
+// sidecar session, so that it runs again after a reopen. An error shows at the next query.
+func (duck *DuckDb) AddSessionSQL(sql string) {
+	duck.sessionSQL = append(duck.sessionSQL, strings.TrimRight(strings.TrimSpace(sql), ";"))
+	duck.initialized = false
 }
 
 // getLoadExtensionSQL generates SQL statements to load extensions
@@ -626,6 +728,11 @@ func (duck *DuckDb) getSessionSettingsSQL() (sql string) {
 	if limit := duck.GetProp("memory_limit"); limit != "" {
 		sql += fmt.Sprintf("SET memory_limit = '%s';", limit)
 	}
+
+	// the 2.0 CLI prints log lines to stdout, which breaks the result parse
+	if duck.version >= 20000 {
+		sql += "SET logging_storage = 'memory';"
+	}
 	return
 }
 
@@ -658,6 +765,30 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 	}
 }
 
+// cliArgs returns the CLI flags of the sidecar. A CLI older than 2.0 gets no 2.0 flag.
+func (duck *DuckDb) cliArgs() []string {
+	args := []string{"-csv", "-nullvalue", `\N\`}
+
+	// a quack connection is read-only through the ATTACH option
+	if cast.ToBool(duck.GetProp("read_only")) && duck.QuackURI() == "" {
+		args = append(args, "-readonly")
+	}
+
+	if duck.version >= 20000 {
+		args = append(args, "-no-agent") // agent mode changes the output format
+	}
+
+	if sv := duck.GetProp("storage_version"); sv != "" {
+		if duck.version >= 20000 {
+			args = append(args, "-storage-version", sv)
+		} else {
+			g.Warn("duckdb storage_version (%s) needs DuckDB 2.0 or later, ignoring it", sv)
+		}
+	}
+
+	return args
+}
+
 func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
@@ -673,18 +804,25 @@ func (duck *DuckDb) openOnce(timeOut ...int) (err error) {
 	duck.Proc.SysProcAttr = duckDbSysProcAttr()
 	duck.stderrTail.reset()
 	duck.initialized = false // a new session loads extensions and secrets again
-	args := []string{"-csv", "-nullvalue", `\N\`}
+	args := duck.cliArgs()
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
-
-	if cast.ToBool(duck.GetProp("read_only")) {
-		args = append(args, "-readonly")
-	}
 
 	if workingDir := duck.GetProp("working_dir"); workingDir != "" {
 		duck.Proc.WorkDir = workingDir
 	}
 
-	if instance := duck.GetProp("instance"); instance != "" {
+	// a quack session is in memory, with the remote attached
+	if quackURI := duck.QuackURI(); quackURI != "" {
+		if duck.version < 20000 {
+			return g.Error("quack connections need DuckDB 2.0 or later (duckdb_version is %d.%d.%d)",
+				duck.version/10000, duck.version/100%100, duck.version%100)
+		}
+		if !duck.quackReady {
+			duck.AddSecret(duck.quackSecret())
+			duck.AddSessionSQL(duck.quackAttachSQL())
+			duck.quackReady = true
+		}
+	} else if instance := duck.GetProp("instance"); instance != "" {
 		args = append(args, instance)
 	}
 
@@ -840,6 +978,9 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 		}
 		if settingsSQL := duck.getSessionSettingsSQL(); settingsSQL != "" {
 			extensionSecretSQL = extensionSecretSQL + strings.Trim(settingsSQL, ";") + ";"
+		}
+		for _, sessionSQL := range duck.sessionSQL {
+			extensionSecretSQL = extensionSecretSQL + sessionSQL + ";"
 		}
 		duck.initialized = true // commented out for now
 		if extensionSecretSQL != "" {
@@ -1442,8 +1583,10 @@ func duckArrowCast(dbType string) string {
 	for _, token := range []string{"ENUM(", "BIGNUM", "VARINT", "INTERVAL", "TIME WITH TIME ZONE", "BIT", "UHUGEINT", "UBIGINT"} {
 		lossy = lossy || strings.Contains(t, token)
 	}
+	lossy = lossy || t == "NULL" || t == `"NULL"` // CTAS of SELECT NULL in DuckDB 2.0
 	nested := strings.Contains(t, "[") || strings.HasPrefix(t, "STRUCT(") ||
-		strings.HasPrefix(t, "MAP(") || strings.HasPrefix(t, "UNION(")
+		strings.HasPrefix(t, "MAP(") || strings.HasPrefix(t, "UNION(") || t == "VARIANT"
+	lossy = lossy || t == "VARIANT"
 
 	switch {
 	case !lossy:
@@ -1809,9 +1952,14 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 		}
 		if stat, _ := os.Stat(envPath); stat.IsDir() {
 			return "", g.Error("DUCKDB_PATH provided is a directory, should be a file: %s", envPath)
-		} else {
-			return envPath, nil
 		}
+		// the flags depend on the version of the binary, not of the setting
+		if out, err := exec.Command(envPath, "-version").Output(); err == nil {
+			if v, err := duckBinVersion(string(out)); err == nil {
+				duck.version = v
+			}
+		}
+		return envPath, nil
 	}
 
 	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
@@ -1928,6 +2076,15 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 	}
 
 	return binPath, nil
+}
+
+// duckBinVersion parses the output of `duckdb -version` (for example "v2.0.0 (Cyanoptera) d54cbbe3df").
+func duckBinVersion(out string) (int, error) {
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return 0, g.Error("empty duckdb version output")
+	}
+	return g.VersionNumber(strings.TrimPrefix(fields[0], "v"))
 }
 
 // Describe returns the columns of a query

@@ -4052,3 +4052,42 @@
   output_does_not_contain:
     - 'context canceled'
     - 'fatal'
+
+# SLING-313: DuckDB 2.0 is the default. A 1.5.x CLI must still work, with no 2.0 flag.
+- id: 863
+  name: 'DuckDB 2.0 default: DUCKDB_VERSION=1.5.5 still works'
+  group: duckdb
+  env:
+    DUCKDB_VERSION: '1.5.5'
+    DUCK_863: 'duckdb:///tmp/sling_863/t.duckdb'
+  run: |
+    rm -rf /tmp/sling_863 && mkdir -p /tmp/sling_863
+    sling conns test DUCK_863
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn DUCK_863 --tgt-object main.t863 --mode full-refresh
+    sling run --src-conn DUCK_863 --src-stream 'select count(*) as cnt, version() as ver from main.t863' --stdout
+  output_contains:
+    - 'success!'
+    - 'inserted 1000 rows'
+    - '1000,v1.5.5'
+  output_does_not_contain:
+    - 'no-agent'
+    - 'storage-version'
+
+# SLING-313: a MotherDuck conn pre-downloads its own DuckDB version, not the 2.0 default.
+- id: 864
+  name: 'DuckDB 2.0 default: MotherDuck pre-downloads the MotherDuck version'
+  group: duckdb
+  env:
+    SLING_HOME_DIR: /tmp/sling_864/home
+  run: |
+    rm -rf /tmp/sling_864 && mkdir -p /tmp/sling_864/home
+    cp "$HOME/.sling/env.yaml" /tmp/sling_864/home/env.yaml
+    sling run --src-conn MOTHERDUCK --src-stream 'select 1 as a' --tgt-object file:///tmp/sling_864/out.csv
+    ls /tmp/sling_864/home/bin/duckdb
+    test -d /tmp/sling_864/home/bin/duckdb/2.0.0 && echo 'UNEXPECTED duckdb 2.0.0 download'
+    echo 'done 864'
+  output_contains:
+    - 'execution succeeded'
+    - 'done 864'
+  output_does_not_contain:
+    - 'UNEXPECTED duckdb 2.0.0 download'

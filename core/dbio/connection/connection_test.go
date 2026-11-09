@@ -501,6 +501,22 @@ func TestSQLServerNamedInstance(t *testing.T) {
 
 // A LanceDB namespace root can itself be an object store URI, so everything
 // after the `lancedb://` scheme is the path.
+func TestDuckDbConnectionQuackURL(t *testing.T) {
+	c, err := NewConnection("QUACK_TEST", dbio.TypeDbDuckDb, map[string]any{"instance": "quack:h:9000"})
+	require.NoError(t, err)
+	assert.Equal(t, "quack:h:9000", c.DataS(true)["instance"])
+	assert.Equal(t, "duckdb://quack:h:9000?schema=main", c.URL())
+
+	c, err = NewConnectionFromURL("QUACK_TEST", "duckdb://quack:h:9000")
+	require.NoError(t, err)
+	assert.Equal(t, dbio.TypeDbDuckDb, c.Type)
+	assert.Equal(t, "quack:h:9000", c.DataS(true)["instance"])
+
+	c, err = NewConnection("DUCK_TEST", dbio.TypeDbDuckDb, map[string]any{"instance": `C:\data\x.duckdb`})
+	require.NoError(t, err)
+	assert.Equal(t, "C:/data/x.duckdb", c.DataS(true)["instance"])
+}
+
 func TestLanceDBConnectionURL(t *testing.T) {
 	cases := []struct{ url, path string }{
 		{"lancedb:///data/lancedb", "/data/lancedb"},
