@@ -656,6 +656,8 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 		switch {
 		case contains("trying to read a database file with version number") && contains("created with an newer version of duckdb"):
 			helpString = "A newer DuckDB (2.0 or later) made this database file. Set `duckdb_version` (or the DUCKDB_VERSION env var) to 2.0 or later. To make files that older DuckDB versions can open, set the `storage_version` property (for example `v1.5.6`). See https://docs.slingdata.io/connections/database-connections/duckdb"
+		case contains("written with a storage version greater than the latest version supported"):
+			helpString = "A newer DuckDB (2.0 or later) wrote this file. For DuckLake, this happens when DuckDB 2.0 writes to a catalog that is a DuckDB file. Set `duckdb_version` (or the DUCKDB_VERSION env var) to 2.0 or later."
 		case contains("deprecated lambda arrow"):
 			helpString = "DuckDB 2.0 disabled the single-arrow lambda syntax (`x -> x + 1`). Use `lambda x: x + 1` in your SQL."
 		case contains("merge into command cannot affect the same target row more than once"):
@@ -688,7 +690,7 @@ func ErrorHelper(err error, connTypes ...dbio.Type) (helpString string) {
 			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
-			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version. A DuckDB 2.0 write upgrades a DuckLake catalog that is a DuckDB file, and older clients cannot read it after that. Set `duckdb_version` (or DUCKDB_VERSION) to 2.0 or later."
+			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version. A DuckDB 2.0 client can migrate the DuckLake catalog to version 1.1, and older clients cannot read it after that. Set `duckdb_version` (or DUCKDB_VERSION) to 2.0 or later."
 		case contains("could not load driver template"):
 			helpString = "See https://docs.slingdata.io/ for creating a custom connection template."
 		case contains("CSV") && contains("encountered too many errors"):

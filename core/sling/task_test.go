@@ -44,6 +44,7 @@ func TestErrorHelper(t *testing.T) {
 			"Binder Error: Deprecated lambda arrow (->) detected. Please transition to the new lambda syntax":                                                                                    "lambda x: x + 1",
 			"Invalid Input Error: MERGE INTO command cannot affect the same target row more than once.":                                                                                          "duplicate primary key",
 			"Not implemented Error: Only DuckLake versions 0.1 to 1.0 are supported":                                                                                                             "migrate the DuckLake catalog",
+			`Error opening "c.ducklake": file was written with a storage version greater than the latest version supported by this DuckDB instance.`:                                             "writes to a catalog that is a DuckDB file",
 		}
 		for msg, want := range cases {
 			assert.Contains(t, ErrorHelper(g.Error(msg), dbio.TypeDbDuckDb), want, msg)
