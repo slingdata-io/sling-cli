@@ -4136,3 +4136,34 @@
   rows: 2
   output_contains:
     - 'execution succeeded'
+
+# SLING-336: the peak RSS of a 2M-row load must stay low (1.6.6 used 1.5 GB, 1.6.5 used 124 MB)
+- id: 869
+  name: 'SLING-336: Postgres binary COPY streams the rows (peak RSS < 400 MB)'
+  group: pg_copy_mem
+  run: |
+    sling run -d -r tests/replications/r.147.postgres_copy_stream_memory.yaml --streams mem_binary & pid=$!
+    peak=0; while kill -0 $pid 2>/dev/null; do rss=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' ') || true; [ -n "$rss" ] && [ "$rss" -gt "$peak" ] && peak=$rss; sleep 0.5; done
+    wait $pid
+    echo "PG COPY peak RSS KB: $peak"
+    [ "$peak" -lt 409600 ] && echo 'PG COPY RSS OK'
+  rows: 2000000
+  output_contains:
+    - 'execution succeeded'
+    - 'PG COPY stream sling_pg_mem_bin rows: 2000000'
+    - 'PG COPY RSS OK'
+
+- id: 870
+  name: 'SLING-336: Postgres text COPY (timetz) streams the rows (peak RSS < 400 MB)'
+  group: pg_copy_mem
+  run: |
+    sling run -d -r tests/replications/r.147.postgres_copy_stream_memory.yaml --streams mem_text & pid=$!
+    peak=0; while kill -0 $pid 2>/dev/null; do rss=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' ') || true; [ -n "$rss" ] && [ "$rss" -gt "$peak" ] && peak=$rss; sleep 0.5; done
+    wait $pid
+    echo "PG COPY peak RSS KB: $peak"
+    [ "$peak" -lt 409600 ] && echo 'PG COPY RSS OK'
+  rows: 2000000
+  output_contains:
+    - 'execution succeeded'
+    - 'PG COPY stream sling_pg_mem_txt rows: 2000000, tz ok: 2000000'
+    - 'PG COPY RSS OK'

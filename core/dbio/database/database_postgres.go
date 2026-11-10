@@ -1,16 +1,19 @@
 package database
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
@@ -412,12 +415,12 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 }
 
 // copyFrom runs a pgx COPY on the Cloud SQL connection, or on a connection of the pool.
-func (conn *PostgresConn) copyFrom(ctx context.Context, table Table, columns []string, rows [][]any) (n int64, err error) {
+func (conn *PostgresConn) copyFrom(ctx context.Context, table Table, columns []string, src *pgCopySource) (n int64, err error) {
 	if conn.isCloudSQL {
 		if conn.cloudSQLConn == nil {
 			return 0, g.Error("native pgx connection not available for Cloud SQL COPY")
 		}
-		return copyRows(ctx, conn.cloudSQLConn, table, columns, rows)
+		return copyRows(ctx, conn.cloudSQLConn, table, columns, src)
 	}
 
 	sqlConn, err := conn.Db().Conn(ctx)
@@ -431,7 +434,7 @@ func (conn *PostgresConn) copyFrom(ctx context.Context, table Table, columns []s
 		if !ok {
 			return g.Error("connection is not pgx (%T)", driverConn)
 		}
-		n, err = copyRows(ctx, stdConn.Conn(), table, columns, rows)
+		n, err = copyRows(ctx, stdConn.Conn(), table, columns, src)
 		return err
 	})
 	return n, err
@@ -441,7 +444,8 @@ var copyTextEscaper = strings.NewReplacer(`\`, `\\`, "\n", `\n`, "\r", `\r`, "\t
 
 // copyRows runs a binary COPY. If a column type has no binary codec in pgx
 // (timetz, an extension type such as geometry), it runs a text COPY, as lib/pq did.
-func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, rows [][]any) (int64, error) {
+// The rows go to the server as src gives them, so memory does not grow with the row count.
+func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, src *pgCopySource) (int64, error) {
 	tableIdent := pgx.Identifier{table.Schema, table.Name}.Sanitize()
 	quoted := make([]string, len(columns))
 	for i, col := range columns {
@@ -455,79 +459,254 @@ func copyRows(ctx context.Context, c *pgx.Conn, table Table, columns []string, r
 	}
 
 	binary := true
+	oids := make([]uint32, len(sd.Fields))
 	for i, field := range sd.Fields {
-		switch field.DataTypeOID {
-		case pgtype.ByteaOID:
-			// pgx encodes only []byte into bytea (an empty binary value is a string)
-			for _, row := range rows {
-				if s, ok := row[i].(string); ok {
-					row[i] = []byte(s)
-				}
-			}
-		case pgtype.BoolOID:
-			// pgx encodes only bool into bool (a tinyint(1) source value is an integer)
-			for _, row := range rows {
-				if v := row[i]; v != nil {
-					if _, ok := v.(bool); !ok {
-						if row[i], err = cast.ToBoolE(v); err != nil {
-							return 0, g.Error(err, "could not convert value of column %s to bool", columns[i])
-						}
-					}
-				}
-			}
-		case pgtype.TextOID, pgtype.VarcharOID, pgtype.BPCharOID, pgtype.NameOID, pgtype.JSONOID, pgtype.JSONBOID:
-			// Postgres rejects 0x00 in text (SQLSTATE 22021). MySQL and others allow it.
-			removed := 0
-			for _, row := range rows {
-				if s, ok := row[i].(string); ok && strings.IndexByte(s, 0) >= 0 {
-					row[i] = strings.ReplaceAll(s, "\x00", "")
-					removed++
-				}
-			}
-			if removed > 0 {
-				g.Debug("removed 0x00 bytes from %d values of column %s", removed, columns[i])
-			}
-		case pgtype.TimeOID:
-			// MySQL TIME is a duration (-838:59:59 to 838:59:59). Postgres time is 00:00 to 24:00.
-			nulled := 0
-			for _, row := range rows {
-				if s, ok := row[i].(string); ok && !pgTimeInRange(s) {
-					row[i] = nil
-					nulled++
-				}
-			}
-			if nulled > 0 {
-				g.Warn("set %d values of column %s to NULL: out of the range of the Postgres time type (00:00:00 to 24:00:00)", nulled, columns[i])
-			}
-		}
+		oids[i] = field.DataTypeOID
 		if t, ok := c.TypeMap().TypeForOID(field.DataTypeOID); !ok || !t.Codec.FormatSupported(pgx.BinaryFormatCode) {
 			binary = false
 		}
 	}
+	src.conv = newPgCopyConverter(columns, oids)
+
 	if binary {
-		return c.CopyFrom(ctx, pgx.Identifier{table.Schema, table.Name}, columns, pgx.CopyFromRows(rows))
+		n, err := c.CopyFrom(ctx, pgx.Identifier{table.Schema, table.Name}, columns, src)
+		if srcErr := src.Err(); srcErr != nil {
+			return n, srcErr // the server error only says that the COPY was aborted
+		} else if err != nil {
+			return n, err
+		}
+		src.conv.LogCounts()
+		return n, nil
 	}
 
-	var buf []byte
-	for _, row := range rows {
-		for i, val := range row {
-			if i > 0 {
-				buf = append(buf, '\t')
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := src.WriteText(pw, c.TypeMap())
+		pw.CloseWithError(err)
+		done <- err
+	}()
+
+	tag, err := c.PgConn().CopyFrom(ctx, pr, g.F("copy %s (%s) from stdin", tableIdent, colList))
+	pr.Close() // a writer that waits on the pipe stops
+	if writeErr := <-done; writeErr != nil && !errors.Is(writeErr, io.ErrClosedPipe) {
+		return tag.RowsAffected(), writeErr
+	} else if err != nil {
+		return tag.RowsAffected(), err
+	}
+	src.conv.LogCounts()
+	return tag.RowsAffected(), nil
+}
+
+// pgCopyConverter changes the values that pgx or Postgres do not accept for a column type.
+// It counts the changed values, so that a COPY logs one line for each column.
+type pgCopyConverter struct {
+	columns    []string
+	oids       []uint32
+	convCols   []int // the indexes of the columns that have a conversion
+	nulRemoved []int
+	timeNulled []int
+}
+
+func newPgCopyConverter(columns []string, oids []uint32) *pgCopyConverter {
+	cv := &pgCopyConverter{
+		columns:    columns,
+		oids:       oids,
+		nulRemoved: make([]int, len(oids)),
+		timeNulled: make([]int, len(oids)),
+	}
+	for i, oid := range oids {
+		switch oid {
+		case pgtype.ByteaOID, pgtype.BoolOID, pgtype.TimeOID,
+			pgtype.TextOID, pgtype.VarcharOID, pgtype.BPCharOID, pgtype.NameOID, pgtype.JSONOID, pgtype.JSONBOID:
+			cv.convCols = append(cv.convCols, i)
+		}
+	}
+	return cv
+}
+
+// Convert changes the values of row in place.
+func (cv *pgCopyConverter) Convert(row []any) (err error) {
+	for _, i := range cv.convCols {
+		if i >= len(row) || row[i] == nil {
+			continue
+		}
+		switch cv.oids[i] {
+		case pgtype.ByteaOID:
+			// pgx encodes only []byte into bytea (an empty binary value is a string)
+			if s, ok := row[i].(string); ok {
+				row[i] = []byte(s)
 			}
-			text, err := c.TypeMap().Encode(sd.Fields[i].DataTypeOID, pgx.TextFormatCode, val, nil)
-			if err != nil {
-				return 0, g.Error(err, "could not encode value of column %s", columns[i])
-			} else if text == nil {
-				buf = append(buf, `\N`...)
-			} else {
-				buf = append(buf, copyTextEscaper.Replace(string(text))...)
+		case pgtype.BoolOID:
+			// pgx encodes only bool into bool (a tinyint(1) source value is an integer)
+			if _, ok := row[i].(bool); !ok {
+				if row[i], err = cast.ToBoolE(row[i]); err != nil {
+					return g.Error(err, "could not convert value of column %s to bool", cv.columns[i])
+				}
+			}
+		case pgtype.TimeOID:
+			// MySQL TIME is a duration (-838:59:59 to 838:59:59). Postgres time is 00:00 to 24:00.
+			if s, ok := row[i].(string); ok && !pgTimeInRange(s) {
+				row[i] = nil
+				cv.timeNulled[i]++
+			}
+		default:
+			// Postgres rejects 0x00 in text (SQLSTATE 22021). MySQL and others allow it.
+			if s, ok := row[i].(string); ok && strings.IndexByte(s, 0) >= 0 {
+				row[i] = strings.ReplaceAll(s, "\x00", "")
+				cv.nulRemoved[i]++
 			}
 		}
-		buf = append(buf, '\n')
+	}
+	return nil
+}
+
+func (cv *pgCopyConverter) LogCounts() {
+	for i, col := range cv.columns {
+		if n := cv.nulRemoved[i]; n > 0 {
+			g.Debug("removed 0x00 bytes from %d values of column %s", n, col)
+		}
+		if n := cv.timeNulled[i]; n > 0 {
+			g.Warn("set %d values of column %s to NULL: out of the range of the Postgres time type (00:00:00 to 24:00:00)", n, col)
+		}
+	}
+}
+
+// pgCopySource gives the rows of a batch to a pgx COPY, one at a time.
+// Only one goroutine at a time can call its methods.
+type pgCopySource struct {
+	ctx       context.Context
+	next      func() ([]any, bool)
+	stop      func()
+	stopAfter func() bool
+	abort     func()
+	abortOnce sync.Once
+	conv      *pgCopyConverter
+	row       []any
+	peeked    bool
+	ended     bool
+	err       error
+}
+
+var _ pgx.CopyFromSource = (*pgCopySource)(nil)
+
+// newPgCopySource pulls the rows. When ctx ends, it calls abort (the batch Close),
+// so that a pull that waits for the producer returns.
+func newPgCopySource(ctx context.Context, rows iter.Seq[[]any], abort func()) *pgCopySource {
+	s := &pgCopySource{ctx: ctx, abort: abort}
+	s.next, s.stop = iter.Pull(rows)
+	if abort != nil {
+		s.stopAfter = context.AfterFunc(ctx, s.doAbort)
+	}
+	return s
+}
+
+func (s *pgCopySource) doAbort() {
+	if s.abort != nil {
+		s.abortOnce.Do(s.abort)
+	}
+}
+
+// Peek waits for the first row. It is false when the rows end first, or on an error (see Err).
+func (s *pgCopySource) Peek() bool {
+	s.peeked = s.pull()
+	return s.peeked
+}
+
+func (s *pgCopySource) Next() bool {
+	if s.peeked {
+		s.peeked = false
+		return true
+	}
+	return s.pull()
+}
+
+func (s *pgCopySource) pull() (ok bool) {
+	if s.err != nil || s.ended {
+		return false
+	} else if err := s.ctx.Err(); err != nil {
+		s.err = err
+		return false
 	}
 
-	tag, err := c.PgConn().CopyFrom(ctx, bytes.NewReader(buf), g.F("copy %s (%s) from stdin", tableIdent, colList))
-	return tag.RowsAffected(), err
+	// pgx calls Next in its own goroutine, which does not recover a panic
+	defer func() {
+		if r := recover(); r != nil {
+			s.err = g.Error("panic in the row iterator of the COPY: %v", r)
+			ok = false
+		}
+	}()
+
+	s.row, ok = s.next()
+	if err := s.ctx.Err(); err != nil {
+		s.err = err // the rows can end because of the abort
+		return false
+	} else if !ok {
+		s.ended = true
+	}
+	return ok
+}
+
+func (s *pgCopySource) Values() ([]any, error) {
+	if s.conv != nil {
+		if err := s.conv.Convert(s.row); err != nil {
+			s.err = err
+			return nil, err
+		}
+	}
+	return s.row, nil
+}
+
+func (s *pgCopySource) Err() error {
+	return s.err
+}
+
+// Stop ends the pull. If the rows did not end, it closes the batch, so that the producer does not wait.
+// Call it after the COPY returns.
+func (s *pgCopySource) Stop() {
+	s.stop()
+	if s.stopAfter != nil {
+		s.stopAfter()
+	}
+	if !s.ended {
+		s.doAbort()
+	}
+}
+
+// WriteText writes the rows to w in the text format of COPY.
+func (s *pgCopySource) WriteText(w io.Writer, typeMap *pgtype.Map) error {
+	bw := bufio.NewWriterSize(w, 65536-5) // the size of a CopyData message of pgconn
+	scratch := make([]byte, 0, 256)       // not nil: Encode gives nil only for NULL
+	for s.Next() {
+		row, err := s.Values()
+		if err != nil {
+			return err
+		} else if len(row) != len(s.conv.oids) {
+			return g.Error("expected %d values, got %d values", len(s.conv.oids), len(row))
+		}
+
+		for i, val := range row {
+			if i > 0 {
+				bw.WriteByte('\t')
+			}
+			text, err := typeMap.Encode(s.conv.oids[i], pgx.TextFormatCode, val, scratch[:0])
+			if err != nil {
+				return g.Error(err, "could not encode value of column %s", s.conv.columns[i])
+			} else if text == nil {
+				bw.WriteString(`\N`)
+			} else {
+				copyTextEscaper.WriteString(bw, string(text))
+				scratch = text
+			}
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return err // bufio keeps the first write error
+		}
+	}
+	if err := s.Err(); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 // pgTimeInRange reports false for a "[-]H:MM:SS[.f]" value outside 00:00:00 to 24:00:00.
@@ -606,23 +785,26 @@ func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastr
 		}
 
 		err = func() error {
-			// Collect rows from batch for CopyFrom
-			var rows [][]interface{}
-			for row := range batch.Rows() {
-				rows = append(rows, row)
+			// A cancel of the stream ends the COPY. The source then closes the batch, so that the
+			// pull stops and mux is free for Datastream.Close.
+			copyCtx, cancel := context.WithCancel(conn.Context().Ctx)
+			defer cancel()
+			defer context.AfterFunc(ds.Context.Ctx, cancel)()
+
+			src := newPgCopySource(copyCtx, batch.Rows(), batch.Close)
+			defer src.Stop()
+			if !src.Peek() {
+				return src.Err() // an empty batch gets no COPY
 			}
 
-			if len(rows) == 0 {
-				return nil
-			}
-
-			// Use pgx CopyFrom with pgx.Identifier for schema.table
 			mux.Lock()
-			rowsInserted, err := conn.copyFrom(conn.Context().Ctx, table, columns.Names(), rows)
+			rowsInserted, err := conn.copyFrom(copyCtx, table, columns.Names(), src)
 			mux.Unlock()
 
 			if err != nil {
-				return g.Error(err, "could not COPY into table %s using pgx", tableFName)
+				err = g.Error(err, "could not COPY into table %s using pgx", tableFName)
+				ds.Context.CaptureErr(err) // the producer stops
+				return err
 			}
 
 			count += uint64(rowsInserted)
