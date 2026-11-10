@@ -130,6 +130,15 @@ func (conn *DuckDbConn) GetTableColumns(table *Table, fields ...string) (columns
 		return columns, err
 	}
 
+	// a missing table also has no columns: fall back only for an existing object
+	exists, qErr := conn.Query(g.F(
+		"select 1 from information_schema.tables where table_schema = '%s' and table_name = '%s'"+noDebugKey,
+		strings.ReplaceAll(table.Schema, "'", "''"), strings.ReplaceAll(table.Name, "'", "''"),
+	))
+	if qErr != nil || len(exists.Rows) == 0 {
+		return columns, err
+	}
+
 	query, qErr := ParseTableName("select * from "+table.FDQN(), conn.GetType())
 	if qErr != nil {
 		return columns, err

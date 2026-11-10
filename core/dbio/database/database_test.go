@@ -40,6 +40,7 @@ import (
 	zerobus "github.com/databricks/zerobus-sdk/go"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/rs/zerolog"
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -4387,6 +4388,22 @@ func TestQuackLive(t *testing.T) {
 	res, err := other.Query("select count(*) as cnt from main.t1")
 	require.NoError(t, err)
 	assert.EqualValues(t, 500, cast.ToInt(res.Rows[0][0]))
+	// a remote view has no rows in information_schema.columns
+	_, err = conn.Exec("create view main.v1 as select id from main.t1")
+	require.NoError(t, err)
+	cols, err := conn.GetColumns("main.v1")
+	require.NoError(t, err)
+	require.Len(t, cols, 1)
+	assert.Equal(t, "id", strings.ToLower(cols[0].Name))
+
+	// a missing table gives an error, with no error log from the fallback
+	prevHooks := g.LogHooks
+	t.Cleanup(func() { g.LogHooks = prevHooks })
+	var errLogs []string
+	g.LogHooks = []*g.LogHook{{Level: zerolog.ErrorLevel, Func: func(ll *g.LogLine) { errLogs = append(errLogs, ll.Text) }}}
+	_, err = conn.GetColumns("missing_schema.missing_table")
+	assert.Error(t, err)
+	assert.Empty(t, errLogs)
 }
 
 func TestQuackLiveConcurrentWriters(t *testing.T) {
