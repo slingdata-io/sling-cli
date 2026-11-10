@@ -1187,9 +1187,6 @@ streams:
 }
 
 func TestExecuteReplicationHookSetsError(t *testing.T) {
-	// offline token payload, so the hooks run without the license server
-	t.Setenv("SLING_TOKEN_PAYLOAD", `{"plan":"cli_pro","valid":true}`)
-
 	runID := "__sling_replication_hook_end__"
 	cases := []struct {
 		name   string
