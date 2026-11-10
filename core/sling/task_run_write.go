@@ -431,12 +431,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	// Execute pre-SQL (legacy)
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
-		err = g.Error(err, "Error executing %s-sql", "pre")
-		return 0, err
-	}
-
 	// Handle empty data case
 	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
 		g.Warn("no data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
@@ -507,12 +501,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// Apply schema migration attributes (foreign keys, indexes) after commit
 	applySchemaAttributes(cfg, tgtConn, targetTable, df.Columns)
 
-	// Execute post-SQL (legacy)
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
-		err = g.Error(err, "error executing %s-sql", "post")
-		return 0, err
-	}
-
 	// Set progress as finished
 	if err := df.Err(); err != nil {
 		setStage("6 - closing")
@@ -559,11 +547,6 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
 		err = g.Error(err, "could not set keys for "+targetTable.FullName())
 		return 0, err
-	}
-
-	// Execute pre-SQL (legacy)
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
-		return cnt, err
 	}
 
 	// Create final table
@@ -685,11 +668,6 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		g.Warn("no data or records found in stream. Nothing to insert.")
 	}
 
-	// Execute post-SQL (legacy)
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
-		return cnt, err
-	}
-
 	// Finalize progress
 	if err := df.Err(); err != nil {
 		setStage("6 - closing")
@@ -735,10 +713,6 @@ func (t *TaskExecution) writeToIcebergMerge(cfg *Config, df *iop.Dataflow, tgtCo
 	targetTable.Columns = sampleData.Columns
 	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
 		return 0, g.Error(err, "could not set keys for "+targetTable.FullName())
-	}
-
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
-		return 0, err
 	}
 
 	if _, err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
@@ -788,10 +762,6 @@ func (t *TaskExecution) writeToIcebergMerge(cfg *Config, df *iop.Dataflow, tgtCo
 
 	if cnt == 0 {
 		g.Warn("no data or records found in stream. Nothing to merge.")
-	}
-
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
-		return cnt, err
 	}
 
 	if err := df.Err(); err != nil {
@@ -1389,22 +1359,6 @@ func performMerge(tgtConn database.Connection, tableTmp, targetTable database.Ta
 	}
 	if rowAffCnt > 0 {
 		g.Debug("%d rows affected", cast.ToInt64(rowAffCnt))
-	}
-	return nil
-}
-
-func executeSQL(t *TaskExecution, tgtConn database.Connection, sqlStatements *string, stage string) error {
-	if sqlStatements == nil || *sqlStatements == "" {
-		return nil
-	}
-
-	// apply values
-	sql := g.Rm(*sqlStatements, t.GetStateMap())
-
-	t.SetProgress("executing %s-sql", stage)
-	if _, err := tgtConn.ExecMulti(sql); err != nil {
-		err = g.Error(err, "Error executing %s-sql", stage)
-		return err
 	}
 	return nil
 }

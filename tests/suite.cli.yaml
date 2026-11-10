@@ -4167,3 +4167,21 @@
     - 'execution succeeded'
     - 'PG COPY stream sling_pg_mem_txt rows: 2000000, tz ok: 2000000'
     - 'PG COPY RSS OK'
+
+# SLING-339: legacy pre_sql / post_sql run as stream hooks on the CLI single-task path
+- id: 871
+  name: 'SLING-339: pre_sql / post_sql run as hooks (sling run, two statements)'
+  group: legacy_sql_hooks
+  run: |
+    sling run -d --src-stream file://tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.legacy_sql_hooks --mode full-refresh --tgt-options '{pre_sql: "drop table if exists public.legacy_sql_hooks_cnt", post_sql: "drop table if exists public.legacy_sql_hooks_cnt; create table public.legacy_sql_hooks_cnt as select count(*) as cnt from {object_full_name}"}'
+  rows: 18
+  output_contains:
+    - 'execution succeeded'
+
+- id: 872
+  name: 'SLING-339: post_sql hook wrote the row count'
+  group: legacy_sql_hooks
+  run: 'sling conns exec POSTGRES "select cnt from public.legacy_sql_hooks_cnt"'
+  output_contains:
+    - '18'
+  after: [871]

@@ -10,7 +10,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/nqd/flat"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -49,6 +48,16 @@ func (t *TaskExecution) Execute() error {
 
 	// set defaults
 	t.Config.SetDefault()
+
+	// stream hooks need a replication state (e.g. legacy pre_sql / post_sql hooks)
+	if rs := t.Config.ReplicationStream; t.Replication == nil && rs != nil &&
+		len(rs.Hooks.Pre)+len(rs.Hooks.Post)+len(rs.Hooks.PreMerge)+len(rs.Hooks.PostMerge) > 0 {
+		t.Replication = &ReplicationConfig{
+			Source: t.Config.Source.Conn,
+			Target: t.Config.Target.Conn,
+			Env:    g.CastToMapAny(t.Config.Env),
+		}
+	}
 
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
@@ -255,25 +264,6 @@ func (t *TaskExecution) ExecuteHooks(stage HookStage) (err error) {
 	}
 
 	return nil
-}
-
-func (t *TaskExecution) GetStateMap() map[string]any {
-	// format map
-	fMap, _ := t.Config.GetFormatMap()
-
-	// merge with context map
-	cMap := t.Context.Map.Items()
-	for k, v := range fMap {
-		cMap[k] = v
-	}
-
-	// flatten with dot separator
-	sMap, err := flat.Flatten(cMap, &flat.Options{Delimiter: ".", Safe: true})
-	if err != nil {
-		g.LogError(err, "error flattening state map")
-	}
-
-	return sMap
 }
 
 func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnection, err error) {

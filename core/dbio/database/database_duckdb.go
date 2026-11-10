@@ -253,6 +253,10 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	// connect first, so that session SQL (e.g. DuckLake ATTACH / USE) is set
+	if err = reconnectIfClosed(conn); err != nil {
+		return nil, g.Error(err, "Could not reconnect")
+	}
 	if conn.useADBC() {
 		return conn.adbc.ExecMultiContext(ctx, sqls...)
 	}
@@ -260,6 +264,9 @@ func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (r
 }
 
 func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+	if err = reconnectIfClosed(conn); err != nil {
+		return nil, g.Error(err, "Could not reconnect")
+	}
 	if conn.useADBC() {
 		return conn.adbc.ExecContext(ctx, sql, args...)
 	}
