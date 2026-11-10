@@ -370,23 +370,21 @@ func (cfg *Config) injectLegacySQLHooks(fMap map[string]any) error {
 		rs = *cfg.ReplicationStream
 	}
 
-	legacyHook := func(sql, key string) map[string]any {
-		return map[string]any{
-			"type":       "query",
-			"connection": cfg.Target.Conn,
-			"query":      sql,
-			"on_failure": "error",
-			"legacy_sql": key,
-		}
-	}
-
 	if preSQL != "" {
+		hook, err := newLegacySQLHook(cfg.Target.Conn, preSQL, "pre_sql")
+		if err != nil {
+			return err
+		}
 		pre := make([]any, 0, len(rs.Hooks.Pre)+1)
-		rs.Hooks.Pre = append(append(pre, rs.Hooks.Pre...), legacyHook(preSQL, "pre_sql"))
+		rs.Hooks.Pre = append(append(pre, rs.Hooks.Pre...), hook)
 	}
 	if postSQL != "" {
+		hook, err := newLegacySQLHook(cfg.Target.Conn, postSQL, "post_sql")
+		if err != nil {
+			return err
+		}
 		postMerge := make([]any, 0, len(rs.Hooks.PostMerge)+1)
-		rs.Hooks.PostMerge = append(append(postMerge, rs.Hooks.PostMerge...), legacyHook(postSQL, "post_sql"))
+		rs.Hooks.PostMerge = append(append(postMerge, rs.Hooks.PostMerge...), hook)
 	}
 
 	cfg.ReplicationStream = &rs

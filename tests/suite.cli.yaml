@@ -4185,3 +4185,15 @@
   output_contains:
     - '18'
   after: [871]
+
+- id: 873
+  name: 'SLING-339: pre_sql without a CLI Pro token fails at compile'
+  group: legacy_sql_hooks
+  run: |
+    SLING_CLI_TOKEN='' sling run -d --src-stream file://tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.legacy_sql_hooks_nopro --mode full-refresh --tgt-options '{pre_sql: "select 1"}'
+  err: true
+  output_contains:
+    - 'pre_sql / post_sql'
+  output_does_not_contain:
+    - 'execution succeeded'
+    - 'reading from source file system'
