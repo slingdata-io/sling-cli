@@ -1,0 +1,10 @@
+target: CLICKHOUSE
+defaults:
+  schema: sling_settings
+  settings:
+    table:
+      index_granularity: 4096
+    query:
+      log_comment: sling_settings_test
+vars:
+  extra: false

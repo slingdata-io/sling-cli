@@ -828,3 +828,151 @@
   output_does_not_contain:
     - '{model.'
     - 'bad connection'
+
+- id: 871
+  name: 'sling build compile shows ClickHouse table_clause and query_settings'
+  group: build
+  run: 'sling build compile tests/build/clickhouse_settings_project --target CLICKHOUSE'
+  output_contains:
+    - "table_clause: ENGINE = MergeTree() PARTITION BY toYYYYMM(event_day) PRIMARY KEY event_day ORDER BY (event_day, id) TTL event_day + INTERVAL 100 YEAR SETTINGS allow_nullable_key = 1, index_granularity = 1024, storage_policy = 'default'"
+    - 'table_clause: ENGINE = MergeTree() ORDER BY tuple() SETTINGS index_granularity = 4096'
+    - "query_settings: log_comment = 'sling_settings_test', max_threads = 3, mutations_sync = 2"
+    - "query_settings: log_comment = 'sling_settings_test', max_insert_threads = 2"
+    - "model 'ch_set_inc': the ClickHouse merge DELETE keeps its inline mutations_sync = 1"
+
+- id: 872
+  name: 'sling build clickhouse settings first run full-refresh'
+  group: build
+  after: [871]
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS sling_settings"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS sling_settings.ch_set_plain"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS sling_settings.ch_set_full"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS sling_settings.ch_set_inc"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS sling_settings.ch_set_append"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS sling_settings.ch_set_trunc"
+    sling build run tests/build/clickhouse_settings_project --target CLICKHOUSE --full-refresh
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 873
+  name: 'sling build clickhouse settings layout and table settings of ch_set_full'
+  group: build
+  after: [872]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', storage_policy, '|', partition_key, '|', sorting_key, '|', primary_key, '|', toString(position(engine_full, 'index_granularity = 1024') > 0), '|', toString(position(engine_full, 'TTL') > 0), '|', toString(position(engine_full, 'allow_nullable_key = 1') > 0)) AS c FROM system.tables WHERE database = 'sling_settings' AND name = 'ch_set_full'"
+  output_contains:
+    - 'chk:default|toYYYYMM(event_day)|event_day, id|event_day|1|1|1'
+
+- id: 874
+  name: 'sling build clickhouse settings defaults only on ch_set_plain, partition on ch_set_inc'
+  group: build
+  after: [872]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', sorting_key, '|', toString(position(engine_full, 'index_granularity = 4096') > 0), '|', toString(position(engine_full, 'allow_nullable_key') > 0)) AS c FROM system.tables WHERE database = 'sling_settings' AND name = 'ch_set_plain'"
+    sling conns exec CLICKHOUSE "SELECT concat('chk2:', partition_key) AS c FROM system.tables WHERE database = 'sling_settings' AND name = 'ch_set_inc'"
+  output_contains:
+    - 'chk:|1|0'
+    - 'chk2:toYYYYMM(event_day)'
+
+- id: 875
+  name: 'sling build clickhouse settings second run (incremental, append, truncate)'
+  group: build
+  after: [873, 874]
+  run: |
+    sling build run tests/build/clickhouse_settings_project --target CLICKHOUSE --vars 'extra: true'
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', toString((SELECT count() FROM sling_settings.ch_set_inc)), '|', toString((SELECT count() FROM sling_settings.ch_set_append)), '|', toString((SELECT count() FROM sling_settings.ch_set_trunc))) AS c"
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+    - 'chk:3|5|3'
+
+- id: 876
+  name: 'sling build clickhouse query settings reach each statement and do not leak'
+  group: build
+  after: [875]
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "SYSTEM FLUSH LOGS"
+    # "sling conns exec" runs a query with the word "insert" as a statement (no rows shown), so k builds the word
+    sling conns exec CLICKHOUSE "WITH concat('ins', 'ert') AS k SELECT concat('chk:',
+      toString(countIf(query_kind = 'Create' AND query LIKE '%_sling_build_tmp_ch_set_inc_%' AND Settings.Values[indexOf(Settings.Names, 'max_threads')] = '3') > 0), '|',
+      toString(countIf(query_kind = 'Alter' AND query LIKE '%ch_set_inc%DELETE%' AND Settings.Values[indexOf(Settings.Names, 'max_threads')] = '3') > 0), '|',
+      toString(countIf(lower(query_kind) = k AND lower(query) LIKE concat(k, ' into%ch_set_inc%') AND Settings.Values[indexOf(Settings.Names, 'max_threads')] = '3') > 0), '|',
+      toString(countIf(lower(query_kind) = k AND lower(query) LIKE concat(k, ' into%ch_set_append%') AND Settings.Values[indexOf(Settings.Names, concat('max_', k, '_threads'))] = '2') > 0), '|',
+      toString(countIf(lower(query_kind) = k AND lower(query) LIKE concat(k, ' into%ch_set_trunc%') AND Settings.Values[indexOf(Settings.Names, 'max_threads')] = '2') > 0), '|',
+      toString(countIf(query LIKE '%ch_set_full%' AND has(Settings.Names, 'max_threads')) = 0)) AS c
+      FROM system.query_log WHERE type = 'QueryFinish' AND log_comment = 'sling_settings_test' AND event_time > now() - INTERVAL 15 MINUTE"
+    sling conns exec CLICKHOUSE "SELECT concat('ms:', Settings.Values[indexOf(Settings.Names, 'mutations_sync')]) AS c FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Alter' AND query LIKE '%ch_set_inc%DELETE%' AND log_comment = 'sling_settings_test' ORDER BY event_time DESC LIMIT 1"
+  output_contains:
+    - 'chk:1|1|1|1|1|1'
+
+- id: 877
+  name: 'sling build clickhouse settings tmp table DDL and final table DDL'
+  group: build
+  after: [876]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:',
+      toString(countIf(query LIKE 'CREATE TABLE%_sling_build_tmp_ch_set_inc_%ENGINE = MergeTree() ORDER BY tuple() SETTINGS index_granularity = 4096 AS (%' AND query NOT LIKE '%PARTITION BY%') > 0), '|',
+      toString(countIf(query LIKE 'CREATE TABLE%_sling_build_tmp_ch_set_full_%PARTITION BY toYYYYMM(event_day) PRIMARY KEY event_day ORDER BY (event_day, id) TTL%') > 0)) AS c
+      FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Create' AND log_comment = 'sling_settings_test' AND event_time > now() - INTERVAL 15 MINUTE"
+  output_contains:
+    - 'chk:1|1'
+
+- id: 878
+  name: 'sling build clickhouse settings hooks do not get the query settings'
+  group: build
+  after: [876]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', toString(count() > 0), '|', toString(countIf(log_comment != '' OR has(Settings.Names, 'max_threads')))) AS c FROM system.query_log WHERE type = 'QueryFinish' AND query LIKE '%sling_settings_hook_probe%' AND query NOT LIKE '%query_log%' AND event_time > now() - INTERVAL 15 MINUTE"
+  output_contains:
+    - 'chk:1|0'
+
+- id: 879
+  name: 'sling build clickhouse settings bad storage policy fails'
+  group: build
+  after: [872]
+  err: true
+  run: 'sling build run tests/build/clickhouse_settings_bad_project --target CLICKHOUSE --full-refresh'
+  output_contains:
+    - 'no_such_policy'
+
+- id: 880
+  name: 'sling build clickhouse settings no tmp table left after a failed build'
+  group: build
+  after: [879]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', toString(count())) AS c FROM system.tables WHERE database = 'sling_settings' AND name LIKE '%sling_build_tmp_ch_set_bad%'"
+  output_contains:
+    - 'chk:0'
+
+- id: 881
+  name: 'sling build compile warns on a non-ClickHouse target'
+  group: build
+  run: 'sling build compile tests/build/clickhouse_settings_project --target POSTGRES'
+  output_contains:
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query apply only to ClickHouse"
+    - 'ignores them'
+  output_does_not_contain:
+    - 'table_clause'
+    - 'ENGINE ='
+
+- id: 882
+  name: 'sling build clickhouse settings over the HTTP protocol'
+  group: build
+  after: [878]
+  run: |
+    SLING_ROW_CNT= sling build run tests/build/clickhouse_settings_project --target CLICKHOUSE_HTTP --vars 'extra: true' -s ch_set_inc
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE_HTTP "SYSTEM FLUSH LOGS"
+    sling conns exec CLICKHOUSE_HTTP "SELECT concat('chk:', toString(countIf(query_kind = 'Alter' AND Settings.Values[indexOf(Settings.Names, 'max_threads')] = '3') > 0)) AS c FROM system.query_log WHERE type = 'QueryFinish' AND interface = 2 AND log_comment = 'sling_settings_test' AND event_time > now() - INTERVAL 5 MINUTE"
+  output_contains:
+    - 'chk:1'
+
+- id: 883
+  name: 'sling build compile warns on a Proton target and renders no table_clause'
+  group: build
+  run: 'sling build compile tests/build/clickhouse_settings_project --target PROTON'
+  output_contains:
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query apply only to ClickHouse"
+  output_does_not_contain:
+    - 'table_clause'
