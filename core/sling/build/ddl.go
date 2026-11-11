@@ -1,6 +1,10 @@
 package build
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/flarco/g"
@@ -152,12 +156,16 @@ func (e *Executor) truncateTable(fullName string) error {
 }
 
 // insertSelect inserts the result of a SELECT into an existing table.
-func (e *Executor) insertSelect(fullName, selectSQL string) (uint64, error) {
-	quoted, err := e.quoteFullTableName(fullName)
+// ClickHouse rejects parens around the SELECT.
+func (e *Executor) insertSelect(model *Model, selectSQL string) (uint64, error) {
+	quoted, err := e.quoteFullTableName(model.FullTableName)
 	if err != nil {
 		return 0, err
 	}
-	return rowsFromExec(e.DbConn.Exec(g.F("INSERT INTO %s (%s)", quoted, selectSQL)))
+	if e.isClickHouse() {
+		return rowsFromExec(e.execModel(model, g.F("INSERT INTO %s %s", quoted, selectSQL)))
+	}
+	return rowsFromExec(e.execModel(model, g.F("INSERT INTO %s (%s)", quoted, selectSQL)))
 }
 
 // createTableAs creates a table from a SELECT, dialect-aware.
@@ -170,20 +178,8 @@ func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) (uint
 	dbType := e.DbConn.GetType()
 
 	if e.isClickHouse() {
-		engineClause := "ENGINE = MergeTree()"
-		orderByClause := "ORDER BY tuple()"
-		settings := ""
-		if model != nil {
-			engineClause = e.getEngineClause(model)
-			orderByClause = e.getOrderByClause(model)
-			// MergeTree sorting keys cannot be nullable. allow_nullable_key
-			// lets incremental unique_key columns work without wrapping every
-			// SELECT in assumeNotNull
-			if !strings.Contains(strings.ToUpper(orderByClause), "TUPLE()") {
-				settings = " SETTINGS allow_nullable_key = 1"
-			}
-		}
-		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s %s %s%s AS (%s)", quoted, engineClause, orderByClause, settings, selectSQL)))
+		table := newCHTable(model, e.DbConn.Quote, dbType == dbio.TypeDbClickhouse)
+		return rowsFromExec(e.execModel(model, g.F("CREATE TABLE %s %s AS (%s)", quoted, table.clause(), selectSQL)))
 	}
 
 	if isSQLServerFamily(dbType) {
@@ -255,4 +251,176 @@ func (e *Executor) renameTable(oldFull, newFull string) error {
 	sql := g.R(tpl, "table", oldQuoted, "new_table", newRef)
 	_, err = e.DbConn.Exec(sql)
 	return err
+}
+
+// sql renders the settings as "k1 = v1, k2 = v2", sorted by key.
+func (v SettingValues) sql() string {
+	parts := make([]string, 0, len(v))
+	for _, key := range sortedKeys(v) {
+		val := v[key]
+		if s, ok := val.(string); ok {
+			val = "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+		}
+		parts = append(parts, key+" = "+settingScalar(val))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// wire returns the values that the driver sends, as strings.
+// It returns a new map on each call.
+func (v SettingValues) wire() map[string]string {
+	out := make(map[string]string, len(v))
+	for key, val := range v {
+		out[key] = settingScalar(val)
+	}
+	return out
+}
+
+// settingScalar renders a string, number or bool value without quotes.
+func settingScalar(val any) string {
+	switch x := val.(type) {
+	case string:
+		return x
+	case bool:
+		if x {
+			return "1"
+		}
+		return "0"
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	case float32:
+		return strconv.FormatFloat(float64(x), 'f', -1, 32)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	}
+	return fmt.Sprint(val)
+}
+
+// chTable holds the ClickHouse clauses between the table name and AS.
+type chTable struct {
+	engine      string // without "ENGINE = "
+	partitionBy string
+	primaryKey  string
+	orderBy     string // expression without "ORDER BY "
+	ttl         string
+	settings    SettingValues
+}
+
+// newCHTable builds the clauses of the final model table. keys is false on
+// Proton: only the engine and the unique key apply.
+func newCHTable(model *Model, quote func(string) string, keys bool) chTable {
+	t := chTable{engine: "MergeTree()", orderBy: "tuple()"}
+	if model == nil {
+		return t
+	}
+	c := model.Config
+	if c.Engine != "" {
+		t.engine = c.Engine
+	}
+	if keys {
+		t.partitionBy, t.primaryKey, t.ttl = c.PartitionBy, c.PrimaryKey, c.TTL
+		t.settings = c.Settings.Table.merge(nil)
+	}
+
+	if keys && c.OrderBy != "" {
+		t.orderBy = c.OrderBy
+	} else if uniqueKeys := getUniqueKeys(model); len(uniqueKeys) > 0 {
+		quoted := make([]string, len(uniqueKeys))
+		for i, k := range uniqueKeys {
+			quoted[i] = k
+			if quote != nil {
+				quoted[i] = quote(k)
+			}
+		}
+		t.orderBy = "(" + strings.Join(quoted, ", ") + ")"
+	}
+
+	// MergeTree sorting keys cannot be nullable. allow_nullable_key lets
+	// incremental unique_key columns work without wrapping every SELECT
+	// in assumeNotNull
+	if !strings.Contains(strings.ToUpper(t.orderBy), "TUPLE()") {
+		if _, set := t.settings["allow_nullable_key"]; !set {
+			if t.settings == nil {
+				t.settings = SettingValues{}
+			}
+			t.settings["allow_nullable_key"] = 1
+		}
+	}
+	return t
+}
+
+// newCHTempTable builds the clauses of a staging table. keys is false on Proton.
+func newCHTempTable(model *Model, keys bool) chTable {
+	t := chTable{engine: "MergeTree()", orderBy: "tuple()"}
+	if model != nil && keys {
+		t.settings = model.Config.Settings.Table.merge(nil)
+	}
+	return t
+}
+
+// clause renders the clauses in the order that ClickHouse requires.
+func (t chTable) clause() string {
+	parts := []string{"ENGINE = " + t.engine}
+	if t.partitionBy != "" {
+		parts = append(parts, "PARTITION BY "+t.partitionBy)
+	}
+	if t.primaryKey != "" {
+		parts = append(parts, "PRIMARY KEY "+t.primaryKey)
+	}
+	parts = append(parts, "ORDER BY "+t.orderBy)
+	if t.ttl != "" {
+		parts = append(parts, "TTL "+t.ttl)
+	}
+	if len(t.settings) > 0 {
+		parts = append(parts, "SETTINGS "+t.settings.sql())
+	}
+	return strings.Join(parts, " ")
+}
+
+// querySettingsConn is a target conn that sends query settings with each statement.
+type querySettingsConn interface {
+	QuerySettingsContext(ctx context.Context, settings map[string]string) context.Context
+}
+
+// querySettings returns the conn and the settings to send with a statement of
+// the model. ok is false when the statement must run with a plain call.
+func (e *Executor) querySettings(model *Model) (conn querySettingsConn, settings SettingValues, ok bool) {
+	if model == nil || len(model.Config.Settings.Query) == 0 {
+		return nil, nil, false
+	}
+	conn, ok = e.DbConn.(querySettingsConn)
+	return conn, model.Config.Settings.Query, ok
+}
+
+// execModel runs one statement of the model.
+func (e *Executor) execModel(model *Model, q string) (sql.Result, error) {
+	conn, settings, ok := e.querySettings(model)
+	if !ok {
+		return e.DbConn.Exec(q)
+	}
+	ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
+	result, err := e.DbConn.ExecContext(ctx, q)
+	if err != nil {
+		err = g.Error(err, "Could not execute SQL")
+	}
+	return result, err
+}
+
+// execModelMulti runs a multi-statement string (merge SQL) of the model.
+// Each statement gets the settings.
+func (e *Executor) execModelMulti(model *Model, q string) (sql.Result, error) {
+	conn, settings, ok := e.querySettings(model)
+	if !ok {
+		return e.DbConn.ExecMulti(q)
+	}
+	ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
+	result, err := e.DbConn.ExecMultiContext(ctx, q)
+	if err != nil {
+		err = g.Error(err, "Could not execute SQL")
+	}
+	return result, err
 }

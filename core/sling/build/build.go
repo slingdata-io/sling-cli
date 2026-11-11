@@ -626,6 +626,10 @@ func (b *Build) Compiled() *BuildConfig {
 			n.Dependencies = node.Dependencies
 			n.SQL = node.Model.CompiledSQL
 			n.Tests = node.Model.Config.Tests
+			if b.dbType == dbio.TypeDbClickhouse && n.Mode != "view" {
+				n.TableClause = newCHTable(node.Model, b.dbType.Quote, true).clause()
+				n.QuerySettings = node.Model.Config.Settings.Query.sql()
+			}
 		}
 		cfg.Nodes = append(cfg.Nodes, n)
 	}
@@ -655,6 +659,8 @@ func (c *BuildConfig) JSONPayload() map[string]any {
 		setIf("table", node.Table, node.Table != "")
 		setIf("file", node.File, node.File != "")
 		setIf("mode", node.Mode, node.Mode != "")
+		setIf("table_clause", node.TableClause, node.TableClause != "")
+		setIf("query_settings", node.QuerySettings, node.QuerySettings != "")
 		setIf("dependencies", node.Dependencies, node.Type == NodeTypeModel)
 		setIf("sql", node.SQL, node.SQL != "")
 		setIf("tests", node.Tests, len(node.Tests) > 0)
@@ -688,6 +694,12 @@ func (b *Build) printModelYAML(name string, node *DAGNode) {
 	fmt.Printf("  table: %s\n", model.FullTableName)
 	fmt.Printf("  file: %s\n", filepath.ToSlash(model.RelPath))
 	fmt.Printf("  mode: %s\n", mode)
+	if b.dbType == dbio.TypeDbClickhouse && mode != "view" {
+		fmt.Printf("  table_clause: %s\n", newCHTable(model, b.dbType.Quote, true).clause())
+		if qs := model.Config.Settings.Query.sql(); qs != "" {
+			fmt.Printf("  query_settings: %s\n", qs)
+		}
+	}
 
 	// Incremental details
 	if model.Config.UniqueKey != nil {

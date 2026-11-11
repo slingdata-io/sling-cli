@@ -307,6 +307,9 @@ type Node struct {
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"` // models only
 	SQL          string   `json:"sql,omitempty" yaml:"sql,omitempty"`                   // models only
 	Tests        []any    `json:"tests,omitempty" yaml:"tests,omitempty"`               // models only
+
+	TableClause   string `json:"table_clause,omitempty" yaml:"table_clause,omitempty"`     // models only, ClickHouse
+	QuerySettings string `json:"query_settings,omitempty" yaml:"query_settings,omitempty"` // models only, rendered "k = v, ..."
 }
 
 // ModelNames returns the names of the compiled nodes that are models, in order.

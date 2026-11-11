@@ -1,6 +1,8 @@
 package build
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"regexp"
 	"strings"
@@ -101,47 +103,297 @@ func TestGetUniqueKeysEmptyString(t *testing.T) {
 	assert.Nil(t, keys)
 }
 
-func TestGetEngineClauseDefault(t *testing.T) {
-	model := &Model{Config: ModelConfig{}}
-	clause := getEngineClause(model)
-	assert.Equal(t, "ENGINE = MergeTree()", clause)
+func backtick(s string) string { return "`" + s + "`" }
+
+func allKeysModel() *Model {
+	return &Model{Config: ModelConfig{
+		UniqueKey:   "id",
+		OrderBy:     "(d, id)",
+		PartitionBy: "toYYYYMM(ts)",
+		PrimaryKey:  "d",
+		TTL:         "ts + INTERVAL 2 YEAR",
+		Settings: ModelSettings{
+			Table: SettingValues{"storage_policy": "p"},
+			Query: SettingValues{"max_memory_usage": 100},
+		},
+	}}
 }
 
-func TestGetEngineClauseCustom(t *testing.T) {
-	model := &Model{Config: ModelConfig{Engine: "ReplacingMergeTree(updated_at)"}}
-	clause := getEngineClause(model)
-	assert.Equal(t, "ENGINE = ReplacingMergeTree(updated_at)", clause)
-}
+func TestCHTableDefault(t *testing.T) {
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", newCHTable(nil, backtick, true).clause())
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", newCHTable(&Model{}, backtick, true).clause())
 
-func TestGetOrderByClauseNoKeys(t *testing.T) {
-	model := &Model{Config: ModelConfig{}}
-	clause := getOrderByClause(model, nil)
-	assert.Equal(t, "ORDER BY tuple()", clause)
-}
-
-func TestGetOrderByClauseSingleKey(t *testing.T) {
 	model := &Model{Config: ModelConfig{UniqueKey: "id"}}
-	clause := getOrderByClause(model, nil)
-	assert.Equal(t, "ORDER BY (id)", clause)
-}
+	assert.Equal(t,
+		"ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1",
+		newCHTable(model, backtick, true).clause())
 
-func TestGetOrderByClauseMultipleKeys(t *testing.T) {
-	model := &Model{Config: ModelConfig{UniqueKey: []string{"id", "name"}}}
-	clause := getOrderByClause(model, nil)
-	assert.Equal(t, "ORDER BY (id, name)", clause)
-}
+	model = &Model{Config: ModelConfig{Engine: "ReplacingMergeTree(ts)"}}
+	assert.Equal(t, "ENGINE = ReplacingMergeTree(ts) ORDER BY tuple()", newCHTable(model, nil, true).clause())
 
-func TestClickHouseCreateTableAllowsNullableKeys(t *testing.T) {
-	model := &Model{Config: ModelConfig{UniqueKey: []string{"order_key", "line_number"}}}
-	clause := getOrderByClause(model, nil)
-	assert.Equal(t, "ORDER BY (order_key, line_number)", clause)
+	model = &Model{Config: ModelConfig{UniqueKey: []string{"order_key", "line_number"}}}
+	clause := newCHTable(model, nil, true).clause()
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY (order_key, line_number) SETTINGS allow_nullable_key = 1", clause)
 	assert.NotContains(t, strings.ToUpper(clause), "TUPLE()")
 }
 
-func TestGetOrderByClauseQuoted(t *testing.T) {
-	model := &Model{Config: ModelConfig{UniqueKey: "id"}}
-	clause := getOrderByClause(model, func(s string) string { return `"` + s + `"` })
-	assert.Equal(t, `ORDER BY ("id")`, clause)
+func TestCHTableClauseOrder(t *testing.T) {
+	model := allKeysModel()
+	assert.Equal(t,
+		"ENGINE = MergeTree() PARTITION BY toYYYYMM(ts) PRIMARY KEY d ORDER BY (d, id) TTL ts + INTERVAL 2 YEAR SETTINGS allow_nullable_key = 1, storage_policy = 'p'",
+		newCHTable(model, backtick, true).clause())
+	assert.Len(t, model.Config.Settings.Table, 1, "the model settings stay unchanged")
+}
+
+func TestCHTableAllowNullableOverride(t *testing.T) {
+	model := &Model{Config: ModelConfig{
+		OrderBy:  "(d, id)",
+		Settings: ModelSettings{Table: SettingValues{"allow_nullable_key": 0}},
+	}}
+	clause := newCHTable(model, backtick, true).clause()
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY (d, id) SETTINGS allow_nullable_key = 0", clause)
+	assert.Equal(t, 1, strings.Count(clause, "allow_nullable_key"))
+}
+
+func TestCHTableProton(t *testing.T) {
+	model := allKeysModel()
+	assert.Equal(t,
+		"ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1",
+		newCHTable(model, backtick, false).clause())
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", newCHTempTable(model, false).clause())
+}
+
+func TestCHTableTemp(t *testing.T) {
+	assert.Equal(t,
+		"ENGINE = MergeTree() ORDER BY tuple() SETTINGS storage_policy = 'p'",
+		newCHTempTable(allKeysModel(), true).clause())
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", newCHTempTable(&Model{}, true).clause())
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", newCHTempTable(nil, true).clause())
+}
+
+func TestSettingValuesSQL(t *testing.T) {
+	assert.Equal(t, "", SettingValues{}.sql())
+	assert.Equal(t, "", SettingValues(nil).sql())
+	assert.Equal(t, `a = 'a\'b\\c', b = 3`, SettingValues{"b": 3, "a": `a'b\c`}.sql())
+	assert.Equal(t, "i = 3, i64 = 4, u64 = 5", SettingValues{"i": 3, "i64": int64(4), "u64": uint64(5)}.sql())
+	assert.Equal(t, "big = 10000000000, half = 0.5", SettingValues{"big": float64(1e10), "half": 0.5}.sql())
+	assert.Equal(t, "f = 0, t = 1", SettingValues{"t": true, "f": false}.sql())
+}
+
+func TestSettingValuesWire(t *testing.T) {
+	v := SettingValues{"s": "a'b", "n": 3, "f": 0.5, "t": true, "z": false}
+	got := v.wire()
+	assert.Equal(t, map[string]string{"s": "a'b", "n": "3", "f": "0.5", "t": "1", "z": "0"}, got)
+
+	got["s"] = "changed"
+	assert.Equal(t, "a'b", v.wire()["s"], "each call returns a new map")
+	assert.Empty(t, SettingValues(nil).wire())
+}
+
+type settingsKey struct{}
+
+type recordedCall struct {
+	method   string
+	sql      string
+	settings map[string]string
+}
+
+// recordingConn is a target that records each statement.
+type recordingConn struct {
+	database.Connection // nil; a call to a method that is not overridden panics
+	dbType              dbio.Type
+	calls               []recordedCall
+	exists              bool
+}
+
+func (c *recordingConn) GetType() dbio.Type             { return c.dbType }
+func (c *recordingConn) Quote(f string) string          { return c.dbType.Quote(f) }
+func (c *recordingConn) Context() *g.Context            { return g.NewContext(context.Background()) }
+func (c *recordingConn) GetCount(string) (int64, error) { return 5, nil }
+func (c *recordingConn) TableExists(database.Table) (bool, error) {
+	return c.exists, nil
+}
+func (c *recordingConn) GetTemplateValue(path string) string { return c.dbType.GetTemplateValue(path) }
+
+func (c *recordingConn) record(method string, ctx context.Context, q string) {
+	settings, _ := ctx.Value(settingsKey{}).(map[string]string)
+	c.calls = append(c.calls, recordedCall{method, q, settings})
+}
+
+func (c *recordingConn) Exec(q string, args ...any) (sql.Result, error) {
+	c.record("Exec", context.Background(), q)
+	return mockSQLResult{n: 1}, nil
+}
+
+func (c *recordingConn) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	c.record("ExecContext", ctx, q)
+	return mockSQLResult{n: 1}, nil
+}
+
+func (c *recordingConn) ExecMulti(qs ...string) (sql.Result, error) {
+	c.record("ExecMulti", context.Background(), strings.Join(qs, ";"))
+	return mockSQLResult{n: 1}, nil
+}
+
+func (c *recordingConn) ExecMultiContext(ctx context.Context, qs ...string) (sql.Result, error) {
+	c.record("ExecMultiContext", ctx, strings.Join(qs, ";"))
+	return mockSQLResult{n: 1}, nil
+}
+
+func (c *recordingConn) QuerySettingsContext(ctx context.Context, settings map[string]string) context.Context {
+	return context.WithValue(ctx, settingsKey{}, settings)
+}
+
+// find returns the calls whose SQL starts with prefix.
+func (c *recordingConn) find(prefix string) (out []recordedCall) {
+	for _, call := range c.calls {
+		if strings.HasPrefix(call.sql, prefix) {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+// plainConn hides QuerySettingsContext, as ProtonConn does.
+type plainConn struct{ database.Connection }
+
+func newRecordingExecutor(dbType dbio.Type) (*Executor, *recordingConn) {
+	conn := &recordingConn{dbType: dbType}
+	return &Executor{DbConn: conn, RunID: "r1"}, conn
+}
+
+func queryModel(query SettingValues) *Model {
+	return &Model{
+		Name:          "t",
+		Schema:        "s",
+		FullTableName: "s.t",
+		Config: ModelConfig{
+			UniqueKey: "id",
+			Settings:  ModelSettings{Table: SettingValues{"storage_policy": "p"}, Query: query},
+		},
+	}
+}
+
+func TestExecModelQuerySettings(t *testing.T) {
+	want := map[string]string{"max_memory_usage": "100"}
+	e, conn := newRecordingExecutor(dbio.TypeDbClickhouse)
+	model := queryModel(SettingValues{"max_memory_usage": 100})
+
+	_, err := e.createTableAs("s.t", "SELECT 1 AS id", model)
+	require.NoError(t, err)
+	_, err = e.createTempTable(model, "s.tmp", "SELECT 1 AS id")
+	require.NoError(t, err)
+	_, err = e.insertSelect(model, "SELECT 1")
+	require.NoError(t, err)
+
+	ctas := conn.find("CREATE TABLE `s`.`t` ")
+	require.Len(t, ctas, 1)
+	assert.Equal(t, "ExecContext", ctas[0].method)
+	assert.Equal(t, want, ctas[0].settings)
+	assert.Equal(t,
+		"CREATE TABLE `s`.`t` ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1, storage_policy = 'p' AS (SELECT 1 AS id)",
+		ctas[0].sql)
+
+	tmp := conn.find("CREATE TABLE `s`.`tmp`")
+	require.Len(t, tmp, 1)
+	assert.Equal(t, "ExecContext", tmp[0].method)
+	assert.Equal(t, want, tmp[0].settings)
+	assert.Equal(t,
+		"CREATE TABLE `s`.`tmp` ENGINE = MergeTree() ORDER BY tuple() SETTINGS storage_policy = 'p' AS (SELECT 1 AS id)",
+		tmp[0].sql)
+
+	ins := conn.find("INSERT INTO `s`.`t` SELECT 1")
+	require.Len(t, ins, 1)
+	assert.Equal(t, "ExecContext", ins[0].method)
+	assert.Equal(t, want, ins[0].settings)
+
+	// append into an existing column store table: tmp CTAS, then INSERT ... SELECT
+	e, conn = newRecordingExecutor(dbio.TypeDbClickhouse)
+	conn.exists = true
+	model.CompiledSQL = "SELECT 1 AS id"
+	_, err = e.executeAppend(model)
+	require.NoError(t, err)
+	tmpName := "`s`.`_sling_build_tmp_t_r1`"
+	tmpCTAS := conn.find("CREATE TABLE " + tmpName)
+	require.Len(t, tmpCTAS, 1)
+	assert.Equal(t, "ExecContext", tmpCTAS[0].method)
+	assert.Equal(t, want, tmpCTAS[0].settings)
+	appendIns := conn.find("INSERT INTO `s`.`t` SELECT * FROM " + tmpName)
+	require.Len(t, appendIns, 1)
+	assert.Equal(t, "ExecContext", appendIns[0].method)
+	assert.Equal(t, want, appendIns[0].settings)
+
+	// merge string with two statements
+	e, conn = newRecordingExecutor(dbio.TypeDbClickhouse)
+	_, err = e.execModelMulti(model, "ALTER TABLE a DELETE WHERE 1; INSERT INTO a SELECT 1")
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 1)
+	assert.Equal(t, "ExecMultiContext", conn.calls[0].method)
+	assert.Equal(t, want, conn.calls[0].settings)
+
+	// a model with no query settings sends the plain calls and no settings
+	e, conn = newRecordingExecutor(dbio.TypeDbClickhouse)
+	plain := queryModel(nil)
+	_, err = e.createTableAs("s.t", "SELECT 1 AS id", plain)
+	require.NoError(t, err)
+	_, err = e.createTempTable(plain, "s.tmp", "SELECT 1 AS id")
+	require.NoError(t, err)
+	_, err = e.insertSelect(plain, "SELECT 1")
+	require.NoError(t, err)
+	_, err = e.execModelMulti(plain, "SELECT 1; SELECT 2")
+	require.NoError(t, err)
+	_, err = e.execModelMulti(nil, "SELECT 3")
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 5)
+	for i, call := range conn.calls {
+		assert.Nil(t, call.settings, "call %d", i)
+		assert.NotContains(t, call.method, "Context", "call %d", i)
+	}
+}
+
+func TestExecModelNonClickhouse(t *testing.T) {
+	model := queryModel(SettingValues{"max_memory_usage": 100})
+
+	e, conn := newRecordingExecutor(dbio.TypeDbPostgres)
+	_, err := e.createTableAs("s.t", "SELECT 1", model)
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 1)
+	assert.Equal(t, "Exec", conn.calls[0].method)
+	assert.Equal(t, `CREATE TABLE "s"."t" AS (SELECT 1)`, conn.calls[0].sql)
+	assert.Nil(t, conn.calls[0].settings)
+
+	// Proton has no QuerySettingsContext: plain Exec with today's clause
+	rec := &recordingConn{dbType: dbio.TypeDbProton}
+	e = &Executor{DbConn: plainConn{rec}, RunID: "r1"}
+	_, err = e.createTableAs("s.t", "SELECT 1", model)
+	require.NoError(t, err)
+	_, err = e.createTempTable(model, "s.tmp", "SELECT 1")
+	require.NoError(t, err)
+	require.Len(t, rec.calls, 2)
+	for _, call := range rec.calls {
+		assert.Equal(t, "Exec", call.method)
+		assert.Nil(t, call.settings)
+	}
+	assert.Equal(t,
+		"CREATE TABLE `s`.`t` ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1 AS (SELECT 1)",
+		rec.calls[0].sql)
+	assert.Equal(t, "CREATE TABLE `s`.`tmp` ENGINE = MergeTree() ORDER BY tuple() AS (SELECT 1)", rec.calls[1].sql)
+}
+
+func TestInsertSelectClickhouseNoParens(t *testing.T) {
+	model := queryModel(nil)
+
+	e, conn := newRecordingExecutor(dbio.TypeDbClickhouse)
+	_, err := e.insertSelect(model, "SELECT 1")
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 1)
+	assert.Equal(t, "INSERT INTO `s`.`t` SELECT 1", conn.calls[0].sql)
+
+	e, conn = newRecordingExecutor(dbio.TypeDbPostgres)
+	_, err = e.insertSelect(model, "SELECT 1")
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 1)
+	assert.Equal(t, `INSERT INTO "s"."t" (SELECT 1)`, conn.calls[0].sql)
 }
 
 func TestFormatDurationMilliseconds(t *testing.T) {

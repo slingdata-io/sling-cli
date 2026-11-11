@@ -32,6 +32,15 @@ type ClickhouseConn struct {
 	version string
 }
 
+// QuerySettingsContext returns ctx with settings that the driver sends with each statement on it. The conn keeps no state.
+func (conn *ClickhouseConn) QuerySettingsContext(ctx context.Context, settings map[string]string) context.Context {
+	s := make(clickhouse.Settings, len(settings))
+	for k, v := range settings {
+		s[k] = v
+	}
+	return clickhouse.Context(ctx, clickhouse.WithSettings(s))
+}
+
 // Init initiates the object
 func (conn *ClickhouseConn) Init() error {
 

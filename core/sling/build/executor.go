@@ -828,7 +828,7 @@ func (e *Executor) executeTruncate(model *Model) (uint64, error) {
 	if err := e.truncateTable(model.FullTableName); err != nil {
 		return 0, err
 	}
-	rows, err := e.insertSelect(model.FullTableName, sql)
+	rows, err := e.insertSelect(model, sql)
 	if err != nil {
 		return 0, err
 	}
@@ -909,7 +909,7 @@ func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 		}
 	}()
 
-	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
+	if _, err = e.createTempTable(model, tempTable, incrementalSQL); err != nil {
 		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
 	staged := e.countIfColumnStore(tempTable, 0)
@@ -930,7 +930,7 @@ func (e *Executor) executeLegacyIncremental(model *Model) (uint64, error) {
 		return 0, g.Error(err, "could not generate merge SQL for '%s'", model.Name)
 	}
 
-	rows, err := rowsFromExec(e.DbConn.ExecMulti(mergeSQL))
+	rows, err := rowsFromExec(e.execModelMulti(model, mergeSQL))
 	if err != nil {
 		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}
@@ -967,7 +967,7 @@ func (e *Executor) executeAppend(model *Model) (uint64, error) {
 			}
 		}()
 
-		rows, err := e.createTempTable(tempTable, sql)
+		rows, err := e.createTempTable(model, tempTable, sql)
 		if err != nil {
 			return 0, g.Error(err, "could not create temp table for append of '%s'", model.Name)
 		}
@@ -982,13 +982,13 @@ func (e *Executor) executeAppend(model *Model) (uint64, error) {
 			return rows, err
 		}
 		// No wrapping parens: ClickHouse rejects INSERT INTO t (SELECT * FROM tmp)
-		if _, err = e.DbConn.Exec(g.F("INSERT INTO %s SELECT * FROM %s", tgtQuoted, tmpQuoted)); err != nil {
+		if _, err = e.execModel(model, g.F("INSERT INTO %s SELECT * FROM %s", tgtQuoted, tmpQuoted)); err != nil {
 			return rows, g.Error(err, "could not append from temp table into '%s'", model.Name)
 		}
 		return rows, nil
 	}
 
-	return e.insertSelect(model.FullTableName, sql)
+	return e.insertSelect(model, sql)
 }
 
 // tableExists checks whether the model's target table exists.
@@ -1003,33 +1003,6 @@ func (e *Executor) tableExists(model *Model) (bool, error) {
 // isClickHouse returns true if the target database is ClickHouse or Proton.
 func (e *Executor) isClickHouse() bool {
 	return g.In(e.DbConn.GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton)
-}
-
-// getEngineClause returns the ClickHouse ENGINE clause for a model.
-func getEngineClause(model *Model) string {
-	engine := model.Config.Engine
-	if engine == "" {
-		engine = "MergeTree()"
-	}
-	return g.F("ENGINE = %s", engine)
-}
-
-// getOrderByClause returns the ClickHouse ORDER BY clause for a model.
-// quote, when non-nil, is applied to each key.
-func getOrderByClause(model *Model, quote func(string) string) string {
-	keys := getUniqueKeys(model)
-	if len(keys) == 0 {
-		return "ORDER BY tuple()"
-	}
-	quoted := make([]string, len(keys))
-	for i, k := range keys {
-		if quote != nil {
-			quoted[i] = quote(k)
-		} else {
-			quoted[i] = k
-		}
-	}
-	return g.F("ORDER BY (%s)", strings.Join(quoted, ", "))
 }
 
 // getUniqueKeys extracts the unique key(s) from the model config.
@@ -1053,12 +1026,6 @@ func getUniqueKeys(model *Model) []string {
 		return keys
 	}
 	return nil
-}
-
-// method wrappers that delegate to package-level functions
-func (e *Executor) getEngineClause(model *Model) string { return getEngineClause(model) }
-func (e *Executor) getOrderByClause(model *Model) string {
-	return getOrderByClause(model, e.DbConn.Quote)
 }
 
 // getMergeStrategy maps the user-facing merge_strategy string to a database.MergeStrategy constant.
@@ -1098,14 +1065,15 @@ func (e *Executor) getTempTableName(model *Model) string {
 }
 
 // createTempTable stages SQL into a temp table. ClickHouse gets an explicit
-// MergeTree engine.
-func (e *Executor) createTempTable(tempTable, sql string) (uint64, error) {
+// MergeTree engine and the table settings of the model.
+func (e *Executor) createTempTable(model *Model, tempTable, sql string) (uint64, error) {
 	if e.isClickHouse() {
 		quoted, err := e.quoteFullTableName(tempTable)
 		if err != nil {
 			return 0, err
 		}
-		return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s ENGINE = MergeTree() ORDER BY tuple() AS (%s)", quoted, sql)))
+		table := newCHTempTable(model, e.DbConn.GetType() == dbio.TypeDbClickhouse)
+		return rowsFromExec(e.execModel(model, g.F("CREATE TABLE %s %s AS (%s)", quoted, table.clause(), sql)))
 	}
 	return e.createTableAs(tempTable, sql, nil)
 }
@@ -1983,7 +1951,7 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (u
 		}
 	}()
 
-	if _, err = e.createTempTable(tempTable, incrementalSQL); err != nil {
+	if _, err = e.createTempTable(model, tempTable, incrementalSQL); err != nil {
 		return 0, g.Error(err, "could not create temp table for incremental merge on '%s'", model.Name)
 	}
 	staged := e.countIfColumnStore(tempTable, 0)
@@ -2001,7 +1969,7 @@ func (e *Executor) runMergeForChunk(model *Model, incCtx *IncrementalContext) (u
 		return 0, g.Error(err, "could not generate merge SQL for '%s'", model.Name)
 	}
 
-	rows, err := rowsFromExec(e.DbConn.ExecMulti(mergeSQL))
+	rows, err := rowsFromExec(e.execModelMulti(model, mergeSQL))
 	if err != nil {
 		return 0, g.Error(err, "could not execute incremental merge for '%s'", model.Name)
 	}

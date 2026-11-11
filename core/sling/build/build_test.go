@@ -2,9 +2,12 @@ package build
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -516,4 +519,67 @@ func TestJSONPayloadCarriesCompiled(t *testing.T) {
 	// a build that never compiled must stay false
 	var nilBuild *Build
 	assert.Equal(t, false, nilBuild.Compiled().JSONPayload()["compiled"])
+}
+
+func TestJSONPayloadClickhouseClauses(t *testing.T) {
+	cfg := &BuildConfig{Nodes: []Node{
+		{Name: "a", Type: NodeTypeModel, TableClause: "ENGINE = MergeTree() ORDER BY tuple()", QuerySettings: "max_threads = 3"},
+		{Name: "b", Type: NodeTypeModel},
+	}}
+	nodes := cfg.JSONPayload()["nodes"].([]map[string]any)
+	assert.Equal(t, "ENGINE = MergeTree() ORDER BY tuple()", nodes[0]["table_clause"])
+	assert.Equal(t, "max_threads = 3", nodes[0]["query_settings"])
+	assert.NotContains(t, nodes[1], "table_clause")
+	assert.NotContains(t, nodes[1], "query_settings")
+}
+
+func TestCompiledClickhouseClauses(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", "target: POSTGRES\n")
+	write("a.sql", `/**
+mode: append
+unique_key: id
+order_by: (d, id)
+partition_by: toYYYYMM(ts)
+primary_key: d
+ttl: ts + INTERVAL 2 YEAR
+settings:
+  table:
+    storage_policy: p
+  query:
+    max_threads: 3
+    log_comment: it's
+**/
+SELECT 1 AS id`)
+	write("v.sql", "/**\nmode: view\nsettings:\n  query:\n    max_threads: 3\n**/\nSELECT 1 AS id")
+
+	b, err := NewBuild(dir, BuildOptions{Target: "POSTGRES"})
+	require.NoError(t, err)
+	require.NoError(t, b.Compile())
+
+	nodes := func() map[string]Node {
+		out := map[string]Node{}
+		for _, n := range b.Compiled().Nodes {
+			out[n.Name] = n
+		}
+		return out
+	}
+
+	// not ClickHouse: no clauses
+	assert.Empty(t, nodes()["a"].TableClause)
+	assert.Empty(t, nodes()["a"].QuerySettings)
+
+	b.dbType = dbio.TypeDbClickhouse
+	a := nodes()["a"]
+	assert.Equal(t,
+		"ENGINE = MergeTree() PARTITION BY toYYYYMM(ts) PRIMARY KEY d ORDER BY (d, id) TTL ts + INTERVAL 2 YEAR SETTINGS allow_nullable_key = 1, storage_policy = 'p'",
+		a.TableClause)
+	assert.Equal(t, `log_comment = 'it\'s', max_threads = 3`, a.QuerySettings)
+
+	v := nodes()["v"]
+	assert.Empty(t, v.TableClause)
+	assert.Empty(t, v.QuerySettings)
 }
