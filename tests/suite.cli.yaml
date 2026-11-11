@@ -4197,3 +4197,44 @@
   output_does_not_contain:
     - 'execution succeeded'
     - 'reading from source file system'
+
+# SLING-368: continuous mode (sling run --continuous)
+- id: 887
+  name: 'Continuous mode needs a replication file'
+  run: 'sling run --src-conn POSTGRES --src-stream public.x --tgt-object file:///tmp/x.csv --continuous'
+  err: true
+  output_contains:
+    - '--continuous needs a replication file'
+
+- id: 888
+  name: 'Continuous mode rejects an incremental stream'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'supports only change-capture streams'
+
+- id: 889
+  name: 'Continuous mode rejects on_stream_error quarantine'
+  run: 'sling run -r tests/replications/r.149.continuous_quarantine_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'quarantine is not supported yet'
+
+- id: 890
+  name: 'Continuous mode from the SLING_CONTINUOUS env var'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml'
+  err: true
+  env:
+    SLING_CONTINUOUS: 'true'
+  output_contains:
+    - 'supports only change-capture streams'
+
+# MySQL to Postgres: run, SIGUSR1 status, second session refused, SIGTERM stop,
+# resume with no repeated rows, kill between the write and the state commit.
+- id: 891
+  name: 'Continuous mode MySQL to PG: stop, lease, resume, kill'
+  group: cdc_continuous
+  run: 'bash tests/pipelines/cdc_continuous/run_docker_test.sh'
+  output_contains:
+    - 'CDC continuous test:'
+    - 'state saved'

@@ -1,0 +1,13 @@
+# on_stream_error: quarantine is not supported yet in continuous mode.
+source: MYSQL_GTID
+target: POSTGRES
+
+defaults:
+  mode: change-capture
+  object: public.cont_quar_fail
+
+continuous:
+  on_stream_error: quarantine
+
+streams:
+  test_db.cont_quar:
