@@ -322,7 +322,10 @@ func newCHTable(model *Model, quote func(string) string, keys bool) chTable {
 		t.engine = c.Engine
 	}
 	if keys {
-		t.partitionBy, t.primaryKey, t.ttl = c.PartitionBy, c.PrimaryKey, c.TTL
+		t.partitionBy, t.primaryKey, t.ttl = c.PartitionBy.SQL(), c.PrimaryKey, c.TTL
+		if len(c.PartitionBy) > 1 {
+			t.partitionBy = "(" + t.partitionBy + ")"
+		}
 		t.settings = c.Settings.Table.merge(nil)
 	}
 
@@ -423,4 +426,47 @@ func (e *Executor) execModelMulti(model *Model, q string) (sql.Result, error) {
 		err = g.Error(err, "Could not execute SQL")
 	}
 	return result, err
+}
+
+// ctasDialect reads the CTAS templates of one dialect.
+type ctasDialect struct {
+	t dbio.Type
+}
+
+func newCTASDialect(t dbio.Type) ctasDialect {
+	return ctasDialect{t: t}
+}
+
+// has reports whether the merged template has a non-empty value for key.
+func (d ctasDialect) has(key string) bool {
+	return strings.TrimSpace(d.t.GetTemplateValue(key)) != ""
+}
+
+// unsupported returns the keys that c sets and the dialect ignores.
+func (d ctasDialect) unsupported(c ModelConfig) []string {
+	clickhouse := d.t == dbio.TypeDbClickhouse
+	keys := []struct {
+		name      string
+		set       bool
+		supported bool
+	}{
+		{"order_by", c.OrderBy != "", clickhouse},
+		{"partition_by", len(c.PartitionBy) > 0, clickhouse || d.has("core.ctas_partition_by")},
+		{"cluster_by", len(c.ClusterBy) > 0, d.has("core.ctas_cluster_by")},
+		{"primary_key", c.PrimaryKey != "", clickhouse},
+		{"ttl", c.TTL != "", clickhouse},
+		{"transient", c.Transient != nil, d.has("core.ctas_transient")},
+		{"unlogged", c.Unlogged != nil, d.has("core.ctas_unlogged")},
+		{"dist", c.Dist != "", d.has("core.ctas_dist_style")},
+		{"sort", len(c.Sort) > 0, d.has("core.ctas_sort")},
+		{"settings.table", len(c.Settings.Table) > 0, clickhouse || d.has("core.ctas_options")},
+		{"settings.query", len(c.Settings.Query) > 0, clickhouse || d.has("variable.query_settings_scope")},
+	}
+	var out []string
+	for _, k := range keys {
+		if k.set && !k.supported {
+			out = append(out, k.name)
+		}
+	}
+	return out
 }

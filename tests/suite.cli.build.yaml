@@ -951,8 +951,8 @@
   group: build
   run: 'sling build compile tests/build/clickhouse_settings_project --target POSTGRES'
   output_contains:
-    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query apply only to ClickHouse"
-    - 'ignores them'
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query do not apply to postgres"
+    - 'sling ignores them'
   output_does_not_contain:
     - 'table_clause'
     - 'ENGINE ='
@@ -973,6 +973,6 @@
   group: build
   run: 'sling build compile tests/build/clickhouse_settings_project --target PROTON'
   output_contains:
-    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query apply only to ClickHouse"
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query do not apply to proton"
   output_does_not_contain:
     - 'table_clause'

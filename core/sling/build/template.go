@@ -12,6 +12,7 @@ import (
 	"github.com/nikolalohinski/gonja/v2/config"
 	"github.com/nikolalohinski/gonja/v2/exec"
 	"github.com/nikolalohinski/gonja/v2/loaders"
+	"github.com/samber/lo"
 	"github.com/spf13/cast"
 )
 
@@ -859,8 +860,27 @@ func (te *TemplateEngine) applyConfig(model *Model, params *exec.VarArgs) error 
 			model.Config.Rewrite = &rw
 		case "order_by":
 			model.Config.OrderBy = strVal
-		case "partition_by":
-			model.Config.PartitionBy = strVal
+		case "partition_by", "cluster_by", "sort":
+			if _, isMap := val.ToGoSimpleType(false).(map[string]any); isMap {
+				return g.Error("model '%s': %s must be a string or a list of strings", model.Name, key)
+			}
+			list := ExprList(lo.Compact(toStringSlice(val)))
+			switch key {
+			case "partition_by":
+				model.Config.PartitionBy = list
+			case "cluster_by":
+				model.Config.ClusterBy = list
+			default:
+				model.Config.Sort = list
+			}
+		case "transient":
+			v := cast.ToBool(strVal)
+			model.Config.Transient = &v
+		case "unlogged":
+			v := cast.ToBool(strVal)
+			model.Config.Unlogged = &v
+		case "dist":
+			model.Config.Dist = strVal
 		case "primary_key":
 			model.Config.PrimaryKey = strVal
 		case "ttl":
@@ -888,6 +908,9 @@ func toStringSlice(val *exec.Value) []string {
 		return nil
 	}
 	iface := val.Interface()
+	if val.IsList() {
+		iface = val.ToGoSimpleType(false)
+	}
 	switch v := iface.(type) {
 	case []string:
 		return v

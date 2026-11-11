@@ -109,7 +109,7 @@ func allKeysModel() *Model {
 	return &Model{Config: ModelConfig{
 		UniqueKey:   "id",
 		OrderBy:     "(d, id)",
-		PartitionBy: "toYYYYMM(ts)",
+		PartitionBy: ExprList{"toYYYYMM(ts)"},
 		PrimaryKey:  "d",
 		TTL:         "ts + INTERVAL 2 YEAR",
 		Settings: ModelSettings{
@@ -143,6 +143,14 @@ func TestCHTableClauseOrder(t *testing.T) {
 		"ENGINE = MergeTree() PARTITION BY toYYYYMM(ts) PRIMARY KEY d ORDER BY (d, id) TTL ts + INTERVAL 2 YEAR SETTINGS allow_nullable_key = 1, storage_policy = 'p'",
 		newCHTable(model, backtick, true).clause())
 	assert.Len(t, model.Config.Settings.Table, 1, "the model settings stay unchanged")
+}
+
+func TestCHTablePartitionList(t *testing.T) {
+	model := &Model{Config: ModelConfig{PartitionBy: ExprList{"toYYYYMM(d)", "region"}}}
+	assert.Contains(t, newCHTable(model, backtick, true).clause(), "PARTITION BY (toYYYYMM(d), region)")
+
+	model = &Model{Config: ModelConfig{PartitionBy: ExprList{"toYYYYMM(d)"}}}
+	assert.Contains(t, newCHTable(model, backtick, true).clause(), "PARTITION BY toYYYYMM(d) ")
 }
 
 func TestCHTableAllowNullableOverride(t *testing.T) {

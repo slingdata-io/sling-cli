@@ -74,31 +74,92 @@ type ModelConfig struct {
 	Rewrite       *bool         `yaml:"rewrite,omitempty"`      // default true; set false to skip bare-name rewrite
 	Tests         []any         `yaml:"tests,omitempty"`        // declarative data tests
 	OrderBy       string        `yaml:"order_by,omitempty"`     // raw ClickHouse expression
-	PartitionBy   string        `yaml:"partition_by,omitempty"`
+	PartitionBy   ExprList      `yaml:"partition_by,omitempty"`
+	ClusterBy     ExprList      `yaml:"cluster_by,omitempty"`
 	PrimaryKey    string        `yaml:"primary_key,omitempty"`
 	TTL           string        `yaml:"ttl,omitempty"`
+	Transient     *bool         `yaml:"transient,omitempty"`
+	Unlogged      *bool         `yaml:"unlogged,omitempty"`
+	Dist          string        `yaml:"dist,omitempty"` // even, all, auto, or a column expression
+	Sort          ExprList      `yaml:"sort,omitempty"`
 	Settings      ModelSettings `yaml:"settings,omitempty"`
 }
 
-var settingNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// ExprList is a list of raw SQL expressions. YAML accepts a string or a list of strings.
+type ExprList []string
+
+// UnmarshalYAML decodes a string or a list of strings.
+func (l *ExprList) UnmarshalYAML(node *yaml.Node) error {
+	errMsg := "must be a string or a list of strings"
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Value == "" {
+			*l = nil
+			return nil
+		}
+		*l = ExprList{node.Value}
+	case yaml.SequenceNode:
+		items := make(ExprList, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode {
+				return g.Error(errMsg)
+			}
+			items = append(items, item.Value)
+		}
+		*l = items
+	default:
+		return g.Error(errMsg)
+	}
+	return nil
+}
+
+// SQL joins the items with ", ".
+func (l ExprList) SQL() string {
+	return strings.Join(l, ", ")
+}
+
+var settingNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
 
 // SettingValues maps a ClickHouse setting name to a string, number or bool.
 type SettingValues map[string]any
 
+// isSettingScalar reports whether val is a string, number or bool.
+func isSettingScalar(val any) bool {
+	switch val.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return true
+	}
+	return false
+}
+
 // validate checks the name and the value type of each setting.
+// Only the settings.table scope accepts lists of scalars and maps of scalars.
 func (v SettingValues) validate(scope string) error {
 	for _, key := range sortedKeys(v) {
 		if !settingNameRegex.MatchString(key) {
 			return g.Error("%s.%s: not a valid setting name", scope, key)
 		}
-		switch v[key].(type) {
-		case string, bool,
-			int, int8, int16, int32, int64,
-			uint, uint8, uint16, uint32, uint64,
-			float32, float64:
-		default:
-			return g.Error("%s.%s: value type %T is not supported, use a string, number or bool", scope, key, v[key])
+		val := v[key]
+		if isSettingScalar(val) {
+			continue
 		}
+		if scope == "settings.table" {
+			ok := false
+			switch x := val.(type) {
+			case []any:
+				ok = lo.EveryBy(x, isSettingScalar)
+			case map[string]any:
+				ok = lo.EveryBy(lo.Values(x), isSettingScalar)
+			}
+			if ok {
+				continue
+			}
+			return g.Error("%s.%s: value type %T is not supported, use a string, number, bool, list or map", scope, key, val)
+		}
+		return g.Error("%s.%s: value type %T is not supported, use a string, number or bool", scope, key, val)
 	}
 	return nil
 }
@@ -353,9 +414,14 @@ type BuildDefaults struct {
 	DropCascade   *bool         `yaml:"drop_cascade,omitempty"`
 	Engine        string        `yaml:"engine,omitempty"`
 	OrderBy       string        `yaml:"order_by,omitempty"`
-	PartitionBy   string        `yaml:"partition_by,omitempty"`
+	PartitionBy   ExprList      `yaml:"partition_by,omitempty"`
+	ClusterBy     ExprList      `yaml:"cluster_by,omitempty"`
 	PrimaryKey    string        `yaml:"primary_key,omitempty"`
 	TTL           string        `yaml:"ttl,omitempty"`
+	Transient     *bool         `yaml:"transient,omitempty"`
+	Unlogged      *bool         `yaml:"unlogged,omitempty"`
+	Dist          string        `yaml:"dist,omitempty"`
+	Sort          ExprList      `yaml:"sort,omitempty"`
 	Settings      ModelSettings `yaml:"settings,omitempty"`
 }
 
@@ -863,8 +929,23 @@ func mergeConfigs(parent, child *BuildConfig) *BuildConfig {
 	if child.Defaults.OrderBy != "" {
 		merged.Defaults.OrderBy = child.Defaults.OrderBy
 	}
-	if child.Defaults.PartitionBy != "" {
+	if len(child.Defaults.PartitionBy) > 0 {
 		merged.Defaults.PartitionBy = child.Defaults.PartitionBy
+	}
+	if len(child.Defaults.ClusterBy) > 0 {
+		merged.Defaults.ClusterBy = child.Defaults.ClusterBy
+	}
+	if child.Defaults.Transient != nil {
+		merged.Defaults.Transient = child.Defaults.Transient
+	}
+	if child.Defaults.Unlogged != nil {
+		merged.Defaults.Unlogged = child.Defaults.Unlogged
+	}
+	if child.Defaults.Dist != "" {
+		merged.Defaults.Dist = child.Defaults.Dist
+	}
+	if len(child.Defaults.Sort) > 0 {
+		merged.Defaults.Sort = child.Defaults.Sort
 	}
 	if child.Defaults.PrimaryKey != "" {
 		merged.Defaults.PrimaryKey = child.Defaults.PrimaryKey
@@ -1360,6 +1441,11 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		Engine:        defaults.Engine,
 		OrderBy:       defaults.OrderBy,
 		PartitionBy:   defaults.PartitionBy,
+		ClusterBy:     defaults.ClusterBy,
+		Transient:     defaults.Transient,
+		Unlogged:      defaults.Unlogged,
+		Dist:          defaults.Dist,
+		Sort:          defaults.Sort,
 		PrimaryKey:    defaults.PrimaryKey,
 		TTL:           defaults.TTL,
 		Settings:      defaults.Settings.Merge(ModelSettings{}),
@@ -1408,8 +1494,23 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		if fmConfig.OrderBy != "" {
 			modelConfig.OrderBy = fmConfig.OrderBy
 		}
-		if fmConfig.PartitionBy != "" {
+		if len(fmConfig.PartitionBy) > 0 {
 			modelConfig.PartitionBy = fmConfig.PartitionBy
+		}
+		if len(fmConfig.ClusterBy) > 0 {
+			modelConfig.ClusterBy = fmConfig.ClusterBy
+		}
+		if fmConfig.Transient != nil {
+			modelConfig.Transient = fmConfig.Transient
+		}
+		if fmConfig.Unlogged != nil {
+			modelConfig.Unlogged = fmConfig.Unlogged
+		}
+		if fmConfig.Dist != "" {
+			modelConfig.Dist = fmConfig.Dist
+		}
+		if len(fmConfig.Sort) > 0 {
+			modelConfig.Sort = fmConfig.Sort
 		}
 		if fmConfig.PrimaryKey != "" {
 			modelConfig.PrimaryKey = fmConfig.PrimaryKey

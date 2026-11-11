@@ -14,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 // Build is the main orchestrator for sling build.
@@ -236,26 +237,26 @@ func (b *Build) validateDatabaseSupport() error {
 	for _, name := range sortedKeys(b.Project.Models) {
 		model := b.Project.Models[name]
 		c := model.Config
-		if dbType != dbio.TypeDbClickhouse {
-			var keys []string
-			for _, k := range []struct {
-				name string
-				set  bool
-			}{
-				{"order_by", c.OrderBy != ""},
-				{"partition_by", c.PartitionBy != ""},
-				{"primary_key", c.PrimaryKey != ""},
-				{"ttl", c.TTL != ""},
-				{"settings.table", len(c.Settings.Table) > 0},
-				{"settings.query", len(c.Settings.Query) > 0},
-			} {
-				if k.set {
-					keys = append(keys, k.name)
+		if keys := newCTASDialect(dbType).unsupported(c); len(keys) > 0 {
+			g.Warn("model '%s': %s do not apply to %s; sling ignores them", name, strings.Join(keys, ", "), dbType)
+		}
+		if g.In(dbType, dbio.TypeDbClickhouse, dbio.TypeDbProton) {
+			for _, key := range sortedKeys(c.Settings.Table) {
+				switch c.Settings.Table[key].(type) {
+				case []any:
+					return g.Error("model '%s': settings.table.%s: lists are not supported on %s", name, key, dbType)
+				case map[string]any:
+					return g.Error("model '%s': settings.table.%s: maps are not supported on %s", name, key, dbType)
 				}
 			}
-			if len(keys) > 0 {
-				g.Warn("model '%s': %s apply only to ClickHouse; %s ignores them", name, strings.Join(keys, ", "), dbType)
-			}
+		}
+		if len(c.PartitionBy) > 0 && len(c.ClusterBy) > 0 && cast.ToBool(dbType.GetTemplateValue("variable.ctas_partition_cluster_exclusive")) {
+			return g.Error("model '%s': partition_by and cluster_by do not work together on %s", name, dbType)
+		}
+		if strings.EqualFold(strings.TrimSpace(c.Dist), "key") {
+			return g.Error("model '%s': dist: key needs a column name", name)
+		}
+		if dbType != dbio.TypeDbClickhouse {
 			continue
 		}
 		if c.PrimaryKey != "" && c.OrderBy == "" && len(getUniqueKeys(model)) == 0 {
