@@ -1556,6 +1556,9 @@ func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, 
 	if settings.MaxBytes > 0 && !sharedReaderOnly {
 		g.Warn("max_bytes applies only to MySQL, MariaDB and PG groups")
 	}
+	if settings.BehindAfter > 0 && settings.BehindAfter <= settings.Interval {
+		g.Warn("behind_after (%s) is not greater than interval (%s), so streams show behind between cycles", settings.BehindAfter, settings.Interval)
+	}
 
 	return settings, nil
 }
