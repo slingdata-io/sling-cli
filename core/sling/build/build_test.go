@@ -603,7 +603,7 @@ func TestCompiledQuerySettingsCrossEngine(t *testing.T) {
 
 	b.dbType = dbio.TypeDbBigQuery
 	assert.Empty(t, b.Compiled().Nodes[0].QuerySettings)
-	assert.Contains(t, newCTASDialect(dbio.TypeDbBigQuery).unsupported(b.Project.Models["a"].Config), "settings.query")
+	assert.Contains(t, newCTASDialect(dbio.TypeDbBigQuery, nil).unsupported(b.Project.Models["a"].Config), "settings.query")
 }
 
 func TestCompiledTableClauseCrossEngine(t *testing.T) {

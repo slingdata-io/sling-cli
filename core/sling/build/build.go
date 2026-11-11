@@ -13,6 +13,7 @@ import (
 	"github.com/slingdata-io/golyglot"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -32,6 +33,7 @@ type Build struct {
 	ExecBytes   uint64
 	Results     []ExecutionResult // per-node results after Execute
 	dbType      dbio.Type         // target type, set by Compile
+	dbProps     map[string]string // target connection properties, set by Compile
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -123,6 +125,7 @@ func (b *Build) Compile() error {
 	// List without a target skips this — splitting needs a dialect.
 	if target != "" {
 		b.dbType = b.resolveDbType()
+		b.dbProps = b.resolveDbProps()
 		if err := b.validateDatabaseSupport(); err != nil {
 			return err
 		}
@@ -237,7 +240,7 @@ func (b *Build) validateDatabaseSupport() error {
 	for _, name := range sortedKeys(b.Project.Models) {
 		model := b.Project.Models[name]
 		c := model.Config
-		if keys := newCTASDialect(dbType).unsupported(c); len(keys) > 0 {
+		if keys := newCTASDialect(dbType, b.dbProps).unsupported(c); len(keys) > 0 {
 			g.Warn("model '%s': %s do not apply to %s; sling ignores them", name, strings.Join(keys, ", "), dbType)
 		}
 		if g.In(dbType, dbio.TypeDbClickhouse, dbio.TypeDbProton) {
@@ -251,7 +254,9 @@ func (b *Build) validateDatabaseSupport() error {
 			}
 		}
 		if b.GetModelMode(model) != "view" && dbType != dbio.TypeDbClickhouse {
-			if _, err := newCTASTable(model, newCTASDialect(dbType), tableFinal); err != nil {
+			// the name check comes later; a bad name only changes the default location
+			target, _ := database.ParseTableName(model.FullTableName, dbType)
+			if _, err := newCTASTable(model, newCTASDialect(dbType, b.dbProps), tableFinal, target); err != nil {
 				return err
 			}
 		}
@@ -305,6 +310,16 @@ func (b *Build) resolveDbType() dbio.Type {
 	}
 	g.Warn("target connection '%s' not found locally; multi-statement splitting will use generic dialect", b.GetTarget())
 	return dbio.TypeUnknown
+}
+
+// resolveDbProps returns the properties of the target connection, or nil
+// when the connection is not found locally.
+func (b *Build) resolveDbProps() map[string]string {
+	entry := connection.GetLocalConns().Get(b.GetTarget())
+	if entry.Name == "" {
+		return nil
+	}
+	return entry.Connection.DataS(true)
 }
 
 // Execute runs the compiled build against the target database.
@@ -652,8 +667,12 @@ func (b *Build) setClauses(n *Node, m *Model) {
 		n.QuerySettings = m.Config.Settings.Query.sql()
 		return
 	}
-	d := newCTASDialect(b.dbType)
-	t, err := newCTASTable(m, d, tableFinal)
+	target, err := database.ParseTableName(m.FullTableName, b.dbType)
+	if err != nil {
+		return
+	}
+	d := newCTASDialect(b.dbType, b.dbProps)
+	t, err := newCTASTable(m, d, tableFinal, target)
 	if err != nil {
 		return
 	}

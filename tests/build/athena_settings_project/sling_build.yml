@@ -1,0 +1,3 @@
+target: ATHENA
+defaults:
+  schema: db1

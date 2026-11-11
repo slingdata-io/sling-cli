@@ -214,7 +214,10 @@ type recordingConn struct {
 	dbType              dbio.Type
 	calls               []recordedCall
 	exists              bool
+	props               map[string]string
 }
+
+func (c *recordingConn) Props() map[string]string { return c.props }
 
 func (c *recordingConn) GetType() dbio.Type             { return c.dbType }
 func (c *recordingConn) Quote(f string) string          { return c.dbType.Quote(f) }
@@ -932,6 +935,42 @@ func TestDrainLogsDoesNotStealOtherModel(t *testing.T) {
 	assert.Equal(t, "a-2", aLines[1].Text)
 }
 
+func TestCTASAthenaDefaultLocation(t *testing.T) {
+	d := newCTASDialect(dbio.TypeDbAthena, map[string]string{"data_location": "s3://b/p/"})
+	target := database.Table{Schema: "db1", Name: "t"}
+	build := func(d ctasDialect, role tableRole, table SettingValues) string {
+		m := &Model{Name: "m", Config: ModelConfig{Settings: ModelSettings{Table: table}}}
+		tbl, err := newCTASTable(m, d, role, target)
+		require.NoError(t, err)
+		return tbl.Options
+	}
+
+	assert.Equal(t, "WITH (format = 'PARQUET', external_location = 's3://b/p/db1/t/')",
+		build(d, tableFinal, SettingValues{"format": "PARQUET"}))
+	assert.Equal(t, "WITH (format = 'PARQUET', table_type = 'ICEBERG', location = 's3://b/p/db1/t/', is_external = false)",
+		build(d, tableFinal, SettingValues{"format": "PARQUET", "table_type": "ICEBERG"}))
+	assert.Equal(t, "WITH (table_type = 'HIVE', external_location = 's3://b/p/db1/t/')",
+		build(d, tableFinal, SettingValues{"table_type": "HIVE"}))
+	assert.Equal(t, "WITH (location = 's3://x/')", build(d, tableFinal, SettingValues{"location": "s3://x/"}))
+	assert.Equal(t, "WITH (external_location = 's3://x/')", build(d, tableFinal, SettingValues{"external_location": "s3://x/"}))
+	assert.Equal(t, "", build(newCTASDialect(dbio.TypeDbAthena, map[string]string{}), tableFinal, nil))
+	assert.Equal(t, "WITH (external_location = 's3://b/p/db1/t/')", build(d, tableStage, SettingValues{"format": "PARQUET"}))
+	assert.Equal(t, "WITH (external_location = 's3://b/p/db1/t/')", build(d, tableFinal, nil))
+
+	// a salt makes the location new on each run; Athena CTAS quotes with double quotes
+	salted := d.withSalt()
+	assert.Regexp(t, `^WITH \(external_location = 's3://b/p/db1/t/\w{19}/'\)$`, build(salted, tableFinal, nil))
+	assert.Equal(t, `"db1"."t"`, d.tableName(target, "`db1`.`t`"))
+	assert.Equal(t, "`s`.`t`", newCTASDialect(dbio.TypeDbPostgres, nil).tableName(target, "`s`.`t`"))
+
+	// nil model (staging table) and a dialect with no default
+	tbl, err := newCTASTable(nil, d, tableStage, target)
+	require.NoError(t, err)
+	assert.Equal(t, "WITH (external_location = 's3://b/p/db1/t/')", tbl.Options)
+	pg := newCTASDialect(dbio.TypeDbPostgres, map[string]string{"data_location": "s3://b/p/"})
+	assert.Equal(t, "", build(pg, tableFinal, nil))
+}
+
 func TestCTASRenderPerDialect(t *testing.T) {
 	yes := true
 	sel := "SELECT 1 AS id"
@@ -961,8 +1000,8 @@ func TestCTASRenderPerDialect(t *testing.T) {
 			"CREATE TABLE `s`.`t` PROPERTIES (\"compression\" = \"ZSTD\", \"replication_num\" = \"1\") AS (SELECT 1 AS id)"},
 	}
 	for _, tt := range tests {
-		d := newCTASDialect(tt.dbType)
-		table, err := newCTASTable(&Model{Name: "m", Config: tt.cfg}, d, tableFinal)
+		d := newCTASDialect(tt.dbType, nil)
+		table, err := newCTASTable(&Model{Name: "m", Config: tt.cfg}, d, tableFinal, database.Table{Schema: "s", Name: "t"})
 		require.NoError(t, err, string(tt.dbType))
 		key := "core.create_table_as"
 		if tt.replace {
@@ -977,8 +1016,8 @@ func TestCTASRenderNoKeysUnchanged(t *testing.T) {
 		dbio.TypeDbPostgres, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery, dbio.TypeDbDatabricks, dbio.TypeDbRedshift,
 		dbio.TypeDbTrino, dbio.TypeDbAthena, dbio.TypeDbStarRocks, dbio.TypeDbDuckDb,
 	} {
-		d := newCTASDialect(dbType)
-		table, err := newCTASTable(&Model{Name: "m"}, d, tableFinal)
+		d := newCTASDialect(dbType, nil)
+		table, err := newCTASTable(&Model{Name: "m"}, d, tableFinal, database.Table{Schema: "s", Name: "t"})
 		require.NoError(t, err)
 		assert.Equal(t, "CREATE TABLE T AS (SELECT 1)", table.render(d.t.GetTemplateValue("core.create_table_as"), "T", "SELECT 1"), string(dbType))
 		assert.Equal(t, "CREATE OR REPLACE TABLE T AS (SELECT 1)", table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"), string(dbType))
@@ -986,15 +1025,15 @@ func TestCTASRenderNoKeysUnchanged(t *testing.T) {
 }
 
 func TestCTASRenderKeepsValueSpaces(t *testing.T) {
-	d := newCTASDialect(dbio.TypeDbSnowflake)
+	d := newCTASDialect(dbio.TypeDbSnowflake, nil)
 	model := &Model{Name: "m", Config: ModelConfig{Settings: ModelSettings{Table: SettingValues{"comment": "a  b"}}}}
-	table, err := newCTASTable(model, d, tableFinal)
+	table, err := newCTASTable(model, d, tableFinal, database.Table{Schema: "s", Name: "t"})
 	require.NoError(t, err)
 	assert.Equal(t, "CREATE OR REPLACE TABLE T comment = 'a  b' AS (SELECT 1)",
 		table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"))
 
 	model.Config.Settings.Table = SettingValues{"comment": "{sql}"}
-	table, err = newCTASTable(model, d, tableFinal)
+	table, err = newCTASTable(model, d, tableFinal, database.Table{Schema: "s", Name: "t"})
 	require.NoError(t, err)
 	assert.Equal(t, "CREATE OR REPLACE TABLE T comment = '{sql}' AS (SELECT 1)",
 		table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"))
@@ -1025,7 +1064,7 @@ func TestCTASLiteral(t *testing.T) {
 		{dbio.TypeDbPostgres, struct{}{}, false, "", "value type struct {} is not supported"},
 	}
 	for _, tt := range tests {
-		got, err := newCTASDialect(tt.dbType).literal(tt.val, tt.option)
+		got, err := newCTASDialect(tt.dbType, nil).literal(tt.val, tt.option)
 		if tt.err != "" {
 			require.Error(t, err, "%s %v", tt.dbType, tt.val)
 			assert.Contains(t, err.Error(), tt.err)
@@ -1035,17 +1074,17 @@ func TestCTASLiteral(t *testing.T) {
 		assert.Equal(t, tt.want, got, "%s %v", tt.dbType, tt.val)
 	}
 
-	_, err := newCTASDialect(dbio.TypeDbPostgres).options(SettingValues{"x": []any{1}})
+	_, err := newCTASDialect(dbio.TypeDbPostgres, nil).options(SettingValues{"x": []any{1}}, "")
 	require.Error(t, err)
 	assert.Equal(t, "settings.table.x: lists are not supported on postgres", err.Error())
 }
 
 func TestCTASDist(t *testing.T) {
-	d := newCTASDialect(dbio.TypeDbRedshift)
+	d := newCTASDialect(dbio.TypeDbRedshift, nil)
 	for dist, want := range map[string]string{
 		"even": "DISTSTYLE EVEN", "AUTO": "DISTSTYLE AUTO", "all": "DISTSTYLE ALL", "id": "DISTSTYLE KEY DISTKEY(id)",
 	} {
-		table, err := newCTASTable(&Model{Name: "m", Config: ModelConfig{Dist: dist}}, d, tableFinal)
+		table, err := newCTASTable(&Model{Name: "m", Config: ModelConfig{Dist: dist}}, d, tableFinal, database.Table{Schema: "s", Name: "t"})
 		require.NoError(t, err)
 		assert.Equal(t, want, table.Dist, dist)
 	}

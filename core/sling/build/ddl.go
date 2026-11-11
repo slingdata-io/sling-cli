@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
@@ -49,8 +50,10 @@ func supportsCreateOrReplaceTable(t dbio.Type) bool {
 }
 
 // supportsRenameTable reports dialects with a rename_table template.
+// Athena has the template, but its Hive rename fails ("Database does not exist").
 func (e *Executor) supportsRenameTable() bool {
-	return strings.TrimSpace(e.DbConn.GetTemplateValue("core.rename_table")) != ""
+	return strings.TrimSpace(e.DbConn.GetTemplateValue("core.rename_table")) != "" &&
+		e.DbConn.GetType() != dbio.TypeDbAthena
 }
 
 // isSQLServerFamily reports SQL Server / Azure SQL / Fabric dialects.
@@ -193,12 +196,16 @@ func (e *Executor) createTableAs(fullName, selectSQL string, model *Model, role 
 		return rowsFromExec(e.DbConn.Exec(g.F("SELECT * INTO %s FROM (%s) AS _sling_src", quoted, selectSQL)))
 	}
 
-	d := newCTASDialect(dbType)
-	t, err := newCTASTable(model, d, role)
+	target, err := database.ParseTableName(fullName, dbType)
+	if err != nil {
+		return 0, g.Error(err, "could not parse table name '%s'", fullName)
+	}
+	d := newCTASDialect(dbType, e.DbConn.Props()).withSalt()
+	t, err := newCTASTable(model, d, role, target)
 	if err != nil {
 		return 0, err
 	}
-	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_table_as"), quoted, selectSQL)))
+	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_table_as"), d.tableName(target, quoted), selectSQL)))
 }
 
 // createOrReplaceTableAs atomically rebuilds a table from a SELECT when the
@@ -212,12 +219,16 @@ func (e *Executor) createOrReplaceTableAs(fullName, selectSQL string, model *Mod
 		// ClickHouse: drop + create (atomic path uses rename elsewhere)
 		return e.createTableAs(fullName, selectSQL, model, tableFinal)
 	}
-	d := newCTASDialect(e.DbConn.GetType())
-	t, err := newCTASTable(model, d, tableFinal)
+	target, err := database.ParseTableName(fullName, e.DbConn.GetType())
+	if err != nil {
+		return 0, g.Error(err, "could not parse table name '%s'", fullName)
+	}
+	d := newCTASDialect(e.DbConn.GetType(), e.DbConn.Props()).withSalt()
+	t, err := newCTASTable(model, d, tableFinal, target)
 	if err != nil {
 		return 0, err
 	}
-	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), quoted, selectSQL)))
+	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), d.tableName(target, quoted), selectSQL)))
 }
 
 // createOrReplaceView creates/replaces a view, dialect-aware.
@@ -459,7 +470,7 @@ func (e *Executor) queryScope(model *Model) string {
 	if model == nil || len(model.Config.Settings.Query) == 0 {
 		return ""
 	}
-	return newCTASDialect(e.DbConn.GetType()).querySettingsScope()
+	return newCTASDialect(e.DbConn.GetType(), e.DbConn.Props()).querySettingsScope()
 }
 
 // execScoped runs the statements in one session or transaction, after the
@@ -469,7 +480,7 @@ func (e *Executor) execScoped(model *Model, scope string, stmts []string) (resul
 	if e.openSession == nil {
 		return nil, g.Error("Could not execute SQL: settings.query needs a database/sql connection")
 	}
-	d := newCTASDialect(e.DbConn.GetType())
+	d := newCTASDialect(e.DbConn.GetType(), e.DbConn.Props())
 	vals := model.Config.Settings.Query
 	sets, err := d.setStatements(vals)
 	if err != nil {
@@ -590,11 +601,37 @@ func (r sessionResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 // ctasDialect reads the CTAS templates of one dialect.
 type ctasDialect struct {
-	t dbio.Type
+	t     dbio.Type
+	props map[string]string // connection properties; nil when unknown
+	salt  string            // path part that makes a default location new on each run
 }
 
-func newCTASDialect(t dbio.Type) ctasDialect {
-	return ctasDialect{t: t}
+func newCTASDialect(t dbio.Type, props map[string]string) ctasDialect {
+	return ctasDialect{t: t, props: props}
+}
+
+// withSalt returns d with a new salt. A dropped Hive table on Athena keeps its
+// data, so a default location that is reused makes the next CTAS fail.
+func (d ctasDialect) withSalt() ctasDialect {
+	d.salt = time.Now().UTC().Format("20060102T150405") + g.RandString(g.AlphaRunesLower, 4)
+	return d
+}
+
+// tableName returns the table name for a CTAS. A dialect with
+// variable.ctas_quote_char quotes the name with it (Athena DML takes
+// double quotes, not the backticks of its DDL).
+func (d ctasDialect) tableName(t database.Table, quoted string) string {
+	q := d.t.GetTemplateValue("variable.ctas_quote_char")
+	if q == "" {
+		return quoted
+	}
+	parts := make([]string, 0, 3)
+	for _, p := range []string{t.Database, t.Schema, t.Name} {
+		if p != "" {
+			parts = append(parts, q+p+q)
+		}
+	}
+	return strings.Join(parts, ".")
 }
 
 // has reports whether the merged template has a non-empty value for key.
@@ -644,12 +681,25 @@ type ctasTable struct {
 	Kind, PartitionBy, ClusterBy, Dist, Sort, Options string
 }
 
-// newCTASTable renders the CTAS parts of the model. A nil model or a
-// staging table gets no part.
-func newCTASTable(model *Model, d ctasDialect, role tableRole) (t ctasTable, err error) {
-	if model == nil || role == tableStage {
-		return t, nil
+// newCTASTable renders the CTAS parts of the model for the target table.
+// A nil model or a staging table gets no user part, only the default
+// options of the dialect.
+func newCTASTable(model *Model, d ctasDialect, role tableRole, target database.Table) (t ctasTable, err error) {
+	var user SettingValues
+	if model != nil && role == tableFinal {
+		user = model.Config.Settings.Table
+		t.layout(model, d)
 	}
+
+	extra := d.defaultOptions(user, target)
+	if t.Options, err = d.options(user, extra); err != nil {
+		return t, g.Error("model '%s': %s", model.Name, err.Error())
+	}
+	return t, nil
+}
+
+// layout renders the kind, layout and flag parts of the model.
+func (t *ctasTable) layout(model *Model, d ctasDialect) {
 	c := model.Config
 	part := func(key string, kv ...string) string {
 		tmpl := d.t.GetTemplateValue(key)
@@ -685,11 +735,6 @@ func newCTASTable(model *Model, d ctasDialect, role tableRole) (t ctasTable, err
 			t.Dist = part("core.ctas_dist_key", "expr", dist)
 		}
 	}
-
-	if t.Options, err = d.options(c.Settings.Table); err != nil {
-		return t, g.Error("model '%s': %s", model.Name, err.Error())
-	}
-	return t, nil
 }
 
 // render fills the template. Only the skeleton collapses: a part that is
@@ -792,9 +837,9 @@ func (d ctasDialect) quote(s string) string {
 
 // options renders the table options of the dialect, or "" when there is
 // nothing to render.
-func (d ctasDialect) options(vals SettingValues) (string, error) {
+func (d ctasDialect) options(vals SettingValues, extra string) (string, error) {
 	tmpl := d.t.GetTemplateValue("core.ctas_options")
-	if len(vals) == 0 || strings.TrimSpace(tmpl) == "" {
+	if (len(vals) == 0 && extra == "") || strings.TrimSpace(tmpl) == "" {
 		return "", nil
 	}
 	optTmpl := d.t.GetTemplateValue("variable.ctas_option")
@@ -806,7 +851,41 @@ func (d ctasDialect) options(vals SettingValues) (string, error) {
 		}
 		pairs = append(pairs, g.R(optTmpl, "key", key, "value", val))
 	}
+	if extra != "" {
+		pairs = append(pairs, extra)
+	}
 	return g.R(tmpl, "options", strings.Join(pairs, d.t.GetTemplateValue("variable.ctas_option_sep"))), nil
+}
+
+// defaultOptions renders the options that Sling adds when the user did not
+// set them: the location of the table, from the connection data_location.
+// It returns "" when the dialect or the connection has no default.
+func (d ctasDialect) defaultOptions(vals SettingValues, target database.Table) string {
+	base := strings.TrimSuffix(d.props["data_location"], "/")
+	if base == "" {
+		return ""
+	}
+	for key := range vals {
+		if g.In(strings.ToLower(key), "location", "external_location") {
+			return ""
+		}
+	}
+
+	const prefix = "variable.ctas_default_options"
+	key := prefix
+	if tt := strings.ToLower(cast.ToString(vals["table_type"])); tt != "" && d.has(prefix+"_"+tt) {
+		key = prefix + "_" + tt
+	}
+	tmpl := d.t.GetTemplateValue(key)
+	if strings.TrimSpace(tmpl) == "" {
+		return ""
+	}
+	path := base + "/" + target.Schema + "/" + target.Name + "/"
+	if d.salt != "" {
+		path += d.salt + "/"
+	}
+	loc, _ := d.literal(path, false)
+	return g.R(tmpl, "location", loc)
 }
 
 // querySettingsScope returns the settings.query scope of the dialect:

@@ -733,18 +733,18 @@ func TestValidateDatabaseSupportCrossEngine(t *testing.T) {
 		dbio.TypeDbProton:     noSettings,
 	}
 	for dbType, want := range ignored {
-		assert.Equal(t, want, newCTASDialect(dbType).unsupported(all), string(dbType))
-		assert.Empty(t, newCTASDialect(dbType).unsupported(ModelConfig{}), string(dbType))
+		assert.Equal(t, want, newCTASDialect(dbType, nil).unsupported(all), string(dbType))
+		assert.Empty(t, newCTASDialect(dbType, nil).unsupported(ModelConfig{}), string(dbType))
 	}
 	assert.Equal(t,
 		[]string{"cluster_by", "transient", "unlogged", "dist", "sort"},
-		newCTASDialect(dbio.TypeDbClickhouse).unsupported(all))
-	assert.Empty(t, newCTASDialect(dbio.TypeDbClickhouse).unsupported(ModelConfig{}))
+		newCTASDialect(dbio.TypeDbClickhouse, nil).unsupported(all))
+	assert.Empty(t, newCTASDialect(dbio.TypeDbClickhouse, nil).unsupported(ModelConfig{}))
 
 	newBuild := func(dbType dbio.Type, cfg ModelConfig) *Build {
 		return &Build{
 			Project: &BuildProject{
-				Models: map[string]*Model{"m": {Name: "m", Config: cfg}},
+				Models: map[string]*Model{"m": {Name: "m", FullTableName: "s.t", Config: cfg}},
 				Seeds:  map[string]*Seed{},
 			},
 			dbType: dbType,
@@ -908,7 +908,7 @@ func TestValidateDatabaseSupportClickhouseKeys(t *testing.T) {
 	newBuild := func(dbType dbio.Type, cfg ModelConfig) *Build {
 		return &Build{
 			Project: &BuildProject{
-				Models: map[string]*Model{"m": {Name: "m", Config: cfg}},
+				Models: map[string]*Model{"m": {Name: "m", FullTableName: "s.t", Config: cfg}},
 				Seeds:  map[string]*Seed{},
 			},
 			dbType: dbType,

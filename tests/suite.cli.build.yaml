@@ -1419,3 +1419,33 @@
   run: 'sling conns exec STARROCKS "DROP DATABASE IF EXISTS sling_build_sr FORCE"'
   output_contains:
     - 'successful!'
+
+- id: 929
+  name: 'sling build athena adds a default location to the CTAS'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec ATHENA "DROP TABLE IF EXISTS db1.ath_set_full"
+    SLING_ROW_CNT= sling conns exec ATHENA "DROP TABLE IF EXISTS db1.ath_set_plain"
+    sling build run tests/build/athena_settings_project --target ATHENA --full-refresh
+  output_contains:
+    - 'Build Completed'
+
+- id: 930
+  name: 'sling build athena tables use the default location and the table options'
+  group: build
+  after: [929]
+  run: |
+    sling conns exec ATHENA "SELECT concat('loc:', (SELECT regexp_extract(\"\$path\", 'db1/ath_set_plain/') FROM db1.ath_set_plain LIMIT 1), '|parts:', CAST((SELECT count(*) FROM db1.\"ath_set_full\$partitions\") AS varchar)) AS c"
+  output_contains:
+    - 'loc:db1/ath_set_plain/'
+    - 'parts:1'
+
+- id: 931
+  name: 'sling build athena settings cleanup'
+  group: build
+  after: [930]
+  run: |
+    sling conns exec ATHENA "DROP TABLE IF EXISTS db1.ath_set_full"
+    sling conns exec ATHENA "DROP TABLE IF EXISTS db1.ath_set_plain"
+  output_contains:
+    - 'successful!'
