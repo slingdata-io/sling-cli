@@ -1586,6 +1586,11 @@ func (rd *ReplicationConfig) buildCDCRunner() {
 
 	rd.CDCRunner = newCDCRunner(groupKey, groupTasks, rd)
 
+	// the continuous runner reads in its own cycles
+	if IsContinuousRunMode() {
+		return
+	}
+
 	// inject hook so shared read phase runs before loads
 	rd.startHooks = append(rd.startHooks, Hooks{rd.CDCRunner.NewReadCDCHook()}...)
 }
