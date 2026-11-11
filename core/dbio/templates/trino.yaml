@@ -29,6 +29,11 @@ core:
   modify_column: alter column {column} type {type}
   use_database: SET SESSION catalog.name = {database}
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {options} AS ({sql})
+  ctas_options: 'WITH ({options})'
+  ctas_array: 'ARRAY[{values}]'
+
 metadata:
 
   current_database:

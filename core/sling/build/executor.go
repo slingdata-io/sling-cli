@@ -757,7 +757,7 @@ func (e *Executor) executeFullRefresh(model *Model) (uint64, error) {
 		if err = e.dropTable(model.FullTableName, cascade); err != nil {
 			return 0, err
 		}
-		rows, err = e.createTableAs(model.FullTableName, sql, model)
+		rows, err = e.createTableAs(model.FullTableName, sql, model, tableFinal)
 	}
 	if err != nil {
 		return rows, err
@@ -771,7 +771,7 @@ func (e *Executor) executeFullRefreshAtomic(model *Model, sql string, cascade bo
 	// Ensure temp is clean
 	_ = e.dropTable(tmpFull, false)
 
-	rows, err := e.createTableAs(tmpFull, sql, model)
+	rows, err := e.createTableAs(tmpFull, sql, model, tableFinal)
 	if err != nil {
 		_ = e.dropTable(tmpFull, false)
 		return 0, g.Error(err, "could not create temp table for full-refresh of '%s'", model.Name)
@@ -818,7 +818,7 @@ func (e *Executor) executeTruncate(model *Model) (uint64, error) {
 	}
 
 	if !exists {
-		rows, err := e.createTableAs(model.FullTableName, sql, model)
+		rows, err := e.createTableAs(model.FullTableName, sql, model, tableFinal)
 		if err != nil {
 			return 0, err
 		}
@@ -952,7 +952,7 @@ func (e *Executor) executeAppend(model *Model) (uint64, error) {
 	}
 
 	if !exists {
-		rows, err := e.createTableAs(model.FullTableName, sql, model)
+		rows, err := e.createTableAs(model.FullTableName, sql, model, tableFinal)
 		if err != nil {
 			return 0, err
 		}
@@ -1075,7 +1075,7 @@ func (e *Executor) createTempTable(model *Model, tempTable, sql string) (uint64,
 		table := newCHTempTable(model, e.DbConn.GetType() == dbio.TypeDbClickhouse)
 		return rowsFromExec(e.execModel(model, g.F("CREATE TABLE %s %s AS (%s)", quoted, table.clause(), sql)))
 	}
-	return e.createTableAs(tempTable, sql, nil)
+	return e.createTableAs(tempTable, sql, model, tableStage)
 }
 
 // getTempTableName is the package-level implementation.

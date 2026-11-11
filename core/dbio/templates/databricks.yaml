@@ -228,6 +228,13 @@ core:
   # Table comment/description template
   add_table_comment: COMMENT ON TABLE {table} IS {comment}
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {partition_by} {cluster_by} {options} AS ({sql})
+  create_or_replace_table_as: CREATE OR REPLACE TABLE {table} {partition_by} {cluster_by} {options} AS ({sql})
+  ctas_partition_by: 'PARTITIONED BY ({expr})'
+  ctas_cluster_by: 'CLUSTER BY ({expr})'
+  ctas_options: 'TBLPROPERTIES ({options})'
+
 metadata:
 
   current_database:
@@ -687,6 +694,10 @@ function:
   checksum_decimal: 'abs(cast({field} as bigint))'
 
 variable:
+  ctas_option: "'{key}' = {value}"
+  ctas_option_quote_all: 'true'
+  ctas_partition_cluster_exclusive: 'true'
+  literal_escape: "\\'"
   bind_string: "?"
   batch_values: 256
   tmp_folder: /tmp

@@ -719,13 +719,21 @@ func TestValidateDatabaseSupportCrossEngine(t *testing.T) {
 		Transient: &yes, Unlogged: &yes, Dist: "id", Sort: ExprList{"a"},
 		Settings: ModelSettings{Table: SettingValues{"x": 1}, Query: SettingValues{"y": 1}},
 	}
-	allKeys := []string{"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.table", "settings.query"}
 
-	for _, dbType := range []dbio.Type{
-		dbio.TypeDbPostgres, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery, dbio.TypeDbDatabricks,
-		dbio.TypeDbRedshift, dbio.TypeDbTrino, dbio.TypeDbAthena, dbio.TypeDbStarRocks, dbio.TypeDbProton,
-	} {
-		assert.Equal(t, allKeys, newCTASDialect(dbType).unsupported(all), string(dbType))
+	noSettings := []string{"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.table", "settings.query"}
+	ignored := map[dbio.Type][]string{
+		dbio.TypeDbPostgres:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "dist", "sort", "settings.query"},
+		dbio.TypeDbSnowflake:  {"order_by", "partition_by", "primary_key", "ttl", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbBigQuery:   {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbDatabricks: {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbRedshift:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "settings.table", "settings.query"},
+		dbio.TypeDbTrino:      {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbAthena:     {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbStarRocks:  {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbProton:     noSettings,
+	}
+	for dbType, want := range ignored {
+		assert.Equal(t, want, newCTASDialect(dbType).unsupported(all), string(dbType))
 		assert.Empty(t, newCTASDialect(dbType).unsupported(ModelConfig{}), string(dbType))
 	}
 	assert.Equal(t,
@@ -758,7 +766,18 @@ func TestValidateDatabaseSupportCrossEngine(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "settings.table.x: maps are not supported on proton")
 
-	assert.NoError(t, newBuild(dbio.TypeDbPostgres, table([]any{1})).validateDatabaseSupport())
+	err = newBuild(dbio.TypeDbDatabricks, ModelConfig{PartitionBy: ExprList{"d"}, ClusterBy: ExprList{"r"}}).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "partition_by and cluster_by do not work together on databricks")
+
+	err = newBuild(dbio.TypeDbPostgres, table([]any{1})).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lists are not supported on postgres")
+
+	// a view has no table clauses
+	view := table([]any{1})
+	view.Mode = "view"
+	assert.NoError(t, newBuild(dbio.TypeDbPostgres, view).validateDatabaseSupport())
 }
 
 func TestParseYAMLFrontmatter_ClickhouseKeys(t *testing.T) {

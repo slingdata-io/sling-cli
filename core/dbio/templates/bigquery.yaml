@@ -129,6 +129,15 @@ core:
   # Table comment/description template (BigQuery uses ALTER TABLE SET OPTIONS)
   add_table_comment: ALTER TABLE {table} SET OPTIONS (description={comment})
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {partition_by} {cluster_by} {options} AS ({sql})
+  create_or_replace_table_as: CREATE OR REPLACE TABLE {table} {partition_by} {cluster_by} {options} AS ({sql})
+  ctas_partition_by: 'PARTITION BY {expr}'
+  ctas_cluster_by: 'CLUSTER BY {expr}'
+  ctas_options: 'OPTIONS ({options})'
+  ctas_array: '[{values}]'
+  ctas_map_entry: '({key}, {value})'
+
 metadata:
 
   current_database:
@@ -559,6 +568,7 @@ function:
   checksum_json: "length(replace(nullif(to_json_string({field}), 'null'), ' ', ''))"
 
 variable:
+  literal_escape: "\\'"
   # BigQuery default is delete_insert as it's more reliable
   default_merge_strategy: delete_insert
   tmp_folder: /tmp

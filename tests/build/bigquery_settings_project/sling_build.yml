@@ -1,0 +1,3 @@
+target: BIGQUERY
+defaults:
+  schema: sling_build_bq

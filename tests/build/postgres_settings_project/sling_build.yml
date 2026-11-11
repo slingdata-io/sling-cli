@@ -1,0 +1,8 @@
+target: POSTGRES
+defaults:
+  schema: sling_build_pg
+  settings:
+    table:
+      autovacuum_enabled: false
+vars:
+  extra: false

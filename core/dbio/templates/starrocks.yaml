@@ -1,6 +1,8 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  # the error of an existing database has no "already exists" text
+  create_schema: create schema if not exists {schema}
   # StarRocks secondary indexes are single-column BITMAP indexes (no unique indexes)
   create_index: create index {index} on {table} ({cols}) using bitmap
   create_unique_index: create index {index} on {table} ({cols}) using bitmap
@@ -113,6 +115,10 @@ core:
         FROM {src_table}
       ) del WHERE _rn = 1 AND _sling_synced_op = 'D'
     )
+
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {options} AS ({sql})
+  ctas_options: 'PROPERTIES ({options})'
 
 metadata:
   current_database: select database() as name from dual
@@ -497,6 +503,10 @@ function:
   checksum_boolean: '{field}'
 
 variable:
+  ctas_option: '"{key}" = {value}'
+  ctas_option_quote_all: 'true'
+  literal_quote: '"'
+  literal_escape: '\"'
   bind_string: "?"
   quote_char: '`'
   ddl_col: 1

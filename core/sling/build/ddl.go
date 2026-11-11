@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/spf13/cast"
 )
 
 // quoteFullTableName parses schema.table and returns a dialect-quoted FDQN.
@@ -169,8 +171,8 @@ func (e *Executor) insertSelect(model *Model, selectSQL string) (uint64, error) 
 }
 
 // createTableAs creates a table from a SELECT, dialect-aware.
-// model may be nil for temp tables that don't need ClickHouse engine config.
-func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) (uint64, error) {
+// model may be nil. role tells whether the table gets the layout of the model.
+func (e *Executor) createTableAs(fullName, selectSQL string, model *Model, role tableRole) (uint64, error) {
 	quoted, err := e.quoteFullTableName(fullName)
 	if err != nil {
 		return 0, err
@@ -187,8 +189,12 @@ func (e *Executor) createTableAs(fullName, selectSQL string, model *Model) (uint
 		return rowsFromExec(e.DbConn.Exec(g.F("SELECT * INTO %s FROM (%s) AS _sling_src", quoted, selectSQL)))
 	}
 
-	// Standard CTAS (Postgres, MySQL, Snowflake, BigQuery, DuckDB, …)
-	return rowsFromExec(e.DbConn.Exec(g.F("CREATE TABLE %s AS (%s)", quoted, selectSQL)))
+	d := newCTASDialect(dbType)
+	t, err := newCTASTable(model, d, role)
+	if err != nil {
+		return 0, err
+	}
+	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_table_as"), quoted, selectSQL)))
 }
 
 // createOrReplaceTableAs atomically rebuilds a table from a SELECT when the
@@ -200,9 +206,14 @@ func (e *Executor) createOrReplaceTableAs(fullName, selectSQL string, model *Mod
 	}
 	if e.isClickHouse() {
 		// ClickHouse: drop + create (atomic path uses rename elsewhere)
-		return e.createTableAs(fullName, selectSQL, model)
+		return e.createTableAs(fullName, selectSQL, model, tableFinal)
 	}
-	return rowsFromExec(e.DbConn.Exec(g.F("CREATE OR REPLACE TABLE %s AS (%s)", quoted, selectSQL)))
+	d := newCTASDialect(e.DbConn.GetType())
+	t, err := newCTASTable(model, d, tableFinal)
+	if err != nil {
+		return 0, err
+	}
+	return rowsFromExec(e.execModel(model, t.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), quoted, selectSQL)))
 }
 
 // createOrReplaceView creates/replaces a view, dialect-aware.
@@ -391,8 +402,12 @@ type querySettingsConn interface {
 
 // querySettings returns the conn and the settings to send with a statement of
 // the model. ok is false when the statement must run with a plain call.
+// Only ClickHouse sends settings through the driver context.
 func (e *Executor) querySettings(model *Model) (conn querySettingsConn, settings SettingValues, ok bool) {
 	if model == nil || len(model.Config.Settings.Query) == 0 {
+		return nil, nil, false
+	}
+	if !e.isClickHouse() {
 		return nil, nil, false
 	}
 	conn, ok = e.DbConn.(querySettingsConn)
@@ -469,4 +484,182 @@ func (d ctasDialect) unsupported(c ModelConfig) []string {
 		}
 	}
 	return out
+}
+
+// tableRole tells which table a CTAS makes.
+type tableRole int
+
+const (
+	tableFinal tableRole = iota // the model table, or the Path B tmp table that becomes it
+	tableStage                  // a staging _sling_build_tmp_* table
+)
+
+// ctasTable holds the rendered CTAS parts of one table.
+type ctasTable struct {
+	Kind, PartitionBy, ClusterBy, Dist, Sort, Options string
+}
+
+// newCTASTable renders the CTAS parts of the model. A nil model or a
+// staging table gets no part.
+func newCTASTable(model *Model, d ctasDialect, role tableRole) (t ctasTable, err error) {
+	if model == nil || role == tableStage {
+		return t, nil
+	}
+	c := model.Config
+	part := func(key string, kv ...string) string {
+		tmpl := d.t.GetTemplateValue(key)
+		if strings.TrimSpace(tmpl) == "" {
+			return ""
+		}
+		return g.R(tmpl, kv...)
+	}
+
+	var kinds []string
+	if c.Transient != nil && *c.Transient {
+		kinds = append(kinds, part("core.ctas_transient"))
+	}
+	if c.Unlogged != nil && *c.Unlogged {
+		kinds = append(kinds, part("core.ctas_unlogged"))
+	}
+	t.Kind = strings.Join(lo.Compact(kinds), " ")
+
+	if len(c.PartitionBy) > 0 {
+		t.PartitionBy = part("core.ctas_partition_by", "expr", c.PartitionBy.SQL())
+	}
+	if len(c.ClusterBy) > 0 {
+		t.ClusterBy = part("core.ctas_cluster_by", "expr", c.ClusterBy.SQL())
+	}
+	if len(c.Sort) > 0 {
+		t.Sort = part("core.ctas_sort", "expr", c.Sort.SQL())
+	}
+	if dist := strings.TrimSpace(c.Dist); dist != "" {
+		switch strings.ToLower(dist) {
+		case "even", "all", "auto":
+			t.Dist = part("core.ctas_dist_style", "style", strings.ToUpper(dist))
+		default:
+			t.Dist = part("core.ctas_dist_key", "expr", dist)
+		}
+	}
+
+	if t.Options, err = d.options(c.Settings.Table); err != nil {
+		return t, g.Error("model '%s': %s", model.Name, err.Error())
+	}
+	return t, nil
+}
+
+// render fills the template. Only the skeleton collapses: a part that is
+// empty drops its token, and the values keep their spaces.
+func (t ctasTable) render(tmpl, table, selectSQL string) string {
+	tokens := strings.Fields(tmpl)
+	out := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		tok = g.R(tok,
+			"kind", t.Kind, "partition_by", t.PartitionBy, "cluster_by", t.ClusterBy,
+			"dist", t.Dist, "sort", t.Sort, "options", t.Options,
+			"table", table, "sql", selectSQL,
+		)
+		if tok != "" {
+			out = append(out, tok)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// clause returns the layout and option parts of the template that are not
+// empty. It leaves out the kind, the table and the SQL.
+func (t ctasTable) clause(tmpl string) string {
+	var out []string
+	for _, tok := range strings.Fields(tmpl) {
+		if !strings.ContainsAny(tok, "{") || strings.Contains(tok, "{kind}") ||
+			strings.Contains(tok, "{table}") || strings.Contains(tok, "{sql}") {
+			continue
+		}
+		tok = g.R(tok,
+			"partition_by", t.PartitionBy, "cluster_by", t.ClusterBy,
+			"dist", t.Dist, "sort", t.Sort, "options", t.Options,
+		)
+		if tok != "" {
+			out = append(out, tok)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// literal renders a setting value as SQL. option is true for a value in
+// the options of the table.
+func (d ctasDialect) literal(v any, option bool) (string, error) {
+	quoteAll := cast.ToBool(d.t.GetTemplateValue("variable.ctas_option_quote_all"))
+	switch x := v.(type) {
+	case string:
+		return d.quote(x), nil
+	case bool, int, int64, uint64, float32, float64:
+		s := settingScalar(x)
+		if b, ok := x.(bool); ok {
+			s = strconv.FormatBool(b)
+		}
+		if option && quoteAll {
+			return d.quote(s), nil
+		}
+		return s, nil
+	case []any:
+		arr := d.t.GetTemplateValue("core.ctas_array")
+		if strings.TrimSpace(arr) == "" {
+			return "", fmt.Errorf("lists are not supported on %s", d.t)
+		}
+		items := make([]string, len(x))
+		for i, item := range x {
+			s, err := d.literal(item, false)
+			if err != nil {
+				return "", err
+			}
+			items[i] = s
+		}
+		return g.R(arr, "values", strings.Join(items, ", ")), nil
+	case map[string]any:
+		arr := d.t.GetTemplateValue("core.ctas_array")
+		entry := d.t.GetTemplateValue("core.ctas_map_entry")
+		if strings.TrimSpace(arr) == "" || strings.TrimSpace(entry) == "" {
+			return "", fmt.Errorf("maps are not supported on %s", d.t)
+		}
+		items := make([]string, 0, len(x))
+		for _, key := range sortedKeys(x) {
+			val, err := d.literal(x[key], false)
+			if err != nil {
+				return "", err
+			}
+			items = append(items, g.R(entry, "key", d.quote(key), "value", val))
+		}
+		return g.R(arr, "values", strings.Join(items, ", ")), nil
+	}
+	return "", fmt.Errorf("value type %T is not supported", v)
+}
+
+// quote renders a string literal with the quote and escape of the dialect.
+func (d ctasDialect) quote(s string) string {
+	q := d.t.GetTemplateValue("variable.literal_quote")
+	esc := d.t.GetTemplateValue("variable.literal_escape")
+	pairs := []string{q, esc}
+	if strings.HasPrefix(esc, `\`) {
+		pairs = append([]string{`\`, `\\`}, pairs...)
+	}
+	return q + strings.NewReplacer(pairs...).Replace(s) + q
+}
+
+// options renders the table options of the dialect, or "" when there is
+// nothing to render.
+func (d ctasDialect) options(vals SettingValues) (string, error) {
+	tmpl := d.t.GetTemplateValue("core.ctas_options")
+	if len(vals) == 0 || strings.TrimSpace(tmpl) == "" {
+		return "", nil
+	}
+	optTmpl := d.t.GetTemplateValue("variable.ctas_option")
+	pairs := make([]string, 0, len(vals))
+	for _, key := range sortedKeys(vals) {
+		val, err := d.literal(vals[key], true)
+		if err != nil {
+			return "", fmt.Errorf("settings.table.%s: %s", key, err)
+		}
+		pairs = append(pairs, g.R(optTmpl, "key", key, "value", val))
+	}
+	return g.R(tmpl, "options", strings.Join(pairs, d.t.GetTemplateValue("variable.ctas_option_sep"))), nil
 }

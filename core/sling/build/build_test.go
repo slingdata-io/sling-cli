@@ -568,8 +568,9 @@ SELECT 1 AS id`)
 		return out
 	}
 
-	// not ClickHouse: no clauses
-	assert.Empty(t, nodes()["a"].TableClause)
+	// Postgres: the table options only
+	b.dbType = dbio.TypeDbPostgres
+	assert.Equal(t, "WITH (storage_policy = 'p')", nodes()["a"].TableClause)
 	assert.Empty(t, nodes()["a"].QuerySettings)
 
 	b.dbType = dbio.TypeDbClickhouse
@@ -582,4 +583,56 @@ SELECT 1 AS id`)
 	v := nodes()["v"]
 	assert.Empty(t, v.TableClause)
 	assert.Empty(t, v.QuerySettings)
+}
+
+func TestCompiledTableClauseCrossEngine(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", "target: POSTGRES\n")
+	write("a.sql", "/**\nunlogged: true\ncluster_by: [region, d]\nsettings:\n  table:\n    fillfactor: 70\n    autovacuum_enabled: false\n**/\nSELECT 1 AS id")
+	write("v.sql", "/**\nmode: view\nunlogged: true\n**/\nSELECT 1 AS id")
+	write("s.sql", "/**\ncluster_by: [region, d]\n**/\nSELECT 1 AS id")
+
+	b, err := NewBuild(dir, BuildOptions{Target: "POSTGRES"})
+	require.NoError(t, err)
+	require.NoError(t, b.Compile())
+
+	nodes := func() map[string]Node {
+		out := map[string]Node{}
+		for _, n := range b.Compiled().Nodes {
+			out[n.Name] = n
+		}
+		return out
+	}
+
+	b.dbType = dbio.TypeDbPostgres
+	assert.Equal(t, "WITH (autovacuum_enabled = false, fillfactor = 70)", nodes()["a"].TableClause)
+	assert.Equal(t, "UNLOGGED", nodes()["a"].TableKind)
+
+	b.dbType = dbio.TypeDbSnowflake
+	assert.Equal(t, "CLUSTER BY (region, d) autovacuum_enabled = false fillfactor = 70", nodes()["a"].TableClause)
+	assert.Empty(t, nodes()["a"].TableKind)
+	assert.Equal(t, "CLUSTER BY (region, d)", nodes()["s"].TableClause)
+
+	for _, dbType := range []dbio.Type{dbio.TypeDbPostgres, dbio.TypeDbSnowflake} {
+		b.dbType = dbType
+		assert.Empty(t, nodes()["v"].TableClause)
+		assert.Empty(t, nodes()["v"].TableKind)
+	}
+
+	b.dbType = dbio.TypeDbProton
+	assert.Empty(t, nodes()["a"].TableClause)
+	assert.Empty(t, nodes()["a"].TableKind)
+}
+
+func TestJSONPayloadCrossEngine(t *testing.T) {
+	cfg := &BuildConfig{Nodes: []Node{
+		{Name: "a", Type: NodeTypeModel, TableKind: "UNLOGGED"},
+		{Name: "b", Type: NodeTypeModel},
+	}}
+	nodes := cfg.JSONPayload()["nodes"].([]map[string]any)
+	assert.Equal(t, "UNLOGGED", nodes[0]["table_kind"])
+	assert.NotContains(t, nodes[1], "table_kind")
 }

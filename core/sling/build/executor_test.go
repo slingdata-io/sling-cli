@@ -287,7 +287,7 @@ func TestExecModelQuerySettings(t *testing.T) {
 	e, conn := newRecordingExecutor(dbio.TypeDbClickhouse)
 	model := queryModel(SettingValues{"max_memory_usage": 100})
 
-	_, err := e.createTableAs("s.t", "SELECT 1 AS id", model)
+	_, err := e.createTableAs("s.t", "SELECT 1 AS id", model, tableFinal)
 	require.NoError(t, err)
 	_, err = e.createTempTable(model, "s.tmp", "SELECT 1 AS id")
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func TestExecModelQuerySettings(t *testing.T) {
 	// a model with no query settings sends the plain calls and no settings
 	e, conn = newRecordingExecutor(dbio.TypeDbClickhouse)
 	plain := queryModel(nil)
-	_, err = e.createTableAs("s.t", "SELECT 1 AS id", plain)
+	_, err = e.createTableAs("s.t", "SELECT 1 AS id", plain, tableFinal)
 	require.NoError(t, err)
 	_, err = e.createTempTable(plain, "s.tmp", "SELECT 1 AS id")
 	require.NoError(t, err)
@@ -363,17 +363,17 @@ func TestExecModelNonClickhouse(t *testing.T) {
 	model := queryModel(SettingValues{"max_memory_usage": 100})
 
 	e, conn := newRecordingExecutor(dbio.TypeDbPostgres)
-	_, err := e.createTableAs("s.t", "SELECT 1", model)
+	_, err := e.createTableAs("s.t", "SELECT 1", model, tableFinal)
 	require.NoError(t, err)
 	require.Len(t, conn.calls, 1)
 	assert.Equal(t, "Exec", conn.calls[0].method)
-	assert.Equal(t, `CREATE TABLE "s"."t" AS (SELECT 1)`, conn.calls[0].sql)
+	assert.Equal(t, `CREATE TABLE "s"."t" WITH (storage_policy = 'p') AS (SELECT 1)`, conn.calls[0].sql)
 	assert.Nil(t, conn.calls[0].settings)
 
 	// Proton has no QuerySettingsContext: plain Exec with today's clause
 	rec := &recordingConn{dbType: dbio.TypeDbProton}
 	e = &Executor{DbConn: plainConn{rec}, RunID: "r1"}
-	_, err = e.createTableAs("s.t", "SELECT 1", model)
+	_, err = e.createTableAs("s.t", "SELECT 1", model, tableFinal)
 	require.NoError(t, err)
 	_, err = e.createTempTable(model, "s.tmp", "SELECT 1")
 	require.NoError(t, err)
@@ -928,4 +928,153 @@ func TestDrainLogsDoesNotStealOtherModel(t *testing.T) {
 	require.Len(t, aLines, 2)
 	assert.Equal(t, "a-1", aLines[0].Text)
 	assert.Equal(t, "a-2", aLines[1].Text)
+}
+
+func TestCTASRenderPerDialect(t *testing.T) {
+	yes := true
+	sel := "SELECT 1 AS id"
+	tests := []struct {
+		dbType  dbio.Type
+		cfg     ModelConfig
+		replace bool
+		want    string
+	}{
+		{dbio.TypeDbPostgres, ModelConfig{Unlogged: &yes, Settings: ModelSettings{Table: SettingValues{"fillfactor": 70, "autovacuum_enabled": false}}}, false,
+			`CREATE UNLOGGED TABLE "s"."t" WITH (autovacuum_enabled = false, fillfactor = 70) AS (SELECT 1 AS id)`},
+		{dbio.TypeDbSnowflake, ModelConfig{Transient: &yes, ClusterBy: ExprList{"region", "d"}, Settings: ModelSettings{Table: SettingValues{"comment": "orders", "data_retention_time_in_days": 0}}}, true,
+			`CREATE OR REPLACE TRANSIENT TABLE "s"."t" CLUSTER BY (region, d) comment = 'orders' data_retention_time_in_days = 0 AS (SELECT 1 AS id)`},
+		{dbio.TypeDbBigQuery, ModelConfig{PartitionBy: ExprList{"d"}, ClusterBy: ExprList{"region", "id"}, Settings: ModelSettings{Table: SettingValues{"description": "orders", "labels": map[string]any{"team": "data"}, "partition_expiration_days": 30}}}, true,
+			"CREATE OR REPLACE TABLE `s`.`t` PARTITION BY d CLUSTER BY region, id OPTIONS (description = 'orders', labels = [('team', 'data')], partition_expiration_days = 30) AS (SELECT 1 AS id)"},
+		{dbio.TypeDbDatabricks, ModelConfig{ClusterBy: ExprList{"region"}, Settings: ModelSettings{Table: SettingValues{"delta.autoOptimize.optimizeWrite": true}}}, true,
+			"CREATE OR REPLACE TABLE `s`.`t` CLUSTER BY (region) TBLPROPERTIES ('delta.autoOptimize.optimizeWrite' = 'true') AS (SELECT 1 AS id)"},
+		{dbio.TypeDbDatabricks, ModelConfig{PartitionBy: ExprList{"d"}}, false,
+			"CREATE TABLE `s`.`t` PARTITIONED BY (d) AS (SELECT 1 AS id)"},
+		{dbio.TypeDbRedshift, ModelConfig{Dist: "id", Sort: ExprList{"d", "region"}}, false,
+			`CREATE TABLE "s"."t" DISTSTYLE KEY DISTKEY(id) COMPOUND SORTKEY(d, region) AS (SELECT 1 AS id)`},
+		{dbio.TypeDbTrino, ModelConfig{Settings: ModelSettings{Table: SettingValues{"format": "PARQUET", "partitioned_by": []any{"d"}}}}, false,
+			`CREATE TABLE "s"."t" WITH (format = 'PARQUET', partitioned_by = ARRAY['d']) AS (SELECT 1 AS id)`},
+		{dbio.TypeDbAthena, ModelConfig{Settings: ModelSettings{Table: SettingValues{"format": "PARQUET", "partitioning": []any{"d"}, "table_type": "ICEBERG"}}}, false,
+			"CREATE TABLE `s`.`t` WITH (format = 'PARQUET', partitioning = ARRAY['d'], table_type = 'ICEBERG') AS (SELECT 1 AS id)"},
+		{dbio.TypeDbStarRocks, ModelConfig{Settings: ModelSettings{Table: SettingValues{"compression": "ZSTD", "replication_num": 1}}}, false,
+			"CREATE TABLE `s`.`t` PROPERTIES (\"compression\" = \"ZSTD\", \"replication_num\" = \"1\") AS (SELECT 1 AS id)"},
+	}
+	for _, tt := range tests {
+		d := newCTASDialect(tt.dbType)
+		table, err := newCTASTable(&Model{Name: "m", Config: tt.cfg}, d, tableFinal)
+		require.NoError(t, err, string(tt.dbType))
+		key := "core.create_table_as"
+		if tt.replace {
+			key = "core.create_or_replace_table_as"
+		}
+		assert.Equal(t, tt.want, table.render(d.t.GetTemplateValue(key), tt.dbType.Quote("s")+"."+tt.dbType.Quote("t"), sel), string(tt.dbType))
+	}
+}
+
+func TestCTASRenderNoKeysUnchanged(t *testing.T) {
+	for _, dbType := range []dbio.Type{
+		dbio.TypeDbPostgres, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery, dbio.TypeDbDatabricks, dbio.TypeDbRedshift,
+		dbio.TypeDbTrino, dbio.TypeDbAthena, dbio.TypeDbStarRocks, dbio.TypeDbDuckDb,
+	} {
+		d := newCTASDialect(dbType)
+		table, err := newCTASTable(&Model{Name: "m"}, d, tableFinal)
+		require.NoError(t, err)
+		assert.Equal(t, "CREATE TABLE T AS (SELECT 1)", table.render(d.t.GetTemplateValue("core.create_table_as"), "T", "SELECT 1"), string(dbType))
+		assert.Equal(t, "CREATE OR REPLACE TABLE T AS (SELECT 1)", table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"), string(dbType))
+	}
+}
+
+func TestCTASRenderKeepsValueSpaces(t *testing.T) {
+	d := newCTASDialect(dbio.TypeDbSnowflake)
+	model := &Model{Name: "m", Config: ModelConfig{Settings: ModelSettings{Table: SettingValues{"comment": "a  b"}}}}
+	table, err := newCTASTable(model, d, tableFinal)
+	require.NoError(t, err)
+	assert.Equal(t, "CREATE OR REPLACE TABLE T comment = 'a  b' AS (SELECT 1)",
+		table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"))
+
+	model.Config.Settings.Table = SettingValues{"comment": "{sql}"}
+	table, err = newCTASTable(model, d, tableFinal)
+	require.NoError(t, err)
+	assert.Equal(t, "CREATE OR REPLACE TABLE T comment = '{sql}' AS (SELECT 1)",
+		table.render(d.t.GetTemplateValue("core.create_or_replace_table_as"), "T", "SELECT 1"))
+}
+
+func TestCTASLiteral(t *testing.T) {
+	tests := []struct {
+		dbType dbio.Type
+		val    any
+		option bool
+		want   string
+		err    string
+	}{
+		{dbio.TypeDbPostgres, "it's", false, `'it''s'`, ""},
+		{dbio.TypeDbPostgres, `a\`, false, `'a\'`, ""},
+		{dbio.TypeDbBigQuery, "it's", false, `'it\'s'`, ""},
+		{dbio.TypeDbBigQuery, `a\`, false, `'a\\'`, ""},
+		{dbio.TypeDbDatabricks, `a\'`, false, `'a\\\''`, ""},
+		{dbio.TypeDbStarRocks, `x"\`, false, `"x\"\\"`, ""},
+		{dbio.TypeDbDatabricks, true, true, `'true'`, ""},
+		{dbio.TypeDbDatabricks, true, false, `true`, ""},
+		{dbio.TypeDbStarRocks, 1, true, `"1"`, ""},
+		{dbio.TypeDbPostgres, 1.5, true, `1.5`, ""},
+		{dbio.TypeDbTrino, []any{"d"}, false, `ARRAY['d']`, ""},
+		{dbio.TypeDbBigQuery, map[string]any{"team": "data"}, false, `[('team', 'data')]`, ""},
+		{dbio.TypeDbPostgres, []any{1}, false, "", "lists are not supported on postgres"},
+		{dbio.TypeDbTrino, map[string]any{"a": 1}, false, "", "maps are not supported on trino"},
+		{dbio.TypeDbPostgres, struct{}{}, false, "", "value type struct {} is not supported"},
+	}
+	for _, tt := range tests {
+		got, err := newCTASDialect(tt.dbType).literal(tt.val, tt.option)
+		if tt.err != "" {
+			require.Error(t, err, "%s %v", tt.dbType, tt.val)
+			assert.Contains(t, err.Error(), tt.err)
+			continue
+		}
+		require.NoError(t, err, "%s %v", tt.dbType, tt.val)
+		assert.Equal(t, tt.want, got, "%s %v", tt.dbType, tt.val)
+	}
+
+	_, err := newCTASDialect(dbio.TypeDbPostgres).options(SettingValues{"x": []any{1}})
+	require.Error(t, err)
+	assert.Equal(t, "settings.table.x: lists are not supported on postgres", err.Error())
+}
+
+func TestCTASDist(t *testing.T) {
+	d := newCTASDialect(dbio.TypeDbRedshift)
+	for dist, want := range map[string]string{
+		"even": "DISTSTYLE EVEN", "AUTO": "DISTSTYLE AUTO", "all": "DISTSTYLE ALL", "id": "DISTSTYLE KEY DISTKEY(id)",
+	} {
+		table, err := newCTASTable(&Model{Name: "m", Config: ModelConfig{Dist: dist}}, d, tableFinal)
+		require.NoError(t, err)
+		assert.Equal(t, want, table.Dist, dist)
+	}
+}
+
+func TestCTASTableStageNoLayout(t *testing.T) {
+	yes := true
+	e, conn := newRecordingExecutor(dbio.TypeDbSnowflake)
+	model := queryModel(SettingValues{"query_tag": "x"})
+	model.Config.Transient = &yes
+	model.Config.ClusterBy = ExprList{"a"}
+
+	_, err := e.createTempTable(model, "S.TMP", "SELECT 1")
+	require.NoError(t, err)
+	require.Len(t, conn.calls, 1)
+	assert.Equal(t, "Exec", conn.calls[0].method)
+	assert.Equal(t, `CREATE TABLE "S"."TMP" AS (SELECT 1)`, conn.calls[0].sql)
+	assert.Nil(t, conn.calls[0].settings)
+}
+
+func TestFullRefreshAtomicTmpGetsLayout(t *testing.T) {
+	yes := true
+	e, conn := newRecordingExecutor(dbio.TypeDbPostgres)
+	model := queryModel(nil)
+	model.Config.Unlogged = &yes
+	model.Config.Settings.Table = SettingValues{"fillfactor": 70}
+
+	_, err := e.executeFullRefreshAtomic(model, "SELECT 1", false)
+	require.NoError(t, err)
+	ctas := conn.find("CREATE ")
+	require.NotEmpty(t, ctas)
+	assert.True(t, strings.HasPrefix(ctas[0].sql, "CREATE UNLOGGED TABLE"), ctas[0].sql)
+	assert.Contains(t, ctas[0].sql, "WITH (fillfactor = 70)")
 }

@@ -209,6 +209,13 @@ core:
   # Table comment/description template
   add_table_comment: COMMENT ON TABLE {table} IS {comment}
 
+  # CTAS templates for sling build
+  create_table_as: CREATE {kind} TABLE {table} {cluster_by} {options} AS ({sql})
+  create_or_replace_table_as: CREATE OR REPLACE {kind} TABLE {table} {cluster_by} {options} AS ({sql})
+  ctas_transient: TRANSIENT
+  ctas_cluster_by: 'CLUSTER BY ({expr})'
+  ctas_options: '{options}'
+
 metadata:
 
   current_database:
@@ -644,6 +651,8 @@ function:
   checksum_json: length(replace({field}::string, ' ', ''))
 
 variable:
+  ctas_option_sep: ' '
+  literal_escape: "\\'"
   bind_string: "?"
   tmp_folder: /tmp
   column_upper: true

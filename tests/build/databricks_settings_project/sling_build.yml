@@ -1,0 +1,3 @@
+target: DATABRICKS
+defaults:
+  schema: sling_build_dbx

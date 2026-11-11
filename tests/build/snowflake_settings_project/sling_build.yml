@@ -1,0 +1,3 @@
+target: SNOWFLAKE
+defaults:
+  schema: sling_build_sf

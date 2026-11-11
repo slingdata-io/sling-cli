@@ -77,6 +77,11 @@ core:
   merge_cdc: null
   merge_change_capture_soft: null
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {options} AS ({sql})
+  ctas_options: 'WITH ({options})'
+  ctas_array: 'ARRAY[{values}]'
+
 metadata:
   current_database:
     select current_database

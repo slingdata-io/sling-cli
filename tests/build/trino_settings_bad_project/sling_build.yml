@@ -1,0 +1,3 @@
+target: TRINO
+defaults:
+  schema: sling_build_trino

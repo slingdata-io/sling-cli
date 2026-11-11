@@ -250,6 +250,11 @@ func (b *Build) validateDatabaseSupport() error {
 				}
 			}
 		}
+		if b.GetModelMode(model) != "view" && dbType != dbio.TypeDbClickhouse {
+			if _, err := newCTASTable(model, newCTASDialect(dbType), tableFinal); err != nil {
+				return err
+			}
+		}
 		if len(c.PartitionBy) > 0 && len(c.ClusterBy) > 0 && cast.ToBool(dbType.GetTemplateValue("variable.ctas_partition_cluster_exclusive")) {
 			return g.Error("model '%s': partition_by and cluster_by do not work together on %s", name, dbType)
 		}
@@ -627,10 +632,7 @@ func (b *Build) Compiled() *BuildConfig {
 			n.Dependencies = node.Dependencies
 			n.SQL = node.Model.CompiledSQL
 			n.Tests = node.Model.Config.Tests
-			if b.dbType == dbio.TypeDbClickhouse && n.Mode != "view" {
-				n.TableClause = newCHTable(node.Model, b.dbType.Quote, true).clause()
-				n.QuerySettings = node.Model.Config.Settings.Query.sql()
-			}
+			b.setClauses(&n, node.Model)
 		}
 		cfg.Nodes = append(cfg.Nodes, n)
 	}
@@ -638,6 +640,25 @@ func (b *Build) Compiled() *BuildConfig {
 	cfg.Compiled = true
 
 	return cfg
+}
+
+// setClauses sets the compile clauses of a table model node.
+func (b *Build) setClauses(n *Node, m *Model) {
+	if n.Mode == "view" || b.dbType == dbio.TypeUnknown {
+		return
+	}
+	if b.dbType == dbio.TypeDbClickhouse {
+		n.TableClause = newCHTable(m, b.dbType.Quote, true).clause()
+		n.QuerySettings = m.Config.Settings.Query.sql()
+		return
+	}
+	d := newCTASDialect(b.dbType)
+	t, err := newCTASTable(m, d, tableFinal)
+	if err != nil {
+		return
+	}
+	n.TableClause = t.clause(d.t.GetTemplateValue("core.create_table_as"))
+	n.TableKind = t.Kind
 }
 
 // CompileJSONPayload returns the --compile --json object.
@@ -661,6 +682,7 @@ func (c *BuildConfig) JSONPayload() map[string]any {
 		setIf("file", node.File, node.File != "")
 		setIf("mode", node.Mode, node.Mode != "")
 		setIf("table_clause", node.TableClause, node.TableClause != "")
+		setIf("table_kind", node.TableKind, node.TableKind != "")
 		setIf("query_settings", node.QuerySettings, node.QuerySettings != "")
 		setIf("dependencies", node.Dependencies, node.Type == NodeTypeModel)
 		setIf("sql", node.SQL, node.SQL != "")
@@ -695,10 +717,11 @@ func (b *Build) printModelYAML(name string, node *DAGNode) {
 	fmt.Printf("  table: %s\n", model.FullTableName)
 	fmt.Printf("  file: %s\n", filepath.ToSlash(model.RelPath))
 	fmt.Printf("  mode: %s\n", mode)
-	if b.dbType == dbio.TypeDbClickhouse && mode != "view" {
-		fmt.Printf("  table_clause: %s\n", newCHTable(model, b.dbType.Quote, true).clause())
-		if qs := model.Config.Settings.Query.sql(); qs != "" {
-			fmt.Printf("  query_settings: %s\n", qs)
+	n := Node{Mode: mode}
+	b.setClauses(&n, model)
+	for _, kv := range [][2]string{{"table_clause", n.TableClause}, {"table_kind", n.TableKind}, {"query_settings", n.QuerySettings}} {
+		if kv[1] != "" {
+			fmt.Printf("  %s: %s\n", kv[0], kv[1])
 		}
 	}
 

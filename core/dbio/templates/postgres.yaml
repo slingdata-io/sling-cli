@@ -212,6 +212,11 @@ core:
       where {src_del_pk_equal}
     )
 
+  # CTAS templates for sling build
+  create_table_as: CREATE {kind} TABLE {table} {options} AS ({sql})
+  ctas_unlogged: UNLOGGED
+  ctas_options: 'WITH ({options})'
+
 metadata:
 
   current_database:

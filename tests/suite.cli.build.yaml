@@ -951,10 +951,11 @@
   group: build
   run: 'sling build compile tests/build/clickhouse_settings_project --target POSTGRES'
   output_contains:
-    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query do not apply to postgres"
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.query do not apply to postgres"
     - 'sling ignores them'
+    - "table_clause: WITH (index_granularity = 1024, storage_policy = 'default')"
+    - 'table_clause: WITH (index_granularity = 4096)'
   output_does_not_contain:
-    - 'table_clause'
     - 'ENGINE ='
 
 - id: 882
@@ -976,3 +977,263 @@
     - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.table, settings.query do not apply to proton"
   output_does_not_contain:
     - 'table_clause'
+
+- id: 887
+  name: 'sling build compile shows Postgres table_clause and table_kind'
+  group: build
+  run: 'sling build compile tests/build/postgres_settings_project --target POSTGRES'
+  output_contains:
+    - 'table_kind: UNLOGGED'
+    - 'table_clause: WITH (autovacuum_enabled = false, fillfactor = 70)'
+    - 'table_clause: WITH (autovacuum_enabled = false)'
+
+- id: 888
+  name: 'sling build compile warns when the target ignores a flag'
+  group: build
+  run: 'sling build compile tests/build/postgres_settings_project --target SNOWFLAKE'
+  output_contains:
+    - "model 'pg_set_full': unlogged do not apply to snowflake"
+
+- id: 889
+  name: 'sling build postgres unlogged and table options, full refresh'
+  group: build
+  after: [887]
+  run: |
+    SLING_ROW_CNT= sling conns exec POSTGRES "CREATE SCHEMA IF NOT EXISTS sling_build_pg"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_plain CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_full CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_inc CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_app CASCADE"
+    sling build run tests/build/postgres_settings_project --target POSTGRES --full-refresh
+  output_contains:
+    - 'OK'
+    - 'Build Completed'
+
+- id: 890
+  name: 'sling build postgres catalog shows relpersistence and reloptions'
+  group: build
+  after: [889]
+  run: |
+    sling conns exec POSTGRES "SELECT 'chk:' || c.relpersistence::text || '|' || coalesce(array_to_string(c.reloptions, ','), '') AS c FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'sling_build_pg' AND c.relname = 'pg_set_full'"
+    sling conns exec POSTGRES "SELECT 'chk2:' || c.relpersistence::text || '|' || coalesce(array_to_string(c.reloptions, ','), '') AS c FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'sling_build_pg' AND c.relname = 'pg_set_plain'"
+  output_contains:
+    - 'chk:u|autovacuum_enabled=false,fillfactor=70'
+    - 'chk2:p|autovacuum_enabled=false'
+
+- id: 891
+  name: 'sling build postgres second run: incremental merge and append'
+  group: build
+  after: [890]
+  run: |
+    sling build run tests/build/postgres_settings_project --target POSTGRES --vars 'extra: true'
+    sling conns exec POSTGRES "SELECT 'chk3:' || c.relpersistence::text || '|' || coalesce(array_to_string(c.reloptions, ','), '') AS c FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'sling_build_pg' AND c.relname = 'pg_set_inc'"
+    sling conns exec POSTGRES "SELECT 'chk4:' || count(*) AS c FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'sling_build_pg' AND c.relname LIKE '\_sling\_build\_tmp\_%'"
+    sling conns exec POSTGRES "SELECT 'chk5:' || (SELECT count(*) FROM sling_build_pg.pg_set_inc) || '|' || (SELECT count(*) FROM sling_build_pg.pg_set_app) AS c"
+  output_contains:
+    - 'Build Completed'
+    - 'chk3:u|autovacuum_enabled=false,fillfactor=70'
+    - 'chk4:0'
+    - 'chk5:3|5'
+
+- id: 892
+  name: 'sling build postgres cleanup'
+  group: build
+  after: [891]
+  run: 'sling conns exec POSTGRES "DROP SCHEMA IF EXISTS sling_build_pg CASCADE"'
+  output_contains:
+    - 'successful!'
+
+- id: 893
+  name: 'sling build snowflake transient, cluster by and table options'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "CREATE SCHEMA IF NOT EXISTS SLING_BUILD_SF"
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "DROP TABLE IF EXISTS SLING_BUILD_SF.SF_SET_PLAIN"
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "DROP TABLE IF EXISTS SLING_BUILD_SF.SF_SET_FULL"
+    sling build run tests/build/snowflake_settings_project --target SNOWFLAKE --full-refresh
+  output_contains:
+    - 'Build Completed'
+
+- id: 894
+  name: 'sling build snowflake catalog shows transient, clustering key, retention and comment'
+  group: build
+  after: [893]
+  run: |
+    sling conns exec SNOWFLAKE "SELECT 'chk:' || is_transient || '|' || clustering_key || '|' || retention_time || '|' || comment AS c FROM information_schema.tables WHERE table_schema = 'SLING_BUILD_SF' AND table_name = 'SF_SET_FULL'"
+  output_contains:
+    - 'chk:YES|LINEAR(region, d)|0|orders'
+
+- id: 895
+  name: 'sling build snowflake cleanup'
+  group: build
+  after: [894]
+  run: 'sling conns exec SNOWFLAKE "DROP SCHEMA IF EXISTS SLING_BUILD_SF CASCADE"'
+  output_contains:
+    - 'successful!'
+
+- id: 896
+  name: 'sling build bigquery partition, cluster and table options'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec BIGQUERY "CREATE SCHEMA IF NOT EXISTS sling_build_bq"
+    SLING_ROW_CNT= sling conns exec BIGQUERY "DROP TABLE IF EXISTS sling_build_bq.bq_set_plain"
+    SLING_ROW_CNT= sling conns exec BIGQUERY "DROP TABLE IF EXISTS sling_build_bq.bq_set_full"
+    sling build run tests/build/bigquery_settings_project --target BIGQUERY --full-refresh
+  output_contains:
+    - 'Build Completed'
+
+- id: 897
+  name: 'sling build bigquery TABLE_OPTIONS show description, labels and expiration'
+  group: build
+  after: [896]
+  run: |
+    sling conns exec BIGQUERY "SELECT CONCAT('chk:', STRING_AGG(CONCAT(option_name, '=', option_value), ';' ORDER BY option_name)) AS c FROM sling_build_bq.INFORMATION_SCHEMA.TABLE_OPTIONS WHERE table_name = 'bq_set_full'"
+  output_contains:
+    - 'description="orders"'
+    - 'labels=[STRUCT("team", "data")]'
+    - 'partition_expiration_days=30.0'
+
+- id: 898
+  name: 'sling build bigquery COLUMNS show the partition and cluster columns'
+  group: build
+  after: [896]
+  run: |
+    sling conns exec BIGQUERY "SELECT CONCAT('chk:', STRING_AGG(CONCAT(column_name, ':', is_partitioning_column, ':', IFNULL(CAST(clustering_ordinal_position AS STRING), '-')), ',' ORDER BY ordinal_position)) AS c FROM sling_build_bq.INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'bq_set_full'"
+  output_contains:
+    - 'chk:id:NO:2,region:NO:1,d:YES:-'
+
+- id: 899
+  name: 'sling build bigquery cleanup'
+  group: build
+  after: [897, 898]
+  run: 'sling conns exec BIGQUERY "DROP SCHEMA IF EXISTS sling_build_bq CASCADE"'
+  output_contains:
+    - 'successful!'
+
+# SLING-225: Databricks CTAS cluster by, partition by and table properties. Requires a working
+# DATABRICKS connection. The warehouse failed with "open session request ... Cannot create the
+# resource" (HTTP 400) on 2026-11-11, so ids 900-902 stay commented out.
+# - id: 900
+#   name: 'sling build databricks cluster by, partition by and table properties'
+#   group: build
+#   run: |
+#     SLING_ROW_CNT= sling conns exec DATABRICKS "CREATE SCHEMA IF NOT EXISTS sling_build_dbx"
+#     SLING_ROW_CNT= sling conns exec DATABRICKS "DROP TABLE IF EXISTS sling_build_dbx.dbx_set_plain"
+#     SLING_ROW_CNT= sling conns exec DATABRICKS "DROP TABLE IF EXISTS sling_build_dbx.dbx_set_full"
+#     SLING_ROW_CNT= sling conns exec DATABRICKS "DROP TABLE IF EXISTS sling_build_dbx.dbx_set_part"
+#     sling build run tests/build/databricks_settings_project --target DATABRICKS --full-refresh
+#   output_contains:
+#     - 'Build Completed'
+#
+# - id: 901
+#   name: 'sling build databricks DESCRIBE DETAIL shows the layout and properties'
+#   group: build
+#   after: [900]
+#   run: |
+#     sling conns exec DATABRICKS "DESCRIBE DETAIL sling_build_dbx.dbx_set_full"
+#     sling conns exec DATABRICKS "DESCRIBE DETAIL sling_build_dbx.dbx_set_part"
+#   output_contains:
+#     - 'delta.autoOptimize.optimizeWrite'
+#     - 'region'
+#
+# - id: 902
+#   name: 'sling build databricks cleanup'
+#   group: build
+#   after: [901]
+#   run: 'sling conns exec DATABRICKS "DROP SCHEMA IF EXISTS sling_build_dbx CASCADE"'
+#   output_contains:
+#     - 'successful!'
+
+# SLING-225: Redshift CTAS dist and sort keys. Requires a reachable REDSHIFT connection
+# (cluster not always available), so it stays commented out.
+# - id: 903
+#   name: 'sling build redshift dist and sort'
+#   group: build
+#   run: |
+#     SLING_ROW_CNT= sling conns exec REDSHIFT "CREATE SCHEMA IF NOT EXISTS sling_build_rs"
+#     SLING_ROW_CNT= sling conns exec REDSHIFT "DROP TABLE IF EXISTS sling_build_rs.rs_set_plain CASCADE"
+#     SLING_ROW_CNT= sling conns exec REDSHIFT "DROP TABLE IF EXISTS sling_build_rs.rs_set_full CASCADE"
+#     SLING_ROW_CNT= sling conns exec REDSHIFT "DROP TABLE IF EXISTS sling_build_rs.rs_set_even CASCADE"
+#     sling build run tests/build/redshift_settings_project --target REDSHIFT --full-refresh
+#   output_contains:
+#     - 'Build Completed'
+#
+# - id: 904
+#   name: 'sling build redshift SVV_TABLE_INFO shows diststyle and sortkey'
+#   group: build
+#   after: [903]
+#   run: |
+#     sling conns exec REDSHIFT "SELECT 'chk:' || diststyle || '|' || sortkey1 || '|' || sortkey_num AS c FROM svv_table_info WHERE \"schema\" = 'sling_build_rs' AND \"table\" = 'rs_set_full'"
+#     sling conns exec REDSHIFT "SELECT 'chk2:' || diststyle AS c FROM svv_table_info WHERE \"schema\" = 'sling_build_rs' AND \"table\" = 'rs_set_even'"
+#   output_contains:
+#     - 'chk:KEY(id)|d|2'
+#     - 'chk2:EVEN'
+#
+# - id: 905
+#   name: 'sling build redshift cleanup'
+#   group: build
+#   after: [904]
+#   run: 'sling conns exec REDSHIFT "DROP SCHEMA IF EXISTS sling_build_rs CASCADE"'
+#   output_contains:
+#     - 'successful!'
+
+- id: 906
+  name: 'sling build trino baseline CTAS with no options'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec TRINO "CREATE SCHEMA IF NOT EXISTS memory.sling_build_trino"
+    SLING_ROW_CNT= sling conns exec TRINO "DROP TABLE IF EXISTS memory.sling_build_trino.tr_set_plain"
+    sling build run tests/build/trino_settings_project --target TRINO --full-refresh
+    sling conns exec TRINO "SELECT 'chk:' || table_name AS c FROM memory.information_schema.tables WHERE table_schema = 'sling_build_trino'"
+  output_contains:
+    - 'Build Completed'
+    - 'chk:tr_set_plain'
+
+# The memory catalog has no table properties, so the server rejects the WITH clause. This proves it reaches the server.
+- id: 907
+  name: 'sling build trino WITH clause reaches the server'
+  group: build
+  after: [906]
+  err: true
+  run: 'sling build run tests/build/trino_settings_bad_project --target TRINO --full-refresh -s tr_set_bad -d'
+  output_contains:
+    - "WITH (format = 'PARQUET')"
+    - 'does not exist'
+
+- id: 908
+  name: 'sling build trino cleanup'
+  group: build
+  after: [907]
+  run: |
+    SLING_ROW_CNT= sling conns exec TRINO "DROP TABLE IF EXISTS memory.sling_build_trino.tr_set_plain"
+    sling conns exec TRINO "DROP SCHEMA IF EXISTS memory.sling_build_trino"
+  output_contains:
+    - 'successful!'
+
+- id: 909
+  name: 'sling build starrocks table properties (no rename, drop then CTAS)'
+  group: build
+  run: |
+    SLING_ROW_CNT= sling conns exec STARROCKS "CREATE DATABASE IF NOT EXISTS sling_build_sr"
+    SLING_ROW_CNT= sling conns exec STARROCKS "DROP TABLE IF EXISTS sling_build_sr.sr_set_plain FORCE"
+    SLING_ROW_CNT= sling conns exec STARROCKS "DROP TABLE IF EXISTS sling_build_sr.sr_set_full FORCE"
+    sling build run tests/build/starrocks_settings_project --target STARROCKS --full-refresh
+  output_contains:
+    - 'Build Completed'
+
+- id: 910
+  name: 'sling build starrocks table properties show in the catalog'
+  group: build
+  after: [909]
+  run: |
+    sling conns exec STARROCKS "SELECT concat('chk:', properties) AS c FROM information_schema.tables_config WHERE table_schema = 'sling_build_sr' AND table_name = 'sr_set_full'"
+  output_contains:
+    - '"compression":"ZSTD"'
+
+- id: 911
+  name: 'sling build starrocks cleanup'
+  group: build
+  after: [910]
+  run: 'sling conns exec STARROCKS "DROP DATABASE IF EXISTS sling_build_sr FORCE"'
+  output_contains:
+    - 'successful!'
