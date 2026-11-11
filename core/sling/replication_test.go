@@ -1291,7 +1291,27 @@ streams:
 			MaxSession:     24 * time.Hour,
 			MaxRows:        100000,
 			OnStreamError:  "stop",
+			RetryAttempts:  3,
+			RetryDelay:     5 * time.Second,
 		}, s)
+	})
+
+	t.Run("retry options", func(t *testing.T) {
+		yaml := strings.Replace(base, "  object:", "  change_capture_options:\n    retry_attempts: 5\n    retry_delay: 250ms\n  object:", 1)
+		s, err := newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 5, s.RetryAttempts)
+		assert.Equal(t, 250*time.Millisecond, s.RetryDelay)
+
+		yaml = strings.Replace(base, "  object:", "  change_capture_options:\n    retry_attempts: 0\n    retry_delay: 0s\n  object:", 1)
+		s, err = newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 0, s.RetryAttempts)
+		assert.Equal(t, time.Duration(0), s.RetryDelay)
+
+		yaml = strings.Replace(base, "  object:", "  change_capture_options:\n    retry_delay: soon\n  object:", 1)
+		_, err = newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.ErrorContains(t, err, "invalid retry_delay")
 	})
 
 	t.Run("min_interval auto", func(t *testing.T) {

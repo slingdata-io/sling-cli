@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,6 +42,55 @@ var (
 func init() {
 	env.InitLogger()
 	store.InitDB()
+}
+
+// continuousControl is the control of a continuous run.
+type continuousControl interface {
+	Stop() bool // starts a graceful stop; false if one already runs
+	PrintStatus()
+}
+
+var (
+	// continuousCtl is set while a continuous run is active.
+	continuousCtl atomic.Pointer[continuousControl]
+
+	// forcedExit is the exit code after a second signal in a continuous run.
+	forcedExit atomic.Int32
+
+	statusSig = make(chan os.Signal, 1)
+)
+
+// setContinuousCtl sets the control of the active continuous run. Nil clears
+// it. The status signals are caught only while a run is active, so a
+// one-shot run keeps the default action of these signals.
+func setContinuousCtl(ctl continuousControl) {
+	if ctl == nil {
+		continuousCtl.Store(nil)
+		signal.Stop(statusSig)
+		return
+	}
+	continuousCtl.Store(&ctl)
+	if len(statusSignals) > 0 {
+		signal.Notify(statusSig, statusSignals...)
+	}
+}
+
+// stopContinuous starts a graceful stop of the active continuous run. It
+// returns false when no run is active or a stop already runs.
+func stopContinuous() bool {
+	ctl := continuousCtl.Load()
+	if ctl == nil || !(*ctl).Stop() {
+		return false
+	}
+	env.Println("\nstop received: finishing running cycles, then exit (Ctrl-C again to stop now)")
+	return true
+}
+
+// printContinuousStatus prints the status of the active continuous run.
+func printContinuousStatus() {
+	if ctl := continuousCtl.Load(); ctl != nil {
+		(*ctl).PrintStatus()
+	}
 }
 
 var cliRunFlags = []g.Flag{
@@ -547,37 +597,59 @@ func main() {
 
 	exit := func() {
 		time.Sleep(50 * time.Millisecond) // so logger can flush
+		if code := forcedExit.Load(); code != 0 {
+			exitCode = int(code)
+		}
 		os.Exit(exitCode)
 	}
 
 	go func() {
-		select {
-		case <-kill:
-			env.Println("\nkilling process...")
-			exitCode = 111
-			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
-			exit()
-		case <-interrupt:
-			g.SentryClear()
-			if cliRun.Sc.Used {
-				env.Println("\ninterrupting...")
-				interrupted = true
-				dumpRuntimeStack()
-				ctx.Cancel()
-				select {
-				case <-done:
-				case <-time.After(10 * time.Second):
+		for {
+			select {
+			case <-kill:
+				if stopContinuous() {
+					continue
 				}
+				if continuousCtl.Load() != nil {
+					forcedExit.Store(111)
+				}
+				env.Println("\nkilling process...")
+				exitCode = 111
+				env.KillChildProcs() // some are not in our process group, so the signal does not reach them
+				exit()
+			case <-interrupt:
+				if stopContinuous() {
+					continue
+				}
+				if continuousCtl.Load() != nil {
+					forcedExit.Store(11)
+				}
+				g.SentryClear()
+				if cliRun.Sc.Used {
+					env.Println("\ninterrupting...")
+					interrupted = true
+					dumpRuntimeStack()
+					ctx.Cancel()
+					select {
+					case <-done:
+					case <-time.After(10 * time.Second):
+					}
+				}
+				env.KillChildProcs() // some are not in our process group, so the signal does not reach them
+				exit()
+				return
+			case <-statusSig:
+				printContinuousStatus()
+			case <-done:
+				exit()
 			}
-			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
-			exit()
-			return
-		case <-done:
-			exit()
 		}
 	}()
 
 	exitCode = cliInit(done)
+	if code := forcedExit.Load(); code != 0 {
+		exitCode = int(code)
+	}
 	if !interrupted {
 		g.SentryFlush(time.Second * 2)
 	}

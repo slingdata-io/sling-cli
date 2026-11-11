@@ -19,6 +19,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
@@ -462,4 +463,54 @@ func TestBase64(t *testing.T) {
 	assert.Equal(t, payload, string(decompressed))
 
 	g.Info("%d => %d", len(encoded), len(encodedGzip))
+}
+
+type fakeContinuousCtl struct {
+	stops    int
+	statuses int
+}
+
+func (f *fakeContinuousCtl) Stop() bool {
+	f.stops++
+	return f.stops == 1
+}
+
+func (f *fakeContinuousCtl) PrintStatus() { f.statuses++ }
+
+func TestStopContinuous(t *testing.T) {
+	assert.False(t, stopContinuous()) // no run: the old signal path
+
+	ctl := &fakeContinuousCtl{}
+	setContinuousCtl(ctl)
+	defer setContinuousCtl(nil)
+
+	assert.True(t, stopContinuous())  // first signal: graceful stop
+	assert.False(t, stopContinuous()) // second signal: the old signal path
+
+	printContinuousStatus()
+	assert.Equal(t, 1, ctl.statuses)
+
+	setContinuousCtl(nil)
+	printContinuousStatus()
+	assert.Equal(t, 1, ctl.statuses)
+	assert.False(t, stopContinuous())
+}
+
+func TestOneShotRun(t *testing.T) {
+	t.Setenv("SLING_CONTINUOUS", "true")
+
+	inner := false
+	run := oneShotRun(func(string, *sling.Config, ...string) error {
+		inner = sling.IsContinuousRunMode()
+		return nil
+	})
+	assert.NoError(t, run("repl.yaml", nil))
+	assert.False(t, inner)                      // the nested run is one-shot
+	assert.True(t, sling.IsContinuousRunMode()) // the outer run stays continuous
+
+	t.Setenv("SLING_CONTINUOUS", "")
+	os.Unsetenv("SLING_CONTINUOUS")
+	assert.NoError(t, run("repl.yaml", nil))
+	_, ok := os.LookupEnv("SLING_CONTINUOUS")
+	assert.False(t, ok)
 }

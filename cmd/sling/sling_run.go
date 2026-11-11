@@ -57,7 +57,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	selectStreams := []string{}
 
 	// set function here due to scoping
-	sling.HookRunReplication = runReplication
+	sling.HookRunReplication = oneShotRun(runReplication)
 
 	// recover from panic
 	defer func() {
@@ -645,6 +645,18 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	return nil
+}
+
+// oneShotRun makes a runner for nested replications (run hooks). A nested
+// replication is one-shot, even inside a continuous run.
+func oneShotRun(run func(string, *sling.Config, ...string) error) func(string, *sling.Config, ...string) error {
+	return func(cfgPath string, cfg *sling.Config, selectStreams ...string) error {
+		if val, ok := os.LookupEnv("SLING_CONTINUOUS"); ok {
+			os.Unsetenv("SLING_CONTINUOUS")
+			defer os.Setenv("SLING_CONTINUOUS", val)
+		}
+		return run(cfgPath, cfg, selectStreams...)
+	}
 }
 
 func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {

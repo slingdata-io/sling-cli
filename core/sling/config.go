@@ -1971,6 +1971,8 @@ type ContinuousSettings struct {
 	MaxRows                                                        int
 	MaxBytes                                                       int64
 	OnStreamError                                                  string
+	RetryAttempts                                                  int           // from change_capture_options
+	RetryDelay                                                     time.Duration // first delay, doubles each attempt
 }
 
 // Resolve applies the defaults and parses the durations.

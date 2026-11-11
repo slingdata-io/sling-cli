@@ -1492,6 +1492,9 @@ func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, 
 
 	runMaxEvents := 0
 	hasRunMaxDuration, sharedReaderOnly := false, true
+	var retryAttempts *int
+	var retryDelay time.Duration
+	retryDelaySet := false
 	for _, task := range rd.Tasks {
 		if task.Mode != ChangeCaptureMode {
 			return settings, g.Error("continuous mode supports only change-capture streams in this version (stream %s has mode %s)", task.StreamName, task.Mode)
@@ -1504,6 +1507,16 @@ func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, 
 			if opts := rs.CDCOptions; opts != nil {
 				runMaxEvents = max(runMaxEvents, g.PtrVal(opts.RunMaxEvents))
 				hasRunMaxDuration = hasRunMaxDuration || opts.RunMaxDuration != nil
+				if opts.RetryAttempts != nil && (retryAttempts == nil || *opts.RetryAttempts > *retryAttempts) {
+					retryAttempts = opts.RetryAttempts
+				}
+				if opts.RetryDelay != nil {
+					d, err := time.ParseDuration(strings.TrimSpace(*opts.RetryDelay))
+					if err != nil || d < 0 {
+						return settings, g.Error("invalid retry_delay for stream %s: %s", task.StreamName, *opts.RetryDelay)
+					}
+					retryDelay, retryDelaySet = max(retryDelay, d), true
+				}
 			}
 		}
 
@@ -1523,6 +1536,14 @@ func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, 
 	settings, err = rd.Continuous.Resolve(rd.Tasks[0].TgtConn.Type, runMaxEvents)
 	if err != nil {
 		return settings, err
+	}
+
+	// the retry options of the streams, else the defaults
+	if settings.RetryAttempts = *CDCOptionsDefault.RetryAttempts; retryAttempts != nil {
+		settings.RetryAttempts = max(*retryAttempts, 0)
+	}
+	if settings.RetryDelay = retryDelay; !retryDelaySet {
+		settings.RetryDelay, _ = time.ParseDuration(*CDCOptionsDefault.RetryDelay)
 	}
 
 	if hasRunMaxDuration {
