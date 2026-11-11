@@ -244,7 +244,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "continuous":
 			if cast.ToBool(v) {
-				os.Setenv("SLING_CONTINUOUS", "true")
+				sling.SetContinuousRunMode(true)
 			}
 		}
 
@@ -651,9 +651,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 // replication is one-shot, even inside a continuous run.
 func oneShotRun(run func(string, *sling.Config, ...string) error) func(string, *sling.Config, ...string) error {
 	return func(cfgPath string, cfg *sling.Config, selectStreams ...string) error {
-		if val, ok := os.LookupEnv("SLING_CONTINUOUS"); ok {
-			os.Unsetenv("SLING_CONTINUOUS")
-			defer os.Setenv("SLING_CONTINUOUS", val)
+		if sling.IsContinuousRunMode() {
+			sling.SetContinuousRunMode(false)
+			defer sling.SetContinuousRunMode(true)
 		}
 		return run(cfgPath, cfg, selectStreams...)
 	}

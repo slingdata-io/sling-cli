@@ -42,6 +42,7 @@ var (
 func init() {
 	env.InitLogger()
 	store.InitDB()
+	sling.LoadContinuousRunMode() // before any reader of the mode
 }
 
 // continuousControl is the control of a continuous run.
@@ -641,7 +642,7 @@ func main() {
 			case <-statusSig:
 				printContinuousStatus()
 			case <-done:
-				exit()
+				return // main exits after the flush
 			}
 		}
 	}()

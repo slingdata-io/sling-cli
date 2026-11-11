@@ -497,7 +497,8 @@ func TestStopContinuous(t *testing.T) {
 }
 
 func TestOneShotRun(t *testing.T) {
-	t.Setenv("SLING_CONTINUOUS", "true")
+	sling.SetContinuousRunMode(true)
+	defer sling.SetContinuousRunMode(false)
 
 	inner := false
 	run := oneShotRun(func(string, *sling.Config, ...string) error {
@@ -508,9 +509,7 @@ func TestOneShotRun(t *testing.T) {
 	assert.False(t, inner)                      // the nested run is one-shot
 	assert.True(t, sling.IsContinuousRunMode()) // the outer run stays continuous
 
-	t.Setenv("SLING_CONTINUOUS", "")
-	os.Unsetenv("SLING_CONTINUOUS")
+	sling.SetContinuousRunMode(false)
 	assert.NoError(t, run("repl.yaml", nil))
-	_, ok := os.LookupEnv("SLING_CONTINUOUS")
-	assert.False(t, ok)
+	assert.False(t, sling.IsContinuousRunMode())
 }
