@@ -857,6 +857,24 @@ func (te *TemplateEngine) applyConfig(model *Model, params *exec.VarArgs) error 
 		case "rewrite":
 			rw := cast.ToBool(strVal)
 			model.Config.Rewrite = &rw
+		case "order_by":
+			model.Config.OrderBy = strVal
+		case "partition_by":
+			model.Config.PartitionBy = strVal
+		case "primary_key":
+			model.Config.PrimaryKey = strVal
+		case "ttl":
+			model.Config.TTL = strVal
+		case "settings":
+			raw, ok := val.ToGoSimpleType(false).(map[string]any)
+			if !ok {
+				return g.Error("model '%s': settings must be a dict with table and/or query", model.Name)
+			}
+			parsed, err := newModelSettings(raw)
+			if err != nil {
+				return g.Error(err, "model '%s'", model.Name)
+			}
+			model.Config.Settings = model.Config.Settings.Merge(parsed)
 		default:
 			g.Warn("model '%s': unrecognized config key '%s' (ignored)", model.Name, key)
 		}

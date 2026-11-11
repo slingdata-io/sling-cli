@@ -30,6 +30,7 @@ type Build struct {
 	ExecRows    uint64                 // sum of model/seed rows after Execute
 	ExecBytes   uint64
 	Results     []ExecutionResult // per-node results after Execute
+	dbType      dbio.Type         // target type, set by Compile
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -120,6 +121,7 @@ func (b *Build) Compile() error {
 	// Split multi-statement models into pre-statements, model query, and post-statements.
 	// List without a target skips this — splitting needs a dialect.
 	if target != "" {
+		b.dbType = b.resolveDbType()
 		if err := b.validateDatabaseSupport(); err != nil {
 			return err
 		}
@@ -210,9 +212,8 @@ func (b *Build) GetModelMode(model *Model) string {
 // This runs after CompileAll but before ExtractTableReferences so that
 // auto-ref detection only scans the model query, not pre/post DDL.
 func (b *Build) splitMultiStatementModels() error {
-	dbType := b.resolveDbType()
 	for _, model := range b.Project.Models {
-		result, err := MakeModelSQL(model.CompiledSQL, dbType)
+		result, err := MakeModelSQL(model.CompiledSQL, b.dbType)
 		if err != nil {
 			return g.Error(err, "model '%s'", model.Name)
 		}
@@ -225,9 +226,47 @@ func (b *Build) splitMultiStatementModels() error {
 
 // validateDatabaseSupport fails when a model or seed sets a database but the
 // target dialect cannot address objects as database.schema.table.
+// It also checks the ClickHouse keys against the target type.
 func (b *Build) validateDatabaseSupport() error {
-	dbType := b.resolveDbType()
-	if dbType == dbio.TypeUnknown || dbType.SupportsThreePartName() {
+	dbType := b.dbType
+	if dbType == dbio.TypeUnknown {
+		return nil
+	}
+
+	for _, name := range sortedKeys(b.Project.Models) {
+		model := b.Project.Models[name]
+		c := model.Config
+		if dbType != dbio.TypeDbClickhouse {
+			var keys []string
+			for _, k := range []struct {
+				name string
+				set  bool
+			}{
+				{"order_by", c.OrderBy != ""},
+				{"partition_by", c.PartitionBy != ""},
+				{"primary_key", c.PrimaryKey != ""},
+				{"ttl", c.TTL != ""},
+				{"settings.table", len(c.Settings.Table) > 0},
+				{"settings.query", len(c.Settings.Query) > 0},
+			} {
+				if k.set {
+					keys = append(keys, k.name)
+				}
+			}
+			if len(keys) > 0 {
+				g.Warn("model '%s': %s apply only to ClickHouse; %s ignores them", name, strings.Join(keys, ", "), dbType)
+			}
+			continue
+		}
+		if c.PrimaryKey != "" && c.OrderBy == "" && len(getUniqueKeys(model)) == 0 {
+			return g.Error("model '%s': primary_key needs order_by or unique_key", name)
+		}
+		if _, ok := c.Settings.Query["mutations_sync"]; ok && c.Mode == "incremental" {
+			g.Warn("model '%s': the ClickHouse merge DELETE keeps its inline mutations_sync = 1; settings.query.mutations_sync may have no effect on it", name)
+		}
+	}
+
+	if dbType.SupportsThreePartName() {
 		return nil
 	}
 	for _, name := range sortedKeys(b.Project.Models) {

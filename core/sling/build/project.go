@@ -73,6 +73,101 @@ type ModelConfig struct {
 	DropCascade   *bool         `yaml:"drop_cascade,omitempty"` // default false; CASCADE on DROP when true
 	Rewrite       *bool         `yaml:"rewrite,omitempty"`      // default true; set false to skip bare-name rewrite
 	Tests         []any         `yaml:"tests,omitempty"`        // declarative data tests
+	OrderBy       string        `yaml:"order_by,omitempty"`     // raw ClickHouse expression
+	PartitionBy   string        `yaml:"partition_by,omitempty"`
+	PrimaryKey    string        `yaml:"primary_key,omitempty"`
+	TTL           string        `yaml:"ttl,omitempty"`
+	Settings      ModelSettings `yaml:"settings,omitempty"`
+}
+
+var settingNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// SettingValues maps a ClickHouse setting name to a string, number or bool.
+type SettingValues map[string]any
+
+// validate checks the name and the value type of each setting.
+func (v SettingValues) validate(scope string) error {
+	for _, key := range sortedKeys(v) {
+		if !settingNameRegex.MatchString(key) {
+			return g.Error("%s.%s: not a valid setting name", scope, key)
+		}
+		switch v[key].(type) {
+		case string, bool,
+			int, int8, int16, int32, int64,
+			uint, uint8, uint16, uint32, uint64,
+			float32, float64:
+		default:
+			return g.Error("%s.%s: value type %T is not supported, use a string, number or bool", scope, key, v[key])
+		}
+	}
+	return nil
+}
+
+// merge returns a new map with o on top of v. It returns nil when both are empty.
+func (v SettingValues) merge(o SettingValues) SettingValues {
+	if len(v)+len(o) == 0 {
+		return nil
+	}
+	out := make(SettingValues, len(v)+len(o))
+	for k, val := range v {
+		out[k] = val
+	}
+	for k, val := range o {
+		out[k] = val
+	}
+	return out
+}
+
+// ModelSettings holds the ClickHouse table and query settings of a model.
+type ModelSettings struct {
+	Table SettingValues `json:"table,omitempty" yaml:"table,omitempty"`
+	Query SettingValues `json:"query,omitempty" yaml:"query,omitempty"`
+}
+
+// newModelSettings builds and validates settings from a raw map.
+func newModelSettings(raw map[string]any) (ModelSettings, error) {
+	var s ModelSettings
+	for _, key := range sortedKeys(raw) {
+		scope := "settings." + key
+		if key != "table" && key != "query" {
+			return ModelSettings{}, g.Error("unknown settings key '%s', use settings.table or settings.query", key)
+		}
+		values, ok := raw[key].(map[string]any)
+		if !ok {
+			return ModelSettings{}, g.Error("%s must be a map", scope)
+		}
+		if err := SettingValues(values).validate(scope); err != nil {
+			return ModelSettings{}, err
+		}
+		if key == "table" {
+			s.Table = values
+		} else {
+			s.Query = values
+		}
+	}
+	return s, nil
+}
+
+// UnmarshalYAML decodes and validates the settings block.
+func (s *ModelSettings) UnmarshalYAML(node *yaml.Node) error {
+	var raw map[string]any
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	parsed, err := newModelSettings(raw)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
+}
+
+// Merge returns s with o on top, key by key. The result shares no map.
+func (s *ModelSettings) Merge(o ModelSettings) ModelSettings {
+	return ModelSettings{
+		Table: s.Table.merge(o.Table),
+		Query: s.Query.merge(o.Query),
+	}
 }
 
 // RangeConfig holds the range block from model front-matter. It drives the
@@ -253,6 +348,12 @@ type BuildDefaults struct {
 	Enabled       *bool         `yaml:"enabled,omitempty"`
 	Hooks         sling.HookMap `yaml:"hooks,omitempty"` // additive across nesting
 	DropCascade   *bool         `yaml:"drop_cascade,omitempty"`
+	Engine        string        `yaml:"engine,omitempty"`
+	OrderBy       string        `yaml:"order_by,omitempty"`
+	PartitionBy   string        `yaml:"partition_by,omitempty"`
+	PrimaryKey    string        `yaml:"primary_key,omitempty"`
+	TTL           string        `yaml:"ttl,omitempty"`
+	Settings      ModelSettings `yaml:"settings,omitempty"`
 }
 
 // BuildOptions holds CLI-provided overrides.
@@ -753,6 +854,22 @@ func mergeConfigs(parent, child *BuildConfig) *BuildConfig {
 	if child.Defaults.DropCascade != nil {
 		merged.Defaults.DropCascade = child.Defaults.DropCascade
 	}
+	if child.Defaults.Engine != "" {
+		merged.Defaults.Engine = child.Defaults.Engine
+	}
+	if child.Defaults.OrderBy != "" {
+		merged.Defaults.OrderBy = child.Defaults.OrderBy
+	}
+	if child.Defaults.PartitionBy != "" {
+		merged.Defaults.PartitionBy = child.Defaults.PartitionBy
+	}
+	if child.Defaults.PrimaryKey != "" {
+		merged.Defaults.PrimaryKey = child.Defaults.PrimaryKey
+	}
+	if child.Defaults.TTL != "" {
+		merged.Defaults.TTL = child.Defaults.TTL
+	}
+	merged.Defaults.Settings = parent.Defaults.Settings.Merge(child.Defaults.Settings)
 	if len(parent.Defaults.Tags)+len(child.Defaults.Tags) > 0 {
 		merged.Defaults.Tags = lo.Uniq(append(append([]string(nil), parent.Defaults.Tags...), child.Defaults.Tags...))
 	}
@@ -1237,6 +1354,12 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		Enabled:       defaults.Enabled,
 		Hooks:         defaults.Hooks,
 		DropCascade:   defaults.DropCascade,
+		Engine:        defaults.Engine,
+		OrderBy:       defaults.OrderBy,
+		PartitionBy:   defaults.PartitionBy,
+		PrimaryKey:    defaults.PrimaryKey,
+		TTL:           defaults.TTL,
+		Settings:      defaults.Settings.Merge(ModelSettings{}),
 	}
 
 	// Parse YAML frontmatter (canonical config declaration)
@@ -1279,6 +1402,19 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		if fmConfig.Engine != "" {
 			modelConfig.Engine = fmConfig.Engine
 		}
+		if fmConfig.OrderBy != "" {
+			modelConfig.OrderBy = fmConfig.OrderBy
+		}
+		if fmConfig.PartitionBy != "" {
+			modelConfig.PartitionBy = fmConfig.PartitionBy
+		}
+		if fmConfig.PrimaryKey != "" {
+			modelConfig.PrimaryKey = fmConfig.PrimaryKey
+		}
+		if fmConfig.TTL != "" {
+			modelConfig.TTL = fmConfig.TTL
+		}
+		modelConfig.Settings = modelConfig.Settings.Merge(fmConfig.Settings)
 		if fmConfig.Range != nil {
 			modelConfig.Range = fmConfig.Range
 		}

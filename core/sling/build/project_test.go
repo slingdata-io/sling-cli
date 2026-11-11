@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func getTestFixturePath(name string) string {
@@ -542,6 +544,208 @@ func TestConfigCallDatabase(t *testing.T) {
 	_, err := te.CompileModel(model, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "OTHER_DB", model.Config.Database)
+}
+
+func TestModelSettingsUnmarshal(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte(`settings:
+  table: {storage_policy: p, index_granularity: 1024}
+  query: {max_memory_usage: 10000000000, ratio: 0.5, flag: true}
+`), &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, SettingValues{"storage_policy": "p", "index_granularity": 1024}, cfg.Settings.Table)
+	assert.Equal(t, SettingValues{"max_memory_usage": 10000000000, "ratio": 0.5, "flag": true}, cfg.Settings.Query)
+}
+
+func TestModelSettingsUnknownKey(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings: {storage_policy: p}\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown settings key 'storage_policy', use settings.table or settings.query")
+
+	err = yaml.Unmarshal([]byte("settings: {table: 3}\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table must be a map")
+}
+
+func TestModelSettingsBadValue(t *testing.T) {
+	for name, value := range map[string]string{"map": "{a: 1}", "list": "[1, 2]", "null": "null"} {
+		var cfg ModelConfig
+		err := yaml.Unmarshal([]byte("settings:\n  query:\n    k: "+value+"\n"), &cfg)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), "settings.query.k: value type", name)
+		assert.Contains(t, err.Error(), "use a string, number or bool", name)
+	}
+}
+
+func TestModelSettingsBadName(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings:\n  table:\n    max memory: 1\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table.max memory: not a valid setting name")
+}
+
+func TestModelSettingsMerge(t *testing.T) {
+	base := ModelSettings{Table: SettingValues{"a": 1, "b": 1}, Query: SettingValues{"x": 1}}
+	over := ModelSettings{Table: SettingValues{"b": 2}, Query: SettingValues{"y": 2}}
+
+	got := base.Merge(over)
+	assert.Equal(t, SettingValues{"a": 1, "b": 2}, got.Table)
+	assert.Equal(t, SettingValues{"x": 1, "y": 2}, got.Query)
+	assert.Equal(t, SettingValues{"a": 1, "b": 1}, base.Table)
+	assert.Equal(t, SettingValues{"b": 2}, over.Table)
+
+	got.Table["a"] = 9
+	assert.Equal(t, 1, base.Table["a"])
+
+	empty := (&ModelSettings{}).Merge(ModelSettings{})
+	assert.Nil(t, empty.Table)
+	assert.Nil(t, empty.Query)
+}
+
+func TestParseYAMLFrontmatter_ClickhouseKeys(t *testing.T) {
+	sql := `/**
+order_by: (a, b)
+partition_by: toYYYYMM(ts)
+primary_key: a
+ttl: ts + INTERVAL 1 YEAR
+settings:
+  table:
+    storage_policy: p
+  query:
+    max_threads: 3
+**/
+SELECT 1`
+
+	cfg, _, hasFM, err := parseYAMLFrontmatter(sql)
+	require.NoError(t, err)
+	assert.True(t, hasFM)
+	assert.Equal(t, "(a, b)", cfg.OrderBy)
+	assert.Equal(t, "toYYYYMM(ts)", cfg.PartitionBy)
+	assert.Equal(t, "a", cfg.PrimaryKey)
+	assert.Equal(t, "ts + INTERVAL 1 YEAR", cfg.TTL)
+	assert.Equal(t, SettingValues{"storage_policy": "p"}, cfg.Settings.Table)
+	assert.Equal(t, SettingValues{"max_threads": 3}, cfg.Settings.Query)
+}
+
+func TestMergeConfigsClickhouseDefaults(t *testing.T) {
+	parent := &BuildConfig{Defaults: BuildDefaults{
+		Engine:  "MergeTree()",
+		OrderBy: "id",
+		TTL:     "ts + INTERVAL 1 DAY",
+		Settings: ModelSettings{
+			Table: SettingValues{"a": 1, "b": 1},
+			Query: SettingValues{"x": 1},
+		},
+	}}
+	child := &BuildConfig{Defaults: BuildDefaults{
+		Engine:  "ReplacingMergeTree()",
+		OrderBy: "(id, ts)",
+		Settings: ModelSettings{
+			Table: SettingValues{"b": 2},
+			Query: SettingValues{"y": 2},
+		},
+	}}
+
+	merged := mergeConfigs(parent, child)
+	assert.Equal(t, "ReplacingMergeTree()", merged.Defaults.Engine)
+	assert.Equal(t, "(id, ts)", merged.Defaults.OrderBy)
+	assert.Equal(t, "ts + INTERVAL 1 DAY", merged.Defaults.TTL)
+	assert.Equal(t, SettingValues{"a": 1, "b": 2}, merged.Defaults.Settings.Table)
+	assert.Equal(t, SettingValues{"x": 1, "y": 2}, merged.Defaults.Settings.Query)
+	assert.Equal(t, SettingValues{"a": 1, "b": 1}, parent.Defaults.Settings.Table)
+}
+
+func TestAddModelClickhouseDefaults(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", `target: CH
+defaults:
+  engine: MergeTree()
+  settings:
+    table:
+      index_granularity: 4096
+    query:
+      log_comment: x
+`)
+	write("a.sql", "/**\nsettings:\n  table:\n    index_granularity: 1024\n**/\nSELECT 1")
+	write("b.sql", "SELECT 2")
+
+	project, err := LoadProject(dir)
+	require.NoError(t, err)
+	a, b := project.Models["a"], project.Models["b"]
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+
+	assert.Equal(t, "MergeTree()", a.Config.Engine)
+	assert.Equal(t, "MergeTree()", b.Config.Engine)
+	assert.Equal(t, SettingValues{"index_granularity": 1024}, a.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"log_comment": "x"}, a.Config.Settings.Query)
+	assert.Equal(t, SettingValues{"index_granularity": 4096}, b.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"log_comment": "x"}, b.Config.Settings.Query)
+
+	a.Config.Settings.Query["log_comment"] = "changed"
+	assert.Equal(t, "x", b.Config.Settings.Query["log_comment"])
+}
+
+func TestConfigCallClickhouseKeys(t *testing.T) {
+	project := &BuildProject{Models: map[string]*Model{}, Seeds: map[string]*Seed{}}
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(order_by='(a, b)', partition_by='toYYYYMM(ts)', primary_key='a', ttl='ts + INTERVAL 1 YEAR', settings={'table': {'storage_policy': 'p'}, 'query': {'max_threads': 3}}) }} SELECT 1"}
+	_, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "(a, b)", model.Config.OrderBy)
+	assert.Equal(t, "toYYYYMM(ts)", model.Config.PartitionBy)
+	assert.Equal(t, "a", model.Config.PrimaryKey)
+	assert.Equal(t, "ts + INTERVAL 1 YEAR", model.Config.TTL)
+	assert.Equal(t, SettingValues{"storage_policy": "p"}, model.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"max_threads": 3}, model.Config.Settings.Query)
+
+	// config() merges over the defaults key by key
+	model = &Model{Name: "cfg2", Schema: "marts", RawSQL: "{{ config(settings={'query': {'max_threads': 3}}) }} SELECT 1"}
+	model.Config.Settings = ModelSettings{Query: SettingValues{"log_comment": "x"}}
+	_, err = te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Equal(t, SettingValues{"log_comment": "x", "max_threads": 3}, model.Config.Settings.Query)
+}
+
+func TestConfigCallSettingsError(t *testing.T) {
+	project := &BuildProject{Models: map[string]*Model{}, Seeds: map[string]*Seed{}}
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(settings={'x': {'a': 1}}) }} SELECT 1"}
+	_, err := te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown settings key 'x', use settings.table or settings.query")
+
+	model = &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(settings='x') }} SELECT 1"}
+	_, err = te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings must be a dict with table and/or query")
+}
+
+func TestValidateDatabaseSupportClickhouseKeys(t *testing.T) {
+	newBuild := func(dbType dbio.Type, cfg ModelConfig) *Build {
+		return &Build{
+			Project: &BuildProject{
+				Models: map[string]*Model{"m": {Name: "m", Config: cfg}},
+				Seeds:  map[string]*Seed{},
+			},
+			dbType: dbType,
+		}
+	}
+
+	err := newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model 'm': primary_key needs order_by or unique_key")
+
+	assert.NoError(t, newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a", OrderBy: "(a, b)"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a", UniqueKey: "a"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbPostgres, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbProton, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport())
 }
 
 func loadDatabaseProject(t *testing.T, opts ...BuildOptions) *BuildProject {
