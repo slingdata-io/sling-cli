@@ -3,14 +3,18 @@ package build
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -414,34 +418,175 @@ func (e *Executor) querySettings(model *Model) (conn querySettingsConn, settings
 	return conn, model.Config.Settings.Query, ok
 }
 
-// execModel runs one statement of the model.
+// execModel runs one statement of the model. ClickHouse sends the settings
+// with the driver context. Other dialects with a scope run the statement in
+// one session or transaction.
 func (e *Executor) execModel(model *Model, q string) (sql.Result, error) {
-	conn, settings, ok := e.querySettings(model)
-	if !ok {
-		return e.DbConn.Exec(q)
+	if conn, settings, ok := e.querySettings(model); ok {
+		ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
+		result, err := e.DbConn.ExecContext(ctx, q)
+		if err != nil {
+			err = g.Error(err, "Could not execute SQL")
+		}
+		return result, err
 	}
-	ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
-	result, err := e.DbConn.ExecContext(ctx, q)
-	if err != nil {
-		err = g.Error(err, "Could not execute SQL")
+	if scope := e.queryScope(model); scope != "" {
+		return e.execScoped(model, scope, []string{q})
 	}
-	return result, err
+	return e.DbConn.Exec(q)
 }
 
 // execModelMulti runs a multi-statement string (merge SQL) of the model.
-// Each statement gets the settings.
+// All statements get the same settings.
 func (e *Executor) execModelMulti(model *Model, q string) (sql.Result, error) {
-	conn, settings, ok := e.querySettings(model)
-	if !ok {
-		return e.DbConn.ExecMulti(q)
+	if conn, settings, ok := e.querySettings(model); ok {
+		ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
+		result, err := e.DbConn.ExecMultiContext(ctx, q)
+		if err != nil {
+			err = g.Error(err, "Could not execute SQL")
+		}
+		return result, err
 	}
-	ctx := conn.QuerySettingsContext(e.DbConn.Context().Ctx, settings.wire())
-	result, err := e.DbConn.ExecMultiContext(ctx, q)
-	if err != nil {
-		err = g.Error(err, "Could not execute SQL")
+	if scope := e.queryScope(model); scope != "" {
+		return e.execScoped(model, scope, database.ParseSQLMultiStatements(q, e.DbConn.GetType()))
 	}
-	return result, err
+	return e.DbConn.ExecMulti(q)
 }
+
+// queryScope returns the settings.query scope of the model on this target,
+// or "" when the statement must run with a plain call.
+func (e *Executor) queryScope(model *Model) string {
+	if model == nil || len(model.Config.Settings.Query) == 0 {
+		return ""
+	}
+	return newCTASDialect(e.DbConn.GetType()).querySettingsScope()
+}
+
+// execScoped runs the statements in one session or transaction, after the
+// settings. A session scope resets the settings at the end. A failed scope
+// drops its session.
+func (e *Executor) execScoped(model *Model, scope string, stmts []string) (result sql.Result, err error) {
+	if e.openSession == nil {
+		return nil, g.Error("Could not execute SQL: settings.query needs a database/sql connection")
+	}
+	d := newCTASDialect(e.DbConn.GetType())
+	vals := model.Config.Settings.Query
+	sets, err := d.setStatements(vals)
+	if err != nil {
+		return nil, g.Error(err, "Could not execute SQL")
+	}
+
+	session, err := e.openSession(e.DbConn.Context().Ctx, scope)
+	if err != nil {
+		return nil, g.Error(err, "Could not execute SQL")
+	}
+	ctx := e.DbConn.Context().Ctx
+
+	var rows int64
+	for _, q := range sets {
+		if _, err = session.ExecContext(ctx, q); err != nil {
+			break
+		}
+	}
+	if err == nil {
+		for _, q := range stmts {
+			if strings.TrimSpace(q) == "" {
+				continue
+			}
+			var res sql.Result
+			if res, err = session.ExecContext(ctx, q); err != nil {
+				break
+			}
+			if n, rerr := res.RowsAffected(); rerr == nil {
+				rows += n
+			}
+		}
+	}
+	if err == nil && scope == "session" {
+		for _, q := range d.resetStatements(vals) {
+			if _, err = session.ExecContext(ctx, q); err != nil {
+				break
+			}
+		}
+	}
+
+	if cerr := session.Close(err == nil); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, g.Error(err, "Could not execute SQL")
+	}
+	return sessionResult(rows), nil
+}
+
+// modelSession runs the statements of one call in one scope.
+type modelSession interface {
+	ExecContext(ctx context.Context, query string) (sql.Result, error)
+	Close(ok bool) error
+}
+
+// sqlSession is a modelSession on a database/sql pool.
+type sqlSession struct {
+	conn  *sqlx.Conn
+	tx    *sqlx.Tx
+	props map[string]string
+}
+
+// openSQLSession pins one pool conn (scope session) or starts one local
+// transaction (scope transaction).
+func openSQLSession(ctx context.Context, db *sqlx.DB, props map[string]string, scope string) (*sqlSession, error) {
+	if db == nil {
+		return nil, g.Error("settings.query needs a database/sql connection")
+	}
+	s := &sqlSession{props: props}
+	var err error
+	switch scope {
+	case "transaction":
+		if s.tx, err = db.BeginTxx(ctx, nil); err != nil {
+			return nil, g.Error(err, "could not begin transaction")
+		}
+	case "session":
+		if s.conn, err = db.Connx(ctx); err != nil {
+			return nil, g.Error(err, "could not get a connection")
+		}
+	default:
+		return nil, g.Error("unknown query_settings_scope '%s'", scope)
+	}
+	return s, nil
+}
+
+func (s *sqlSession) ExecContext(ctx context.Context, query string) (sql.Result, error) {
+	query = strings.TrimSuffix(strings.TrimSpace(query), ";")
+	env.LogSQL(s.props, query)
+	if s.tx != nil {
+		return s.tx.ExecContext(ctx, query)
+	}
+	return s.conn.ExecContext(ctx, query)
+}
+
+// Close ends the scope. A failed session conn is discarded, so a value that
+// was not reset cannot reach another model.
+func (s *sqlSession) Close(ok bool) error {
+	if s.tx != nil {
+		if ok {
+			return s.tx.Commit()
+		}
+		return s.tx.Rollback()
+	}
+	if !ok {
+		_ = s.conn.Raw(func(any) error { return driver.ErrBadConn })
+	}
+	if err := s.conn.Close(); err != nil && !errors.Is(err, sql.ErrConnDone) {
+		return err
+	}
+	return nil
+}
+
+// sessionResult is the sum of the rows of the statements of one scope.
+type sessionResult int64
+
+func (r sessionResult) LastInsertId() (int64, error) { return 0, nil }
+func (r sessionResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 // ctasDialect reads the CTAS templates of one dialect.
 type ctasDialect struct {
@@ -662,4 +807,38 @@ func (d ctasDialect) options(vals SettingValues) (string, error) {
 		pairs = append(pairs, g.R(optTmpl, "key", key, "value", val))
 	}
 	return g.R(tmpl, "options", strings.Join(pairs, d.t.GetTemplateValue("variable.ctas_option_sep"))), nil
+}
+
+// querySettingsScope returns the settings.query scope of the dialect:
+// "session", "transaction" or "" when it has none.
+func (d ctasDialect) querySettingsScope() string {
+	return strings.TrimSpace(d.t.GetTemplateValue("variable.query_settings_scope"))
+}
+
+// setStatements renders the statements that set the values, sorted by key.
+func (d ctasDialect) setStatements(vals SettingValues) ([]string, error) {
+	tmpl := d.t.GetTemplateValue("core.set_query_setting")
+	out := make([]string, 0, len(vals))
+	for _, key := range sortedKeys(vals) {
+		val, err := d.literal(vals[key], false)
+		if err != nil {
+			return nil, fmt.Errorf("settings.query.%s: %s", key, err)
+		}
+		out = append(out, g.R(tmpl, "key", key, "value", val))
+	}
+	return out, nil
+}
+
+// resetStatements renders the statements that reset the values. It returns
+// nil when the dialect has no reset template (transaction scope).
+func (d ctasDialect) resetStatements(vals SettingValues) []string {
+	tmpl := d.t.GetTemplateValue("core.reset_query_setting")
+	if strings.TrimSpace(tmpl) == "" {
+		return nil
+	}
+	out := make([]string, 0, len(vals))
+	for _, key := range sortedKeys(vals) {
+		out = append(out, g.R(tmpl, "key", key))
+	}
+	return out
 }

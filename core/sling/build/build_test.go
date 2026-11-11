@@ -571,7 +571,8 @@ SELECT 1 AS id`)
 	// Postgres: the table options only
 	b.dbType = dbio.TypeDbPostgres
 	assert.Equal(t, "WITH (storage_policy = 'p')", nodes()["a"].TableClause)
-	assert.Empty(t, nodes()["a"].QuerySettings)
+	assert.Equal(t, "log_comment = 'it''s', max_threads = 3", nodes()["a"].QuerySettings)
+	assert.Empty(t, nodes()["v"].QuerySettings)
 
 	b.dbType = dbio.TypeDbClickhouse
 	a := nodes()["a"]
@@ -583,6 +584,26 @@ SELECT 1 AS id`)
 	v := nodes()["v"]
 	assert.Empty(t, v.TableClause)
 	assert.Empty(t, v.QuerySettings)
+}
+
+func TestCompiledQuerySettingsCrossEngine(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", "target: POSTGRES\n")
+	write("a.sql", "/**\nsettings:\n  query:\n    work_mem: 64MB\n**/\nSELECT 1 AS id")
+
+	b, err := NewBuild(dir, BuildOptions{Target: "POSTGRES"})
+	require.NoError(t, err)
+	require.NoError(t, b.Compile())
+
+	b.dbType = dbio.TypeDbPostgres
+	assert.Equal(t, "work_mem = '64MB'", b.Compiled().Nodes[0].QuerySettings)
+
+	b.dbType = dbio.TypeDbBigQuery
+	assert.Empty(t, b.Compiled().Nodes[0].QuerySettings)
+	assert.Contains(t, newCTASDialect(dbio.TypeDbBigQuery).unsupported(b.Project.Models["a"].Config), "settings.query")
 }
 
 func TestCompiledTableClauseCrossEngine(t *testing.T) {

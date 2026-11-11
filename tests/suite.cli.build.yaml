@@ -951,10 +951,11 @@
   group: build
   run: 'sling build compile tests/build/clickhouse_settings_project --target POSTGRES'
   output_contains:
-    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl, settings.query do not apply to postgres"
+    - "model 'ch_set_full': order_by, partition_by, primary_key, ttl do not apply to postgres"
     - 'sling ignores them'
     - "table_clause: WITH (index_granularity = 1024, storage_policy = 'default')"
     - 'table_clause: WITH (index_granularity = 4096)'
+    - "query_settings: log_comment = 'sling_settings_test', max_threads = 3, mutations_sync = 2"
   output_does_not_contain:
     - 'ENGINE ='
 
@@ -1183,7 +1184,7 @@
   run: |
     SLING_ROW_CNT= sling conns exec TRINO "CREATE SCHEMA IF NOT EXISTS memory.sling_build_trino"
     SLING_ROW_CNT= sling conns exec TRINO "DROP TABLE IF EXISTS memory.sling_build_trino.tr_set_plain"
-    sling build run tests/build/trino_settings_project --target TRINO --full-refresh
+    sling build run tests/build/trino_settings_project --target TRINO --full-refresh -s tr_set_plain
     sling conns exec TRINO "SELECT 'chk:' || table_name AS c FROM memory.information_schema.tables WHERE table_schema = 'sling_build_trino'"
   output_contains:
     - 'Build Completed'
@@ -1234,6 +1235,187 @@
   name: 'sling build starrocks cleanup'
   group: build
   after: [910]
+  run: 'sling conns exec STARROCKS "DROP DATABASE IF EXISTS sling_build_sr FORCE"'
+  output_contains:
+    - 'successful!'
+
+- id: 912
+  name: 'sling build compile shows query_settings and warns on BigQuery'
+  group: build
+  run: |
+    sling build compile tests/build/postgres_settings_project --target POSTGRES
+    sling build compile tests/build/postgres_settings_project --target BIGQUERY
+  output_contains:
+    - "query_settings: work_mem = '64MB'"
+    - "model 'pg_set_full': unlogged, settings.query do not apply to bigquery"
+
+- id: 913
+  name: 'sling build postgres query settings run (local transaction for each model)'
+  group: build
+  after: [912, 892]
+  run: |
+    SLING_ROW_CNT= sling conns exec POSTGRES "CREATE SCHEMA IF NOT EXISTS sling_build_pg"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_plain CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_full CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_inc CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_set_app CASCADE"
+    SLING_ROW_CNT= sling conns exec POSTGRES "DROP TABLE IF EXISTS sling_build_pg.pg_hook_probe CASCADE"
+    sling build run tests/build/postgres_settings_project --target POSTGRES --full-refresh --threads 4
+  output_contains:
+    - 'Build Completed'
+
+# The model captures the value in its own SELECT. The plain model and the end hook see the server default.
+- id: 914
+  name: 'sling build postgres work_mem applies to the model and does not leak'
+  group: build
+  after: [913]
+  run: |
+    sling conns exec POSTGRES "SELECT 'chk:' || (SELECT max(wm) FROM sling_build_pg.pg_set_full) || '|' || ((SELECT max(wm) FROM sling_build_pg.pg_set_plain) = current_setting('work_mem')) || '|' || ((SELECT max(wm) FROM sling_build_pg.pg_hook_probe) = current_setting('work_mem')) AS c"
+  output_contains:
+    - 'chk:64MB|true|true'
+
+- id: 915
+  name: 'sling build postgres merge runs in one transaction with work_mem'
+  group: build
+  after: [914]
+  run: |
+    sling build run tests/build/postgres_settings_project --target POSTGRES --vars 'extra: true' -s +pg_set_inc
+    sling conns exec POSTGRES "SELECT 'chk2:' || count(*) || '|' || max(wm) AS c FROM sling_build_pg.pg_set_inc"
+  output_contains:
+    - 'Build Completed'
+    - 'chk2:3|64MB'
+
+- id: 916
+  name: 'sling build postgres query settings cleanup'
+  group: build
+  after: [915]
+  run: 'sling conns exec POSTGRES "DROP SCHEMA IF EXISTS sling_build_pg CASCADE"'
+  output_contains:
+    - 'successful!'
+
+- id: 917
+  name: 'sling build snowflake query_tag run (pinned session)'
+  group: build
+  after: [895]
+  run: |
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "CREATE SCHEMA IF NOT EXISTS SLING_BUILD_SF"
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "DROP TABLE IF EXISTS SLING_BUILD_SF.SF_SET_PLAIN"
+    SLING_ROW_CNT= sling conns exec SNOWFLAKE "DROP TABLE IF EXISTS SLING_BUILD_SF.SF_SET_FULL"
+    sling build run tests/build/snowflake_settings_project --target SNOWFLAKE --full-refresh
+  output_contains:
+    - 'Build Completed'
+
+# The tag covers the CTAS of sf_set_full only. The CTAS of sf_set_plain must not carry it.
+- id: 918
+  name: 'sling build snowflake QUERY_HISTORY shows the tag on the model only'
+  group: build
+  after: [917]
+  run: |
+    sling conns exec SNOWFLAKE "SELECT 'chk:' || iff(count_if(query_text ILIKE 'create or replace%table \"sling_build_sf\".\"sf_set_full\" %') > 0, 'true', 'false') || '|' || iff(count_if(query_text ILIKE 'create or replace%table \"sling_build_sf\".\"sf_set_plain\" %') > 0, 'true', 'false') AS c FROM TABLE(information_schema.query_history(RESULT_LIMIT => 1000)) WHERE query_tag = 'sling_build_225' AND start_time > dateadd(minute, -30, current_timestamp())"
+  output_contains:
+    - 'chk:true|false'
+
+- id: 919
+  name: 'sling build snowflake query settings cleanup'
+  group: build
+  after: [918]
+  run: 'sling conns exec SNOWFLAKE "DROP SCHEMA IF EXISTS SLING_BUILD_SF CASCADE"'
+  output_contains:
+    - 'successful!'
+
+# SLING-225: Databricks session timezone. The DATABRICKS connection failed with "open session request ...
+# Cannot create the resource" (HTTP 400) on 2026-11-11, so ids 920-921 stay commented out.
+# - id: 920
+#   name: 'sling build databricks session timezone applies to the model only'
+#   group: build
+#   run: |
+#     SLING_ROW_CNT= sling conns exec DATABRICKS "CREATE SCHEMA IF NOT EXISTS sling_build_dbx"
+#     sling build run tests/build/databricks_settings_project --target DATABRICKS --full-refresh
+#     sling conns exec DATABRICKS "SELECT concat('chk:', (SELECT max(tz) FROM sling_build_dbx.dbx_set_tz), '|', (SELECT max(tz) FROM sling_build_dbx.dbx_set_plain) = current_timezone()) AS c"
+#   output_contains:
+#     - 'Build Completed'
+#     - 'chk:Asia/Tokyo|true'
+#
+# - id: 921
+#   name: 'sling build databricks query settings cleanup'
+#   group: build
+#   after: [920]
+#   run: 'sling conns exec DATABRICKS "DROP SCHEMA IF EXISTS sling_build_dbx CASCADE"'
+#   output_contains:
+#     - 'successful!'
+
+# SLING-225: Redshift SET LOCAL statement_timeout. Requires a reachable REDSHIFT connection
+# (cluster not always available), so it stays commented out.
+# - id: 922
+#   name: 'sling build redshift statement_timeout applies to the model only'
+#   group: build
+#   run: |
+#     SLING_ROW_CNT= sling conns exec REDSHIFT "CREATE SCHEMA IF NOT EXISTS sling_build_rs"
+#     sling build run tests/build/redshift_settings_project --target REDSHIFT --full-refresh
+#     sling conns exec REDSHIFT "SELECT 'chk:' || (SELECT max(st) FROM sling_build_rs.rs_set_full) || '|' || ((SELECT max(st) FROM sling_build_rs.rs_set_plain) = current_setting('statement_timeout')) AS c"
+#   output_contains:
+#     - 'Build Completed'
+#     - 'chk:600000|true'
+#
+# - id: 923
+#   name: 'sling build redshift query settings cleanup'
+#   group: build
+#   after: [922]
+#   run: 'sling conns exec REDSHIFT "DROP SCHEMA IF EXISTS sling_build_rs CASCADE"'
+#   output_contains:
+#     - 'successful!'
+
+- id: 924
+  name: 'sling build trino session property (SET SESSION, then RESET SESSION)'
+  group: build
+  after: [908]
+  run: |
+    SLING_ROW_CNT= sling conns exec TRINO "CREATE SCHEMA IF NOT EXISTS memory.sling_build_trino"
+    SLING_ROW_CNT= sling conns exec TRINO "DROP TABLE IF EXISTS memory.sling_build_trino.tr_set_sess"
+    sling build run tests/build/trino_settings_project --target TRINO --full-refresh -s tr_set_sess -d
+  output_contains:
+    - "SET SESSION query_max_run_time = '10m'"
+    - 'RESET SESSION query_max_run_time'
+    - 'Build Completed'
+
+- id: 925
+  name: 'sling build trino rejects an unknown session property'
+  group: build
+  after: [924]
+  err: true
+  run: 'sling build run tests/build/trino_settings_bad_project --target TRINO --full-refresh -s tr_set_badq'
+  output_contains:
+    - 'sling_bad_prop'
+    - 'does not exist'
+
+- id: 926
+  name: 'sling build trino query settings cleanup'
+  group: build
+  after: [925]
+  run: |
+    SLING_ROW_CNT= sling conns exec TRINO "DROP TABLE IF EXISTS memory.sling_build_trino.tr_set_sess"
+    sling conns exec TRINO "DROP SCHEMA IF EXISTS memory.sling_build_trino"
+  output_contains:
+    - 'successful!'
+
+- id: 927
+  name: 'sling build starrocks query_timeout applies to the model only'
+  group: build
+  after: [911]
+  run: |
+    SLING_ROW_CNT= sling conns exec STARROCKS "CREATE DATABASE IF NOT EXISTS sling_build_sr"
+    SLING_ROW_CNT= sling conns exec STARROCKS "DROP TABLE IF EXISTS sling_build_sr.sr_set_plain FORCE"
+    SLING_ROW_CNT= sling conns exec STARROCKS "DROP TABLE IF EXISTS sling_build_sr.sr_set_full FORCE"
+    sling build run tests/build/starrocks_settings_project --target STARROCKS --full-refresh
+    sling conns exec STARROCKS "SELECT concat('chk:', (SELECT max(qt) FROM sling_build_sr.sr_set_full), '|', (SELECT max(qt) FROM sling_build_sr.sr_set_plain) = @@query_timeout) AS c"
+  output_contains:
+    - 'Build Completed'
+    - 'chk:600|1'
+
+- id: 928
+  name: 'sling build starrocks query settings cleanup'
+  group: build
+  after: [927]
   run: 'sling conns exec STARROCKS "DROP DATABASE IF EXISTS sling_build_sr FORCE"'
   output_contains:
     - 'successful!'

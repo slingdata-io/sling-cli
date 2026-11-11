@@ -659,6 +659,20 @@ func (b *Build) setClauses(n *Node, m *Model) {
 	}
 	n.TableClause = t.clause(d.t.GetTemplateValue("core.create_table_as"))
 	n.TableKind = t.Kind
+
+	if d.querySettingsScope() == "" {
+		return
+	}
+	vals := m.Config.Settings.Query
+	pairs := make([]string, 0, len(vals))
+	for _, key := range sortedKeys(vals) {
+		val, err := d.literal(vals[key], false)
+		if err != nil {
+			return
+		}
+		pairs = append(pairs, key+" = "+val)
+	}
+	n.QuerySettings = strings.Join(pairs, ", ")
 }
 
 // CompileJSONPayload returns the --compile --json object.

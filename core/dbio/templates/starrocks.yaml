@@ -119,6 +119,10 @@ core:
   # CTAS templates for sling build
   create_table_as: CREATE TABLE {table} {options} AS ({sql})
   ctas_options: 'PROPERTIES ({options})'
+  # settings.query: mysql driver, one conn is one session. A plain SET leaks or misses.
+  # sling build pins one conn for each model call, sets, runs, resets, then frees the conn.
+  set_query_setting: SET {key} = {value}
+  reset_query_setting: SET {key} = DEFAULT
 
 metadata:
   current_database: select database() as name from dual
@@ -503,6 +507,8 @@ function:
   checksum_boolean: '{field}'
 
 variable:
+  # Scope of settings.query: see core.set_query_setting
+  query_settings_scope: session
   ctas_option: '"{key}" = {value}'
   ctas_option_quote_all: 'true'
   literal_quote: '"'

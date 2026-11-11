@@ -216,6 +216,9 @@ core:
   create_table_as: CREATE {kind} TABLE {table} {options} AS ({sql})
   ctas_unlogged: UNLOGGED
   ctas_options: 'WITH ({options})'
+  # settings.query: pgx pool, one conn for each statement. A plain SET leaks or misses.
+  # sling build runs SET LOCAL in a local transaction for each model call.
+  set_query_setting: SET LOCAL {key} = {value}
 
 metadata:
 
@@ -683,6 +686,8 @@ function:
   now: current_timestamp
 
 variable:
+  # Scope of settings.query: see core.set_query_setting
+  query_settings_scope: transaction
   tmp_folder: /tmp
   bind_string: ${c}
   error_filter_table_exists: already exists

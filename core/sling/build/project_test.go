@@ -722,14 +722,14 @@ func TestValidateDatabaseSupportCrossEngine(t *testing.T) {
 
 	noSettings := []string{"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.table", "settings.query"}
 	ignored := map[dbio.Type][]string{
-		dbio.TypeDbPostgres:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "dist", "sort", "settings.query"},
-		dbio.TypeDbSnowflake:  {"order_by", "partition_by", "primary_key", "ttl", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbPostgres:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "dist", "sort"},
+		dbio.TypeDbSnowflake:  {"order_by", "partition_by", "primary_key", "ttl", "unlogged", "dist", "sort"},
 		dbio.TypeDbBigQuery:   {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
-		dbio.TypeDbDatabricks: {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
-		dbio.TypeDbRedshift:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "settings.table", "settings.query"},
-		dbio.TypeDbTrino:      {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbDatabricks: {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
+		dbio.TypeDbRedshift:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "settings.table"},
+		dbio.TypeDbTrino:      {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
 		dbio.TypeDbAthena:     {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
-		dbio.TypeDbStarRocks:  {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbStarRocks:  {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
 		dbio.TypeDbProton:     noSettings,
 	}
 	for dbType, want := range ignored {

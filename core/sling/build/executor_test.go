@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/jmoiron/sqlx"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -363,7 +365,7 @@ func TestExecModelNonClickhouse(t *testing.T) {
 	model := queryModel(SettingValues{"max_memory_usage": 100})
 
 	e, conn := newRecordingExecutor(dbio.TypeDbPostgres)
-	_, err := e.createTableAs("s.t", "SELECT 1", model, tableFinal)
+	_, err := e.createTableAs("s.t", "SELECT 1", queryModel(nil), tableFinal)
 	require.NoError(t, err)
 	require.Len(t, conn.calls, 1)
 	assert.Equal(t, "Exec", conn.calls[0].method)
@@ -1051,17 +1053,19 @@ func TestCTASDist(t *testing.T) {
 
 func TestCTASTableStageNoLayout(t *testing.T) {
 	yes := true
-	e, conn := newRecordingExecutor(dbio.TypeDbSnowflake)
+	e, conn, fake, _ := sessionExecutor(dbio.TypeDbSnowflake)
 	model := queryModel(SettingValues{"query_tag": "x"})
 	model.Config.Transient = &yes
 	model.Config.ClusterBy = ExprList{"a"}
 
 	_, err := e.createTempTable(model, "S.TMP", "SELECT 1")
 	require.NoError(t, err)
-	require.Len(t, conn.calls, 1)
-	assert.Equal(t, "Exec", conn.calls[0].method)
-	assert.Equal(t, `CREATE TABLE "S"."TMP" AS (SELECT 1)`, conn.calls[0].sql)
-	assert.Nil(t, conn.calls[0].settings)
+	assert.Empty(t, conn.calls)
+	assert.Equal(t, []string{
+		"ALTER SESSION SET query_tag = 'x'",
+		`CREATE TABLE "S"."TMP" AS (SELECT 1)`,
+		"ALTER SESSION UNSET query_tag",
+	}, fake.stmts)
 }
 
 func TestFullRefreshAtomicTmpGetsLayout(t *testing.T) {
@@ -1077,4 +1081,230 @@ func TestFullRefreshAtomicTmpGetsLayout(t *testing.T) {
 	require.NotEmpty(t, ctas)
 	assert.True(t, strings.HasPrefix(ctas[0].sql, "CREATE UNLOGGED TABLE"), ctas[0].sql)
 	assert.Contains(t, ctas[0].sql, "WITH (fillfactor = 70)")
+}
+
+// fakeSession records the statements and the Close(ok) value of one scope.
+type fakeSession struct {
+	stmts  []string
+	failOn string // fail a statement that has this text
+	closed []bool
+}
+
+func (f *fakeSession) ExecContext(_ context.Context, q string) (sql.Result, error) {
+	f.stmts = append(f.stmts, q)
+	if f.failOn != "" && strings.Contains(q, f.failOn) {
+		return nil, errors.New("boom")
+	}
+	return mockSQLResult{n: 2}, nil
+}
+
+func (f *fakeSession) Close(ok bool) error {
+	f.closed = append(f.closed, ok)
+	return nil
+}
+
+// sessionExecutor returns an executor whose scoped calls use one fake session.
+func sessionExecutor(dbType dbio.Type) (*Executor, *recordingConn, *fakeSession, *[]string) {
+	e, conn := newRecordingExecutor(dbType)
+	fake := &fakeSession{}
+	scopes := &[]string{}
+	e.openSession = func(_ context.Context, scope string) (modelSession, error) {
+		*scopes = append(*scopes, scope)
+		return fake, nil
+	}
+	return e, conn, fake, scopes
+}
+
+func TestExecModelScopedTransaction(t *testing.T) {
+	e, conn, fake, scopes := sessionExecutor(dbio.TypeDbPostgres)
+	model := queryModel(SettingValues{"work_mem": "64MB"})
+
+	res, err := e.execModel(model, `INSERT INTO "s"."t" (SELECT 1)`)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"transaction"}, *scopes)
+	assert.Equal(t, []string{"SET LOCAL work_mem = '64MB'", `INSERT INTO "s"."t" (SELECT 1)`}, fake.stmts)
+	assert.Equal(t, []bool{true}, fake.closed)
+	assert.Empty(t, conn.calls)
+	n, _ := res.RowsAffected()
+	assert.Equal(t, int64(2), n)
+}
+
+func TestExecModelScopedSessionReset(t *testing.T) {
+	e, conn, fake, scopes := sessionExecutor(dbio.TypeDbSnowflake)
+	model := queryModel(SettingValues{"query_tag": "x"})
+
+	_, err := e.execModel(model, "SELECT 1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"session"}, *scopes)
+	assert.Equal(t, []string{"ALTER SESSION SET query_tag = 'x'", "SELECT 1", "ALTER SESSION UNSET query_tag"}, fake.stmts)
+	assert.Equal(t, []bool{true}, fake.closed)
+	assert.Empty(t, conn.calls)
+}
+
+func TestExecModelScopedStatementError(t *testing.T) {
+	e, _, fake, _ := sessionExecutor(dbio.TypeDbSnowflake)
+	fake.failOn = "first"
+	model := queryModel(SettingValues{"query_tag": "x"})
+
+	_, err := e.execModelMulti(model, "SELECT 'first'; SELECT 'second'")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Could not execute SQL")
+	assert.Equal(t, []string{"ALTER SESSION SET query_tag = 'x'", "SELECT 'first'"}, fake.stmts)
+	assert.Equal(t, []bool{false}, fake.closed)
+}
+
+func TestExecModelScopedResetError(t *testing.T) {
+	e, _, fake, _ := sessionExecutor(dbio.TypeDbTrino)
+	fake.failOn = "RESET"
+	model := queryModel(SettingValues{"query_max_run_time": "10m"})
+
+	_, err := e.execModel(model, "SELECT 1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Could not execute SQL")
+	assert.Equal(t, []bool{false}, fake.closed)
+	assert.Equal(t, "RESET SESSION query_max_run_time", fake.stmts[len(fake.stmts)-1])
+}
+
+func TestExecModelScopedNoOpener(t *testing.T) {
+	e, conn := newRecordingExecutor(dbio.TypeDbPostgres)
+	model := queryModel(SettingValues{"work_mem": "64MB"})
+
+	_, err := e.execModel(model, "SELECT 1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.query needs a database/sql connection")
+	_, err = e.execModelMulti(model, "SELECT 1; SELECT 2")
+	require.Error(t, err)
+	assert.Empty(t, conn.calls)
+}
+
+func TestExecModelScopedSetError(t *testing.T) {
+	e, conn, fake, _ := sessionExecutor(dbio.TypeDbPostgres)
+	_, err := e.execModel(queryModel(SettingValues{"x": []any{1}}), "SELECT 1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.query.x")
+	assert.Empty(t, fake.stmts)
+	assert.Empty(t, conn.calls)
+}
+
+func TestExecModelMultiScoped(t *testing.T) {
+	e, conn, fake, scopes := sessionExecutor(dbio.TypeDbPostgres)
+	model := queryModel(SettingValues{"work_mem": "64MB"})
+
+	res, err := e.execModelMulti(model, "DELETE FROM a WHERE 1=1; INSERT INTO a SELECT 1")
+	require.NoError(t, err)
+	assert.Len(t, *scopes, 1)
+	require.Len(t, fake.stmts, 3)
+	assert.Equal(t, "SET LOCAL work_mem = '64MB'", fake.stmts[0])
+	assert.Contains(t, fake.stmts[1], "DELETE FROM a")
+	assert.Contains(t, fake.stmts[2], "INSERT INTO a SELECT 1")
+	n, _ := res.RowsAffected()
+	assert.Equal(t, int64(4), n)
+	assert.Equal(t, []bool{true}, fake.closed)
+	assert.Empty(t, conn.calls)
+}
+
+func TestExecModelNoQuerySettingsPlain(t *testing.T) {
+	e, conn, fake, scopes := sessionExecutor(dbio.TypeDbPostgres)
+	for _, model := range []*Model{queryModel(nil), nil} {
+		_, err := e.execModel(model, "SELECT 1")
+		require.NoError(t, err)
+		_, err = e.execModelMulti(model, "SELECT 1; SELECT 2")
+		require.NoError(t, err)
+	}
+	assert.Empty(t, *scopes)
+	assert.Empty(t, fake.stmts)
+	require.Len(t, conn.calls, 4)
+	assert.Equal(t, "Exec", conn.calls[0].method)
+	assert.Equal(t, "ExecMulti", conn.calls[1].method)
+}
+
+func TestExecModelScopeUnsupported(t *testing.T) {
+	e, conn, fake, scopes := sessionExecutor(dbio.TypeDbBigQuery)
+	model := queryModel(SettingValues{"work_mem": "64MB"})
+
+	_, err := e.execModel(model, "SELECT 1")
+	require.NoError(t, err)
+	_, err = e.execModelMulti(model, "SELECT 1; SELECT 2")
+	require.NoError(t, err)
+	assert.Empty(t, *scopes)
+	assert.Empty(t, fake.stmts)
+	require.Len(t, conn.calls, 2)
+	assert.Equal(t, "Exec", conn.calls[0].method)
+	assert.Equal(t, "ExecMulti", conn.calls[1].method)
+	assert.Nil(t, conn.calls[0].settings)
+}
+
+func TestStageTableGetsQuerySettings(t *testing.T) {
+	e, conn, fake, _ := sessionExecutor(dbio.TypeDbPostgres)
+	model := queryModel(SettingValues{"work_mem": "64MB"})
+
+	_, err := e.createTempTable(model, "s.tmp", "SELECT 1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SET LOCAL work_mem = '64MB'", `CREATE TABLE "s"."tmp" AS (SELECT 1)`}, fake.stmts)
+	assert.Equal(t, []bool{true}, fake.closed)
+	assert.Empty(t, conn.calls)
+
+	// the final table gets the options in the same kind of scope
+	fake.stmts = nil
+	_, err = e.createTableAs("s.t", "SELECT 1", model, tableFinal)
+	require.NoError(t, err)
+	assert.Equal(t, `CREATE TABLE "s"."t" WITH (storage_policy = 'p') AS (SELECT 1)`, fake.stmts[1])
+}
+
+// countDriver is a fake database/sql driver that counts conn closes, commits and rollbacks.
+type countDriver struct{ closes, commits, rollbacks int }
+
+type countConn struct{ d *countDriver }
+type countTx struct{ d *countDriver }
+
+func (d *countDriver) Open(string) (driver.Conn, error) { return &countConn{d}, nil }
+func (c *countConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("not supported")
+}
+func (c *countConn) Close() error              { c.d.closes++; return nil }
+func (c *countConn) Begin() (driver.Tx, error) { return &countTx{c.d}, nil }
+func (c *countConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(1), nil
+}
+func (t *countTx) Commit() error   { t.d.commits++; return nil }
+func (t *countTx) Rollback() error { t.d.rollbacks++; return nil }
+
+func TestSQLSessionDiscardOnError(t *testing.T) {
+	fake := &countDriver{}
+	sql.Register("sling_build_count_driver", fake)
+	db, err := sqlx.Open("sling_build_count_driver", "")
+	require.NoError(t, err)
+	defer db.Close()
+	ctx := context.Background()
+
+	s, err := openSQLSession(ctx, db, nil, "session")
+	require.NoError(t, err)
+	_, err = s.ExecContext(ctx, "SELECT 1;")
+	require.NoError(t, err)
+	require.NoError(t, s.Close(true))
+	assert.Equal(t, 0, fake.closes)
+	assert.Equal(t, 1, db.Stats().Idle)
+
+	s, err = openSQLSession(ctx, db, nil, "session")
+	require.NoError(t, err)
+	require.NoError(t, s.Close(false))
+	assert.Equal(t, 1, fake.closes)
+	assert.Equal(t, 0, db.Stats().Idle)
+
+	s, err = openSQLSession(ctx, db, nil, "transaction")
+	require.NoError(t, err)
+	_, err = s.ExecContext(ctx, "SELECT 1")
+	require.NoError(t, err)
+	require.NoError(t, s.Close(true))
+	assert.Equal(t, 1, fake.commits)
+
+	s, err = openSQLSession(ctx, db, nil, "transaction")
+	require.NoError(t, err)
+	require.NoError(t, s.Close(false))
+	assert.Equal(t, 1, fake.rollbacks)
+
+	_, err = openSQLSession(ctx, db, nil, "other")
+	assert.ErrorContains(t, err, "unknown query_settings_scope 'other'")
+	_, err = openSQLSession(ctx, nil, nil, "session")
+	assert.ErrorContains(t, err, "settings.query needs a database/sql connection")
 }

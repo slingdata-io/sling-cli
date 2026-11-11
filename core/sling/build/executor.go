@@ -36,6 +36,8 @@ type Executor struct {
 	failedSet   map[string]bool // tracks failed nodes for skipping downstream
 	stopped     bool            // set when fail-fast triggers; prevents new dispatches
 
+	openSession func(ctx context.Context, scope string) (modelSession, error) // set by Connect; tests set a fake
+
 	prevLogSink func(*g.LogLine)
 	startTime   *time.Time
 
@@ -185,6 +187,15 @@ func (e *Executor) Connect() error {
 	}
 
 	e.DbConn = dbConn
+	if e.openSession == nil {
+		e.openSession = func(ctx context.Context, scope string) (modelSession, error) {
+			s, err := openSQLSession(ctx, e.DbConn.Db(), e.DbConn.Props(), scope)
+			if err != nil {
+				return nil, err
+			}
+			return s, nil
+		}
+	}
 	return nil
 }
 
