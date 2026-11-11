@@ -4169,7 +4169,7 @@
     - 'PG COPY RSS OK'
 
 # SLING-339: legacy pre_sql / post_sql run as stream hooks on the CLI single-task path
-- id: 871
+- id: 884
   name: 'SLING-339: pre_sql / post_sql run as hooks (sling run, two statements)'
   group: legacy_sql_hooks
   run: |
@@ -4178,15 +4178,15 @@
   output_contains:
     - 'execution succeeded'
 
-- id: 872
+- id: 885
   name: 'SLING-339: post_sql hook wrote the row count'
   group: legacy_sql_hooks
   run: 'sling conns exec POSTGRES "select cnt from public.legacy_sql_hooks_cnt"'
   output_contains:
     - '18'
-  after: [871]
+  after: [884]
 
-- id: 873
+- id: 886
   name: 'SLING-339: pre_sql without a CLI Pro token fails at compile'
   group: legacy_sql_hooks
   run: |
