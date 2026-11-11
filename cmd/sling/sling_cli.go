@@ -130,6 +130,12 @@ var cliRunFlags = []g.Flag{
 		Description: "in-line CDC options to configure change-capture mode (JSON or YAML).\n",
 	},
 	{
+		Name:        "continuous",
+		ShortName:   "",
+		Type:        "bool",
+		Description: "Run the replication in continuous mode (CDC streams only). It runs cycles until a stop signal.",
+	},
+	{
 		Name:        "streams",
 		ShortName:   "",
 		Type:        "string",

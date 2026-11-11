@@ -5,6 +5,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 // Sling accepts a configuration and runs an Extract-Load task
@@ -24,6 +25,11 @@ func Sling(cfg *Config) (err error) {
 
 func IsReplicationRunMode() bool {
 	return os.Getenv("SLING_RUN_MODE") == "replication"
+}
+
+// IsContinuousRunMode returns true when the run is in continuous mode
+func IsContinuousRunMode() bool {
+	return cast.ToBool(os.Getenv("SLING_CONTINUOUS"))
 }
 
 func IsPipelineRunMode() bool {
