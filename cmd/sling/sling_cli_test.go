@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unicode"
@@ -465,35 +466,43 @@ func TestBase64(t *testing.T) {
 	g.Info("%d => %d", len(encoded), len(encodedGzip))
 }
 
-type fakeContinuousCtl struct {
+type fakeGracefulRun struct {
 	stops    int
 	statuses int
 }
 
-func (f *fakeContinuousCtl) Stop() bool {
+func (f *fakeGracefulRun) Stop() bool {
 	f.stops++
 	return f.stops == 1
 }
 
-func (f *fakeContinuousCtl) PrintStatus() { f.statuses++ }
+func (f *fakeGracefulRun) PrintStatus() { f.statuses++ }
 
-func TestStopContinuous(t *testing.T) {
-	assert.False(t, stopContinuous()) // no run: the old signal path
+func TestSignals(t *testing.T) {
+	s := newSignals()
+	assert.False(t, s.stopRun(syscall.SIGINT)) // no run: the old signal path
+	assert.Equal(t, 0, s.ExitCode(0))
 
-	ctl := &fakeContinuousCtl{}
-	setContinuousCtl(ctl)
-	defer setContinuousCtl(nil)
+	run := &fakeGracefulRun{}
+	detach := s.Attach(run)
+	assert.True(t, s.stopRun(syscall.SIGTERM))  // first signal: graceful stop
+	assert.False(t, s.stopRun(syscall.SIGTERM)) // second signal: the old signal path
+	assert.Equal(t, 111, s.ExitCode(0))
+	detach()
+	assert.False(t, s.stopRun(syscall.SIGINT))
 
-	assert.True(t, stopContinuous())  // first signal: graceful stop
-	assert.False(t, stopContinuous()) // second signal: the old signal path
-
-	printContinuousStatus()
-	assert.Equal(t, 1, ctl.statuses)
-
-	setContinuousCtl(nil)
-	printContinuousStatus()
-	assert.Equal(t, 1, ctl.statuses)
-	assert.False(t, stopContinuous())
+	// watch: first SIGINT stops the run, second goes to hardStop with code 11
+	s, run = newSignals(), &fakeGracefulRun{}
+	defer s.Attach(run)()
+	done, hard := make(chan struct{}), make(chan os.Signal, 1)
+	go s.watch(done, func(sig os.Signal) { hard <- sig })
+	s.status <- os.Interrupt
+	s.stop <- syscall.SIGINT
+	s.stop <- syscall.SIGINT
+	assert.Equal(t, syscall.SIGINT, <-hard)
+	assert.Equal(t, 2, run.stops)
+	assert.Equal(t, 1, run.statuses)
+	assert.Equal(t, 11, s.ExitCode(0))
 }
 
 func TestOneShotRun(t *testing.T) {

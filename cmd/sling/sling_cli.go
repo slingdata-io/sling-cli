@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 
@@ -45,53 +45,101 @@ func init() {
 	sling.LoadContinuousRunMode() // before any reader of the mode
 }
 
-// continuousControl is the control of a continuous run.
-type continuousControl interface {
-	Stop() bool // starts a graceful stop; false if one already runs
+// gracefulRun is a run that stops in a graceful way on the first stop signal.
+type gracefulRun interface {
+	Stop() bool // false if a stop already runs
 	PrintStatus()
 }
 
-var (
-	// continuousCtl is set while a continuous run is active.
-	continuousCtl atomic.Pointer[continuousControl]
+// signals owns the signal handling of the process.
+type signals struct {
+	stop   chan os.Signal // SIGINT, SIGTERM
+	status chan os.Signal // statusSignals
+	mu     sync.Mutex
+	run    gracefulRun
+	forced int // exit code after a second signal during a graceful run
+}
 
-	// forcedExit is the exit code after a second signal in a continuous run.
-	forcedExit atomic.Int32
+var sigs = newSignals()
 
-	statusSig = make(chan os.Signal, 1)
-)
+func newSignals() *signals {
+	return &signals{stop: make(chan os.Signal, 2), status: make(chan os.Signal, 1)}
+}
 
-// setContinuousCtl sets the control of the active continuous run. Nil clears
-// it. The status signals are caught only while a run is active, so a
-// one-shot run keeps the default action of these signals.
-func setContinuousCtl(ctl continuousControl) {
-	if ctl == nil {
-		continuousCtl.Store(nil)
-		signal.Stop(statusSig)
-		return
-	}
-	continuousCtl.Store(&ctl)
+// Start catches SIGINT and SIGTERM and handles them until done closes.
+// hardStop gets a signal that no graceful run takes.
+func (s *signals) Start(done <-chan struct{}, hardStop func(os.Signal)) {
+	signal.Notify(s.stop, os.Interrupt, syscall.SIGTERM)
+	go s.watch(done, hardStop)
+}
+
+// Attach sends the stop and status signals to run, until detach is called.
+// A one-shot run keeps the default action of the status signals.
+func (s *signals) Attach(run gracefulRun) (detach func()) {
+	s.mu.Lock()
+	s.run = run
+	s.mu.Unlock()
 	if len(statusSignals) > 0 {
-		signal.Notify(statusSig, statusSignals...)
+		signal.Notify(s.status, statusSignals...)
+	}
+	return func() {
+		signal.Stop(s.status)
+		s.mu.Lock()
+		s.run = nil
+		s.mu.Unlock()
 	}
 }
 
-// stopContinuous starts a graceful stop of the active continuous run. It
-// returns false when no run is active or a stop already runs.
-func stopContinuous() bool {
-	ctl := continuousCtl.Load()
-	if ctl == nil || !(*ctl).Stop() {
+// ExitCode returns the forced exit code if there is one, else code.
+func (s *signals) ExitCode(code int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.forced != 0 {
+		return s.forced
+	}
+	return code
+}
+
+func (s *signals) watch(done <-chan struct{}, hardStop func(os.Signal)) {
+	for {
+		select {
+		case sig := <-s.stop:
+			if s.stopRun(sig) {
+				continue
+			}
+			hardStop(sig)
+			return
+		case <-s.status:
+			if run := s.active(); run != nil {
+				run.PrintStatus()
+			}
+		case <-done:
+			return // main exits after the flush
+		}
+	}
+}
+
+// stopRun starts a graceful stop of the attached run. It returns false when
+// no run is attached or a stop already runs. Then it records the forced exit code.
+func (s *signals) stopRun(sig os.Signal) bool {
+	run := s.active()
+	if run == nil {
 		return false
 	}
-	env.Println("\nstop received: finishing running cycles, then exit (Ctrl-C again to stop now)")
-	return true
+	if run.Stop() {
+		env.Println("\nstop received: finishing running cycles, then exit (Ctrl-C again to stop now)")
+		return true
+	}
+	s.mu.Lock()
+	s.forced = lo.Ternary(sig == syscall.SIGTERM, 111, 11)
+	s.mu.Unlock()
+	return false
 }
 
-// printContinuousStatus prints the status of the active continuous run.
-func printContinuousStatus() {
-	if ctl := continuousCtl.Load(); ctl != nil {
-		(*ctl).PrintStatus()
-	}
+func (s *signals) active() gracefulRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.run
 }
 
 var cliRunFlags = []g.Flag{
@@ -586,10 +634,6 @@ func main() {
 
 	exitCode := 11
 	done := make(chan struct{})
-	interrupt := make(chan os.Signal, 1)
-	kill := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	signal.Notify(kill, syscall.SIGTERM)
 
 	if val := os.Getenv("SLING_SHOW_PROGRESS"); val != "" {
 		sling.ShowProgress = cast.ToBool(os.Getenv("SLING_SHOW_PROGRESS"))
@@ -598,59 +642,32 @@ func main() {
 
 	exit := func() {
 		time.Sleep(50 * time.Millisecond) // so logger can flush
-		if code := forcedExit.Load(); code != 0 {
-			exitCode = int(code)
-		}
-		os.Exit(exitCode)
+		os.Exit(sigs.ExitCode(exitCode))
 	}
 
-	go func() {
-		for {
+	sigs.Start(done, func(sig os.Signal) {
+		if sig == syscall.SIGTERM {
+			env.Println("\nkilling process...")
+			exitCode = 111
+			env.KillChildProcs() // some are not in our process group, so the signal does not reach them
+			exit()
+		}
+		g.SentryClear()
+		if cliRun.Sc.Used {
+			env.Println("\ninterrupting...")
+			interrupted = true
+			dumpRuntimeStack()
+			ctx.Cancel()
 			select {
-			case <-kill:
-				if stopContinuous() {
-					continue
-				}
-				if continuousCtl.Load() != nil {
-					forcedExit.Store(111)
-				}
-				env.Println("\nkilling process...")
-				exitCode = 111
-				env.KillChildProcs() // some are not in our process group, so the signal does not reach them
-				exit()
-			case <-interrupt:
-				if stopContinuous() {
-					continue
-				}
-				if continuousCtl.Load() != nil {
-					forcedExit.Store(11)
-				}
-				g.SentryClear()
-				if cliRun.Sc.Used {
-					env.Println("\ninterrupting...")
-					interrupted = true
-					dumpRuntimeStack()
-					ctx.Cancel()
-					select {
-					case <-done:
-					case <-time.After(10 * time.Second):
-					}
-				}
-				env.KillChildProcs() // some are not in our process group, so the signal does not reach them
-				exit()
-				return
-			case <-statusSig:
-				printContinuousStatus()
 			case <-done:
-				return // main exits after the flush
+			case <-time.After(10 * time.Second):
 			}
 		}
-	}()
+		env.KillChildProcs() // some are not in our process group, so the signal does not reach them
+		exit()
+	})
 
-	exitCode = cliInit(done)
-	if code := forcedExit.Load(); code != 0 {
-		exitCode = int(code)
-	}
+	exitCode = sigs.ExitCode(cliInit(done))
 	if !interrupted {
 		g.SentryFlush(time.Second * 2)
 	}
