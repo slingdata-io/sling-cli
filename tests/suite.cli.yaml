@@ -3810,7 +3810,7 @@
 
 - id: 846
   name: 'CDC primary key from source, MySQL to DuckDB target'
-  group: cdc_pk_from_source
+  group: cdc_pk_from_source,duckdb
   run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_pk
@@ -4053,9 +4053,9 @@
     - 'context canceled'
     - 'fatal'
 
-# SLING-313: DuckDB 2.0 is the default. A 1.5.x CLI must still work, with no 2.0 flag.
+# SLING-313: a 1.5.x CLI must work, with no 2.0 flag.
 - id: 863
-  name: 'DuckDB 2.0 default: DUCKDB_VERSION=1.5.5 still works'
+  name: 'DUCKDB_VERSION=1.5.5 works with no 2.0 flag'
   group: duckdb
   env:
     DUCKDB_VERSION: '1.5.5'
