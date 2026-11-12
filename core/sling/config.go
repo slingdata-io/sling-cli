@@ -317,7 +317,7 @@ func (cfg *Config) isDbSQL() bool {
 }
 
 // injectLegacySQLHooks renders target pre_sql / post_sql and moves them into
-// the stream hooks: pre_sql last in `pre`, post_sql last in `post_merge`.
+// the stream hooks: pre_sql last in `pre`, post_sql last in `post` (after the commit).
 func (cfg *Config) injectLegacySQLHooks(fMap map[string]any) error {
 	if !cfg.TgtConn.Type.IsDb() || cfg.Target.Options == nil {
 		return nil
@@ -383,8 +383,8 @@ func (cfg *Config) injectLegacySQLHooks(fMap map[string]any) error {
 		if err != nil {
 			return err
 		}
-		postMerge := make([]any, 0, len(rs.Hooks.PostMerge)+1)
-		rs.Hooks.PostMerge = append(append(postMerge, rs.Hooks.PostMerge...), hook)
+		post := make([]any, 0, len(rs.Hooks.Post)+1)
+		rs.Hooks.Post = append(append(post, rs.Hooks.Post...), hook)
 	}
 
 	cfg.ReplicationStream = &rs

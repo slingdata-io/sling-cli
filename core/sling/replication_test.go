@@ -1017,16 +1017,17 @@ streams:
 	users := tasks["public.users"]
 	if assert.NotNil(t, users) {
 		assert.Equal(t, []string{"d_pre", `legacy:select '"public"."users_copy"'`}, queries(users.ReplicationStream.Hooks.Pre))
-		assert.Equal(t, []string{"d_post_merge", `legacy:select '{"a":1}'`}, queries(users.ReplicationStream.Hooks.PostMerge))
+		assert.Equal(t, []string{"d_post_merge"}, queries(users.ReplicationStream.Hooks.PostMerge))
+		assert.Equal(t, []string{`legacy:select '{"a":1}'`}, queries(users.ReplicationStream.Hooks.Post))
 		assert.Nil(t, users.Target.Options.PreSQL)
 		assert.Nil(t, users.Target.Options.PostSQL)
 
 		// a second prepare must not inject again
 		assert.NoError(t, users.Prepare())
 		assert.Len(t, users.ReplicationStream.Hooks.Pre, 2)
-		assert.Len(t, users.ReplicationStream.Hooks.PostMerge, 2)
+		assert.Len(t, users.ReplicationStream.Hooks.PostMerge, 1)
+		assert.Len(t, users.ReplicationStream.Hooks.Post, 1)
 		assert.Empty(t, users.ReplicationStream.Hooks.PreMerge)
-		assert.Empty(t, users.ReplicationStream.Hooks.Post)
 	}
 
 	if orders := tasks["public.orders"]; assert.NotNil(t, orders) {

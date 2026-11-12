@@ -156,9 +156,9 @@ func TestPrepareLegacySQLHooks(t *testing.T) {
 	cfg := newCfg(dbio.TypeFileLocal, g.String("select 2"))
 	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) && assert.NotNil(t, cfg.ReplicationStream) {
 		assert.Equal(t, []string{"pre_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Pre))
-		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.PostMerge))
+		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Post))
 		assert.Empty(t, cfg.ReplicationStream.Hooks.PreMerge)
-		assert.Empty(t, cfg.ReplicationStream.Hooks.Post)
+		assert.Empty(t, cfg.ReplicationStream.Hooks.PostMerge)
 		assert.Nil(t, cfg.Target.Options.PreSQL)
 		assert.Nil(t, cfg.Target.Options.PostSQL)
 	}
@@ -175,7 +175,7 @@ func TestPrepareLegacySQLHooks(t *testing.T) {
 	cfg = newCfg(dbio.TypeApi, g.String("select 2"))
 	assert.False(t, cfg.isDbSQL())
 	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) && assert.NotNil(t, cfg.ReplicationStream) {
-		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.PostMerge))
+		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Post))
 	}
 
 	// file target: no injection

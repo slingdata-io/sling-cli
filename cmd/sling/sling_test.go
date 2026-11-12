@@ -729,7 +729,7 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 			}
 			if rs := taskCfg.ReplicationStream; rs != nil {
 				rs.Hooks.Pre = rewriteLegacySQL(rs.Hooks.Pre)
-				rs.Hooks.PostMerge = rewriteLegacySQL(rs.Hooks.PostMerge)
+				rs.Hooks.Post = rewriteLegacySQL(rs.Hooks.Post)
 			}
 		}
 	}
@@ -1767,10 +1767,11 @@ streams:
 		assert.Equal(t, g.Bool(true), config.Target.Options.AddNewColumns)
 		assert.EqualValues(t, g.Int64(600000), config.Target.Options.FileMaxRows)
 		assert.Nil(t, config.Target.Options.PostSQL)
-		if assert.Len(t, config.ReplicationStream.Hooks.PostMerge, 1) {
-			hook, _ := config.ReplicationStream.Hooks.PostMerge[0].(map[string]any)
+		if assert.Len(t, config.ReplicationStream.Hooks.Post, 1) {
+			hook, _ := config.ReplicationStream.Hooks.Post[0].(map[string]any)
 			assert.Equal(t, "some sql", hook["query"])
 			assert.Equal(t, "post_sql", hook["legacy_sql"])
+			assert.Equal(t, `run.status == "success"`, hook["if"])
 		}
 		assert.EqualValues(t, false, config.ReplicationStream.Disabled)
 	}
@@ -1785,7 +1786,7 @@ streams:
 		assert.Equal(t, "", config.Source.UpdateKey)
 		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
 		assert.Nil(t, config.Target.Options.PostSQL)
-		assert.Empty(t, config.ReplicationStream.Hooks.PostMerge)
+		assert.Empty(t, config.ReplicationStream.Hooks.Post)
 		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
 		assert.Equal(t, "[{\"name\":\"id\",\"type\":\"string(100)\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))
