@@ -944,9 +944,24 @@ func (duck *DuckDb) Exec(sql string, args ...any) (result sql.Result, err error)
 	return
 }
 
-// ExecMultiContext executes multiple SQL queries with context and returns the result
+// ExecMultiContext executes SQL statements one by one and stops at the first error.
+// Each element must be one statement.
 func (duck *DuckDb) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
-	return duck.ExecContext(ctx, strings.Join(sqls, ";\n"))
+	// the CLI reports a running total_changes, so the last statement holds the total
+	total := duckDbResult{}
+	for i, sql := range sqls {
+		if strings.TrimSpace(sql) == "" {
+			continue
+		}
+		res, err := duck.ExecContext(ctx, sql)
+		if err != nil {
+			return total, g.Error(err, "Error executing statement %d of %d, the next statements did not run", i+1, len(sqls))
+		}
+		if res != nil {
+			total.TotalChanges, _ = res.RowsAffected()
+		}
+	}
+	return total, nil
 }
 
 type duckDbResult struct {

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -4473,4 +4474,125 @@ func TestDuckLakeConnDefaultVersion(t *testing.T) {
 
 	t.Setenv("DUCKDB_VERSION", "2.0.0")
 	assert.Equal(t, "", version(), "the env var wins over the DuckLake default")
+}
+
+type fakeResult struct{ rows int64 }
+
+func (r fakeResult) LastInsertId() (int64, error) { return 0, nil }
+func (r fakeResult) RowsAffected() (int64, error) { return r.rows, nil }
+
+func TestStatementRunner(t *testing.T) {
+	ctx := context.Background()
+	fakeErr := fmt.Errorf("fake failure")
+
+	newRunner := func(failOn string, ran *[]string) statementRunner {
+		return statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			*ran = append(*ran, q)
+			if failOn != "" && strings.Contains(q, failOn) {
+				return nil, fakeErr
+			}
+			return fakeResult{rows: 5}, nil
+		}}
+	}
+
+	t.Run("first fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("a", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fake failure")
+		assert.Contains(t, err.Error(), "statement 1 of 3")
+		assert.Equal(t, []string{"a"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+
+	t.Run("second fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("b", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "statement 2 of 3")
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(5), ra)
+	})
+
+	t.Run("all pass", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("", &ran).run(ctx, []string{"a", "b", "c"})
+		require.NoError(t, err)
+		assert.Len(t, ran, 3)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(15), ra)
+	})
+
+	t.Run("blank statements and nil result", func(t *testing.T) {
+		ran := []string{}
+		runner := statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			ran = append(ran, q)
+			return nil, nil
+		}}
+		res, err := runner.run(ctx, []string{"", "a", "  \n", "b"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+}
+
+// failingExecConn fails the statements that contain failOn
+type failingExecConn struct {
+	*PostgresConn
+	failOn string
+	ran    []string
+}
+
+func (c *failingExecConn) ExecContext(ctx context.Context, q string, args ...interface{}) (sql.Result, error) {
+	c.ran = append(c.ran, q)
+	if strings.Contains(q, c.failOn) {
+		return nil, fmt.Errorf("fake failure")
+	}
+	return fakeResult{rows: 1}, nil
+}
+
+func TestBaseConnExecMultiStopsAtFirstError(t *testing.T) {
+	newFake := func(t *testing.T) *failingExecConn {
+		conn, err := NewConn("postgres://u:p@localhost:5432/db")
+		require.NoError(t, err)
+		pg := conn.(*PostgresConn)
+		fake := &failingExecConn{PostgresConn: pg, failOn: "DELETE"}
+		var c Connection = fake
+		pg.BaseConn.instance = &c
+		return fake
+	}
+
+	t.Run("one element", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1;\nINSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+
+	t.Run("two elements", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1", "INSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+}
+
+func TestDuckDbConnExecMultiStopsAtFirstError(t *testing.T) {
+	conn, err := NewConn("duckdb://" + filepath.Join(t.TempDir(), "x.duckdb"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	_, err = conn.ExecMulti("create table t (id int);\ninsert into missing values (1);\ninsert into t values (1)")
+	require.Error(t, err)
+
+	data, err := conn.Query("select count(*) as cnt from t")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 1)
+	assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
 }

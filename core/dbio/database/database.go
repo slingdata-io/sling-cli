@@ -1429,35 +1429,27 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 	return
 }
 
-// ExecMultiContext runs multiple sql queries with context, returns `error`
+// ExecMultiContext runs multiple sql queries with context, stops at the first error
 func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
-
-	Res := Result{rowsAffected: 0}
-
-	eG := g.ErrorGroup{}
+	stmts := []string{}
 	for _, q := range qs {
 		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
 		for _, sql := range ParseSQLMultiStatements(q, conn.GetType()) {
 			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
 				sql = sql + env.NoDebugKey
 			}
-			res, err := conn.Self().ExecContext(ctx, sql)
-			if err != nil {
-				eG.Capture(g.Error(err, "Error executing query"))
-			} else {
-				ra, _ := res.RowsAffected()
-				g.Trace("RowsAffected: %d", ra)
-				Res.rowsAffected = Res.rowsAffected + ra
-			}
-			delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
-			time.Sleep(time.Duration(delay) * time.Second)
+			stmts = append(stmts, sql)
 		}
 	}
 
-	err = eG.Err()
-	result = Res
-
-	return
+	delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+	runner := statementRunner{
+		exec: func(ctx context.Context, q string) (sql.Result, error) {
+			return conn.Self().ExecContext(ctx, q)
+		},
+		delay: time.Duration(delay) * time.Second,
+	}
+	return runner.run(ctx, stmts)
 }
 
 // MustExec execs the query using e and panics if there was an error.

@@ -1449,3 +1449,32 @@
     sling conns exec ATHENA "DROP TABLE IF EXISTS db1.ath_set_plain"
   output_contains:
     - 'successful!'
+
+- id: 932
+  name: 'sling build clickhouse merge stops after a failed DELETE'
+  group: build
+  after: [440]
+  err: true
+  run: |
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE DATABASE IF NOT EXISTS staging"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.stg_events"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_inc"
+    SLING_ROW_CNT= sling build run tests/build/column_store_modes_project --target CLICKHOUSE --full-refresh -s "+events_inc"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_inc_log"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "CREATE TABLE staging.events_inc_log AS staging.events_inc ENGINE = Log"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "INSERT INTO staging.events_inc_log SELECT * FROM staging.events_inc"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE staging.events_inc"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "RENAME TABLE staging.events_inc_log TO staging.events_inc"
+    sling build run tests/build/column_store_modes_project --target CLICKHOUSE --vars 'extra: true' -s "+events_inc"
+  output_contains:
+    - 'support mutations'
+
+- id: 933
+  name: 'sling build clickhouse failed merge did not insert'
+  group: build
+  after: [932]
+  run: |
+    sling conns exec CLICKHOUSE "SELECT concat('chk:', toString(count())) AS c FROM staging.events_inc"
+    SLING_ROW_CNT= sling conns exec CLICKHOUSE "DROP TABLE IF EXISTS staging.events_inc"
+  output_contains:
+    - 'chk:2'
