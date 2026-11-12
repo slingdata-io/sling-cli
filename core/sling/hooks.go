@@ -143,6 +143,11 @@ var ParseHook = func(any, ParseOptions) (Hook, error) {
 	return nil, g.Error("please use the official sling-cli release for using hooks and pipelines")
 }
 
+// newLegacySQLHook makes the query hook for target_options pre_sql / post_sql (key).
+var newLegacySQLHook = func(conn, sql, key string) (map[string]any, error) {
+	return nil, g.Error("please use the official sling-cli release for using pre_sql / post_sql")
+}
+
 // NewParseOptions creates ParseOption
 func NewParseOptions(stage HookStage, kind HookKind, index int, state RuntimeState, ctx *g.Context) ParseOptions {
 	return ParseOptions{

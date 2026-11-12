@@ -953,3 +953,88 @@ func TestDatastreamCollectUntypedColumns(t *testing.T) {
 		assert.Equal(t, []any{"n1999", "1999"}, data.Rows[1999])
 	}
 }
+
+// TestDatastreamTransformOncePerRow pauses a running stream. The pause makes
+// the row loop run again for the current row, which must not transform the
+// row a second time (SLING-330).
+func TestDatastreamTransformOncePerRow(t *testing.T) {
+	origSampleSize := SampleSize
+	SampleSize = 2
+	defer func() { SampleSize = origSampleSize }()
+
+	cols := NewColumns(
+		Column{Name: "id", Type: BigIntType},
+		Column{Name: "created_on", Type: TimestampType},
+		Column{Name: "created_bam_date", Type: TimestampType},
+	)
+	expr := `if(is_null(value), nil, date_add(date_parse(value, "%Y-%m-%d %H:%M:%S"), -7, "hour"))`
+	transforms := []map[string]string{{"created_on": expr, "created_bam_date": expr}}
+
+	ts := time.Date(2026, 11, 5, 9, 39, 51, 217538000, time.UTC)
+	src := make(chan []any)
+	nextFunc := func(it *Iterator) bool {
+		row, ok := <-src
+		if ok {
+			it.Row = row
+		}
+		return ok
+	}
+
+	ds := NewDatastreamIt(context.Background(), cols, nextFunc)
+	ds.SetConfig(map[string]string{"transforms": g.Marshal(transforms)})
+	ds.Inferred = true
+
+	// the first row has a null, as in the source of SLING-330
+	go func() {
+		src <- []any{int64(0), ts, nil}
+		src <- []any{int64(1), ts, ts}
+	}()
+	require.NoError(t, ds.Start())
+
+	var rows [][]any
+	consumed := make(chan struct{})
+	go func() {
+		defer close(consumed)
+		for row := range ds.Rows() {
+			rows = append(rows, row)
+		}
+	}()
+
+	// the pause lands on the next row that the stream processes
+	paused := make(chan struct{})
+	go func() {
+		ds.Pause()
+		close(paused)
+	}()
+	id := int64(2)
+feed:
+	for {
+		select {
+		case <-paused:
+			break feed
+		case src <- []any{id, ts, ts}:
+			id++
+		}
+	}
+	ds.Unpause()
+	src <- []any{id, ts, ts}
+	close(src)
+	<-consumed
+
+	require.NoError(t, ds.Err())
+	require.Len(t, rows, int(id)+1)
+	assert.Equal(t, TimestampType, ds.Columns[2].Type, "a null in the first row keeps the column type")
+	want := ts.Add(-7 * time.Hour)
+	for _, row := range rows {
+		tVal, err := ds.Sp.CastToTime(row[1])
+		require.NoError(t, err, "row %v", row[0])
+		assert.True(t, want.Equal(tVal), "created_on of row %v is %v, want %v", row[0], tVal, want)
+		if row[0] == int64(0) {
+			assert.Nil(t, row[2])
+			continue
+		}
+		tVal, err = ds.Sp.CastToTime(row[2])
+		require.NoError(t, err, "row %v", row[0])
+		assert.True(t, want.Equal(tVal), "created_bam_date of row %v is %v, want %v", row[0], tVal, want)
+	}
+}

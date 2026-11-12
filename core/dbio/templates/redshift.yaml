@@ -141,6 +141,15 @@ core:
   # Table comment/description template
   add_table_comment: COMMENT ON TABLE {table} IS {comment}
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {dist} {sort} AS ({sql})
+  ctas_dist_style: 'DISTSTYLE {style}'
+  ctas_dist_key: 'DISTSTYLE KEY DISTKEY({expr})'
+  ctas_sort: 'COMPOUND SORTKEY({expr})'
+  # settings.query: postgres driver pool, one conn for each statement. A plain SET leaks or misses.
+  # sling build runs SET LOCAL in a local transaction for each model call.
+  set_query_setting: SET LOCAL {key} = {value}
+
 metadata:
 
   current_database:
@@ -713,6 +722,8 @@ function:
   now: current_timestamp
 
 variable:
+  # Scope of settings.query: see core.set_query_setting
+  query_settings_scope: transaction
   # Redshift default is delete_insert since it doesn't support native MERGE
   default_merge_strategy: delete_insert
   max_string_type: varchar(65535)

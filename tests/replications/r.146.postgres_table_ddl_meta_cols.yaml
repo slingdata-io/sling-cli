@@ -1,0 +1,92 @@
+# SLING-237: a custom table_ddl must define the metadata columns (_sling_*) of the stream.
+# Sling stops before it loads data and names each missing column.
+# Run one stream at a time with --streams (see suite.cli.yaml 865-868).
+
+source: POSTGRES
+target: POSTGRES
+
+defaults:
+  mode: snapshot
+  sql: select * from public.sling_237_src
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_237_src;
+        CREATE TABLE public.sling_237_src (id int, name text);
+        INSERT INTO public.sling_237_src VALUES (1, 'a'), (2, 'b');
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_237_no_meta;
+        DROP TABLE IF EXISTS public.sling_237_no_meta_tmp;
+        DROP TABLE IF EXISTS public.sling_237_with_meta;
+        DROP TABLE IF EXISTS public.sling_237_with_meta_tmp;
+        DROP TABLE IF EXISTS public.sling_237_direct;
+        DROP TABLE IF EXISTS public.sling_237_col_types;
+        DROP TABLE IF EXISTS public.sling_237_col_types_tmp;
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT count(*) as cnt
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name LIKE 'sling\_237\_%\_tmp'
+      into: tmp_tables
+
+    - type: log
+      message: 'SLING-237 tmp tables left: {store.tmp_tables[0].cnt}'
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.sling_237_src
+
+    # the direct path leaves an empty table after the error
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.sling_237_direct
+
+streams:
+  ddl_no_loaded_at:
+    object: public.sling_237_no_meta
+    target_options:
+      table_ddl: create table {table} (id integer, name text)
+
+  ddl_with_loaded_at:
+    object: public.sling_237_with_meta
+    target_options:
+      table_ddl: create table {table} (id integer, name text, _sling_loaded_at bigint)
+    hooks:
+      post:
+        - type: query
+          if: run.status == "success"
+          connection: '{target.name}'
+          query: |
+            SELECT count(_sling_loaded_at) as cnt
+            FROM public.sling_237_with_meta
+          into: with_meta
+
+        - type: log
+          if: run.status == "success"
+          message: 'SLING-237 with_meta loaded_at rows: {store.with_meta[0].cnt}'
+
+        - type: check
+          if: run.status == "success"
+          check: int_parse(store.with_meta[0].cnt) == 2
+          failure_message: '_sling_loaded_at is not set in 2 rows: {store.with_meta}'
+
+  ddl_direct_no_meta:
+    object: public.sling_237_direct
+    mode: full-refresh
+    target_options:
+      direct_insert: true
+      table_ddl: create table {table} (id integer, name text)
+
+  ddl_col_types:
+    object: public.sling_237_col_types
+    target_options:
+      table_ddl: create table {table} ({col_types})

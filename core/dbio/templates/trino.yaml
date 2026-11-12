@@ -29,6 +29,15 @@ core:
   modify_column: alter column {column} type {type}
   use_database: SET SESSION catalog.name = {database}
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {options} AS ({sql})
+  ctas_options: 'WITH ({options})'
+  ctas_array: 'ARRAY[{values}]'
+  # settings.query: the client keeps session properties for each driver conn. A plain SET leaks to the next user of the conn.
+  # sling build pins one conn for each model call, sets, runs, resets, then frees the conn.
+  set_query_setting: SET SESSION {key} = {value}
+  reset_query_setting: RESET SESSION {key}
+
 metadata:
 
   current_database:
@@ -330,6 +339,8 @@ function:
   checksum_datetime: to_unixtime({field}) * 1000000
 
 variable:
+  # Scope of settings.query: see core.set_query_setting
+  query_settings_scope: session
   tmp_folder: /tmp
   bind_string: '?'
   error_filter_table_exists: already exists

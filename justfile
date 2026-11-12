@@ -62,7 +62,7 @@ test-core:
     (cd core/sling && go test -v -run 'TestReplication')
     (cd core/sling && go test -v -run 'TestColumnCasing')
     (cd core/sling && go test -run 'TestCheck')
-    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestCreateTableIfNotExists|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines|TestStateSetConcurrentTasks|TestUnmarshalTaskEnv')
+    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestCreateTableIfNotExists|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines|TestPrepareLegacySQLHooks|TestStateSetConcurrentTasks|TestUnmarshalTaskEnv')
     (cd core/env && go test -v)
     (cd core/secrets && go test -v)
     (cd core/sling/assist && go test -v)
@@ -78,19 +78,19 @@ test-dbio-connection:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio connection"
-    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs')
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestDuckDbConnectionQuackURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:
     echo "TESTING dbio iop"
-    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping|TestRecordStream|TestDatastream|TestConsumeArrowRecords|TestParquetArrowWriter|TestUnwrap|TestApplySelect|TestSelector|TestFlattenRecord|TestCoerceUnsizedDecimalCast|TestDecomposedToRat|TestDecodeJSONIfBase64|TestEncodeRowAsJSONObject|TestCSVSkipLines|TestReaderReadyRetriesFailedOpenAndClose|TestPause|TestParseModifiers|TestTokenizeModifiers|TestCollectInlineIndexes|TestMakeIndexName|TestGenerateCopyStatementEpochPartitionKey|TestRenderStringMethodCallHint|TestOpenTunnelProxy_(ForwardsTraffic|UnreachableProxy)|TestSSHHostKey|TestSSHOptions|TestUntarGz' && cd -
+    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestDuckMapLiteral|TestEnsureBinDuckDB|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping|TestRecordStream|TestDatastream|TestConsumeArrowRecords|TestParquetArrowWriter|TestUnwrap|TestApplySelect|TestSelector|TestFlattenRecord|TestCoerceUnsizedDecimalCast|TestDecomposedToRat|TestDecodeJSONIfBase64|TestEncodeRowAsJSONObject|TestCSVSkipLines|TestReaderReadyRetriesFailedOpenAndClose|TestPause|TestParseModifiers|TestTokenizeModifiers|TestCollectInlineIndexes|TestMakeIndexName|TestGenerateCopyStatementEpochPartitionKey|TestRenderStringMethodCallHint|TestOpenTunnelProxy_(ForwardsTraffic|UnreachableProxy)|TestSSHHostKey|TestSSHOptions|TestUntarGz' && cd -
 
 # Test dbio database
 test-dbio-database:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio database"
-    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestMySQLArrow|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestHana|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL|TestStarRocksNewTransactionFailSafe|TestStarRocksStreamLoadTimeout|TestD1StreamRowsPaged|TestSnowflakeStage')
+    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestMySQLArrow|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestDuckDbConn|TestDuckLakeConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestHana|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL|TestStarRocksNewTransactionFailSafe|TestStarRocksStreamLoadTimeout|TestD1StreamRowsPaged|TestSnowflakeStage|TestPgTimeInRange|TestPgCopy')
     (cd core/dbio/database && go test -run TestChunkByColumnRange)
 
 # Test dbio filesys

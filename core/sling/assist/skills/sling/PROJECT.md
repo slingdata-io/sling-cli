@@ -198,7 +198,7 @@ Scope:
 
 Do not put source-specific logic in a global macro. Keep Stripe-only helpers next to staging.
 
-See https://docs.slingdata.io/concepts/build/macros.md for syntax.
+See https://docs.slingdata.io/concepts/build/models.md#macros for syntax.
 
 ## Full Documentation
 

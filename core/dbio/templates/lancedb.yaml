@@ -114,7 +114,7 @@ core:
 metadata:
   databases: PRAGMA database_list
   
-  current_database: PRAGMA database_list
+  current_database: select current_database()
 
   schemas: |
     select distinct schema_name
@@ -275,10 +275,10 @@ analysis:
     select
       '{schema}' as schema_nm,
       '{table}' as table_nm,
-      '{field}' as field, sum(case when {field}::text ~ '\n' then 1 else 0 end) as cnt_nline, 
-      sum(case when {field}::text ~ '\t' then 1 else 0 end) as cnt_tab, 
-      sum(case when {field}::text ~ ',' then 1 else 0 end) as cnt_comma, 
-      sum(case when {field}::text ~ '"' then 1 else 0 end) as cnt_dquote, 
+      '{field}' as field, sum(case when regexp_matches({field}::text, '\n') then 1 else 0 end) as cnt_nline, 
+      sum(case when regexp_matches({field}::text, '\t') then 1 else 0 end) as cnt_tab, 
+      sum(case when regexp_matches({field}::text, ',') then 1 else 0 end) as cnt_comma, 
+      sum(case when regexp_matches({field}::text, '"') then 1 else 0 end) as cnt_dquote, 
       min(length({field}::text)) as f_min_len, 
       max(length({field}::text)) as f_max_len
     from "{schema}"."{table}"
@@ -340,7 +340,10 @@ native_type_map:
   text: text
   time: time
   timestamp: timestamp
+  "null": string
+  '"null"': string # DuckDB 2.0 CTAS of SELECT NULL
   "timestamp with time zone": timestampz
+  timestamptz_ns: timestampz
   tinyblob: text
   tinyint: smallint
   ubigint: decimal
@@ -348,6 +351,7 @@ native_type_map:
   usmallint: integer
   utinyint: integer
   uuid: uuid
+  variant: json
   varchar: text
 
 general_type_map:

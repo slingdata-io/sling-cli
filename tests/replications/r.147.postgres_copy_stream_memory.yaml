@@ -1,0 +1,79 @@
+# SLING-336: a pgx COPY into Postgres streams the rows.
+# Memory must not grow with the row count (1.6.6 held the full batch in memory).
+# mem_binary uses the binary COPY. mem_text has a timetz column, so it uses the text COPY.
+
+source: POSTGRES
+target: POSTGRES
+
+defaults:
+  mode: truncate
+  target_options:
+    direct_insert: true
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_pg_mem_bin;
+        DROP TABLE IF EXISTS public.sling_pg_mem_txt;
+        CREATE TABLE public.sling_pg_mem_bin (id bigint, a text, b text, ts timestamp, amt numeric(18,4));
+        CREATE TABLE public.sling_pg_mem_txt (id bigint, a text, b text, tz timetz);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_pg_mem_bin;
+        DROP TABLE IF EXISTS public.sling_pg_mem_txt;
+
+streams:
+  mem_binary:
+    sql: |
+      select g as id, md5(g::text) as a, md5((g*2)::text) as b,
+             now()::timestamp - (g || ' seconds')::interval as ts, (g * 1.5)::numeric(18,4) as amt
+      from generate_series(1, 2000000) g
+    object: public.sling_pg_mem_bin
+    hooks:
+      post:
+        - type: query
+          if: run.status == "success"
+          connection: '{target.name}'
+          query: select count(*) as cnt from public.sling_pg_mem_bin
+          into: bin
+
+        - type: log
+          if: run.status == "success"
+          message: 'PG COPY stream sling_pg_mem_bin rows: {store.bin[0].cnt}'
+
+        - type: check
+          if: run.status == "success"
+          check: int_parse(store.bin[0].cnt) == 2000000
+          failure_message: 'wrong row count: {store.bin}'
+
+  mem_text:
+    sql: |
+      select g as id, md5(g::text) as a, md5((g*2)::text) as b, '12:34:56+02' as tz
+      from generate_series(1, 2000000) g
+    object: public.sling_pg_mem_txt
+    hooks:
+      post:
+        - type: query
+          if: run.status == "success"
+          connection: '{target.name}'
+          query: |
+            select count(*) as cnt, count(*) filter (where tz = '12:34:56+02'::timetz) as tz_ok
+            from public.sling_pg_mem_txt
+          into: txt
+
+        - type: log
+          if: run.status == "success"
+          message: 'PG COPY stream sling_pg_mem_txt rows: {store.txt[0].cnt}, tz ok: {store.txt[0].tz_ok}'
+
+        - type: check
+          if: run.status == "success"
+          check: int_parse(store.txt[0].cnt) == 2000000 && int_parse(store.txt[0].tz_ok) == 2000000
+          failure_message: 'wrong rows or timetz values: {store.txt}'

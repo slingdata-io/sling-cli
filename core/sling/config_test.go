@@ -128,6 +128,65 @@ func TestGetFormatMapAPISourceStreamTable(t *testing.T) {
 	}
 }
 
+func TestPrepareLegacySQLHooks(t *testing.T) {
+	newCfg := func(src dbio.Type, postSQL *string) *Config {
+		cfg := &Config{
+			Source: Source{Conn: "SRC", Stream: "users"},
+			Target: Target{Conn: "PG", Object: "public.users", Options: &TargetOptions{
+				PreSQL: g.String("select 1"), PostSQL: postSQL,
+			}},
+			StreamName: "users",
+		}
+		if src == "" {
+			cfg.Source = Source{}
+		}
+		cfg.SrcConn.Type = src
+		cfg.TgtConn.Type = dbio.TypeDbPostgres
+		cfg.initEvaluator()
+		return cfg
+	}
+	legacyKeys := func(hooks []any) (keys []string) {
+		for _, hook := range hooks {
+			keys = append(keys, cast.ToString(hook.(map[string]any)["legacy_sql"]))
+		}
+		return keys
+	}
+
+	// library path (sling.Sling / NewConfig): no ReplicationStream yet
+	cfg := newCfg(dbio.TypeFileLocal, g.String("select 2"))
+	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) && assert.NotNil(t, cfg.ReplicationStream) {
+		assert.Equal(t, []string{"pre_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Pre))
+		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Post))
+		assert.Empty(t, cfg.ReplicationStream.Hooks.PreMerge)
+		assert.Empty(t, cfg.ReplicationStream.Hooks.PostMerge)
+		assert.Nil(t, cfg.Target.Options.PreSQL)
+		assert.Nil(t, cfg.Target.Options.PostSQL)
+	}
+
+	// target only: post_sql is the task itself (DbSQL), no hook
+	cfg = newCfg("", g.String("select 2"))
+	assert.True(t, cfg.isDbSQL())
+	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) {
+		assert.Nil(t, cfg.ReplicationStream)
+		assert.Equal(t, g.String("select 2"), cfg.Target.Options.PostSQL)
+	}
+
+	// API source with post_sql is not DbSQL
+	cfg = newCfg(dbio.TypeApi, g.String("select 2"))
+	assert.False(t, cfg.isDbSQL())
+	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) && assert.NotNil(t, cfg.ReplicationStream) {
+		assert.Equal(t, []string{"post_sql"}, legacyKeys(cfg.ReplicationStream.Hooks.Post))
+	}
+
+	// file target: no injection
+	cfg = newCfg(dbio.TypeDbPostgres, g.String("select 2"))
+	cfg.TgtConn.Type = dbio.TypeFileLocal
+	if assert.NoError(t, cfg.injectLegacySQLHooks(map[string]any{})) {
+		assert.Nil(t, cfg.ReplicationStream)
+		assert.NotNil(t, cfg.Target.Options.PreSQL)
+	}
+}
+
 func TestUnmarshalTaskEnv(t *testing.T) {
 	t.Setenv("SLING_TEST_TASK_SCHEMA", "dbo")
 

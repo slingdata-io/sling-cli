@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	stdnet "net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +89,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
 	dbio.Type("duckdb_csv"):      {name: "duckdb_csv", adjustCol: g.Bool(false)},
+	dbio.Type("duckdb_quack"):    {name: "duckdb_quack", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckLake:          {name: "ducklake", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_az"):     {name: "ducklake_az", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
@@ -704,23 +706,30 @@ func runOneTask(t *testing.T, ctx context.Context, file g.FileItem, connType dbi
 			}
 			dropTableMergeDI := g.R(dbConn.GetTemplateValue("core.drop_table"), "table", table.FullName())
 
-			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
-				taskCfg.Target.Options.PreSQL = g.String(g.R(
-					*preSQL,
-					"drop_view", dropViewSQL,
-					"drop_table_merge_ins", dropTableMergeIns,
-					"drop_table_merge_ui", dropTableMergeUI,
-					"drop_table_merge_di", dropTableMergeDI,
-				))
+			// pre_sql / post_sql are compiled into stream hooks
+			rewriteLegacySQL := func(hooks []any) (out []any) {
+				for _, hook := range hooks {
+					m, ok := hook.(map[string]any)
+					if !ok || m["legacy_sql"] == nil {
+						out = append(out, hook)
+						continue
+					}
+					m["query"] = strings.TrimSpace(g.R(
+						cast.ToString(m["query"]),
+						"drop_view", dropViewSQL,
+						"drop_table_merge_ins", dropTableMergeIns,
+						"drop_table_merge_ui", dropTableMergeUI,
+						"drop_table_merge_di", dropTableMergeDI,
+					))
+					if m["query"] != "" {
+						out = append(out, m)
+					}
+				}
+				return out
 			}
-			if postSQL := taskCfg.Target.Options.PostSQL; postSQL != nil {
-				taskCfg.Target.Options.PostSQL = g.String(g.R(
-					*postSQL,
-					"drop_view", dropViewSQL,
-					"drop_table_merge_ins", dropTableMergeIns,
-					"drop_table_merge_ui", dropTableMergeUI,
-					"drop_table_merge_di", dropTableMergeDI,
-				))
+			if rs := taskCfg.ReplicationStream; rs != nil {
+				rs.Hooks.Pre = rewriteLegacySQL(rs.Hooks.Pre)
+				rs.Hooks.Post = rewriteLegacySQL(rs.Hooks.Post)
 			}
 		}
 	}
@@ -1215,6 +1224,13 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 		testSuite(t, dbio.Type("duckdb_csv"))
 	}
 
+	// DUCKDB_QUACK, against a local Quack server
+	if uri := startQuackServer(t, "t313"); uri != "" {
+		os.Setenv("DUCKDB_QUACK", g.Marshal(g.M("type", "duckdb", "instance", uri, "token", "t313", "duckdb_version", "2.0.0")))
+		connection.GetLocalConns(true) // to load DUCKDB_QUACK
+		testSuite(t, dbio.Type("duckdb_quack"))
+	}
+
 	// MOTHERDUCK
 	testSuite(t, dbio.TypeDbMotherDuck)
 
@@ -1223,6 +1239,43 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 	testSuite(t, dbio.Type("ducklake_az"))
 	testSuite(t, dbio.Type("ducklake_r2"))
 	testSuite(t, dbio.Type("ducklake_s3"))
+}
+
+// startQuackServer starts a DuckDB 2.0 Quack server on a free local port and
+// returns its instance URI. It returns "" when the server does not start.
+func startQuackServer(t *testing.T, token string) string {
+	bin, err := iop.NewDuckDb(context.Background()).EnsureBinDuckDB("2.0.0")
+	if !assert.NoError(t, err) {
+		return ""
+	}
+
+	port, err := g.GetPort("localhost:0")
+	if !assert.NoError(t, err) {
+		return ""
+	}
+
+	cmd := exec.Command(bin, "-no-agent", filepath.Join(t.TempDir(), "quack.duckdb"))
+	stdin, err := cmd.StdinPipe()
+	if !assert.NoError(t, err) || !assert.NoError(t, cmd.Start()) {
+		return ""
+	}
+	t.Cleanup(func() {
+		stdin.Close()
+		cmd.Process.Kill()
+		cmd.Wait()
+	})
+
+	uri := g.F("quack:localhost:%d", port)
+	stdin.Write([]byte(g.F("CALL quack_serve('%s', token = '%s');\n", uri, token)))
+	for range 100 {
+		if c, err := stdnet.Dial("tcp", g.F("localhost:%d", port)); err == nil {
+			c.Close()
+			return uri
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	assert.Fail(t, "quack server did not start on "+uri)
+	return ""
 }
 
 func TestSuiteDatabaseExasol(t *testing.T) {
@@ -1713,7 +1766,13 @@ streams:
 		assert.Equal(t, `"my_schema2"."table2"`, config.Target.Object)
 		assert.Equal(t, g.Bool(true), config.Target.Options.AddNewColumns)
 		assert.EqualValues(t, g.Int64(600000), config.Target.Options.FileMaxRows)
-		assert.EqualValues(t, g.String("some sql"), config.Target.Options.PostSQL)
+		assert.Nil(t, config.Target.Options.PostSQL)
+		if assert.Len(t, config.ReplicationStream.Hooks.Post, 1) {
+			hook, _ := config.ReplicationStream.Hooks.Post[0].(map[string]any)
+			assert.Equal(t, "some sql", hook["query"])
+			assert.Equal(t, "post_sql", hook["legacy_sql"])
+			assert.Equal(t, `run.status == "success"`, hook["if"])
+		}
 		assert.EqualValues(t, false, config.ReplicationStream.Disabled)
 	}
 
@@ -1726,7 +1785,8 @@ streams:
 		assert.Equal(t, []string{}, config.Source.PrimaryKey())
 		assert.Equal(t, "", config.Source.UpdateKey)
 		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
-		assert.EqualValues(t, g.String(""), config.Target.Options.PostSQL)
+		assert.Nil(t, config.Target.Options.PostSQL)
+		assert.Empty(t, config.ReplicationStream.Hooks.Post)
 		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
 		assert.Equal(t, "[{\"name\":\"id\",\"type\":\"string(100)\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))

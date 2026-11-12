@@ -184,10 +184,10 @@ Append `.md` paths to https://docs.slingdata.io to fetch raw markdown. Full inde
 | Build overview | https://docs.slingdata.io/concepts/build.md |
 | Structure & naming | https://docs.slingdata.io/concepts/build/structure.md |
 | Models | https://docs.slingdata.io/concepts/build/models.md |
-| Modes | https://docs.slingdata.io/concepts/build/modes.md |
+| Modes | https://docs.slingdata.io/concepts/build/models.md#materialization-modes |
 | Incremental | https://docs.slingdata.io/concepts/build/incremental.md |
-| Selectors | https://docs.slingdata.io/concepts/build/selectors.md |
-| Seeds | https://docs.slingdata.io/concepts/build/seeds.md |
-| Macros | https://docs.slingdata.io/concepts/build/macros.md |
-| Dev & Prod | https://docs.slingdata.io/concepts/build/dev-prod.md |
+| Selectors | https://docs.slingdata.io/concepts/build/structure.md#selectors |
+| Seeds | https://docs.slingdata.io/concepts/build/models.md#seeds |
+| Macros | https://docs.slingdata.io/concepts/build/models.md#macros |
+| Dev & Prod | https://docs.slingdata.io/concepts/build/structure.md#dev-and-prod-mode |
 | Project layout (four layers) | https://docs.slingdata.io/concepts/project-structure.md |

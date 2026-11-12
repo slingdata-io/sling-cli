@@ -2,6 +2,8 @@ package sling
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -962,6 +964,88 @@ streams:
 	}
 }
 
+func TestReplicationLegacySQLHooks(t *testing.T) {
+	sqlFile := filepath.Join(t.TempDir(), "pre.sql")
+	assert.NoError(t, os.WriteFile(sqlFile, []byte("select 'from_file'"), 0644))
+
+	rd, err := LoadReplicationConfig(g.F(`
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.{stream_table}_copy
+  hooks:
+    pre: [{type: log, message: d_pre}]
+    post_merge: [{type: log, message: d_post_merge}]
+streams:
+  public.users:
+    target_options:
+      pre_sql: "select '{object_name}'"
+      post_sql: "select '{\"a\":1}'"
+  public.orders: {}
+  public.items:
+    target_options:
+      pre_sql: "file://%s"
+      post_sql: "  "
+`, sqlFile))
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NoError(t, rd.Compile(nil)) {
+		return
+	}
+
+	tasks := map[string]*Config{}
+	for _, task := range rd.Tasks {
+		tasks[task.StreamName] = task
+	}
+	queries := func(hooks []any) (out []string) {
+		for _, hook := range hooks {
+			m, _ := hook.(map[string]any)
+			if m["legacy_sql"] != nil {
+				assert.Equal(t, "query", m["type"])
+				assert.Equal(t, "postgres", m["connection"])
+				assert.Equal(t, "error", m["on_failure"])
+				out = append(out, "legacy:"+cast.ToString(m["query"]))
+			} else {
+				out = append(out, cast.ToString(m["message"]))
+			}
+		}
+		return out
+	}
+
+	users := tasks["public.users"]
+	if assert.NotNil(t, users) {
+		assert.Equal(t, []string{"d_pre", `legacy:select '"public"."users_copy"'`}, queries(users.ReplicationStream.Hooks.Pre))
+		assert.Equal(t, []string{"d_post_merge"}, queries(users.ReplicationStream.Hooks.PostMerge))
+		assert.Equal(t, []string{`legacy:select '{"a":1}'`}, queries(users.ReplicationStream.Hooks.Post))
+		assert.Nil(t, users.Target.Options.PreSQL)
+		assert.Nil(t, users.Target.Options.PostSQL)
+
+		// a second prepare must not inject again
+		assert.NoError(t, users.Prepare())
+		assert.Len(t, users.ReplicationStream.Hooks.Pre, 2)
+		assert.Len(t, users.ReplicationStream.Hooks.PostMerge, 1)
+		assert.Len(t, users.ReplicationStream.Hooks.Post, 1)
+		assert.Empty(t, users.ReplicationStream.Hooks.PreMerge)
+	}
+
+	if orders := tasks["public.orders"]; assert.NotNil(t, orders) {
+		assert.Equal(t, []string{"d_pre"}, queries(orders.ReplicationStream.Hooks.Pre))
+		assert.Equal(t, []string{"d_post_merge"}, queries(orders.ReplicationStream.Hooks.PostMerge))
+	}
+
+	if items := tasks["public.items"]; assert.NotNil(t, items) {
+		assert.Equal(t, []string{"d_pre", "legacy:select 'from_file'"}, queries(items.ReplicationStream.Hooks.Pre))
+		assert.Equal(t, []string{"d_post_merge"}, queries(items.ReplicationStream.Hooks.PostMerge))
+	}
+
+	// shared stream config and defaults do not change
+	assert.Len(t, rd.Defaults.Hooks.Pre, 1)
+	assert.Len(t, rd.Defaults.Hooks.PostMerge, 1)
+	assert.NotNil(t, rd.Streams["public.users"].TargetOptions.PreSQL)
+}
+
 func TestMatchStreamsChunkParts(t *testing.T) {
 	rd := ReplicationConfig{Streams: map[string]*ReplicationStreamConfig{
 		"t_surat (part-001)": {},
@@ -1104,9 +1188,6 @@ streams:
 }
 
 func TestExecuteReplicationHookSetsError(t *testing.T) {
-	// offline token payload, so the hooks run without the license server
-	t.Setenv("SLING_TOKEN_PAYLOAD", `{"plan":"cli_pro","valid":true}`)
-
 	runID := "__sling_replication_hook_end__"
 	cases := []struct {
 		name   string

@@ -212,6 +212,28 @@ func TestCLI(t *testing.T) {
 		}
 	}
 
+	// a case waits until the selected cases of its `after` IDs finish
+	var pendingMu sync.Mutex
+	pending := map[int]int{}
+	for _, tc := range tests {
+		pending[tc.ID]++
+	}
+	afterDone := func(ids []int) bool {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		for _, id := range ids {
+			if pending[id] > 0 {
+				return false
+			}
+		}
+		return true
+	}
+	finish := func(id int) {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		pending[id]--
+	}
+
 	done := make(chan struct{})
 	defer close(done)
 
@@ -266,9 +288,9 @@ func TestCLI(t *testing.T) {
 				return strings.TrimSpace(group)
 			}))
 
-			if len(groups) > 0 && !takeGroups(groups) {
+			if !afterDone(tt.After) || (len(groups) > 0 && !takeGroups(groups)) {
 				// do not hold a concurrency slot (or the spawn loop) while
-				// waiting on groups: release the slot and retry async
+				// waiting on deps or groups: release the slot and retry async
 				allTestContext.Wg.Read.Done()
 				go func() {
 					time.Sleep(time.Second)
@@ -283,6 +305,7 @@ func TestCLI(t *testing.T) {
 
 			go func() {
 				defer allDone.Done()
+				defer finish(tt.ID)
 				defer allTestContext.Wg.Read.Done()
 				if len(groups) > 0 {
 					defer releaseGroups(groups)
@@ -291,14 +314,6 @@ func TestCLI(t *testing.T) {
 				t.Run(testID, func(t *testing.T) {
 					running.Set(g.CastToString(tt.ID), tt)
 					defer running.Remove(g.CastToString(tt.ID))
-
-				retry:
-					for _, needID := range tt.After {
-						if running.Has(g.CastToString(needID)) {
-							time.Sleep(time.Second)
-							goto retry
-						}
-					}
 
 					now := time.Now().Format(time.DateTime)
 					env.Println(env.GreenString(g.F("%s -- %02d | ", now, tt.ID) + tt.Run))

@@ -3810,7 +3810,7 @@
 
 - id: 846
   name: 'CDC primary key from source, MySQL to DuckDB target'
-  group: cdc_pk_from_source
+  group: cdc_pk_from_source,duckdb
   run: 'sling run -d -p tests/pipelines/p.62.cdc_pk_from_source.yaml'
   env:
     SLING_STATE: POSTGRES/sling_state_cdc_pk
@@ -3833,6 +3833,7 @@
     - 'CDC primary key for test_db.cdc_pk_uq from unique index id: ["id"]'
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nokey'
     - 'change-capture mode needs a primary key for test_db.cdc_pk_nullable_uq'
+    - 'CDC no-key end hook: errors=4'
   output_does_not_contain:
     - 'created table'
 
@@ -3851,3 +3852,348 @@
     - 'CDC PG key test: orders=3 events=2 items=1'
     - 'CDC PG key test PASSED'
     - 'CDC PG no-key test PASSED'
+
+# CDC from MySQL: a value must land the same from the snapshot and from the
+# binlog merge. Each entry tests one column type. The binlog path does no
+# charset conversion and decodes ENUM, SET, BIT, BINARY and DECIMAL
+# differently from the snapshot. Postgres also rejects 0x00 in text.
+- id: 850
+  name: "CDC MySQL value fidelity: NUL byte in VARCHAR (Postgres rejects 0x00)"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: nul
+    COL_DDL: "VARCHAR(50)"
+    COL_VAL: "CONCAT('a', CHAR(0), 'b')"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity nul PASSED'
+
+- id: 851
+  name: "CDC MySQL value fidelity: latin1 VARCHAR with accents and cp1252 chars"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: latin1
+    COL_DDL: "VARCHAR(50) CHARACTER SET latin1"
+    COL_VAL: "'Québec été l’électeur €'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity latin1 PASSED'
+
+- id: 852
+  name: "CDC MySQL value fidelity: ENUM value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: enum
+    COL_DDL: "ENUM('oui','non','peut-être')"
+    COL_VAL: "'peut-être'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity enum PASSED'
+
+- id: 853
+  name: "CDC MySQL value fidelity: ENUM with values that contain int"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: enum_int
+    COL_DDL: "ENUM('print','paint')"
+    COL_VAL: "'paint'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity enum_int PASSED'
+
+- id: 854
+  name: "CDC MySQL value fidelity: SET value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: set
+    COL_DDL: "SET('a','b','c')"
+    COL_VAL: "'a,c'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity set PASSED'
+
+- id: 855
+  name: "CDC MySQL value fidelity: BINARY(16) with trailing 0x00"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: bin16
+    COL_DDL: "BINARY(16)"
+    COL_VAL: "UNHEX('0102030405060708090A0B0C0D0E0F00')"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity bin16 PASSED'
+
+- id: 856
+  name: "CDC MySQL value fidelity: DECIMAL(30,10) precision"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: dec
+    COL_DDL: "DECIMAL(30,10)"
+    COL_VAL: "12345678901234567890.1234567890"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity dec PASSED'
+
+- id: 857
+  name: "CDC MySQL value fidelity: BIT(3) value"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: bit
+    COL_DDL: "BIT(3)"
+    COL_VAL: "b'101'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity bit PASSED'
+
+- id: 858
+  name: "CDC MySQL value fidelity: zero DATETIME"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: zdate
+    COL_DDL: "DATETIME"
+    COL_VAL: "'0000-00-00 00:00:00'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity zdate PASSED'
+
+- id: 859
+  name: "CDC MySQL value fidelity: TIME over 24 hours"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: POSTGRES
+    SCHEMA: public
+    NAME: time_big
+    COL_DDL: "TIME"
+    COL_VAL: "'100:00:00'"
+    TGT_EXPR: "c::text"
+  output_contains:
+    - 'CDC value fidelity time_big PASSED'
+
+- id: 860
+  name: "CDC MySQL value fidelity: latin1 VARCHAR to MariaDB (no error, bytes replaced)"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: MARIADB
+    SCHEMA: mariadb
+    NAME: latin1_maria
+    COL_DDL: "VARCHAR(50) CHARACTER SET latin1"
+    COL_VAL: "'Québec été l’électeur €'"
+    TGT_EXPR: "HEX(c)"
+  output_contains:
+    - 'CDC value fidelity latin1_maria PASSED'
+
+- id: 861
+  name: "CDC MySQL value fidelity: DECIMAL(30,10) to MariaDB"
+  group: cdc_value_fidelity
+  run: 'sling run -d -p tests/pipelines/cdc/p.40.cdc_mysql_value_fidelity.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_fid
+    TARGET: MARIADB
+    SCHEMA: mariadb
+    NAME: dec_maria
+    COL_DDL: "DECIMAL(30,10)"
+    COL_VAL: "12345678901234567890.1234567890"
+    TGT_EXPR: "HEX(c)"
+  output_contains:
+    - 'CDC value fidelity dec_maria PASSED'
+
+# A failed replication step must not cancel the pipeline context (SLING-227).
+# A read_cdc failure and a stream pre hook abort fail only their step. The
+# replication end hook runs, the later steps run, and on_failure: warn exits 0.
+- id: 862
+  name: 'Failed replication step does not cancel the pipeline'
+  run: 'sling run -d -p tests/pipelines/p.63.replication_failure_isolated.yaml'
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_pk
+  output_contains:
+    - 'change-capture mode needs a primary key for test_db.cdc_pl_nokey'
+    - 'CDC end hook ran after read_cdc failure'
+    - 'after steps: cdc=warning after_cdc=success rows=1 hook=warning after_hook=success'
+  output_does_not_contain:
+    - 'context canceled'
+    - 'fatal'
+
+# SLING-313: a 1.5.x CLI must work, with no 2.0 flag.
+- id: 863
+  name: 'DUCKDB_VERSION=1.5.5 works with no 2.0 flag'
+  group: duckdb
+  env:
+    DUCKDB_VERSION: '1.5.5'
+    DUCK_863: 'duckdb:///tmp/sling_863/t.duckdb'
+  run: |
+    rm -rf /tmp/sling_863 && mkdir -p /tmp/sling_863
+    sling conns test DUCK_863
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn DUCK_863 --tgt-object main.t863 --mode full-refresh
+    sling run --src-conn DUCK_863 --src-stream 'select count(*) as cnt, version() as ver from main.t863' --stdout
+  output_contains:
+    - 'success!'
+    - 'inserted 1000 rows'
+    - '1000,v1.5.5'
+  output_does_not_contain:
+    - 'no-agent'
+    - 'storage-version'
+
+# SLING-313: a MotherDuck conn pre-downloads its own DuckDB version, not the 2.0 default.
+- id: 864
+  name: 'DuckDB 2.0 default: MotherDuck pre-downloads the MotherDuck version'
+  group: duckdb
+  env:
+    SLING_HOME_DIR: /tmp/sling_864/home
+  run: |
+    rm -rf /tmp/sling_864 && mkdir -p /tmp/sling_864/home
+    cp "$HOME/.sling/env.yaml" /tmp/sling_864/home/env.yaml
+    sling run --src-conn MOTHERDUCK --src-stream 'select 1 as a' --tgt-object file:///tmp/sling_864/out.csv
+    ls /tmp/sling_864/home/bin/duckdb
+    test -d /tmp/sling_864/home/bin/duckdb/2.0.0 && echo 'UNEXPECTED duckdb 2.0.0 download'
+    echo 'done 864'
+  output_contains:
+    - 'execution succeeded'
+    - 'done 864'
+  output_does_not_contain:
+    - 'UNEXPECTED duckdb 2.0.0 download'
+
+# SLING-237: a custom table_ddl without a metadata column (_sling_*) fails early with a clear message.
+- id: 865
+  name: 'SLING-237: snapshot + table_ddl without _sling_loaded_at fails early (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_no_loaded_at'
+  err: true
+  output_contains:
+    - 'does not define column "_sling_loaded_at"'
+    - 'mode "snapshot"'
+    - 'SLING-237 tmp tables left: 0'
+  output_does_not_contain:
+    - 'provided field'
+    - 'could not insert into'
+
+- id: 866
+  name: 'SLING-237: snapshot + table_ddl with _sling_loaded_at succeeds (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_with_loaded_at'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+    - 'SLING-237 with_meta loaded_at rows: 2'
+
+- id: 867
+  name: 'SLING-237: direct_insert + full-refresh + table_ddl without the metadata column fails early (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_direct_no_meta'
+  env:
+    SLING_LOADED_AT_COLUMN: 'true'
+  err: true
+  output_contains:
+    - 'does not define column "_sling_loaded_at"'
+    - 'mode "full-refresh"'
+  output_does_not_contain:
+    - 'provided field'
+    - 'could not insert into'
+
+- id: 868
+  name: 'SLING-237: snapshot + table_ddl with {col_types} succeeds (Postgres)'
+  group: sling_237
+  run: 'sling run -d -r tests/replications/r.146.postgres_table_ddl_meta_cols.yaml --streams ddl_col_types'
+  rows: 2
+  output_contains:
+    - 'execution succeeded'
+
+# SLING-336: the peak RSS of a 2M-row load must stay low (1.6.6 used 1.5 GB, 1.6.5 used 124 MB)
+- id: 869
+  name: 'SLING-336: Postgres binary COPY streams the rows (peak RSS < 400 MB)'
+  group: pg_copy_mem
+  run: |
+    sling run -d -r tests/replications/r.147.postgres_copy_stream_memory.yaml --streams mem_binary & pid=$!
+    peak=0; while kill -0 $pid 2>/dev/null; do rss=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' ') || true; [ -n "$rss" ] && [ "$rss" -gt "$peak" ] && peak=$rss; sleep 0.5; done
+    wait $pid
+    echo "PG COPY peak RSS KB: $peak"
+    [ "$peak" -lt 409600 ] && echo 'PG COPY RSS OK'
+  rows: 2000000
+  output_contains:
+    - 'execution succeeded'
+    - 'PG COPY stream sling_pg_mem_bin rows: 2000000'
+    - 'PG COPY RSS OK'
+
+- id: 870
+  name: 'SLING-336: Postgres text COPY (timetz) streams the rows (peak RSS < 400 MB)'
+  group: pg_copy_mem
+  run: |
+    sling run -d -r tests/replications/r.147.postgres_copy_stream_memory.yaml --streams mem_text & pid=$!
+    peak=0; while kill -0 $pid 2>/dev/null; do rss=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' ') || true; [ -n "$rss" ] && [ "$rss" -gt "$peak" ] && peak=$rss; sleep 0.5; done
+    wait $pid
+    echo "PG COPY peak RSS KB: $peak"
+    [ "$peak" -lt 409600 ] && echo 'PG COPY RSS OK'
+  rows: 2000000
+  output_contains:
+    - 'execution succeeded'
+    - 'PG COPY stream sling_pg_mem_txt rows: 2000000, tz ok: 2000000'
+    - 'PG COPY RSS OK'
+
+# SLING-339: legacy pre_sql / post_sql run as stream hooks on the CLI single-task path
+- id: 884
+  name: 'SLING-339: pre_sql / post_sql run as hooks (sling run, two statements)'
+  group: legacy_sql_hooks
+  run: |
+    sling run -d --src-stream file://tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.legacy_sql_hooks --mode full-refresh --tgt-options '{pre_sql: "drop table if exists public.legacy_sql_hooks_cnt", post_sql: "drop table if exists public.legacy_sql_hooks_cnt; create table public.legacy_sql_hooks_cnt as select count(*) as cnt from {object_full_name}"}'
+  rows: 18
+  output_contains:
+    - 'execution succeeded'
+
+- id: 885
+  name: 'SLING-339: post_sql hook wrote the row count'
+  group: legacy_sql_hooks
+  run: 'sling conns exec POSTGRES "select cnt from public.legacy_sql_hooks_cnt"'
+  output_contains:
+    - '18'
+  after: [884]
+
+- id: 886
+  name: 'SLING-339: pre_sql without a CLI Pro token fails at compile'
+  group: legacy_sql_hooks
+  run: |
+    SLING_CLI_TOKEN='' sling run -d --src-stream file://tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.legacy_sql_hooks_nopro --mode full-refresh --tgt-options '{pre_sql: "select 1"}'
+  err: true
+  output_contains:
+    - 'pre_sql / post_sql'
+  output_does_not_contain:
+    - 'execution succeeded'
+    - 'reading from source file system'

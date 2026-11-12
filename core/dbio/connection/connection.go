@@ -665,7 +665,11 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("project", U.Hostname())
 				setIfMissing("instance", pathValue)
 			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
-				setIfMissing("instance", U.Path())
+				if rest := strings.TrimPrefix(c.URL(), "duckdb://"); c.Type == dbio.TypeDbDuckDb && strings.HasPrefix(rest, "quack:") {
+					setIfMissing("instance", strings.Split(rest, "?")[0]) // remote Quack server, not a path
+				} else {
+					setIfMissing("instance", U.Path())
+				}
 				setIfMissing("schema", "main")
 			case dbio.TypeDbDBase:
 				setIfMissing("path", database.DbasePathFromURL(c.URL()))
@@ -975,7 +979,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("schema", "main")
 		template = "dbase://{path}"
 	case dbio.TypeDbDuckDb:
-		if val, ok := c.Data["instance"]; ok {
+		if val, ok := c.Data["instance"]; ok && strings.HasPrefix(cast.ToString(val), "quack:") {
+			// remote Quack server: keep as-is
+		} else if ok {
 			dbURL, err := net.NewURL(cast.ToString(val))
 			if err == nil && g.In(dbURL.U.Scheme, "s3", "http", "https") {
 				setIfMissing("http_url", dbURL.String())

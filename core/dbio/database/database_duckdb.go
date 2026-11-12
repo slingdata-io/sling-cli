@@ -98,14 +98,71 @@ func (conn *DuckDbConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		return ddl, g.Error(err)
 	}
 
+	// a temp table is local to the client, so the staging table of a Quack
+	// target is a normal remote table (the name has a random suffix)
+	if temporary && conn.isQuack() {
+		ddl = strings.Replace(ddl, "create temp table", "create table", 1)
+	}
+
 	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
 	if err != nil {
 		return ddl, g.Error(err)
 	}
 
-	ddl = appendIndexesAndComments(strings.TrimSpace(ddl), conn, table, data, temporary)
+	if conn.isQuack() {
+		// Quack 2.0.0 cannot run CREATE INDEX on a remote catalog
+		if !temporary && len(table.Indexes(data.Columns)) > 0 {
+			g.Warn("indexes are not supported on a Quack server, skipping them for %s", table.FullName())
+		}
+		ddl = appendColumnComments(strings.TrimSpace(ddl), conn, table, data, temporary)
+	} else {
+		ddl = appendIndexesAndComments(strings.TrimSpace(ddl), conn, table, data, temporary)
+	}
 
 	return strings.TrimSpace(ddl), nil
+}
+
+// GetTableColumns falls back to a query for a view on a Quack server, because
+// its information_schema has no columns for remote views.
+func (conn *DuckDbConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+	if err == nil || !conn.isQuack() || table.IsQuery() {
+		return columns, err
+	}
+
+	// a missing table also has no columns: fall back only for an existing object
+	exists, qErr := conn.Query(g.F(
+		"select 1 from information_schema.tables where table_schema = '%s' and table_name = '%s'"+noDebugKey,
+		strings.ReplaceAll(table.Schema, "'", "''"), strings.ReplaceAll(table.Name, "'", "''"),
+	))
+	if qErr != nil || len(exists.Rows) == 0 {
+		return columns, err
+	}
+
+	query, qErr := ParseTableName("select * from "+table.FDQN(), conn.GetType())
+	if qErr != nil {
+		return columns, err
+	}
+	if columns, qErr = conn.GetSQLColumns(query); qErr != nil || len(columns) == 0 {
+		return iop.Columns{}, err
+	}
+
+	if len(fields) > 0 {
+		filtered := iop.Columns{}
+		for _, field := range fields {
+			col := columns.GetColumn(field)
+			if col == nil {
+				return iop.Columns{}, g.Error("provided field '%s' not found in table %s", field, table.FullName())
+			}
+			filtered = append(filtered, *col)
+		}
+		columns = filtered
+	}
+	for i := range columns {
+		columns[i].Database, columns[i].Schema, columns[i].Table = table.Database, table.Schema, table.Name
+	}
+	table.Columns = columns
+	return columns, nil
 }
 
 func (conn *DuckDbConn) dbPath() (string, error) {
@@ -116,6 +173,11 @@ func (conn *DuckDbConn) dbPath() (string, error) {
 	}
 	dbPath := strings.ReplaceAll(conn.GetURL(), "?"+dbPathU.U.RawQuery, "")
 	return dbPath, nil
+}
+
+// isQuack reports whether the instance is a remote Quack server (quack:<host>[:<port>]).
+func (conn *DuckDbConn) isQuack() bool {
+	return conn.duck != nil && conn.duck.QuackURI() != ""
 }
 
 // useADBC reports whether this connection runs on its ADBC handle alone.
@@ -140,11 +202,13 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	connURL := conn.GetURL()
 
-	dbPath, err := conn.dbPath()
-	if err != nil {
-		return g.Error(err, "could not get db path")
-	} else if conn.GetType() != dbio.TypeDbMotherDuck && !g.PathExists(dbPath) {
-		g.Trace("The file %s does not exist, however it will be created if needed.", dbPath)
+	if !conn.isQuack() {
+		dbPath, err := conn.dbPath()
+		if err != nil {
+			return g.Error(err, "could not get db path")
+		} else if conn.GetType() != dbio.TypeDbMotherDuck && !g.PathExists(dbPath) {
+			g.Trace("The file %s does not exist, however it will be created if needed.", dbPath)
+		}
 	}
 
 	connPool.Mux.Lock()
@@ -189,6 +253,10 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	// connect first, so that session SQL (e.g. DuckLake ATTACH / USE) is set
+	if err = reconnectIfClosed(conn); err != nil {
+		return nil, g.Error(err, "Could not reconnect")
+	}
 	if conn.useADBC() {
 		return conn.adbc.ExecMultiContext(ctx, sqls...)
 	}
@@ -196,6 +264,9 @@ func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (r
 }
 
 func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+	if err = reconnectIfClosed(conn); err != nil {
+		return nil, g.Error(err, "Could not reconnect")
+	}
 	if conn.useADBC() {
 		return conn.adbc.ExecContext(ctx, sql, args...)
 	}

@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func getTestFixturePath(name string) string {
@@ -542,6 +544,385 @@ func TestConfigCallDatabase(t *testing.T) {
 	_, err := te.CompileModel(model, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "OTHER_DB", model.Config.Database)
+}
+
+func TestModelSettingsUnmarshal(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte(`settings:
+  table: {storage_policy: p, index_granularity: 1024}
+  query: {max_memory_usage: 10000000000, ratio: 0.5, flag: true}
+`), &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, SettingValues{"storage_policy": "p", "index_granularity": 1024}, cfg.Settings.Table)
+	assert.Equal(t, SettingValues{"max_memory_usage": 10000000000, "ratio": 0.5, "flag": true}, cfg.Settings.Query)
+}
+
+func TestModelSettingsUnknownKey(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings: {storage_policy: p}\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown settings key 'storage_policy', use settings.table or settings.query")
+
+	err = yaml.Unmarshal([]byte("settings: {table: 3}\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table must be a map")
+}
+
+func TestModelSettingsBadValue(t *testing.T) {
+	for name, value := range map[string]string{"map": "{a: 1}", "list": "[1, 2]", "null": "null"} {
+		var cfg ModelConfig
+		err := yaml.Unmarshal([]byte("settings:\n  query:\n    k: "+value+"\n"), &cfg)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), "settings.query.k: value type", name)
+		assert.Contains(t, err.Error(), "use a string, number or bool", name)
+	}
+}
+
+func TestModelSettingsBadName(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings:\n  table:\n    max memory: 1\n"), &cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table.max memory: not a valid setting name")
+}
+
+func TestModelSettingsMerge(t *testing.T) {
+	base := ModelSettings{Table: SettingValues{"a": 1, "b": 1}, Query: SettingValues{"x": 1}}
+	over := ModelSettings{Table: SettingValues{"b": 2}, Query: SettingValues{"y": 2}}
+
+	got := base.Merge(over)
+	assert.Equal(t, SettingValues{"a": 1, "b": 2}, got.Table)
+	assert.Equal(t, SettingValues{"x": 1, "y": 2}, got.Query)
+	assert.Equal(t, SettingValues{"a": 1, "b": 1}, base.Table)
+	assert.Equal(t, SettingValues{"b": 2}, over.Table)
+
+	got.Table["a"] = 9
+	assert.Equal(t, 1, base.Table["a"])
+
+	empty := (&ModelSettings{}).Merge(ModelSettings{})
+	assert.Nil(t, empty.Table)
+	assert.Nil(t, empty.Query)
+}
+
+func TestExprListUnmarshal(t *testing.T) {
+	var cfg ModelConfig
+	require.NoError(t, yaml.Unmarshal([]byte("partition_by: d\n"), &cfg))
+	assert.Equal(t, ExprList{"d"}, cfg.PartitionBy)
+
+	cfg = ModelConfig{}
+	require.NoError(t, yaml.Unmarshal([]byte("partition_by: [a, b]\n"), &cfg))
+	assert.Equal(t, ExprList{"a", "b"}, cfg.PartitionBy)
+	assert.Equal(t, "a, b", cfg.PartitionBy.SQL())
+
+	for _, doc := range []string{"partition_by: {a: 1}\n", "partition_by: [a, {b: 1}]\n", "partition_by: [a, [b]]\n"} {
+		err := yaml.Unmarshal([]byte(doc), &ModelConfig{})
+		require.Error(t, err, doc)
+		assert.Contains(t, err.Error(), "must be a string or a list of strings", doc)
+	}
+
+	assert.Equal(t, "", ExprList(nil).SQL())
+}
+
+func TestModelSettingsDottedKey(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings:\n  table:\n    delta.autoOptimize.optimizeWrite: true\n    toast.autovacuum_enabled: false\n"), &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, true, cfg.Settings.Table["delta.autoOptimize.optimizeWrite"])
+
+	for _, key := range []string{"a..b", ".a", "1a"} {
+		err := yaml.Unmarshal([]byte("settings:\n  table:\n    '"+key+"': 1\n"), &ModelConfig{})
+		require.Error(t, err, key)
+		assert.Contains(t, err.Error(), "not a valid setting name", key)
+	}
+}
+
+func TestModelSettingsTableListMap(t *testing.T) {
+	var cfg ModelConfig
+	err := yaml.Unmarshal([]byte("settings:\n  table:\n    partitioned_by: [d]\n    labels: {team: data}\n"), &cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []any{"d"}, cfg.Settings.Table["partitioned_by"])
+	assert.Equal(t, map[string]any{"team": "data"}, cfg.Settings.Table["labels"])
+
+	err = yaml.Unmarshal([]byte("settings:\n  query:\n    x: [1]\n"), &ModelConfig{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "use a string, number or bool")
+
+	for _, v := range []string{"[[1]]", "[{a: 1}]", "{a: [1]}"} {
+		err = yaml.Unmarshal([]byte("settings:\n  table:\n    x: "+v+"\n"), &ModelConfig{})
+		require.Error(t, err, v)
+		assert.Contains(t, err.Error(), "use a string, number, bool, list or map", v)
+	}
+}
+
+func TestModelConfigCrossEngineMerge(t *testing.T) {
+	yes, no := true, false
+	parent := &BuildConfig{Defaults: BuildDefaults{
+		ClusterBy: ExprList{"a"}, Transient: &yes, Sort: ExprList{"d"},
+	}}
+	child := &BuildConfig{Defaults: BuildDefaults{Dist: "id", Transient: &no}}
+
+	merged := mergeConfigs(parent, child)
+	assert.Equal(t, ExprList{"a"}, merged.Defaults.ClusterBy)
+	require.NotNil(t, merged.Defaults.Transient)
+	assert.False(t, *merged.Defaults.Transient)
+	assert.Equal(t, "id", merged.Defaults.Dist)
+	assert.Equal(t, ExprList{"d"}, merged.Defaults.Sort)
+
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", "target: PG\ndefaults:\n  cluster_by: [a]\n  transient: true\n")
+	write("a.sql", "/**\ntransient: false\n**/\nSELECT 1")
+	write("b.sql", "SELECT 2")
+
+	project, err := LoadProject(dir)
+	require.NoError(t, err)
+	a, b := project.Models["a"], project.Models["b"]
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	require.NotNil(t, a.Config.Transient)
+	assert.False(t, *a.Config.Transient)
+	require.NotNil(t, b.Config.Transient)
+	assert.True(t, *b.Config.Transient)
+	assert.Equal(t, ExprList{"a"}, b.Config.ClusterBy)
+}
+
+func TestConfigCallCrossEngine(t *testing.T) {
+	project := &BuildProject{Models: map[string]*Model{}, Seeds: map[string]*Seed{}}
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(cluster_by=['a','b'], partition_by='d', transient=true, unlogged=false, dist='id', sort='d') }} SELECT 1"}
+	_, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	c := model.Config
+	assert.Equal(t, ExprList{"a", "b"}, c.ClusterBy)
+	assert.Equal(t, ExprList{"d"}, c.PartitionBy)
+	require.NotNil(t, c.Transient)
+	assert.True(t, *c.Transient)
+	require.NotNil(t, c.Unlogged)
+	assert.False(t, *c.Unlogged)
+	assert.Equal(t, "id", c.Dist)
+	assert.Equal(t, ExprList{"d"}, c.Sort)
+
+	for _, key := range []string{"partition_by", "cluster_by", "sort"} {
+		model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(" + key + "={'field': 'd'}) }} SELECT 1"}
+		_, err := te.CompileModel(model, nil)
+		require.Error(t, err, key)
+		assert.Contains(t, err.Error(), "model 'cfg': "+key+" must be a string or a list of strings")
+	}
+}
+
+func TestValidateDatabaseSupportCrossEngine(t *testing.T) {
+	yes := true
+	all := ModelConfig{
+		OrderBy: "a", PartitionBy: ExprList{"a"}, ClusterBy: ExprList{"a"}, PrimaryKey: "a", TTL: "a",
+		Transient: &yes, Unlogged: &yes, Dist: "id", Sort: ExprList{"a"},
+		Settings: ModelSettings{Table: SettingValues{"x": 1}, Query: SettingValues{"y": 1}},
+	}
+
+	noSettings := []string{"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.table", "settings.query"}
+	ignored := map[dbio.Type][]string{
+		dbio.TypeDbPostgres:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "dist", "sort"},
+		dbio.TypeDbSnowflake:  {"order_by", "partition_by", "primary_key", "ttl", "unlogged", "dist", "sort"},
+		dbio.TypeDbBigQuery:   {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbDatabricks: {"order_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
+		dbio.TypeDbRedshift:   {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "settings.table"},
+		dbio.TypeDbTrino:      {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
+		dbio.TypeDbAthena:     {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort", "settings.query"},
+		dbio.TypeDbStarRocks:  {"order_by", "partition_by", "cluster_by", "primary_key", "ttl", "transient", "unlogged", "dist", "sort"},
+		dbio.TypeDbProton:     noSettings,
+	}
+	for dbType, want := range ignored {
+		assert.Equal(t, want, newCTASDialect(dbType, nil).unsupported(all), string(dbType))
+		assert.Empty(t, newCTASDialect(dbType, nil).unsupported(ModelConfig{}), string(dbType))
+	}
+	assert.Equal(t,
+		[]string{"cluster_by", "transient", "unlogged", "dist", "sort"},
+		newCTASDialect(dbio.TypeDbClickhouse, nil).unsupported(all))
+	assert.Empty(t, newCTASDialect(dbio.TypeDbClickhouse, nil).unsupported(ModelConfig{}))
+
+	newBuild := func(dbType dbio.Type, cfg ModelConfig) *Build {
+		return &Build{
+			Project: &BuildProject{
+				Models: map[string]*Model{"m": {Name: "m", FullTableName: "s.t", Config: cfg}},
+				Seeds:  map[string]*Seed{},
+			},
+			dbType: dbType,
+		}
+	}
+	table := func(v any) ModelConfig {
+		return ModelConfig{Settings: ModelSettings{Table: SettingValues{"x": v}}}
+	}
+
+	err := newBuild(dbio.TypeDbRedshift, ModelConfig{Dist: "Key"}).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model 'm': dist: key needs a column name")
+
+	err = newBuild(dbio.TypeDbClickhouse, table([]any{1})).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table.x: lists are not supported on clickhouse")
+
+	err = newBuild(dbio.TypeDbProton, table(map[string]any{"a": 1})).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings.table.x: maps are not supported on proton")
+
+	err = newBuild(dbio.TypeDbDatabricks, ModelConfig{PartitionBy: ExprList{"d"}, ClusterBy: ExprList{"r"}}).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "partition_by and cluster_by do not work together on databricks")
+
+	err = newBuild(dbio.TypeDbPostgres, table([]any{1})).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lists are not supported on postgres")
+
+	// a view has no table clauses
+	view := table([]any{1})
+	view.Mode = "view"
+	assert.NoError(t, newBuild(dbio.TypeDbPostgres, view).validateDatabaseSupport())
+}
+
+func TestParseYAMLFrontmatter_ClickhouseKeys(t *testing.T) {
+	sql := `/**
+order_by: (a, b)
+partition_by: toYYYYMM(ts)
+primary_key: a
+ttl: ts + INTERVAL 1 YEAR
+settings:
+  table:
+    storage_policy: p
+  query:
+    max_threads: 3
+**/
+SELECT 1`
+
+	cfg, _, hasFM, err := parseYAMLFrontmatter(sql)
+	require.NoError(t, err)
+	assert.True(t, hasFM)
+	assert.Equal(t, "(a, b)", cfg.OrderBy)
+	assert.Equal(t, ExprList{"toYYYYMM(ts)"}, cfg.PartitionBy)
+	assert.Equal(t, "a", cfg.PrimaryKey)
+	assert.Equal(t, "ts + INTERVAL 1 YEAR", cfg.TTL)
+	assert.Equal(t, SettingValues{"storage_policy": "p"}, cfg.Settings.Table)
+	assert.Equal(t, SettingValues{"max_threads": 3}, cfg.Settings.Query)
+}
+
+func TestMergeConfigsClickhouseDefaults(t *testing.T) {
+	parent := &BuildConfig{Defaults: BuildDefaults{
+		Engine:  "MergeTree()",
+		OrderBy: "id",
+		TTL:     "ts + INTERVAL 1 DAY",
+		Settings: ModelSettings{
+			Table: SettingValues{"a": 1, "b": 1},
+			Query: SettingValues{"x": 1},
+		},
+	}}
+	child := &BuildConfig{Defaults: BuildDefaults{
+		Engine:  "ReplacingMergeTree()",
+		OrderBy: "(id, ts)",
+		Settings: ModelSettings{
+			Table: SettingValues{"b": 2},
+			Query: SettingValues{"y": 2},
+		},
+	}}
+
+	merged := mergeConfigs(parent, child)
+	assert.Equal(t, "ReplacingMergeTree()", merged.Defaults.Engine)
+	assert.Equal(t, "(id, ts)", merged.Defaults.OrderBy)
+	assert.Equal(t, "ts + INTERVAL 1 DAY", merged.Defaults.TTL)
+	assert.Equal(t, SettingValues{"a": 1, "b": 2}, merged.Defaults.Settings.Table)
+	assert.Equal(t, SettingValues{"x": 1, "y": 2}, merged.Defaults.Settings.Query)
+	assert.Equal(t, SettingValues{"a": 1, "b": 1}, parent.Defaults.Settings.Table)
+}
+
+func TestAddModelClickhouseDefaults(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0644))
+	}
+	write("sling_build.yml", `target: CH
+defaults:
+  engine: MergeTree()
+  settings:
+    table:
+      index_granularity: 4096
+    query:
+      log_comment: x
+`)
+	write("a.sql", "/**\nsettings:\n  table:\n    index_granularity: 1024\n**/\nSELECT 1")
+	write("b.sql", "SELECT 2")
+
+	project, err := LoadProject(dir)
+	require.NoError(t, err)
+	a, b := project.Models["a"], project.Models["b"]
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+
+	assert.Equal(t, "MergeTree()", a.Config.Engine)
+	assert.Equal(t, "MergeTree()", b.Config.Engine)
+	assert.Equal(t, SettingValues{"index_granularity": 1024}, a.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"log_comment": "x"}, a.Config.Settings.Query)
+	assert.Equal(t, SettingValues{"index_granularity": 4096}, b.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"log_comment": "x"}, b.Config.Settings.Query)
+
+	a.Config.Settings.Query["log_comment"] = "changed"
+	assert.Equal(t, "x", b.Config.Settings.Query["log_comment"])
+}
+
+func TestConfigCallClickhouseKeys(t *testing.T) {
+	project := &BuildProject{Models: map[string]*Model{}, Seeds: map[string]*Seed{}}
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(order_by='(a, b)', partition_by='toYYYYMM(ts)', primary_key='a', ttl='ts + INTERVAL 1 YEAR', settings={'table': {'storage_policy': 'p'}, 'query': {'max_threads': 3}}) }} SELECT 1"}
+	_, err := te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "(a, b)", model.Config.OrderBy)
+	assert.Equal(t, ExprList{"toYYYYMM(ts)"}, model.Config.PartitionBy)
+	assert.Equal(t, "a", model.Config.PrimaryKey)
+	assert.Equal(t, "ts + INTERVAL 1 YEAR", model.Config.TTL)
+	assert.Equal(t, SettingValues{"storage_policy": "p"}, model.Config.Settings.Table)
+	assert.Equal(t, SettingValues{"max_threads": 3}, model.Config.Settings.Query)
+
+	// config() merges over the defaults key by key
+	model = &Model{Name: "cfg2", Schema: "marts", RawSQL: "{{ config(settings={'query': {'max_threads': 3}}) }} SELECT 1"}
+	model.Config.Settings = ModelSettings{Query: SettingValues{"log_comment": "x"}}
+	_, err = te.CompileModel(model, nil)
+	require.NoError(t, err)
+	assert.Equal(t, SettingValues{"log_comment": "x", "max_threads": 3}, model.Config.Settings.Query)
+}
+
+func TestConfigCallSettingsError(t *testing.T) {
+	project := &BuildProject{Models: map[string]*Model{}, Seeds: map[string]*Seed{}}
+	te := NewTemplateEngine(project, nil)
+
+	model := &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(settings={'x': {'a': 1}}) }} SELECT 1"}
+	_, err := te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown settings key 'x', use settings.table or settings.query")
+
+	model = &Model{Name: "cfg", Schema: "marts", RawSQL: "{{ config(settings='x') }} SELECT 1"}
+	_, err = te.CompileModel(model, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settings must be a dict with table and/or query")
+}
+
+func TestValidateDatabaseSupportClickhouseKeys(t *testing.T) {
+	newBuild := func(dbType dbio.Type, cfg ModelConfig) *Build {
+		return &Build{
+			Project: &BuildProject{
+				Models: map[string]*Model{"m": {Name: "m", FullTableName: "s.t", Config: cfg}},
+				Seeds:  map[string]*Seed{},
+			},
+			dbType: dbType,
+		}
+	}
+
+	err := newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model 'm': primary_key needs order_by or unique_key")
+
+	assert.NoError(t, newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a", OrderBy: "(a, b)"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbClickhouse, ModelConfig{PrimaryKey: "a", UniqueKey: "a"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbPostgres, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport())
+	assert.NoError(t, newBuild(dbio.TypeDbProton, ModelConfig{PrimaryKey: "a"}).validateDatabaseSupport())
 }
 
 func loadDatabaseProject(t *testing.T, opts ...BuildOptions) *BuildProject {

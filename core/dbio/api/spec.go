@@ -24,6 +24,9 @@ import (
 )
 
 func LoadSpec(specBody string) (spec Spec, err error) {
+	if strings.TrimSpace(specBody) == "" {
+		return spec, g.Error("spec body is empty")
+	}
 
 	// set maps
 	err = yaml.Unmarshal([]byte(specBody), &spec.originalMap)

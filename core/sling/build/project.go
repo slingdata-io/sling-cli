@@ -73,6 +73,162 @@ type ModelConfig struct {
 	DropCascade   *bool         `yaml:"drop_cascade,omitempty"` // default false; CASCADE on DROP when true
 	Rewrite       *bool         `yaml:"rewrite,omitempty"`      // default true; set false to skip bare-name rewrite
 	Tests         []any         `yaml:"tests,omitempty"`        // declarative data tests
+	OrderBy       string        `yaml:"order_by,omitempty"`     // raw ClickHouse expression
+	PartitionBy   ExprList      `yaml:"partition_by,omitempty"`
+	ClusterBy     ExprList      `yaml:"cluster_by,omitempty"`
+	PrimaryKey    string        `yaml:"primary_key,omitempty"`
+	TTL           string        `yaml:"ttl,omitempty"`
+	Transient     *bool         `yaml:"transient,omitempty"`
+	Unlogged      *bool         `yaml:"unlogged,omitempty"`
+	Dist          string        `yaml:"dist,omitempty"` // even, all, auto, or a column expression
+	Sort          ExprList      `yaml:"sort,omitempty"`
+	Settings      ModelSettings `yaml:"settings,omitempty"`
+}
+
+// ExprList is a list of raw SQL expressions. YAML accepts a string or a list of strings.
+type ExprList []string
+
+// UnmarshalYAML decodes a string or a list of strings.
+func (l *ExprList) UnmarshalYAML(node *yaml.Node) error {
+	errMsg := "must be a string or a list of strings"
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Value == "" {
+			*l = nil
+			return nil
+		}
+		*l = ExprList{node.Value}
+	case yaml.SequenceNode:
+		items := make(ExprList, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode {
+				return g.Error(errMsg)
+			}
+			items = append(items, item.Value)
+		}
+		*l = items
+	default:
+		return g.Error(errMsg)
+	}
+	return nil
+}
+
+// SQL joins the items with ", ".
+func (l ExprList) SQL() string {
+	return strings.Join(l, ", ")
+}
+
+var settingNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
+// SettingValues maps a ClickHouse setting name to a string, number or bool.
+type SettingValues map[string]any
+
+// isSettingScalar reports whether val is a string, number or bool.
+func isSettingScalar(val any) bool {
+	switch val.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return true
+	}
+	return false
+}
+
+// validate checks the name and the value type of each setting.
+// Only the settings.table scope accepts lists of scalars and maps of scalars.
+func (v SettingValues) validate(scope string) error {
+	for _, key := range sortedKeys(v) {
+		if !settingNameRegex.MatchString(key) {
+			return g.Error("%s.%s: not a valid setting name", scope, key)
+		}
+		val := v[key]
+		if isSettingScalar(val) {
+			continue
+		}
+		if scope == "settings.table" {
+			ok := false
+			switch x := val.(type) {
+			case []any:
+				ok = lo.EveryBy(x, isSettingScalar)
+			case map[string]any:
+				ok = lo.EveryBy(lo.Values(x), isSettingScalar)
+			}
+			if ok {
+				continue
+			}
+			return g.Error("%s.%s: value type %T is not supported, use a string, number, bool, list or map", scope, key, val)
+		}
+		return g.Error("%s.%s: value type %T is not supported, use a string, number or bool", scope, key, val)
+	}
+	return nil
+}
+
+// merge returns a new map with o on top of v. It returns nil when both are empty.
+func (v SettingValues) merge(o SettingValues) SettingValues {
+	if len(v)+len(o) == 0 {
+		return nil
+	}
+	out := make(SettingValues, len(v)+len(o))
+	for k, val := range v {
+		out[k] = val
+	}
+	for k, val := range o {
+		out[k] = val
+	}
+	return out
+}
+
+// ModelSettings holds the ClickHouse table and query settings of a model.
+type ModelSettings struct {
+	Table SettingValues `json:"table,omitempty" yaml:"table,omitempty"`
+	Query SettingValues `json:"query,omitempty" yaml:"query,omitempty"`
+}
+
+// newModelSettings builds and validates settings from a raw map.
+func newModelSettings(raw map[string]any) (ModelSettings, error) {
+	var s ModelSettings
+	for _, key := range sortedKeys(raw) {
+		scope := "settings." + key
+		if key != "table" && key != "query" {
+			return ModelSettings{}, g.Error("unknown settings key '%s', use settings.table or settings.query", key)
+		}
+		values, ok := raw[key].(map[string]any)
+		if !ok {
+			return ModelSettings{}, g.Error("%s must be a map", scope)
+		}
+		if err := SettingValues(values).validate(scope); err != nil {
+			return ModelSettings{}, err
+		}
+		if key == "table" {
+			s.Table = values
+		} else {
+			s.Query = values
+		}
+	}
+	return s, nil
+}
+
+// UnmarshalYAML decodes and validates the settings block.
+func (s *ModelSettings) UnmarshalYAML(node *yaml.Node) error {
+	var raw map[string]any
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	parsed, err := newModelSettings(raw)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
+}
+
+// Merge returns s with o on top, key by key. The result shares no map.
+func (s *ModelSettings) Merge(o ModelSettings) ModelSettings {
+	return ModelSettings{
+		Table: s.Table.merge(o.Table),
+		Query: s.Query.merge(o.Query),
+	}
 }
 
 // RangeConfig holds the range block from model front-matter. It drives the
@@ -212,6 +368,10 @@ type Node struct {
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"` // models only
 	SQL          string   `json:"sql,omitempty" yaml:"sql,omitempty"`                   // models only
 	Tests        []any    `json:"tests,omitempty" yaml:"tests,omitempty"`               // models only
+
+	TableClause   string `json:"table_clause,omitempty" yaml:"table_clause,omitempty"`     // models only, all table dialects
+	TableKind     string `json:"table_kind,omitempty" yaml:"table_kind,omitempty"`         // models only, e.g. UNLOGGED
+	QuerySettings string `json:"query_settings,omitempty" yaml:"query_settings,omitempty"` // models only, rendered "k = v, ..."
 }
 
 // ModelNames returns the names of the compiled nodes that are models, in order.
@@ -253,6 +413,17 @@ type BuildDefaults struct {
 	Enabled       *bool         `yaml:"enabled,omitempty"`
 	Hooks         sling.HookMap `yaml:"hooks,omitempty"` // additive across nesting
 	DropCascade   *bool         `yaml:"drop_cascade,omitempty"`
+	Engine        string        `yaml:"engine,omitempty"`
+	OrderBy       string        `yaml:"order_by,omitempty"`
+	PartitionBy   ExprList      `yaml:"partition_by,omitempty"`
+	ClusterBy     ExprList      `yaml:"cluster_by,omitempty"`
+	PrimaryKey    string        `yaml:"primary_key,omitempty"`
+	TTL           string        `yaml:"ttl,omitempty"`
+	Transient     *bool         `yaml:"transient,omitempty"`
+	Unlogged      *bool         `yaml:"unlogged,omitempty"`
+	Dist          string        `yaml:"dist,omitempty"`
+	Sort          ExprList      `yaml:"sort,omitempty"`
+	Settings      ModelSettings `yaml:"settings,omitempty"`
 }
 
 // BuildOptions holds CLI-provided overrides.
@@ -753,6 +924,37 @@ func mergeConfigs(parent, child *BuildConfig) *BuildConfig {
 	if child.Defaults.DropCascade != nil {
 		merged.Defaults.DropCascade = child.Defaults.DropCascade
 	}
+	if child.Defaults.Engine != "" {
+		merged.Defaults.Engine = child.Defaults.Engine
+	}
+	if child.Defaults.OrderBy != "" {
+		merged.Defaults.OrderBy = child.Defaults.OrderBy
+	}
+	if len(child.Defaults.PartitionBy) > 0 {
+		merged.Defaults.PartitionBy = child.Defaults.PartitionBy
+	}
+	if len(child.Defaults.ClusterBy) > 0 {
+		merged.Defaults.ClusterBy = child.Defaults.ClusterBy
+	}
+	if child.Defaults.Transient != nil {
+		merged.Defaults.Transient = child.Defaults.Transient
+	}
+	if child.Defaults.Unlogged != nil {
+		merged.Defaults.Unlogged = child.Defaults.Unlogged
+	}
+	if child.Defaults.Dist != "" {
+		merged.Defaults.Dist = child.Defaults.Dist
+	}
+	if len(child.Defaults.Sort) > 0 {
+		merged.Defaults.Sort = child.Defaults.Sort
+	}
+	if child.Defaults.PrimaryKey != "" {
+		merged.Defaults.PrimaryKey = child.Defaults.PrimaryKey
+	}
+	if child.Defaults.TTL != "" {
+		merged.Defaults.TTL = child.Defaults.TTL
+	}
+	merged.Defaults.Settings = parent.Defaults.Settings.Merge(child.Defaults.Settings)
 	if len(parent.Defaults.Tags)+len(child.Defaults.Tags) > 0 {
 		merged.Defaults.Tags = lo.Uniq(append(append([]string(nil), parent.Defaults.Tags...), child.Defaults.Tags...))
 	}
@@ -1237,6 +1439,17 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		Enabled:       defaults.Enabled,
 		Hooks:         defaults.Hooks,
 		DropCascade:   defaults.DropCascade,
+		Engine:        defaults.Engine,
+		OrderBy:       defaults.OrderBy,
+		PartitionBy:   defaults.PartitionBy,
+		ClusterBy:     defaults.ClusterBy,
+		Transient:     defaults.Transient,
+		Unlogged:      defaults.Unlogged,
+		Dist:          defaults.Dist,
+		Sort:          defaults.Sort,
+		PrimaryKey:    defaults.PrimaryKey,
+		TTL:           defaults.TTL,
+		Settings:      defaults.Settings.Merge(ModelSettings{}),
 	}
 
 	// Parse YAML frontmatter (canonical config declaration)
@@ -1279,6 +1492,34 @@ func addModel(project *BuildProject, absPath, relPath string) error {
 		if fmConfig.Engine != "" {
 			modelConfig.Engine = fmConfig.Engine
 		}
+		if fmConfig.OrderBy != "" {
+			modelConfig.OrderBy = fmConfig.OrderBy
+		}
+		if len(fmConfig.PartitionBy) > 0 {
+			modelConfig.PartitionBy = fmConfig.PartitionBy
+		}
+		if len(fmConfig.ClusterBy) > 0 {
+			modelConfig.ClusterBy = fmConfig.ClusterBy
+		}
+		if fmConfig.Transient != nil {
+			modelConfig.Transient = fmConfig.Transient
+		}
+		if fmConfig.Unlogged != nil {
+			modelConfig.Unlogged = fmConfig.Unlogged
+		}
+		if fmConfig.Dist != "" {
+			modelConfig.Dist = fmConfig.Dist
+		}
+		if len(fmConfig.Sort) > 0 {
+			modelConfig.Sort = fmConfig.Sort
+		}
+		if fmConfig.PrimaryKey != "" {
+			modelConfig.PrimaryKey = fmConfig.PrimaryKey
+		}
+		if fmConfig.TTL != "" {
+			modelConfig.TTL = fmConfig.TTL
+		}
+		modelConfig.Settings = modelConfig.Settings.Merge(fmConfig.Settings)
 		if fmConfig.Range != nil {
 			modelConfig.Range = fmConfig.Range
 		}

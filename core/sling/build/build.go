@@ -13,7 +13,9 @@ import (
 	"github.com/slingdata-io/golyglot"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 // Build is the main orchestrator for sling build.
@@ -30,6 +32,8 @@ type Build struct {
 	ExecRows    uint64                 // sum of model/seed rows after Execute
 	ExecBytes   uint64
 	Results     []ExecutionResult // per-node results after Execute
+	dbType      dbio.Type         // target type, set by Compile
+	dbProps     map[string]string // target connection properties, set by Compile
 }
 
 // NewBuild creates a new Build from the given project directory and options.
@@ -120,6 +124,8 @@ func (b *Build) Compile() error {
 	// Split multi-statement models into pre-statements, model query, and post-statements.
 	// List without a target skips this — splitting needs a dialect.
 	if target != "" {
+		b.dbType = b.resolveDbType()
+		b.dbProps = b.resolveDbProps()
 		if err := b.validateDatabaseSupport(); err != nil {
 			return err
 		}
@@ -210,9 +216,8 @@ func (b *Build) GetModelMode(model *Model) string {
 // This runs after CompileAll but before ExtractTableReferences so that
 // auto-ref detection only scans the model query, not pre/post DDL.
 func (b *Build) splitMultiStatementModels() error {
-	dbType := b.resolveDbType()
 	for _, model := range b.Project.Models {
-		result, err := MakeModelSQL(model.CompiledSQL, dbType)
+		result, err := MakeModelSQL(model.CompiledSQL, b.dbType)
 		if err != nil {
 			return g.Error(err, "model '%s'", model.Name)
 		}
@@ -225,9 +230,54 @@ func (b *Build) splitMultiStatementModels() error {
 
 // validateDatabaseSupport fails when a model or seed sets a database but the
 // target dialect cannot address objects as database.schema.table.
+// It also checks the ClickHouse keys against the target type.
 func (b *Build) validateDatabaseSupport() error {
-	dbType := b.resolveDbType()
-	if dbType == dbio.TypeUnknown || dbType.SupportsThreePartName() {
+	dbType := b.dbType
+	if dbType == dbio.TypeUnknown {
+		return nil
+	}
+
+	for _, name := range sortedKeys(b.Project.Models) {
+		model := b.Project.Models[name]
+		c := model.Config
+		if keys := newCTASDialect(dbType, b.dbProps).unsupported(c); len(keys) > 0 {
+			g.Warn("model '%s': %s do not apply to %s; sling ignores them", name, strings.Join(keys, ", "), dbType)
+		}
+		if g.In(dbType, dbio.TypeDbClickhouse, dbio.TypeDbProton) {
+			for _, key := range sortedKeys(c.Settings.Table) {
+				switch c.Settings.Table[key].(type) {
+				case []any:
+					return g.Error("model '%s': settings.table.%s: lists are not supported on %s", name, key, dbType)
+				case map[string]any:
+					return g.Error("model '%s': settings.table.%s: maps are not supported on %s", name, key, dbType)
+				}
+			}
+		}
+		if b.GetModelMode(model) != "view" && dbType != dbio.TypeDbClickhouse {
+			// the name check comes later; a bad name only changes the default location
+			target, _ := database.ParseTableName(model.FullTableName, dbType)
+			if _, err := newCTASTable(model, newCTASDialect(dbType, b.dbProps), tableFinal, target); err != nil {
+				return err
+			}
+		}
+		if len(c.PartitionBy) > 0 && len(c.ClusterBy) > 0 && cast.ToBool(dbType.GetTemplateValue("variable.ctas_partition_cluster_exclusive")) {
+			return g.Error("model '%s': partition_by and cluster_by do not work together on %s", name, dbType)
+		}
+		if strings.EqualFold(strings.TrimSpace(c.Dist), "key") {
+			return g.Error("model '%s': dist: key needs a column name", name)
+		}
+		if dbType != dbio.TypeDbClickhouse {
+			continue
+		}
+		if c.PrimaryKey != "" && c.OrderBy == "" && len(getUniqueKeys(model)) == 0 {
+			return g.Error("model '%s': primary_key needs order_by or unique_key", name)
+		}
+		if _, ok := c.Settings.Query["mutations_sync"]; ok && c.Mode == "incremental" {
+			g.Warn("model '%s': the ClickHouse merge DELETE keeps its inline mutations_sync = 1; settings.query.mutations_sync may have no effect on it", name)
+		}
+	}
+
+	if dbType.SupportsThreePartName() {
 		return nil
 	}
 	for _, name := range sortedKeys(b.Project.Models) {
@@ -260,6 +310,16 @@ func (b *Build) resolveDbType() dbio.Type {
 	}
 	g.Warn("target connection '%s' not found locally; multi-statement splitting will use generic dialect", b.GetTarget())
 	return dbio.TypeUnknown
+}
+
+// resolveDbProps returns the properties of the target connection, or nil
+// when the connection is not found locally.
+func (b *Build) resolveDbProps() map[string]string {
+	entry := connection.GetLocalConns().Get(b.GetTarget())
+	if entry.Name == "" {
+		return nil
+	}
+	return entry.Connection.DataS(true)
 }
 
 // Execute runs the compiled build against the target database.
@@ -587,6 +647,7 @@ func (b *Build) Compiled() *BuildConfig {
 			n.Dependencies = node.Dependencies
 			n.SQL = node.Model.CompiledSQL
 			n.Tests = node.Model.Config.Tests
+			b.setClauses(&n, node.Model)
 		}
 		cfg.Nodes = append(cfg.Nodes, n)
 	}
@@ -594,6 +655,43 @@ func (b *Build) Compiled() *BuildConfig {
 	cfg.Compiled = true
 
 	return cfg
+}
+
+// setClauses sets the compile clauses of a table model node.
+func (b *Build) setClauses(n *Node, m *Model) {
+	if n.Mode == "view" || b.dbType == dbio.TypeUnknown {
+		return
+	}
+	if b.dbType == dbio.TypeDbClickhouse {
+		n.TableClause = newCHTable(m, b.dbType.Quote, true).clause()
+		n.QuerySettings = m.Config.Settings.Query.sql()
+		return
+	}
+	target, err := database.ParseTableName(m.FullTableName, b.dbType)
+	if err != nil {
+		return
+	}
+	d := newCTASDialect(b.dbType, b.dbProps)
+	t, err := newCTASTable(m, d, tableFinal, target)
+	if err != nil {
+		return
+	}
+	n.TableClause = t.clause(d.t.GetTemplateValue("core.create_table_as"))
+	n.TableKind = t.Kind
+
+	if d.querySettingsScope() == "" {
+		return
+	}
+	vals := m.Config.Settings.Query
+	pairs := make([]string, 0, len(vals))
+	for _, key := range sortedKeys(vals) {
+		val, err := d.literal(vals[key], false)
+		if err != nil {
+			return
+		}
+		pairs = append(pairs, key+" = "+val)
+	}
+	n.QuerySettings = strings.Join(pairs, ", ")
 }
 
 // CompileJSONPayload returns the --compile --json object.
@@ -616,6 +714,9 @@ func (c *BuildConfig) JSONPayload() map[string]any {
 		setIf("table", node.Table, node.Table != "")
 		setIf("file", node.File, node.File != "")
 		setIf("mode", node.Mode, node.Mode != "")
+		setIf("table_clause", node.TableClause, node.TableClause != "")
+		setIf("table_kind", node.TableKind, node.TableKind != "")
+		setIf("query_settings", node.QuerySettings, node.QuerySettings != "")
 		setIf("dependencies", node.Dependencies, node.Type == NodeTypeModel)
 		setIf("sql", node.SQL, node.SQL != "")
 		setIf("tests", node.Tests, len(node.Tests) > 0)
@@ -649,6 +750,13 @@ func (b *Build) printModelYAML(name string, node *DAGNode) {
 	fmt.Printf("  table: %s\n", model.FullTableName)
 	fmt.Printf("  file: %s\n", filepath.ToSlash(model.RelPath))
 	fmt.Printf("  mode: %s\n", mode)
+	n := Node{Mode: mode}
+	b.setClauses(&n, model)
+	for _, kv := range [][2]string{{"table_clause", n.TableClause}, {"table_kind", n.TableKind}, {"query_settings", n.QuerySettings}} {
+		if kv[1] != "" {
+			fmt.Printf("  %s: %s\n", kv[0], kv[1])
+		}
+	}
 
 	// Incremental details
 	if model.Config.UniqueKey != nil {

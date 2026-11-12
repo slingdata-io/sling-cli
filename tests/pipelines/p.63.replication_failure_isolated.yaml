@@ -1,0 +1,61 @@
+# A failed replication step must not cancel the pipeline context (SLING-227).
+#   - cdc_no_pk: the read_cdc hook fails (no primary key). The end hook of the
+#     replication still runs, and the next steps run.
+#   - pre_hook_fail: a stream pre hook fails with the default on_failure (abort).
+#     The abort stops the replication only, not the pipeline.
+steps:
+  - id: setup
+    type: query
+    connection: MYSQL_GTID
+    query: |
+      DROP TABLE IF EXISTS test_db.cdc_pl_nokey;
+      CREATE TABLE test_db.cdc_pl_nokey (id INT, note VARCHAR(50));
+      INSERT INTO test_db.cdc_pl_nokey VALUES (1, 'a');
+
+  - id: cdc_no_pk
+    type: replication
+    on_failure: warn
+    replication:
+      source: MYSQL_GTID
+      target: MARIADB
+      hooks:
+        end:
+          - type: log
+            message: 'CDC end hook ran after read_cdc failure'
+      defaults:
+        mode: change-capture
+        object: mariadb.{stream_table}
+      streams:
+        test_db.cdc_pl_nokey:
+
+  - id: after_cdc
+    type: query
+    connection: MYSQL_GTID
+    query: SELECT count(*) as cnt FROM test_db.cdc_pl_nokey
+    into: rows
+
+  - id: pre_hook_fail
+    type: replication
+    on_failure: warn
+    replication:
+      source: MYSQL_GTID
+      target: MARIADB
+      defaults:
+        mode: full-refresh
+        object: mariadb.{stream_table}
+        hooks:
+          pre:
+            - type: query
+              connection: MYSQL_GTID
+              query: SELECT * FROM test_db.sling_227_missing_table
+
+      streams:
+        test_db.cdc_pl_nokey:
+
+  - id: after_hook
+    type: query
+    connection: MYSQL_GTID
+    query: SELECT 1 as x
+
+  - type: log
+    message: 'after steps: cdc={state.cdc_no_pk.status} after_cdc={state.after_cdc.status} rows={store.rows[0].cnt} hook={state.pre_hook_fail.status} after_hook={state.after_hook.status}'

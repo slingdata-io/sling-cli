@@ -307,6 +307,90 @@ func (cfg *Config) sourceIsFile() bool {
 	return cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
 }
 
+// isDbSQL reports a target-only task that runs post_sql (JobType DbSQL).
+func (cfg *Config) isDbSQL() bool {
+	return cfg.TgtConn.Info().Type.IsDb() &&
+		!cfg.SrcConn.Info().Type.IsDb() &&
+		!cfg.sourceIsFile() &&
+		!cfg.SrcConn.Info().Type.IsAPI() &&
+		cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil
+}
+
+// injectLegacySQLHooks renders target pre_sql / post_sql and moves them into
+// the stream hooks: pre_sql last in `pre`, post_sql last in `post` (after the commit).
+func (cfg *Config) injectLegacySQLHooks(fMap map[string]any) error {
+	if !cfg.TgtConn.Type.IsDb() || cfg.Target.Options == nil {
+		return nil
+	}
+
+	render := func(sqlPtr *string, stage string) (string, error) {
+		if sqlPtr == nil || strings.TrimSpace(*sqlPtr) == "" {
+			return "", nil
+		}
+		sql, err := GetSQLText(*sqlPtr)
+		if err != nil {
+			return "", g.Error(err, "could not get %s-sql body", stage)
+		}
+		rendered, err := cfg.evaluator.RenderString(sql, fMap)
+		if err != nil {
+			return "", g.Error(err, "could not render %s-SQL query", stage)
+		}
+		return rendered, nil
+	}
+
+	// DbSQL runs post_sql as the task itself (see DetermineType)
+	if cfg.isDbSQL() {
+		postSQL, err := render(cfg.Target.Options.PostSQL, "post")
+		if err != nil {
+			return err
+		}
+		cfg.Target.Options.PostSQL = g.String(postSQL)
+		return nil
+	}
+
+	preSQL, err := render(cfg.Target.Options.PreSQL, "pre")
+	if err != nil {
+		return err
+	}
+	postSQL, err := render(cfg.Target.Options.PostSQL, "post")
+	if err != nil {
+		return err
+	}
+	cfg.Target.Options.PreSQL = nil
+	cfg.Target.Options.PostSQL = nil
+
+	preSQL, postSQL = strings.TrimSpace(preSQL), strings.TrimSpace(postSQL)
+	if preSQL == "" && postSQL == "" {
+		return nil
+	}
+
+	// copy, so that shared stream configs and default hook slices do not change
+	rs := ReplicationStreamConfig{}
+	if cfg.ReplicationStream != nil {
+		rs = *cfg.ReplicationStream
+	}
+
+	if preSQL != "" {
+		hook, err := newLegacySQLHook(cfg.Target.Conn, preSQL, "pre_sql")
+		if err != nil {
+			return err
+		}
+		pre := make([]any, 0, len(rs.Hooks.Pre)+1)
+		rs.Hooks.Pre = append(append(pre, rs.Hooks.Pre...), hook)
+	}
+	if postSQL != "" {
+		hook, err := newLegacySQLHook(cfg.Target.Conn, postSQL, "post_sql")
+		if err != nil {
+			return err
+		}
+		post := make([]any, 0, len(rs.Hooks.Post)+1)
+		rs.Hooks.Post = append(append(post, rs.Hooks.Post...), hook)
+	}
+
+	cfg.ReplicationStream = &rs
+	return nil
+}
+
 func (cfg *Config) IsFileStreamWithStateAndParts() bool {
 	uri := cfg.StreamName
 	return os.Getenv("SLING_STATE") != "" &&
@@ -476,7 +560,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
-	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
+	} else if cfg.isDbSQL() {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
 	} else if srcApiProvided && srcStreamProvided && tgtFileProvided {
@@ -903,40 +987,8 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
-	// compile pre and post sql
-	if cfg.TgtConn.Type.IsDb() {
-
-		// pre SQL
-		if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
-			sql, err := GetSQLText(*preSQL)
-			if err != nil {
-				return g.Error(err, "could not get pre-sql body")
-			}
-			renderedPreSQL, err := cfg.evaluator.RenderString(sql, fMap)
-			if err != nil {
-				return g.Error(err, "could not render pre-SQL query")
-			}
-			cfg.Target.Options.PreSQL = g.String(renderedPreSQL)
-			if cfg.ReplicationStream != nil {
-				cfg.ReplicationStream.TargetOptions.PreSQL = cfg.Target.Options.PreSQL
-			}
-		}
-
-		// post SQL
-		if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
-			sql, err := GetSQLText(*postSQL)
-			if err != nil {
-				return g.Error(err, "could not get post-sql body")
-			}
-			renderedPostSQL, err := cfg.evaluator.RenderString(sql, fMap)
-			if err != nil {
-				return g.Error(err, "could not render post-SQL query")
-			}
-			cfg.Target.Options.PostSQL = g.String(renderedPostSQL)
-			if cfg.ReplicationStream != nil {
-				cfg.ReplicationStream.TargetOptions.PostSQL = cfg.Target.Options.PostSQL
-			}
-		}
+	if err = cfg.injectLegacySQLHooks(fMap); err != nil {
+		return err
 	}
 
 	// validate transform
@@ -1077,7 +1129,12 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else if g.In(dbType, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbLanceDB) {
 				// for duckdb, ducklake and lancedb, we'll use a temp table, which uses the 'main' schema
-				tableTmp := makeTempTableName(dbType, table, "_sling_duckdb_tmp")
+				suffix := "_sling_duckdb_tmp"
+				if strings.HasPrefix(cast.ToString(cfg.TgtConn.Data["instance"]), "quack:") {
+					// runs on one Quack server must not share a temp table
+					suffix += "_" + strings.ToLower(g.RandString(g.AlphaNumericRunes, 6))
+				}
+				tableTmp := makeTempTableName(dbType, table, suffix)
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
 			} else {

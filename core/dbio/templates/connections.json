@@ -118,6 +118,12 @@
           "type": "boolean",
           "description": "Enable TLS encryption",
           "default": false
+        },
+        "arrow_reader": {
+          "type": "string",
+          "description": "How Sling reads MySQL with Arrow Acceleration: native (default) or adbc",
+          "enum": ["native", "adbc"],
+          "default": "native"
         }
       }
     },
@@ -170,35 +176,76 @@
       "properties": {
         "instance": {
           "type": "string",
-          "description": "Local file path of the database file",
+          "description": "Local file path of the database file, or quack:<host>[:<port>] for a remote DuckDB server (DuckDB 2.0+)",
           "required": true,
-          "examples": ["/path/to/database.db", "./data/mydatabase.duckdb"]
+          "examples": ["/path/to/database.db", "./data/mydatabase.duckdb", "quack:localhost:9494"]
         },
         "schema": {
           "type": "string",
           "description": "Default schema name",
           "examples": ["main", "staging"]
         },
+        "token": {
+          "type": "string",
+          "description": "Quack only. Authentication token of the remote DuckDB server",
+          "secret": true
+        },
+        "database": {
+          "type": "string",
+          "description": "Quack only. Alias of the attached remote database",
+          "default": "quack"
+        },
+        "disable_ssl": {
+          "type": "boolean",
+          "description": "Quack only. Use plain HTTP for a remote host",
+          "default": false
+        },
+        "ssl_fingerprint": {
+          "type": "string",
+          "description": "Quack only. SHA-256 fingerprint of a self-signed server certificate"
+        },
+        "client_id": {
+          "type": "string",
+          "description": "Quack only. Client ID sent to the server"
+        },
+        "heartbeat_timeout": {
+          "type": "integer",
+          "description": "Quack only. Heartbeat timeout in seconds"
+        },
+        "extra_http_headers": {
+          "type": "object",
+          "description": "Quack only. Extra HTTP headers sent to the server"
+        },
         "duckdb_version": {
           "type": "string",
           "description": "DuckDB CLI version to use",
-          "examples": ["0.9.0", "0.8.1"]
+          "examples": ["2.0.0", "1.5.5"]
         },
         "read_only": {
           "type": "boolean",
           "description": "Open connection in readonly mode",
           "default": false
         },
+        "storage_version": {
+          "type": "string",
+          "description": "Storage version for new database files, for example v1.5.6. Needs DuckDB 2.0 or later.",
+          "examples": ["v1.5.6", "latest"]
+        },
         "interactive": {
           "type": "boolean",
           "description": "Use interactive mode instead of reopening connection",
           "default": false
         },
+        "copy_format": {
+          "type": "string",
+          "description": "Format that moves data between Sling and DuckDB",
+          "enum": ["arrow", "csv"],
+          "default": "arrow"
+        },
         "copy_method": {
           "type": "string",
-          "description": "Method for copying data into DuckDB",
-          "enum": ["csv_files", "csv_http", "arrow_http", "named_pipes"],
-          "default": "csv_http"
+          "description": "Deprecated: use copy_format",
+          "enum": ["csv_files", "csv_http", "arrow_http", "named_pipes"]
         }
       }
     },
@@ -1629,10 +1676,15 @@
           "type": "number",
           "description": "Row limit for DATA_INLINING_ROW_LIMIT"
         },
+        "copy_format": {
+          "type": "string",
+          "description": "Format that moves data between Sling and DuckDB",
+          "enum": ["arrow", "csv"],
+          "default": "arrow"
+        },
         "copy_method": {
           "type": "string",
-          "description": "Copy method into DuckDB",
-          "default": "arrow_http",
+          "description": "Deprecated: use copy_format",
           "enum": [
             "csv_http",
             "arrow_http"

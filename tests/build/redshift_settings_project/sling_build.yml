@@ -1,0 +1,3 @@
+target: REDSHIFT
+defaults:
+  schema: sling_build_rs

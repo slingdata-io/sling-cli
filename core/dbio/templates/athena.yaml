@@ -77,6 +77,11 @@ core:
   merge_cdc: null
   merge_change_capture_soft: null
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} {options} AS ({sql})
+  ctas_options: 'WITH ({options})'
+  ctas_array: 'ARRAY[{values}]'
+
 metadata:
   current_database:
     select current_database
@@ -340,6 +345,10 @@ variable:
   max_string_type: VARCHAR
   max_string_length: 2147483647
   max_column_length: 127
+  ctas_quote_char: '"'
+  # default location of a CTAS table; {location} is a string literal
+  ctas_default_options: 'external_location = {location}'
+  ctas_default_options_iceberg: 'location = {location}, is_external = false'
 
 native_type_map:
   array: json

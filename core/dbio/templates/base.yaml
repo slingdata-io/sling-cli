@@ -128,6 +128,10 @@ core:
     WHEN MATCHED THEN UPDATE SET {set_fields}
     WHEN NOT MATCHED THEN INSERT ({insert_fields}) VALUES ({src_insert_fields})
 
+  # CTAS templates for sling build
+  create_table_as: CREATE TABLE {table} AS ({sql})
+  create_or_replace_table_as: CREATE OR REPLACE TABLE {table} AS ({sql})
+
 analysis:
   # table level
   table_count: |
@@ -459,6 +463,10 @@ function:
   concat: 'concat({fields})'
 
 variable:
+  ctas_option: '{key} = {value}'
+  ctas_option_sep: ', '
+  literal_quote: "'"
+  literal_escape: "''"
   tmp_folder: /tmp
   quote_char: '"'
   bind_string: ${i}

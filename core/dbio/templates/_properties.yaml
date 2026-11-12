@@ -638,17 +638,52 @@ duckdb:
       examples: ['DUCKDB_MAIN', 'DUCK_ANALYTICS', 'DDB_LOCAL']
     instance:
       type: text
-      description: 'Local file path of the database file'
-      examples: ['/path/to/database.db', './data/mydatabase.duckdb', ':memory:']
+      description: 'Local file path of the database file, or `quack:<host>[:<port>]` for a remote DuckDB server (DuckDB 2.0+)'
+      examples: ['/path/to/database.db', './data/mydatabase.duckdb', ':memory:', 'quack:localhost:9494']
     schema:
       type: text
       description: 'Default schema name'
       examples: ['main', 'staging', 'analytics']
+    token:
+      type: text
+      description: 'Quack only. Authentication token of the remote DuckDB server.'
+      examples: ['my-quack-token']
+      secret: true
+    database:
+      type: text
+      description: 'Quack only. Alias of the attached remote database.'
+      examples: ['quack', 'remote']
+      default: quack
+    disable_ssl:
+      type: boolean
+      description: 'Quack only. Use plain HTTP for a remote host. Local hosts always use plain HTTP.'
+      examples: [true, false]
+      default: false
+    ssl_fingerprint:
+      type: text
+      description: 'Quack only. SHA-256 fingerprint of a self-signed server certificate.'
+      examples: ['3f:a1:...']
+    client_id:
+      type: text
+      description: 'Quack only. Client ID sent to the server. DuckDB reads QUACK_CLIENT_ID when it is not set.'
+      examples: ['sling-prod']
+    heartbeat_timeout:
+      type: integer
+      description: 'Quack only. Heartbeat timeout in seconds.'
+      examples: [30, 60]
+    extra_http_headers:
+      type: text
+      description: 'Quack only. Extra HTTP headers sent to the server (a map, or JSON text), for example for a reverse proxy.'
+      examples: ['{"X-Api-Key": "abc"}']
     read_only:
       type: boolean
       description: 'Open connection in readonly mode'
       examples: [true, false]
       default: false
+    storage_version:
+      type: text
+      description: 'Storage version for new database files, for example v1.5.6. Needs DuckDB 2.0 or later.'
+      examples: ['v1.5.6', 'latest']
 
 motherduck:
   title: 'MotherDuck'
