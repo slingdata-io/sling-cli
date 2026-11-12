@@ -1519,7 +1519,7 @@ func TestDuckDbChangesParse(t *testing.T) {
 }
 
 func TestDuckDbLogWarnings(t *testing.T) {
-	duck := NewDuckDb(context.Background())
+	duck := NewDuckDb(context.Background(), "duckdb_version=2.0.0")
 	defer duck.Close()
 
 	// the shell log storage of 2.0 prints log lines to stdout
@@ -1538,7 +1538,7 @@ func TestDuckDbLogWarnings(t *testing.T) {
 func TestDuckDbStorageVersion(t *testing.T) {
 	makeFile := func(props ...string) string {
 		dbPath := filepath.Join(t.TempDir(), "s.duckdb")
-		duck := NewDuckDb(context.Background(), append(props, "instance="+dbPath)...)
+		duck := NewDuckDb(context.Background(), append(props, "instance="+dbPath, "duckdb_version=2.0.0")...)
 		_, err := duck.Exec("create table t as select 1 as a")
 		require.NoError(t, err)
 		require.NoError(t, duck.Close())
@@ -1591,7 +1591,7 @@ func TestDuckDbArrowCastVariant(t *testing.T) {
 	assert.Equal(t, "CAST(%s AS VARCHAR)", duckArrowCast(`"NULL"`))
 	assert.Equal(t, "CAST(%s AS VARCHAR)", duckArrowCast("NULL"))
 
-	duck := NewDuckDb(context.Background())
+	duck := NewDuckDb(context.Background(), "duckdb_version=2.0.0")
 	defer duck.Close()
 
 	_, err := duck.Exec(`create table t as select 1 as id, '{"a": 1}'::JSON::VARIANT as v, NULL as n`)

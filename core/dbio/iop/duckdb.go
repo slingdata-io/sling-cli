@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	DuckDbVersion   = "2.0.0"
+	DuckDbVersion   = "1.5.5" // pinned until 2.0 is ready
 	DuckDbVersionMD = "1.5.5"
 	// a DuckDB 2.0 write upgrades a DuckLake catalog file, and older clients
 	// cannot open it after that, so DuckLake stays on 1.5.5 by default

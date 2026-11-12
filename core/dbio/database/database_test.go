@@ -4251,7 +4251,7 @@ func TestDuckDbConnAnalysisChars(t *testing.T) {
 // DuckDB 2.0 gives a NULL-type column for CTAS of SELECT NULL.
 func TestDuckDbConnNullAndVariantTypes(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "types.duckdb")
-	conn, err := NewConn("duckdb://" + dbPath)
+	conn, err := NewConn("duckdb://"+dbPath, "duckdb_version=2.0.0")
 	require.NoError(t, err)
 	require.NoError(t, conn.Connect())
 	defer conn.Close()
