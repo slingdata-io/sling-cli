@@ -1828,7 +1828,7 @@ func (conn *IcebergConn) ensureDuckCatalog() (err error) {
 			conn.duck = nil
 			return g.Error("rest_uri property is required for REST catalog")
 		}
-		attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
+		attachSQL = g.F("ATTACH IF NOT EXISTS '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
 
 	case dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeS3Tables:
 		var storageSecretType iop.DuckDbSecretType
@@ -1862,7 +1862,7 @@ func (conn *IcebergConn) ensureDuckCatalog() (err error) {
 			}
 
 			warehouse := g.F("%s:s3tablescatalog/%s", accountID, namespace)
-			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
+			attachSQL = g.F("ATTACH IF NOT EXISTS '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
 		}
 
 		if catalogType == dbio.IcebergCatalogTypeS3Tables {
@@ -1873,7 +1873,7 @@ func (conn *IcebergConn) ensureDuckCatalog() (err error) {
 				return g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
 			}
 
-			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_storage_secret)", arn)
+			attachSQL = g.F("ATTACH IF NOT EXISTS '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_storage_secret)", arn)
 		}
 
 	default:
