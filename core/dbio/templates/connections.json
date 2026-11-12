@@ -118,6 +118,12 @@
           "type": "boolean",
           "description": "Enable TLS encryption",
           "default": false
+        },
+        "arrow_reader": {
+          "type": "string",
+          "description": "How Sling reads MySQL with Arrow Acceleration: native (default) or adbc",
+          "enum": ["native", "adbc"],
+          "default": "native"
         }
       }
     },
