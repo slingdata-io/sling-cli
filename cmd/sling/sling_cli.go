@@ -45,103 +45,6 @@ func init() {
 	sling.LoadContinuousRunMode() // before any reader of the mode
 }
 
-// gracefulRun is a run that stops in a graceful way on the first stop signal.
-type gracefulRun interface {
-	Stop() bool // false if a stop already runs
-	PrintStatus()
-}
-
-// signals owns the signal handling of the process.
-type signals struct {
-	stop   chan os.Signal // SIGINT, SIGTERM
-	status chan os.Signal // statusSignals
-	mu     sync.Mutex
-	run    gracefulRun
-	forced int // exit code after a second signal during a graceful run
-}
-
-var sigs = newSignals()
-
-func newSignals() *signals {
-	return &signals{stop: make(chan os.Signal, 2), status: make(chan os.Signal, 1)}
-}
-
-// Start catches SIGINT and SIGTERM and handles them until done closes.
-// hardStop gets a signal that no graceful run takes.
-func (s *signals) Start(done <-chan struct{}, hardStop func(os.Signal)) {
-	signal.Notify(s.stop, os.Interrupt, syscall.SIGTERM)
-	go s.watch(done, hardStop)
-}
-
-// Attach sends the stop and status signals to run, until detach is called.
-// A one-shot run keeps the default action of the status signals.
-func (s *signals) Attach(run gracefulRun) (detach func()) {
-	s.mu.Lock()
-	s.run = run
-	s.mu.Unlock()
-	if len(statusSignals) > 0 {
-		signal.Notify(s.status, statusSignals...)
-	}
-	return func() {
-		signal.Stop(s.status)
-		s.mu.Lock()
-		s.run = nil
-		s.mu.Unlock()
-	}
-}
-
-// ExitCode returns the forced exit code if there is one, else code.
-func (s *signals) ExitCode(code int) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.forced != 0 {
-		return s.forced
-	}
-	return code
-}
-
-func (s *signals) watch(done <-chan struct{}, hardStop func(os.Signal)) {
-	for {
-		select {
-		case sig := <-s.stop:
-			if s.stopRun(sig) {
-				continue
-			}
-			hardStop(sig)
-			return
-		case <-s.status:
-			if run := s.active(); run != nil {
-				run.PrintStatus()
-			}
-		case <-done:
-			return // main exits after the flush
-		}
-	}
-}
-
-// stopRun starts a graceful stop of the attached run. It returns false when
-// no run is attached or a stop already runs. Then it records the forced exit code.
-func (s *signals) stopRun(sig os.Signal) bool {
-	run := s.active()
-	if run == nil {
-		return false
-	}
-	if run.Stop() {
-		env.Println("\nstop received: finishing running cycles, then exit (Ctrl-C again to stop now)")
-		return true
-	}
-	s.mu.Lock()
-	s.forced = lo.Ternary(sig == syscall.SIGTERM, 111, 11)
-	s.mu.Unlock()
-	return false
-}
-
-func (s *signals) active() gracefulRun {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.run
-}
-
 var cliRunFlags = []g.Flag{
 	{
 		Name:        "replication",
@@ -897,4 +800,101 @@ func setSentry() {
 		}
 		g.SentryInit()
 	}
+}
+
+// gracefulRun is a run that stops in a graceful way on the first stop signal.
+type gracefulRun interface {
+	Stop() bool // false if a stop already runs
+	PrintStatus()
+}
+
+// signals owns the signal handling of the process.
+type signals struct {
+	stop   chan os.Signal // SIGINT, SIGTERM
+	status chan os.Signal // statusSignals
+	mu     sync.Mutex
+	run    gracefulRun
+	forced int // exit code after a second signal during a graceful run
+}
+
+var sigs = newSignals()
+
+func newSignals() *signals {
+	return &signals{stop: make(chan os.Signal, 2), status: make(chan os.Signal, 1)}
+}
+
+// Start catches SIGINT and SIGTERM and handles them until done closes.
+// hardStop gets a signal that no graceful run takes.
+func (s *signals) Start(done <-chan struct{}, hardStop func(os.Signal)) {
+	signal.Notify(s.stop, os.Interrupt, syscall.SIGTERM)
+	go s.watch(done, hardStop)
+}
+
+// Attach sends the stop and status signals to run, until detach is called.
+// A one-shot run keeps the default action of the status signals.
+func (s *signals) Attach(run gracefulRun) (detach func()) {
+	s.mu.Lock()
+	s.run = run
+	s.mu.Unlock()
+	if len(statusSignals) > 0 {
+		signal.Notify(s.status, statusSignals...)
+	}
+	return func() {
+		signal.Stop(s.status)
+		s.mu.Lock()
+		s.run = nil
+		s.mu.Unlock()
+	}
+}
+
+// ExitCode returns the forced exit code if there is one, else code.
+func (s *signals) ExitCode(code int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.forced != 0 {
+		return s.forced
+	}
+	return code
+}
+
+func (s *signals) watch(done <-chan struct{}, hardStop func(os.Signal)) {
+	for {
+		select {
+		case sig := <-s.stop:
+			if s.stopRun(sig) {
+				continue
+			}
+			hardStop(sig)
+			return
+		case <-s.status:
+			if run := s.active(); run != nil {
+				run.PrintStatus()
+			}
+		case <-done:
+			return // main exits after the flush
+		}
+	}
+}
+
+// stopRun starts a graceful stop of the attached run. It returns false when
+// no run is attached or a stop already runs. Then it records the forced exit code.
+func (s *signals) stopRun(sig os.Signal) bool {
+	run := s.active()
+	if run == nil {
+		return false
+	}
+	if run.Stop() {
+		env.Println("\nstop received: finishing running cycles, then exit (Ctrl-C again to stop now)")
+		return true
+	}
+	s.mu.Lock()
+	s.forced = lo.Ternary(sig == syscall.SIGTERM, 111, 11)
+	s.mu.Unlock()
+	return false
+}
+
+func (s *signals) active() gracefulRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.run
 }
