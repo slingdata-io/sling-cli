@@ -522,3 +522,31 @@ func TestTrimSQLComments(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectSQLServerOrderBy(t *testing.T) {
+	query := "select id, name from dbo.t order by id"
+
+	table, err := ParseTableName(query, dbio.TypeDbSQLServer)
+	assert.NoError(t, err)
+
+	sql := table.Select(SelectOptions{Limit: g.Ptr(10)})
+	assert.Contains(t, sql, "select top 10 * from (")
+	assert.Contains(t, sql, "order by id offset 0 rows")
+
+	sql = table.Select(SelectOptions{Limit: g.Ptr(10), Fields: []string{"id"}})
+	assert.Contains(t, sql, "top 10")
+	assert.Contains(t, sql, "order by id offset 0 rows\n) t")
+
+	sql = table.Select(SelectOptions{Fields: []string{"id"}})
+	assert.Contains(t, sql, "order by id offset 0 rows\n) t")
+
+	// no wrap, no change
+	assert.Equal(t, query, table.Select())
+
+	// postgres is unchanged
+	table, err = ParseTableName(query, dbio.TypeDbPostgres)
+	assert.NoError(t, err)
+	sql = table.Select(SelectOptions{Limit: g.Ptr(10), Fields: []string{"id"}})
+	assert.NotContains(t, sql, "offset 0 rows")
+	assert.Contains(t, sql, "order by id")
+}

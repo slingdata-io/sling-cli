@@ -530,7 +530,11 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
+			innerSQL := t.SQL
+			if isSQLServer {
+				innerSQL = sqlServerOrderByOffset(innerSQL)
+			}
+			sql = g.F("select %s from (\n%s\n) t", fieldsStr, innerSQL)
 		} else {
 			sql = t.SQL
 		}
@@ -549,6 +553,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
+			if isSQLServer {
+				sql = sqlServerOrderByOffset(sql)
+			}
 			sql = g.R(
 				template.Core["limit_sql"],
 				"sql", sql,

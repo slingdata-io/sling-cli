@@ -1580,3 +1580,118 @@ func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.C
 
 	return selectStr
 }
+
+// sqlServerOrderByOffset appends "offset 0 rows" to a query with a top-level
+// ORDER BY, so SQL Server accepts it inside a derived table. It returns the
+// query unchanged when it has TOP, OFFSET, FOR XML or starts with WITH.
+func sqlServerOrderByOffset(sql string) string {
+	var (
+		depth, lastSig, optionPos = 0, 0, -1
+		words                     []string
+		sawOrderBy                bool
+	)
+
+	isWordChar := func(c byte) bool {
+		return c == '_' || c == '#' || c == '@' || c == '$' || c >= 0x80 ||
+			(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+
+	// skipQuoted returns the index after the closing quote (doubled = escape)
+	skipQuoted := func(i int, closeQ byte) int {
+		for i++; i < len(sql); i++ {
+			if sql[i] == closeQ {
+				if i+1 < len(sql) && sql[i+1] == closeQ {
+					i++
+					continue
+				}
+				return i + 1
+			}
+		}
+		return len(sql)
+	}
+
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		switch {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f':
+			i++
+		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			// block comments nest in SQL Server
+			level := 0
+			for i < len(sql) {
+				if strings.HasPrefix(sql[i:], "/*") {
+					level++
+					i += 2
+				} else if strings.HasPrefix(sql[i:], "*/") {
+					level--
+					i += 2
+					if level == 0 {
+						break
+					}
+				} else {
+					i++
+				}
+			}
+		case c == '\'' || c == '"' || c == '[':
+			closeQ := lo.Ternary(c == '[', byte(']'), c)
+			i = skipQuoted(i, closeQ)
+			lastSig = i
+		case c == ';':
+			i++
+		case c == '(':
+			depth++
+			i++
+			lastSig = i
+		case c == ')':
+			depth--
+			i++
+			lastSig = i
+		case isWordChar(c):
+			start := i
+			for i < len(sql) && isWordChar(sql[i]) {
+				i++
+			}
+			lastSig = i
+			if depth != 0 {
+				continue
+			}
+			word := strings.ToLower(sql[start:i])
+			if word == "option" && sawOrderBy && optionPos < 0 {
+				rest := strings.TrimLeft(sql[i:], " \t\r\n")
+				if strings.HasPrefix(rest, "(") {
+					optionPos = start
+				}
+			}
+			if word == "by" && len(words) > 0 && words[len(words)-1] == "order" {
+				sawOrderBy = true
+			}
+			words = append(words, word)
+		default:
+			i++
+			lastSig = i
+		}
+	}
+
+	if !sawOrderBy || len(words) == 0 || words[0] == "with" {
+		return sql
+	}
+	for j, word := range words {
+		switch word {
+		case "top", "offset":
+			return sql
+		case "for":
+			if j+1 < len(words) && words[j+1] == "xml" {
+				return sql
+			}
+		}
+	}
+
+	if optionPos >= 0 {
+		return sql[:optionPos] + "offset 0 rows " + sql[optionPos:lastSig]
+	}
+	return sql[:lastSig] + " offset 0 rows"
+}

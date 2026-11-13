@@ -4596,3 +4596,47 @@ func TestDuckDbConnExecMultiStopsAtFirstError(t *testing.T) {
 	require.Len(t, data.Rows, 1)
 	assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
 }
+
+func TestSQLServerOrderByOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain", "select id from t order by id", "select id from t order by id offset 0 rows"},
+		{"uppercase", "SELECT id FROM t ORDER BY id DESC", "SELECT id FROM t ORDER BY id DESC offset 0 rows"},
+		{"semicolon", "select id from t order by id;  ", "select id from t order by id offset 0 rows"},
+		{"line comment", "select id from t order by id -- sorted", "select id from t order by id offset 0 rows"},
+		{"block comment", "select id from t order by id /* c */ ;", "select id from t order by id offset 0 rows"},
+		{"multiline", "select id\nfrom t\norder by id\n", "select id\nfrom t\norder by id offset 0 rows"},
+		{"over only", "select row_number() over (order by x) as rn from t", "select row_number() over (order by x) as rn from t"},
+		{"over and order by", "select row_number() over (order by x) rn from t order by rn", "select row_number() over (order by x) rn from t order by rn offset 0 rows"},
+		{"subquery only", "select * from (select top 5 * from t order by id) s", "select * from (select top 5 * from t order by id) s"},
+		{"subquery and outer", "select * from (select * from t) s order by id", "select * from (select * from t) s order by id offset 0 rows"},
+		{"top", "select top 5 id from t order by id", "select top 5 id from t order by id"},
+		{"offset", "select id from t order by id offset 10 rows", "select id from t order by id offset 10 rows"},
+		{"offset fetch", "select id from t order by id offset 10 rows fetch next 5 rows only", "select id from t order by id offset 10 rows fetch next 5 rows only"},
+		{"for xml", "select id from t order by id for xml path('')", "select id from t order by id for xml path('')"},
+		{"cte", "with cte as (select id from t) select id from cte order by id", "with cte as (select id from t) select id from cte order by id"},
+		{"cte uppercase", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id"},
+		{"string literal", "select 'order by x' as a from t", "select 'order by x' as a from t"},
+		{"string escape", "select 'it''s order by' as a from t", "select 'it''s order by' as a from t"},
+		{"unicode string", "select N'order by' as a from t", "select N'order by' as a from t"},
+		{"bracket identifier", "select [order by] from t", "select [order by] from t"},
+		{"quoted identifier", `select "order by" from t`, `select "order by" from t`},
+		{"order by after string", "select 'a;' as a from t order by a", "select 'a;' as a from t order by a offset 0 rows"},
+		{"top in string", "select 'top' as a from t order by a", "select 'top' as a from t order by a offset 0 rows"},
+		{"order by in comment", "select id from t -- order by id\n", "select id from t -- order by id\n"},
+		{"union", "select id from a union all select id from b order by id", "select id from a union all select id from b order by id offset 0 rows"},
+		{"option", "select id from t order by id option (recompile)", "select id from t order by id offset 0 rows option (recompile)"},
+		{"option semicolon", "select id from t order by id OPTION (maxdop 1);", "select id from t order by id offset 0 rows OPTION (maxdop 1)"},
+		{"no order by", "select id from t where id > 1", "select id from t where id > 1"},
+		{"empty", "", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, sqlServerOrderByOffset(c.input))
+		})
+	}
+}
