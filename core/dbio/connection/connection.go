@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -99,6 +100,8 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 func NewConnectionFromURL(Name, URL string) (conn Connection, err error) {
 	return NewConnection(Name, "", g.M("url", URL))
 }
+
+var oracleTNSSpaceRegex = regexp.MustCompile(`\s*([()=])\s*`)
 
 // NewConnectionFromMap loads a Connection from a Map
 func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
@@ -781,9 +784,12 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		// no default client_charset: go-ora then encodes binds in the server charset (GH #759)
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
-			if !strings.HasPrefix(cast.ToString(tns), "(") {
-				c.Data["tns"] = "(" + cast.ToString(tns) + ")"
+			// strip whitespace of multi-line descriptors (tnsnames.ora style)
+			tnsStr := oracleTNSSpaceRegex.ReplaceAllString(strings.TrimSpace(cast.ToString(tns)), "$1")
+			if !strings.HasPrefix(tnsStr, "(") {
+				tnsStr = "(" + tnsStr + ")"
 			}
+			c.Data["tns"] = tnsStr
 			template = "oracle://{username}:{password}@{tns}"
 		} else {
 			template = "oracle://{username}:{password}@{host}:{port}/{database}"
