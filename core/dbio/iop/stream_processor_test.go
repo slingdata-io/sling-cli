@@ -454,3 +454,56 @@ func TestStreamProcessorCastThousands(t *testing.T) {
 	assert.Equal(t, "1234.50", sp.CastVal(1, "1,234.50", decCol))
 	assert.Equal(t, "1.5", sp.CastVal(1, "1,5", decCol))
 }
+
+func TestNormalizeNumberText(t *testing.T) {
+	tests := []struct{ in, out string }{
+		{"3000", "3000"},
+		{"1,234,567", "1234567"},
+		{"-1,234,567.89", "-1234567.89"},
+		{"1,234.5", "1234.5"},
+		{"+12,345,678", "+12345678"},
+		{"1,5", "1.5"},
+		{"-1,5", "-1.5"},
+		{"45,3828582763672", "45.3828582763672"},
+		{"0,500", "0.500"},
+		{"1234,567", "1234.567"},
+		{"3,000", "3,000"},
+		{"-3,000", "-3,000"},
+		{"1.234,56", "1.234,56"},
+		{"1,23,456", "1,23,456"},
+		{"a,b", "a,b"},
+		{",5", ",5"},
+		{"1,", "1,"},
+		{"1,234,", "1,234,"},
+		{"1,234.", "1,234."},
+		{"1,234.5a", "1,234.5a"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.out, normalizeNumberText(tt.in), tt.in)
+	}
+}
+
+// go test -benchmem -run='^$' -bench '^BenchmarkNormalizeNumberText' ./core/dbio/iop
+func BenchmarkNormalizeNumberText(b *testing.B) {
+	inputs := []struct{ name, val string }{
+		{"no_comma", "1273192311231.9382471941"},
+		{"decimal_comma", "45,3828582763672"},
+		{"thousands", "-1,234,567.89"},
+		{"ambiguous", "3,000"},
+	}
+	for _, in := range inputs {
+		b.Run(in.name+"/current", func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				_ = strings.Replace(in.val, ",", ".", 1)
+			}
+		})
+		b.Run(in.name+"/normalize", func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				_ = normalizeNumberText(in.val)
+			}
+		})
+	}
+}
