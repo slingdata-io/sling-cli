@@ -441,3 +441,16 @@ func TestDecomposedToRat(t *testing.T) {
 	val := sp.CastVal(0, testDecomposer{coef: big.NewInt(35987).Bytes(), exp: -3}, col)
 	assert.Equal(t, "35.987", cast.ToString(val))
 }
+
+func TestStreamProcessorCastThousands(t *testing.T) {
+	sp := NewStreamProcessor()
+
+	intCol := &Column{Name: "n", Type: BigIntType}
+	assert.Equal(t, int64(1234567), sp.CastVal(0, "1,234,567", intCol))
+	assert.Equal(t, int64(1234567), sp.CastVal(0, []byte("1,234,567"), intCol))
+	assert.Equal(t, BigIntType, intCol.Type)
+
+	decCol := &Column{Name: "d", Type: DecimalType}
+	assert.Equal(t, "1234.50", sp.CastVal(1, "1,234.50", decCol))
+	assert.Equal(t, "1.5", sp.CastVal(1, "1,5", decCol))
+}

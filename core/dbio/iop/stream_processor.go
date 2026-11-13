@@ -484,13 +484,13 @@ func (sp *StreamProcessor) toFloat64E(i any) (float64, error) {
 	case float32:
 		return float64(s), nil
 	case string:
-		v, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+		v, err := strconv.ParseFloat(normalizeNumberText(s), 64)
 		if err == nil {
 			return v, nil
 		}
 		return 0, g.Error("unable to cast %#v of type %T to float64", i, i)
 	case []uint8:
-		v, err := strconv.ParseFloat(strings.Replace(string(s), ",", ".", 1), 64)
+		v, err := strconv.ParseFloat(normalizeNumberText(string(s)), 64)
 		if err == nil {
 			return v, nil
 		}
@@ -834,6 +834,11 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 	case col.Type == SmallIntType:
 		iVal, err := cast.ToInt32E(val)
 		if err != nil {
+			if nVal, ok := normalizedNumberText(val); ok {
+				iVal, err = cast.ToInt32E(nVal)
+			}
+		}
+		if err != nil {
 			fVal, err := sp.toFloat64E(val)
 			if err != nil || sp.ds == nil {
 				// is string
@@ -873,6 +878,11 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		nVal = iVal
 	case col.Type.IsInteger():
 		iVal, err := cast.ToInt64E(val)
+		if err != nil {
+			if nVal, ok := normalizedNumberText(val); ok {
+				iVal, err = cast.ToInt64E(nVal)
+			}
+		}
 		if err != nil {
 			// if value is boolean casted as int
 			switch val {
@@ -989,7 +999,7 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		}
 
 		// use string to keep accuracy, replace comma as decimal point
-		sVal := strings.Replace(sp.CastToString(val), ",", ".", 1)
+		sVal := normalizeNumberText(sp.CastToString(val))
 		if sp.Config.MaxDecimals > -1 && !isInt {
 			nVal = sp.TruncateDecimalString(sVal, sp.Config.MaxDecimals)
 		} else {
@@ -1509,26 +1519,29 @@ func (sp *StreamProcessor) hasZeroPrefix(s string) bool {
 }
 
 func (sp *StreamProcessor) parseStringInt(s string) (newVal any, err error) {
-	if sp.hasZeroPrefix(s) {
+	n := normalizeNumberText(s)
+	if sp.hasZeroPrefix(n) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
-	// return fastfloat.ParseInt64(s)
-	return strconv.ParseInt(s, 10, 64)
+	// return fastfloat.ParseInt64(n)
+	return strconv.ParseInt(n, 10, 64)
 }
 
 func (sp *StreamProcessor) parseStringFloat(s string) (newVal any, err error) {
-	if sp.hasZeroPrefix(s) {
+	n := normalizeNumberText(s)
+	if sp.hasZeroPrefix(n) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
-	return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+	return strconv.ParseFloat(n, 64)
 }
 
 func (sp *StreamProcessor) parseStringBigFloat(s string) (newVal any, err error) {
-	if sp.hasZeroPrefix(s) {
+	n := normalizeNumberText(s)
+	if sp.hasZeroPrefix(n) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
 	var ok bool
-	newVal, ok = new(big.Float).SetString(strings.Replace(s, ",", ".", 1))
+	newVal, ok = new(big.Float).SetString(n)
 	if !ok {
 		return nil, errors.New("could not cast to big.Rat, treat as string")
 	}
@@ -1557,20 +1570,22 @@ func (sp *StreamProcessor) parseStringIsDecimal(s string) bool {
 }
 
 func (sp *StreamProcessor) parseStringDecimal(s string) (newVal any, err error) {
-	if sp.hasZeroPrefix(s) {
+	n := normalizeNumberText(s)
+	if sp.hasZeroPrefix(n) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
 
-	return decimal.NewFromString(strings.Replace(s, ",", ".", 1))
+	return decimal.NewFromString(n)
 }
 
 func (sp *StreamProcessor) parseStringRational(s string) (newVal any, err error) {
-	if sp.hasZeroPrefix(s) {
+	n := normalizeNumberText(s)
+	if sp.hasZeroPrefix(n) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
 
 	var ok bool
-	newVal, ok = new(big.Rat).SetString(strings.Replace(s, ",", ".", 1))
+	newVal, ok = new(big.Rat).SetString(n)
 	if !ok {
 		return nil, errors.New("could not cast to big.Rat, treat as string")
 	}

@@ -4238,3 +4238,23 @@
   output_contains:
     - 'CDC continuous test:'
     - 'state saved'
+
+# An Excel number cell with a thousands format (#,##0) must load the stored
+# number (3000), not the shown text (3,000, read as 3).
+- id: 937
+  name: 'SLING-320: Excel number formats load the stored number'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.number-formats.xlsx' --stdout
+  rows: 2
+  output_contains:
+    - 'wrote 2 rows to stdout'
+    - ',3000,'
+    - '1234567'
+    - '1234.5'
+    - '-1000'
+    - '50%'
+    - '2023-10-31'
+    - '123456789012'
+  output_does_not_contain:
+    - '3.000'
+    - '3,000'
