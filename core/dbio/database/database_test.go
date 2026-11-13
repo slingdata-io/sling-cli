@@ -1676,6 +1676,49 @@ func TestSoftMergeGuardIsNullSafe(t *testing.T) {
 	}
 }
 
+// ClickHouse 21.x rejects an IN whose two sides have different integer widths
+// ("Types of column 1 in section IN don't match: Int32 on the left, Int64 on
+// the right"). The merge templates must select the source PK through a cast to
+// the target type, so every IN compares equal types.
+func TestClickhouseMergeTemplatesCastPK(t *testing.T) {
+	tmpl, err := dbio.TypeDbClickhouse.Template()
+	assert.NoError(t, err)
+
+	strategies := []string{
+		"merge_insert", "merge_delete_insert",
+		"merge_change_capture", "merge_change_capture_soft",
+	}
+
+	// every IN subquery takes the casted key, never the bare one
+	for _, name := range strategies {
+		sql := tmpl.Core[name]
+		if !assert.NotEmpty(t, sql, "%s is empty", name) {
+			continue
+		}
+		assert.NotContains(t, sql, "{src_pk_fields}",
+			"%s still selects the uncast source PK", name)
+		assert.Contains(t, sql, "{src_pk_fields_casted}",
+			"%s does not select the casted source PK", name)
+	}
+
+	c, err := NewConn("clickhouse://u:p@ch:9000/db")
+	assert.NoError(t, err)
+	conn := c.(*ClickhouseConn)
+
+	// differing widths produce a cast to the target type
+	src := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	tgt := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Int32"}
+	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgt))
+
+	// a Nullable target casts to the inner type, not to Nullable(T)
+	tgtNull := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Nullable(Int32)"}
+	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgtNull))
+
+	// equal types add no cast, so the common case renders as before
+	same := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	assert.Equal(t, "`id`", conn.CastColumnForSelect(src, same))
+}
+
 type fakeZerobusStream struct {
 	batches      [][]byte
 	ingestErr    error

@@ -3154,6 +3154,7 @@ func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable str
 		"src_del_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "del."),
 		"pk_fields", mc.Map["pk_fields"],
 		"src_pk_fields", mc.Map["src_pk_fields"],
+		"src_pk_fields_casted", mc.Map["src_pk_fields_casted"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
 		"set_fields_casted", mc.Map["set_fields_casted"],
@@ -3207,7 +3208,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		return
 	}
 
-	var pkEqualFields, srcPkFields, tgtPkFields []string
+	var pkEqualFields, srcPkFields, srcPkFieldsCasted, tgtPkFields []string
 	pkFields = conn.Template().QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
 	for _, pkField := range pkCols.Names() {
@@ -3228,13 +3229,17 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 
 		// cast src PK to target type when types differ (e.g. CDC staging writes text, target has bigint)
 		srcPkExpr := g.F("src.%s", srcField)
+		srcPkFieldCasted := srcField
 		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
 			castedExpr := conn.Self().CastColumnForSelect(*srcCol, *tgtCol)
 			quotedName := conn.Template().Quote(srcCol.Name)
 			if !strings.EqualFold(castedExpr, quotedName) {
 				srcPkExpr = strings.ReplaceAll(castedExpr, quotedName, g.F("src.%s", srcField))
+				// unaliased form, for a subquery that selects straight from {src_table}
+				srcPkFieldCasted = castedExpr
 			}
 		}
+		srcPkFieldsCasted = append(srcPkFieldsCasted, srcPkFieldCasted)
 		pkEqualField := g.F("%s = tgt.%s", srcPkExpr, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
 		pkFieldMap[pkField] = ""
@@ -3365,6 +3370,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"src_insert_fields":    strings.Join(srcInsertFields, ", "),
 			"pk_fields":            strings.Join(pkFields, ", "),
 			"src_pk_fields":        strings.Join(srcPkFields, ", "),
+			"src_pk_fields_casted": strings.Join(srcPkFieldsCasted, ", "),
 			"tgt_pk_fields":        strings.Join(tgtPkFields, ", "),
 			"set_fields":           strings.Join(setFields, ", "),
 			// for templates where `src` is a derived table already projecting {src_fields}

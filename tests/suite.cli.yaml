@@ -2029,6 +2029,25 @@
     - 'CDC merge_cdc MySQL test PASSED'
     - 'CDC soft merge: rows=5 ids=5 deleted=2'
 
+# ClickHouse 21.x rejects an IN whose two sides have different integer widths
+# (Code: 53). The target id is Int32 and the _tmp id is Int64, so the merge
+# templates must cast the source PK. Run on both an old and a current server.
+- id: 938
+  name: CDC merge_cdc strategy - ClickHouse target (21.3)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
+- id: 939
+  name: CDC merge_cdc strategy - ClickHouse target (25.x)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse_top
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
 # change_capture and change_capture_soft. Offline template rendering is also

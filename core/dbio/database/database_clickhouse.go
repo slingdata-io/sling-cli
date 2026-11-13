@@ -974,6 +974,15 @@ func (conn *ClickhouseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Co
 		fallthrough
 	case srcCol.IsBool() && tgtCol.IsString():
 		selectStr = g.F("case when %s = 1 then 'true' else 'false' end", qName)
+	case srcCol.IsInteger() && tgtCol.IsInteger():
+		// ClickHouse 21.x rejects an IN whose two sides have different integer
+		// widths (Code: 53). Match the width of the target column.
+		tgtType := strings.TrimSuffix(strings.TrimPrefix(tgtCol.DbType, "Nullable("), ")")
+		if tgtType == "" || strings.EqualFold(tgtType, srcCol.DbType) {
+			selectStr = qName
+		} else {
+			selectStr = g.F("cast(%s as %s)", qName, tgtType)
+		}
 	default:
 		selectStr = qName
 	}
