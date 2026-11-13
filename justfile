@@ -165,6 +165,22 @@ test-cdc-basic:
     set -e
     (cd ../sling && bash scripts/test.cdc.sh basic)
 
+test-cdc-continuous-network-drop:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_network_drop)
+
+test-cdc-continuous-restart:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_server_restart)
+
+# 72h soak, a release check. Set CDC_SOAK_HOURS for a shorter run.
+test-cdc-soak:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_soak)
+
 test-cdc-soft-delete:
     #!/usr/bin/env bash
     set -e
