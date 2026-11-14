@@ -171,7 +171,7 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		cfg.Header = lo.Ternary(sameCols, false, true)
 		cfg.DatetimeFormat = conn.GetProp("datetime_format")
 		if strings.ToLower(cfg.DatetimeFormat) == "auto" || cfg.DatetimeFormat == "" {
-			cfg.DatetimeFormat = "2006-01-02 15:04:05.000Z"
+			cfg.DatetimeFormat = "2006-01-02 15:04:05.000Z07:00"
 		}
 
 		if runtime.GOOS == "windows" {
