@@ -1448,3 +1448,33 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeToGeneralStarRocksLargeInt(t *testing.T) {
+	// StarRocks reports its signed 128-bit integer as LARGEINT. bigint is 64-bit,
+	// so the map uses decimal(38,0), the same precision DuckDB pins for hugeint.
+	cases := []struct {
+		native   string
+		expected ColumnType
+	}{
+		{"largeint", ColumnType("decimal(38,0)")},
+		{"LARGEINT", ColumnType("decimal(38,0)")},
+		{"bigint", BigIntType},
+		{"int", IntegerType},
+		{"decimal", DecimalType},
+	}
+	for _, tc := range cases {
+		t.Run(tc.native, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", tc.native, dbio.TypeDbStarRocks)
+			assert.Equal(t, tc.expected, colType)
+		})
+	}
+
+	t.Run("precision", func(t *testing.T) {
+		col := Column{Name: "id", Type: NativeTypeToGeneral("id", "largeint", dbio.TypeDbStarRocks)}
+		col.SetLengthPrecisionScale()
+		assert.Equal(t, DecimalType, col.Type)
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 0, col.DbScale)
+		assert.True(t, col.Sourced)
+	})
+}

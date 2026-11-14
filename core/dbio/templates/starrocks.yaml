@@ -550,6 +550,7 @@ native_type_map:
   geometrycollection: string
   int: integer
   json: json
+  largeint: "decimal(38,0)"
   linestring: string
   longblob: text
   longtext: text
