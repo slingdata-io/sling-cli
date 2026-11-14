@@ -428,7 +428,9 @@ native_type_map:
   fixedstring: text
   float32: float
   float64: float
+  int128: decimal
   int16: smallint
+  int256: decimal
   int32: integer
   int64: bigint
   int8: smallint
@@ -439,7 +441,9 @@ native_type_map:
   simpleaggregatefunction: text
   string: text
   tuple: string
+  uint128: decimal
   uint16: integer
+  uint256: decimal
   uint32: bigint
   uint64: "decimal(28,0)"
   uint8: integer
