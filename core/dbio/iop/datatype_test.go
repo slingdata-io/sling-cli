@@ -1448,3 +1448,25 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeToGeneralOracleBinaryFloatAndLocalTZ(t *testing.T) {
+	// go-ora reports BINARY_FLOAT, BINARY_DOUBLE and TIMESTAMP WITH LOCAL
+	// TIME ZONE columns as "IBFloat", "IBDouble" and "TimeStampLTZ_DTY";
+	// all_tab_columns reports the first two as BINARY_FLOAT / BINARY_DOUBLE
+	cases := map[string]ColumnType{
+		"IBFloat":          FloatType,
+		"IBDouble":         FloatType,
+		"BINARY_FLOAT":     FloatType,
+		"BINARY_DOUBLE":    FloatType,
+		"TimeStampLTZ_DTY": TimestampzType,
+		"FLOAT":            FloatType,
+		"TimeStampDTY":     TimestampType,
+		"TimeStampTZ_DTY":  TimestampzType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbOracle)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
