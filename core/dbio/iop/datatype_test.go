@@ -1448,3 +1448,22 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeToGeneralClickHouseDateAndDecimal(t *testing.T) {
+	cases := map[string]ColumnType{
+		"Date":           DateType,
+		"Date32":         DateType,
+		"Decimal(10, 2)": DecimalType,
+		"Decimal32(2)":   DecimalType,
+		"Decimal64(4)":   DecimalType,
+		"Decimal128(10)": DecimalType,
+		"Decimal256(20)": DecimalType,
+		"Enum16":         StringType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
