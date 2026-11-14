@@ -499,12 +499,16 @@ variable:
 
 native_type_map:
   bfile: binary
+  binary_double: float
+  binary_float: float
   blob: binary
   char: string
   clob: text
   date: datetime
   datetime: datetime
   float: float
+  ibdouble: float
+  ibfloat: float
   json: json
   long: string
   longraw: binary
@@ -518,6 +522,7 @@ native_type_map:
   rowid: bigint
   timestamp: timestamp
   timestampdty: timestamp
+  timestampltz_dty: timestampz
   timestamptz: timestampz
   timestamptz_dty: timestampz
   varchar2: string
