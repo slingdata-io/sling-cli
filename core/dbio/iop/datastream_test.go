@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -1037,4 +1039,54 @@ feed:
 		require.NoError(t, err, "row %v", row[0])
 		assert.True(t, want.Equal(tVal), "created_bam_date of row %v is %v, want %v", row[0], tVal, want)
 	}
+}
+
+// TestDatastreamBatchReleasesRows makes many batches whose limit is not a
+// multiple of RowChunkSize. The consumed rows and batches must be free for
+// the GC while the stream is still alive (SLING-470).
+func TestDatastreamBatchReleasesRows(t *testing.T) {
+	origSampleSize := SampleSize
+	SampleSize = 2
+	defer func() { SampleSize = origSampleSize }()
+
+	const total, limit = 200_000, 1000
+	cols := NewColumns(
+		Column{Name: "id", Type: BigIntType},
+		Column{Name: "val", Type: StringType},
+	)
+	i := 0
+	nextFunc := func(it *Iterator) bool {
+		if i >= total {
+			return false
+		}
+		it.Row = []any{int64(i), "v"}
+		i++
+		return true
+	}
+
+	ds := NewDatastreamIt(context.Background(), cols, nextFunc)
+	ds.Inferred = true
+	ds.Sp.Config.BatchLimit = limit
+	require.NoError(t, ds.Start())
+
+	var rowRefs []weak.Pointer[any]
+	var batchRefs []weak.Pointer[Batch]
+	for batch := range ds.BatchChan {
+		batchRefs = append(batchRefs, weak.Make(batch))
+		for row := range batch.Rows() {
+			rowRefs = append(rowRefs, weak.Make(&row[0]))
+		}
+	}
+	require.NoError(t, ds.Err())
+	require.Len(t, rowRefs, total)
+
+	runtime.GC()
+	runtime.GC()
+	aliveRows := lo.CountBy(rowRefs, func(p weak.Pointer[any]) bool { return p.Value() != nil })
+	aliveBatches := lo.CountBy(batchRefs, func(p weak.Pointer[Batch]) bool { return p.Value() != nil })
+	runtime.KeepAlive(ds)
+
+	t.Logf("batches=%d alive_batches=%d alive_rows=%d", len(batchRefs), aliveBatches, aliveRows)
+	assert.Less(t, aliveRows, limit, "consumed rows stay in memory")
+	assert.LessOrEqual(t, aliveBatches, 2, "consumed batches stay in memory")
 }

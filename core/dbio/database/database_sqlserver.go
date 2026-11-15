@@ -848,7 +848,9 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		ds.Context.CaptureErr(err)
 	}
 
+	batchNum := 0
 	for batch := range ds.BatchChan {
+		batchNum++
 
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			ds.Context.Lock()
@@ -870,7 +872,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		// Write the ds to a temp file
 
-		filePath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlserver.%s", env.CleanTableName(tableFName)))+g.F("%d.csv", len(ds.Batches)))
+		filePath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlserver.%s", env.CleanTableName(tableFName)))+g.F("%d.csv", batchNum))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
 
 		if err != nil {

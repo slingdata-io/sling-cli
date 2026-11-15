@@ -29,7 +29,7 @@ type Batch struct {
 	ds          *Datastream
 	closed      bool
 	transforms  []func(row []any) []any
-	context     *g.Context
+	closeMu     sync.Mutex
 
 	// The producer adds rows to pending, and sends full chunks to the consumer.
 	// Close gives the pending rows to the consumer as the tail.
@@ -57,12 +57,11 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 			chunks:  chunks,
 			closing: make(chan struct{}),
 			closed:  true,
-			context: g.NewContext(ds.Context.Ctx),
 		}
 	}
 
 	batch := &Batch{
-		id:          len(ds.Batches),
+		id:          ds.batchCount,
 		Columns:     columns,
 		Previous:    ds.LatestBatch(),
 		ds:          ds,
@@ -70,7 +69,6 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 		MaxDuration: ds.Sp.Config.BatchMaxDuration,
 		started:     time.Now(),
 		transforms:  []func(row []any) []any{},
-		context:     g.NewContext(ds.Context.Ctx),
 		chunks:      make(chan [][]any, 2),
 		closing:     make(chan struct{}),
 	}
@@ -78,7 +76,7 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 	if batch.Previous != nil && !batch.Previous.closed {
 		batch.Previous.Close() // close previous batch
 	}
-	ds.Batches = append(ds.Batches, batch)
+	ds.batchCount++
 	ds.CurrentBatch = batch
 	if !ds.closed {
 		ds.BatchChan <- batch
@@ -90,10 +88,7 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 }
 
 func (ds *Datastream) LatestBatch() *Batch {
-	if len(ds.Batches) > 0 {
-		return ds.Batches[len(ds.Batches)-1]
-	}
-	return nil
+	return ds.CurrentBatch
 }
 
 func (b *Batch) ID() string {
@@ -122,8 +117,8 @@ func (b *Batch) Close() {
 	if b == nil {
 		return
 	}
-	b.context.Lock()
-	defer b.context.Unlock()
+	b.closeMu.Lock()
+	defer b.closeMu.Unlock()
 
 	b.mu.Lock()
 	if b.closed {
@@ -152,8 +147,14 @@ func (b *Batch) Close() {
 }
 
 // Rows gives the rows of the batch to the consumer, with the batch transforms.
+// When the iteration ends, the batch drops the tail and Previous. Read the batch once.
 func (b *Batch) Rows() iter.Seq[[]any] {
 	return func(yield func([]any) bool) {
+		defer func() {
+			b.mu.Lock()
+			b.tail, b.Previous = nil, nil
+			b.mu.Unlock()
+		}()
 		send := func(rows [][]any) bool {
 			for i, row := range rows {
 				for _, f := range b.transforms {
@@ -184,6 +185,8 @@ func (b *Batch) Closed() bool {
 	return b != nil && b.closed
 }
 
+// ColumnsChanged compares the columns with the previous batch.
+// Call it before Rows, because Rows drops Previous.
 func (b *Batch) ColumnsChanged() bool {
 	if pB := b.Previous; pB != nil {
 		if len(pB.Columns) != len(b.Columns) {
