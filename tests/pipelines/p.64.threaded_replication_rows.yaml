@@ -1,0 +1,60 @@
+# Threaded replication steps must report rows, bytes and store keys to the pipeline (SLING-481).
+# 3 streams on 2 threads: the third stream starts after one stream finishes.
+# repl_a runs with an empty pipeline store, repl_b after a store step.
+steps:
+  - id: repl_a
+    type: replication
+    replication:
+      source: LOCAL
+      target: LOCAL
+      defaults:
+        mode: full-refresh
+        object: file://temp/p64_threaded_rows/a_{stream_file_name}.csv
+      env:
+        SLING_THREADS: 2
+      hooks:
+        end:
+          - type: store
+            key: repl_a_end
+            value: done
+      streams:
+        file://tests/files/test1.1.csv:
+        file://tests/files/test1.csv:
+        file://tests/files/test2.csv:
+
+  - type: store
+    key: before_b
+    value: x
+
+  - id: repl_b
+    type: replication
+    replication:
+      source: LOCAL
+      target: LOCAL
+      defaults:
+        mode: full-refresh
+        object: file://temp/p64_threaded_rows/b_{stream_file_name}.csv
+      env:
+        SLING_THREADS: 2
+      streams:
+        file://tests/files/test1.1.csv:
+        file://tests/files/test1.csv:
+        file://tests/files/test2.csv:
+
+  - type: log
+    message: 'threaded rows a={state.repl_a.rows} b={state.repl_b.rows} bytes_a={state.repl_a.bytes} hook={store.repl_a_end}'
+
+  - type: check
+    check: int_parse(state.repl_a.rows) == 2018 && int_parse(state.repl_b.rows) == 2018
+    failure_message: 'expected 2018 rows for each step, got a={state.repl_a.rows} b={state.repl_b.rows}'
+
+  - type: check
+    check: int_parse(state.repl_a.bytes) > 0
+    failure_message: 'expected bytes > 0, got {state.repl_a.bytes}'
+
+  - type: check
+    check: store.repl_a_end == "done"
+    failure_message: 'end hook store key was lost: {store.repl_a_end}'
+
+  - type: log
+    message: 'SUCCESS: threaded replication step reports rows'

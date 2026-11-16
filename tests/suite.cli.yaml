@@ -4295,3 +4295,11 @@
   output_does_not_contain:
     - '3.000'
     - '3,000'
+
+# Threaded pipeline replication steps reported 0 rows: the exec folder cleanup deleted the store file (SLING-481).
+- id: 942
+  name: 'Threaded replication step reports rows, bytes and store keys to the pipeline'
+  run: 'sling run -d -p tests/pipelines/p.64.threaded_replication_rows.yaml'
+  output_contains:
+    - 'threaded rows a=2018 b=2018'
+    - 'SUCCESS: threaded replication step reports rows'

@@ -810,10 +810,9 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 	}
 
-	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
-		state.SetStoreData("_replication_total_rows", state.Execution.TotalRows, false)
-		state.SetStoreData("_replication_total_bytes", state.Execution.TotalBytes, false)
-		sling.SetPipelineStoreEnv(state.GetStore())
+	// a thread child does not write: the parent owns the pipeline store
+	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() && !env.IsThreadChild {
+		state.WritePipelineStore()
 	}
 
 	return eG.Err()
