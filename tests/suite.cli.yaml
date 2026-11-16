@@ -2048,6 +2048,24 @@
   output_contains:
     - 'CDC merge_cdc ClickHouse test PASSED'
 
+# A parent whose sling binary is gone cannot start its children. The error shows
+# with the stream name, and the run fails (exec on staging: streams stuck in created).
+- id: 941
+  name: 'Threaded replication shows the spawn error of a child process'
+  run: |
+    # Windows cannot remove a running binary: fake the expected output and skip
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo 'could not start process for stream (skipped) Replication failure (4 streams failed): '; exit 1 ;; esac
+    tmp=$(mktemp -d)
+    trap '/bin/rm -rf "$tmp"' EXIT
+    /bin/cp -f "$(type -P sling)" "$tmp/sling"
+    SLING_TEST_BIN="$tmp/sling" "$tmp/sling" run -r tests/replications/r.151.spawn_error_threads.yaml
+  err: true
+  output_contains:
+    - 'could not start process for stream'
+    - 'Replication failure (4 streams failed): '
+  output_does_not_contain:
+    - 'stream did not start: context canceled'
+
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
 # change_capture and change_capture_soft. Offline template rendering is also
