@@ -224,7 +224,7 @@ func (b *Batch) Shape(tgtColumns Columns, pause ...bool) (err error) {
 			return g.Error("column %s not found in target columns. available => %s", col.Name, g.Marshal(tgtColNames))
 		}
 		colMap[s] = t
-		diffCols = s != t ||
+		diffCols = diffCols || s != t ||
 			!strings.EqualFold(tgtColumns[t].Name, srcColumns[s].Name)
 	}
 

@@ -1090,3 +1090,42 @@ func TestDatastreamBatchReleasesRows(t *testing.T) {
 	assert.Less(t, aliveRows, limit, "consumed rows stay in memory")
 	assert.LessOrEqual(t, aliveBatches, 2, "consumed batches stay in memory")
 }
+
+func shapeBatch(t *testing.T, src, tgt []string, row []any) (*Batch, []any, error) {
+	t.Helper()
+	srcCols := NewColumnsFromFields(src...)
+	ds := NewDatastream(srcCols)
+	batch := ds.NewBatch(srcCols)
+	err := batch.Shape(NewColumnsFromFields(tgt...), false)
+	for _, f := range batch.transforms {
+		row = f(row)
+	}
+	return batch, row, err
+}
+
+func TestBatchShapeReordersWhenLastColumnMatches(t *testing.T) {
+	batch, row, err := shapeBatch(t, []string{"a", "b", "c"}, []string{"b", "a", "c"}, []any{1, 2, 3})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"b", "a", "c"}, batch.Columns.Names())
+	assert.Equal(t, []any{2, 1, 3}, row)
+}
+
+func TestBatchShapePadsExtraTargetColumns(t *testing.T) {
+	batch, row, err := shapeBatch(t, []string{"a", "b"}, []string{"a", "b", "x"}, []any{1, 2})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "x"}, batch.Columns.Names())
+	assert.Equal(t, []any{1, 2, nil}, row)
+}
+
+func TestBatchShapeSameOrderNoTransform(t *testing.T) {
+	batch, row, err := shapeBatch(t, []string{"a", "b"}, []string{"A", "B"}, []any{1, 2})
+	require.NoError(t, err)
+	assert.Empty(t, batch.transforms)
+	assert.Equal(t, []any{1, 2}, row)
+}
+
+func TestBatchShapeMissingColumn(t *testing.T) {
+	_, _, err := shapeBatch(t, []string{"a", "z"}, []string{"a", "b"}, []any{1, 2})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "column z not found in target columns")
+}
