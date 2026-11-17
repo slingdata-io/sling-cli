@@ -46,6 +46,35 @@ type EnvFile struct {
 	Repaired   bool   `json:"-" yaml:"-"` // indentation was repaired on read
 	TopComment string `json:"-" yaml:"-"`
 	Body       string `json:"-" yaml:"-"`
+
+	// expandMap is the map that loadEnvFile used to expand Body.
+	expandMap map[string]any
+}
+
+// envFileVars records the env keys that loadEnvFile exported to the process
+// env, to tell them apart from real process env vars.
+type envFileVars struct {
+	mu  sync.Mutex
+	set map[string]string
+}
+
+var loadedEnvVars = &envFileVars{set: map[string]string{}}
+
+// isReal is true when key is in base and does not hold the value that
+// loadEnvFile recorded for it. The caller must hold v.mu.
+func (v *envFileVars) isReal(key string, base map[string]any) bool {
+	cur, ok := base[key]
+	if !ok {
+		return false
+	}
+	rec, recorded := v.set[key]
+	return !recorded || g.CastToString(cur) != rec
+}
+
+// setenv exports key to the process env and records it. The caller must hold v.mu.
+func (v *envFileVars) setenv(key, val string) {
+	os.Setenv(key, val)
+	v.set[key] = val
 }
 
 // WorkbenchConfig is the `workbench:` block of env.yaml: the settings of
@@ -125,7 +154,11 @@ func (ef *EnvFile) marshalEnvFileBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	merged := mergeNode(original, newRoot, interpEnvMap(ef.Path))
+	envMap := ef.expandMap
+	if envMap == nil {
+		envMap = interpEnvMap(ef.Path)
+	}
+	merged := mergeNode(original, newRoot, envMap)
 	annotateEnvVarRefComments(merged)
 
 	var buf bytes.Buffer
@@ -292,7 +325,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 
 // loadEnvFile parses YAML env-file content from `body`, expanding ${VAR}
 // references against the current process environment (plus SLING_HOME_DIR
-// when a path is provided), and exports scalar entries from `env:` into
+// when a path is provided) and the env block of the file, and exports scalar entries from `env:` into
 // os.Environ. `path` is recorded on the returned EnvFile when non-empty.
 func loadEnvFile(body, path string) (ef EnvFile, err error) {
 	repaired := string(repairEnvYAML([]byte(body)))
@@ -307,9 +340,39 @@ func loadEnvFile(body, path string) (ef EnvFile, err error) {
 		return ef, nil
 	}
 
-	// expand variables
-	envMap := interpEnvMap(path)
-	ef.Body = g.Rmd(ef.Body, envMap)
+	loadedEnvVars.mu.Lock()
+	defer loadedEnvVars.mu.Unlock()
+
+	// expand with the process env and the env block of the file itself
+	base := interpEnvMap(path)
+	merged := maps.Clone(base)
+	fileVals := map[string]any{}
+	var pre struct {
+		Env       map[string]any `yaml:"env"`
+		Variables map[string]any `yaml:"variables"`
+	}
+	if yaml.Unmarshal([]byte(ef.Body), &pre) == nil {
+		block := pre.Env
+		if len(block) == 0 {
+			block = pre.Variables
+		}
+		for k, v := range block {
+			switch v.(type) {
+			case map[string]any, map[any]any, []any:
+				continue
+			}
+			if !loadedEnvVars.isReal(k, base) {
+				fileVals[k] = g.CastToString(v)
+			}
+		}
+	}
+	lookup := maps.Clone(base)
+	maps.Copy(lookup, fileVals)
+	for k, v := range fileVals {
+		merged[k] = g.Rmd(v.(string), lookup)
+	}
+	ef.Body = g.Rmd(ef.Body, merged)
+	ef.expandMap = merged
 
 	if err = yaml.Unmarshal([]byte(ef.Body), &ef); err != nil {
 		err = g.Error(err, "error parsing yaml string")
@@ -329,13 +392,13 @@ func loadEnvFile(body, path string) (ef EnvFile, err error) {
 	}
 
 	for k, v := range ef.Env {
-		if _, found := envMap[k]; !found {
+		if !loadedEnvVars.isReal(k, base) {
 			// non-scalar values (e.g. SLING_ASSIST) are read from ef.Env, not os.Getenv
 			switch v.(type) {
 			case map[string]any, map[any]any, []any:
 				continue
 			}
-			os.Setenv(k, g.CastToString(v))
+			loadedEnvVars.setenv(k, g.CastToString(v))
 		}
 	}
 	return ef, err
