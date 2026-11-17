@@ -325,8 +325,9 @@ func LoadEnvFile(path string) (ef EnvFile) {
 
 // loadEnvFile parses YAML env-file content from `body`, expanding ${VAR}
 // references against the current process environment (plus SLING_HOME_DIR
-// when a path is provided) and the env block of the file, and exports scalar entries from `env:` into
-// os.Environ. `path` is recorded on the returned EnvFile when non-empty.
+// when a path is provided) and the env block of the file, and exports scalar
+// entries from `env:` into os.Environ. `path` is recorded on the returned
+// EnvFile when non-empty.
 func loadEnvFile(body, path string) (ef EnvFile, err error) {
 	repaired := string(repairEnvYAML([]byte(body)))
 	ef.Repaired = repaired != body

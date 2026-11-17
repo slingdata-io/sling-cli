@@ -311,7 +311,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			if err != nil {
 				e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
 				g.Warn(e)
-				failed[key] = err
+				failed[strings.ToUpper(key)] = err
 				continue
 			}
 		}
