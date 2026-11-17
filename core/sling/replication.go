@@ -1055,6 +1055,9 @@ func (rd *ReplicationConfig) checkConnections() error {
 		if name == "" || strings.Contains(name, "://") || !connection.SchemeType(name).IsUnknown() {
 			continue
 		} else if _, ok := connsMap[strings.ToLower(name)]; !ok {
+			if err := connection.LocalConnLoadError(name); err != nil {
+				name = g.F("%s (could not load: %s)", name, g.ErrMsgSimple(err))
+			}
 			missing = append(missing, name)
 		}
 	}

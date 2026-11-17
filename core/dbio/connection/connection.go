@@ -1517,7 +1517,15 @@ func ReadConnectionsFromFile(path string) (conns map[string]Connection, err erro
 }
 
 func ReadConnections(env map[string]interface{}) (conns map[string]Connection, err error) {
+	conns, _ = readConnections(env)
+	return conns, nil
+}
+
+// readConnections is ReadConnections that also returns the entries it could
+// not load, keyed by upper-case name.
+func readConnections(env map[string]interface{}) (conns map[string]Connection, failed map[string]error) {
 	conns = map[string]Connection{}
+	failed = map[string]error{}
 
 	if connections, ok := env["connections"]; ok {
 		switch connectionsV := connections.(type) {
@@ -1534,10 +1542,12 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 					conn, err := NewConnectionFromMap(g.M("name", name, "data", data, "type", data["type"]))
 					if err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 					if err = conn.setURL(); err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 

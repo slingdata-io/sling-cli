@@ -661,3 +661,83 @@ func TestDiscoverUnknownConnection(t *testing.T) {
 		t.Fatalf("want invalid connection name error, got %v", err)
 	}
 }
+
+// TestConnectionEnvFileVariablesFirstLoad: the first parse in a process must
+// expand ${VAR} refs from the variables block of the same file.
+func TestConnectionEnvFileVariablesFirstLoad(t *testing.T) {
+	t.Cleanup(func() {
+		for _, k := range []string{"CEV_HOST", "CEV_USER", "CEV_PASS"} {
+			os.Unsetenv(k)
+		}
+	})
+	body := `
+variables:
+  CEV_HOST: localhost
+  CEV_USER: u
+  CEV_PASS: p
+connections:
+  CEV_DW:
+    type: sqlserver
+    host: ${CEV_HOST}
+    user: ${CEV_USER}
+    password: ${CEV_PASS}
+    database: db
+    port: 1433
+`
+	ef, err := env.LoadSlingEnvFileBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := g.M()
+	g.JSONConvert(ef, &m)
+	conns, err := ReadConnections(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, ok := conns["CEV_DW"]
+	if !ok {
+		t.Fatal("CEV_DW did not load")
+	}
+	if strings.Contains(conn.URL(), "${") {
+		t.Errorf("URL has an unexpanded ref: %s", conn.URL())
+	}
+}
+
+func TestConnectionLoadErrorRecorded(t *testing.T) {
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD:
+    type: sqlserver
+    host: ${CLE_UNSET_HOST}
+    user: ${CLE_UNSET_USER}
+    password: ${CLE_UNSET_PASS}
+`)
+	GetLocalConns(true)
+	if name := GetLocalConns().Get("CLE_BAD").Name; name != "" {
+		t.Fatalf("CLE_BAD should not load, got %q", name)
+	}
+	want := "could not parse provided credentials / url for CLE_BAD"
+	if err := LocalConnLoadError("cle_bad"); err == nil || !strings.Contains(g.ErrMsgSimple(err), want) {
+		t.Fatalf("want error with %q, got %v", want, err)
+	}
+
+	// an uncached call does not touch the record
+	GetLocalConns(true, LocalConnsExclude("X"))
+	if LocalConnLoadError("CLE_BAD") == nil {
+		t.Error("the error should stay after an uncached call")
+	}
+
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD:
+    type: sqlserver
+    host: localhost
+    user: u
+    password: p
+    database: db
+`)
+	GetLocalConns(true)
+	if err := LocalConnLoadError("CLE_BAD"); err != nil {
+		t.Errorf("the error should clear after a valid load, got %v", err)
+	}
+}

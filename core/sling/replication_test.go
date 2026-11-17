@@ -1100,6 +1100,22 @@ func TestReplicationCheckConnections(t *testing.T) {
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "could not find connection(s): MISSING_TGT_X3.")
 	}
+
+	// a connection that failed to load says why
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD2:
+    type: sqlserver
+    host: ${CLE_UNSET_HOST2}
+    user: ${CLE_UNSET_USER2}
+    password: ${CLE_UNSET_PASS2}
+`)
+	connection.GetLocalConns(true)
+	rd = ReplicationConfig{Source: "CLE_BAD2", Target: "LOCAL"}
+	err = rd.checkConnections()
+	if assert.Error(t, err) {
+		assert.Equal(t, "could not find connection(s): CLE_BAD2 (could not load: could not parse provided credentials / url for CLE_BAD2). Add them to the environment", g.ErrMsgSimple(err))
+	}
 }
 
 // RuntimeState must not race with Env and Store writes (SLING-153).
