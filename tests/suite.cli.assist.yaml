@@ -306,3 +306,41 @@
   output_does_not_contain:
     - '/Users/'
 
+- id: 943
+  name: 'sling skills prints the index'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling skills
+    rm -rf "$H"
+  output_contains:
+    - '# Sling skills'
+    - '## sling-api-specs'
+    - '## Without the Sling MCP server'
+  output_does_not_contain:
+    - 'agent-browser'
+
+- id: 944
+  name: 'sling skills prints a sub-file'
+  group: assist
+  run: 'sling skills sling/CONNECTIONS.md'
+  output_contains:
+    - '# Skill: sling (CONNECTIONS.md)'
+    - '# Connection Management'
+
+- id: 945
+  name: 'sling skills unknown skill fails'
+  group: assist
+  err: true
+  run: 'sling skills foo'
+  output_contains:
+    - 'unknown skill'
+
+- id: 946
+  name: 'sling skills writes no files'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling skills sling >/dev/null
+    test ! -e "$H/.agents"
+    rm -rf "$H"

@@ -654,7 +654,7 @@ func cliInit(done chan struct{}) int {
 			err = g.Error(cast.ToString(env.TelMap["error"]))
 		}
 
-		if g.In(g.CliObj.Name, "conns", "update", "build", "assist", "validate") || env.TelMap["error"] == nil {
+		if g.In(g.CliObj.Name, "conns", "update", "build", "assist", "validate", "skills") || env.TelMap["error"] == nil {
 			env.SetTelVal("error", getErrString(err))
 
 			eventName := g.CliObj.Name
@@ -705,7 +705,7 @@ func cliInit(done chan struct{}) int {
 		Track("conns_" + g.CliObj.UsedSC())
 	case g.CliObj.Name == "update":
 		Track("update")
-	case g.In(g.CliObj.Name, "build", "assist", "validate"):
+	case g.In(g.CliObj.Name, "build", "assist", "validate", "skills"):
 		eventName := g.CliObj.Name
 		if g.CliObj.UsedSC() != "" {
 			eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
