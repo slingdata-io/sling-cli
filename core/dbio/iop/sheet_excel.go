@@ -442,13 +442,20 @@ func (xls *Excel) WriteSheet(shtName string, ds *Datastream, mode string) (err e
 		for _, field := range ds.GetFields(false, true) {
 			header = append(header, field)
 		}
-		xls.File.SetSheetRow(shtName, cellRange, &header)
+		err = xls.File.SetSheetRow(shtName, cellRange, &header)
+		if err != nil {
+			return g.Error(err, "could not write header to sheet %s", shtName)
+		}
 		i++
 	}
 
 	for row := range ds.Rows() {
 		cellRange = g.F("%s%d", col, i)
-		xls.File.SetSheetRow(shtName, cellRange, &row)
+		err = xls.File.SetSheetRow(shtName, cellRange, &row)
+		if err != nil {
+			// excel sheets are limited to excelize.TotalRows rows, header included
+			return g.Error(err, "could not write row %d to sheet %s", i, shtName)
+		}
 		i++
 	}
 
