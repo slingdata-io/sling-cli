@@ -4303,3 +4303,60 @@
   output_contains:
     - 'threaded rows a=2018 b=2018'
     - 'SUCCESS: threaded replication step reports rows'
+
+# `sling platform login` (SLING-533). The three cases need no server: they
+# check that the command fails fast and never prints or writes a token.
+- id: 947
+  name: 'sling platform login fails fast with no server'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - 'could not reach the Sling Platform'
+  output_does_not_contain:
+    - 'SLING_PROJECT_TOKEN='
+
+- id: 948
+  name: 'sling platform status json without a token'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform status --output json
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+  output_contains:
+    - 'sling platform login'
+
+- id: 949
+  name: 'sling platform login does not overwrite without consent'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    mkdir -p "$DIR/.sling"
+    printf 'env:\n  SLING_PROJECT_TOKEN: dummy\n' > "$DIR/.sling/env.yaml"
+    cd "$DIR"
+    set +e
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser < /dev/null
+    code=$?
+    set -e
+    grep -q dummy "$DIR/.sling/env.yaml" || { echo 'FAIL: env.yaml was changed'; exit 1; }
+    exit $code
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - '--force'
+  output_does_not_contain:
+    - 'FAIL: env.yaml was changed'

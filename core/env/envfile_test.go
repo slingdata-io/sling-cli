@@ -9,6 +9,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func boolToInt(b bool) int {
@@ -1461,4 +1462,41 @@ connections:
 	if strings.Contains(connBlock, "secretA") {
 		t.Errorf("merge wrote expanded secret\n--- got ---\n%s", out)
 	}
+}
+
+// TestEnvVarSource checks that each of the three sources is named correctly.
+func TestEnvVarSource(t *testing.T) {
+	// a real process env var
+	t.Setenv("SOURCE_TEST_PROCESS", "from-shell")
+	src, _ := EnvVarSource("SOURCE_TEST_PROCESS")
+	assert.Equal(t, "process", src)
+
+	// a key that is not set at all
+	src, path := EnvVarSource("SOURCE_TEST_MISSING")
+	assert.Equal(t, "", src)
+	assert.Equal(t, "", path)
+
+	// a key from the env block of env.yaml
+	t.Setenv("SOURCE_TEST_FILE", "")
+	os.Unsetenv("SOURCE_TEST_FILE")
+	_, err := loadEnvFile("env:\n  SOURCE_TEST_FILE: from-file\n", "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.Unsetenv("SOURCE_TEST_FILE")
+		loadedEnvVars.mu.Lock()
+		delete(loadedEnvVars.set, "SOURCE_TEST_FILE")
+		loadedEnvVars.mu.Unlock()
+	})
+	src, path = EnvVarSource("SOURCE_TEST_FILE")
+	assert.Equal(t, "env.yaml", src)
+	assert.Equal(t, HomeDirEnvFile, path)
+
+	// a key from .env.sling
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env.sling"), []byte("SOURCE_TEST_DOTENV=from-dotenv\n"), 0o644))
+	t.Cleanup(func() { os.Unsetenv("SOURCE_TEST_DOTENV"); dotEnvMap.Remove("SOURCE_TEST_DOTENV") })
+	LoadDotEnvSlingFrom(dir)
+	src, path = EnvVarSource("SOURCE_TEST_DOTENV")
+	assert.Equal(t, ".env.sling", src)
+	assert.Contains(t, path, ".env.sling")
 }

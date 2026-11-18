@@ -77,6 +77,36 @@ func (v *envFileVars) setenv(key, val string) {
 	v.set[key] = val
 }
 
+// EnvVarSource says where the value of key in the process env comes from:
+// "process" (the real shell), "env.yaml", ".env.sling", or "" when the key is
+// not set. path names the file for the two file sources.
+func EnvVarSource(key string) (source string, filePath string) {
+	if _, set := os.LookupEnv(key); !set {
+		return "", ""
+	}
+
+	cur := os.Getenv(key)
+
+	// .env.sling never overwrites an existing value, so a match there is the
+	// source only when env.yaml did not set the key.
+	loadedEnvVars.mu.Lock()
+	rec, fromEnvFile := loadedEnvVars.set[key]
+	loadedEnvVars.mu.Unlock()
+	if fromEnvFile && rec == cur {
+		return "env.yaml", HomeDirEnvFile
+	}
+
+	if val, ok := dotEnvMap.Get(key); ok && val == cur {
+		dotPath := ".env.sling"
+		if cwd, err := os.Getwd(); err == nil {
+			dotPath = path.Join(cwd, ".env.sling")
+		}
+		return ".env.sling", dotPath
+	}
+
+	return "process", ""
+}
+
 // WorkbenchConfig is the `workbench:` block of env.yaml: the settings of
 // `sling serve workbench`. A command-line flag wins over the file.
 type WorkbenchConfig struct {
