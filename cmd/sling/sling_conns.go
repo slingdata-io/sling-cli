@@ -189,7 +189,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot get query")
 			}
 
-			sQuery, err := database.ParseTableName(query, conn.Connection.Type)
+			sQuery, err := database.ParseTableName(query, conn.Connection.GetType())
 			if err != nil {
 				return ok, g.Error(err, "cannot parse query")
 			}

@@ -1,6 +1,7 @@
 package dbio
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -130,4 +131,43 @@ func TestTypeSupportsCDC(t *testing.T) {
 	for _, tp := range []Type{TypeDbSQLite, TypeDbDuckDb, TypeDbSnowflake} {
 		assert.False(t, tp.SupportsCDC(), tp)
 	}
+}
+
+func TestFirebirdTemplate(t *testing.T) {
+	fb := Type("firebird")
+	tpl, err := fb.Template(true)
+	require.NoError(t, err)
+
+	own, err := fb.Template(false) // keys that firebird.yaml defines itself
+	require.NoError(t, err)
+	require.NotEmpty(t, own.Metadata)
+	ownKeys := map[string]map[string]string{"metadata": own.Metadata, "analysis": own.Analysis}
+
+	reservedAlias := regexp.MustCompile(`(?i)as (position|count|value|year|month|day)\b`)
+	for group, vals := range map[string]map[string]string{"metadata": tpl.Metadata, "analysis": tpl.Analysis} {
+		for key, val := range vals {
+			if _, ok := ownKeys[group][key]; !ok {
+				continue
+			}
+			assert.NotContains(t, val, "'main'", "%s.%s", group, key)
+			assert.False(t, reservedAlias.MatchString(val), "unquoted reserved alias in %s.%s", group, key)
+		}
+	}
+	assert.Contains(t, tpl.Value("metadata.row_count_estimates"), `as "count"`)
+	assert.Contains(t, tpl.Value("metadata.schemata"), `'false'`)
+
+	limitKeys := []string{"limit", "limit_offset", "limit_sql", "incremental_select_limit", "incremental_select_limit_offset"}
+	for _, key := range limitKeys {
+		val := tpl.Value("core." + key)
+		assert.Contains(t, val, "first {limit}", key)
+		assert.NotContains(t, val, " limit {limit}", key)
+		if strings.HasSuffix(key, "_offset") || key == "limit_sql" {
+			assert.Contains(t, val, "skip {offset}", key)
+		}
+	}
+
+	assert.True(t, fb.Schemaless())
+	assert.True(t, fb.DBNameUpperCase())
+	assert.False(t, TypeDbPostgres.Schemaless())
+	assert.False(t, TypeDbSQLite.Schemaless())
 }

@@ -321,6 +321,37 @@ type Wildcard struct {
 	EndpointMap map[string]api.Endpoint
 }
 
+// stripLegacyMainSchema removes the "main." prefix from the stream names.
+// Old Firebird metadata returned "main" as a fake schema.
+func (rd *ReplicationConfig) stripLegacyMainSchema() {
+	const prefix = "main."
+	ordered := make([]string, 0, len(rd.streamsOrdered))
+	for _, name := range rd.streamsOrdered {
+		if len(name) <= len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
+			ordered = append(ordered, name)
+			continue
+		}
+
+		newName := name[len(prefix):]
+		g.Warn("stream '%s' has a schema, but %s does not support schemas. Use the table name only: '%s'", name, rd.Source, newName)
+
+		cfg := rd.Streams[name]
+		mapEntry, hasMap := rd.maps.Streams[name]
+		delete(rd.Streams, name)
+		delete(rd.maps.Streams, name)
+		if _, exists := rd.Streams[newName]; exists {
+			continue // explicit stream wins
+		}
+
+		rd.Streams[newName] = cfg
+		if hasMap && rd.maps.Streams != nil {
+			rd.maps.Streams[newName] = mapEntry
+		}
+		ordered = append(ordered, newName)
+	}
+	rd.streamsOrdered = ordered
+}
+
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
@@ -335,6 +366,11 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		return strings.Contains(name, "*") || strings.Contains(name, "?")
 	}
 
+	schemaless := conn.Connection.Type.IsDb() && conn.Connection.GetType().Schemaless()
+	if schemaless {
+		rd.stripLegacyMainSchema()
+	}
+
 	patterns := []string{}
 	for _, name := range rd.streamsOrdered {
 		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams), will be expand while reading
@@ -347,7 +383,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 			continue
 		}
 
-		if name == "*" && !conn.Connection.Type.IsAPI() {
+		if name == "*" && !conn.Connection.Type.IsAPI() && !schemaless {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) || conn.Connection.Type.IsAPI() {
 			// Always treat API endpoints as patterns to forms the upstream endpoints
@@ -1086,7 +1122,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 		schemaT, err := database.ParseTableName(pattern, c.Type)
 		if err != nil {
 			return wildcards, g.Error(err, "could not parse stream name: %s", pattern)
-		} else if schemaT.Schema == "" {
+		} else if schemaT.Schema == "" && !c.GetType().Schemaless() {
 			continue
 		}
 

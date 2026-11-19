@@ -928,7 +928,10 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	}
 
 	matchedTables := lo.Filter(lo.Values(s.Tables()), func(t Table, i int) bool {
-		key := strings.ToLower(g.F("%s.%s", t.Schema, t.Name))
+		key := strings.ToLower(t.Name)
+		if t.Schema != "" {
+			key = strings.ToLower(g.F("%s.%s", t.Schema, t.Name))
+		}
 		if gc != nil {
 			return (*gc).Match(key)
 		}
@@ -981,8 +984,12 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	}
 
 	matchedColumns := lo.Filter(lo.Values(s.Columns()), func(col iop.Column, i int) bool {
-		keyTable := strings.ToLower(g.F("%s.%s", col.Schema, col.Table))
-		keyCol := strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		keyTable := strings.ToLower(col.Table)
+		keyCol := strings.ToLower(g.F("%s.%s", col.Table, col.Name))
+		if col.Schema != "" {
+			keyTable = strings.ToLower(g.F("%s.%s", col.Schema, col.Table))
+			keyCol = strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		}
 		if gc != nil {
 			return (*gc).Match(keyCol)
 		}

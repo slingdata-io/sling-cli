@@ -56,6 +56,14 @@ core:
     when matched then
       update set {set_fields2}
   sample: select first {n} {fields} from {table}
+  limit: select first {limit} {fields} from {table}{where_clause}
+  limit_offset: select first {limit} skip {offset} {fields} from {table}{where_clause}
+  limit_sql: |
+    select first {limit} skip {offset} * from (
+      {sql}
+    ) as t
+  incremental_select_limit: select first {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit_offset: select first {limit} skip {offset} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
   rename_table: alter table {table} rename to {new_table}
   modify_column: alter table {table} alter column {column} type {type}
   use_database: -- firebird doesn't support USE DATABASE
@@ -71,12 +79,12 @@ metadata:
     from MON$DATABASE
 
   schemas: |
-    select 'main' as schema_name
+    select cast('' as varchar(31)) as schema_name
     from RDB$DATABASE
 
   tables: |
     select 
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
       'false' as is_view
     from RDB$RELATIONS r
@@ -86,7 +94,7 @@ metadata:
 
   views: |
     select 
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
       'true' as is_view
     from RDB$RELATIONS r
@@ -127,7 +135,7 @@ metadata:
   primary_keys: |
     select
       trim(rc.RDB$CONSTRAINT_NAME) as pk_name,
-      sg.RDB$FIELD_POSITION + 1 as position,
+      sg.RDB$FIELD_POSITION + 1 as "position",
       trim(sg.RDB$FIELD_NAME) as column_name
     from RDB$RELATION_CONSTRAINTS rc
     join RDB$INDEX_SEGMENTS sg on rc.RDB$INDEX_NAME = sg.RDB$INDEX_NAME
@@ -147,7 +155,7 @@ metadata:
 
   columns_full: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(rf.RDB$RELATION_NAME) as table_name,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
@@ -170,7 +178,7 @@ metadata:
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      rf.RDB$FIELD_POSITION + 1 as position
+      rf.RDB$FIELD_POSITION + 1 as "position"
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
     join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
@@ -180,11 +188,11 @@ metadata:
 
   schemata: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(rf.RDB$RELATION_NAME) as table_name,
-      case 
-        when r.RDB$VIEW_BLR is null then false
-        else true
+      case
+        when r.RDB$VIEW_BLR is null then 'false'
+        else 'true'
       end as is_view,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
@@ -207,7 +215,7 @@ metadata:
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      rf.RDB$FIELD_POSITION + 1 as position
+      rf.RDB$FIELD_POSITION + 1 as "position"
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
     join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
@@ -217,9 +225,9 @@ metadata:
 
   row_count_estimates: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
-      0 as count
+      0 as "count"
     from RDB$RELATIONS r
     where r.RDB$SYSTEM_FLAG = 0
       and r.RDB$VIEW_BLR is null
@@ -297,7 +305,7 @@ metadata:
 analysis:
   field_chars: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       sum(case when {field} containing ascii_char(10) then 1 else 0 end) as cnt_nline,
@@ -310,7 +318,7 @@ analysis:
 
   field_stat_len: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       count(*) as tot_cnt,
@@ -320,7 +328,7 @@ analysis:
 
   field_stat_deep: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       count(*) as tot_cnt,
@@ -340,7 +348,7 @@ analysis:
     select first 1000
       '{table}' as table_nm,
       '{field}' as field,
-      {field} as value,
+      {field} as "value",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -352,7 +360,7 @@ analysis:
       '{table}' as table_nm,
       '{field}' as field,
       {group_expr} as group_exp,
-      {field} as value,
+      {field} as "value",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -361,12 +369,12 @@ analysis:
 
   distro_field_date: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
-      extract(year from {field}) as year,
-      extract(month from {field}) as month,
-      extract(day from {field}) as day,
+      extract(year from {field}) as "year",
+      extract(month from {field}) as "month",
+      extract(day from {field}) as "day",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -395,6 +403,8 @@ variable:
   max_string_type: varchar(8000)
   max_string_length: 8000
   max_column_length: 31
+  schemaless: true
+  column_upper: true
 
 native_type_map:
   smallint: smallint

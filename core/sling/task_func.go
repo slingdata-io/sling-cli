@@ -22,6 +22,13 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 		return
 	}
 
+	if conn.GetType().Schemaless() {
+		if schemaName != "" {
+			return false, g.Error("%s does not support schemas (got %q). Use only the table name in the object name", conn.GetType(), schemaName)
+		}
+		return false, nil
+	}
+
 	// check schema existence
 	schemasData, err := conn.GetSchemas()
 	if err != nil {

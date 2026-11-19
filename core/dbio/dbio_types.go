@@ -243,6 +243,15 @@ func (t Type) DBNameUpperCase() bool {
 	return g.In(t, TypeDbOracle, TypeDbSnowflake, TypeDbExasol, TypeDbHana)
 }
 
+// Schemaless returns true if the template declares no schema concept
+func (t Type) Schemaless() bool {
+	tp, err := t.Template()
+	if err != nil {
+		return false
+	}
+	return cast.ToBool(tp.Value("variable.schemaless"))
+}
+
 // Kind returns the kind of connection
 func (t Type) Kind() Kind {
 	switch t {

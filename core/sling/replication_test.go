@@ -1479,3 +1479,56 @@ streams:
 		assert.NotContains(t, rd.JSON(), "continuous")
 	})
 }
+
+func TestProcessWildcardsSchemaless(t *testing.T) {
+	t.Setenv("ENV_YAML", `
+connections:
+  FB_SCHEMALESS_TEST:
+    type: odbc
+    conn_template: firebird
+    conn_string: "Driver={Firebird};Dbname=localhost:/none.fdb;Uid=u;Pwd=p"
+  PG_SCHEMALESS_TEST:
+    type: postgres
+    url: postgres://u:p@localhost:1/db
+`)
+	connection.GetLocalConns(true)
+	t.Cleanup(func() { connection.GetLocalConns(true) })
+
+	newConfig := func(source string, streams ...string) *ReplicationConfig {
+		rd := &ReplicationConfig{Source: source, Streams: map[string]*ReplicationStreamConfig{}}
+		rd.Defaults.Object = "t_{stream_table}"
+		for _, name := range streams {
+			rd.Streams[name] = &ReplicationStreamConfig{}
+			rd.streamsOrdered = append(rd.streamsOrdered, name)
+		}
+		return rd
+	}
+
+	// a schema-less source passes "*" on to discovery
+	rd := newConfig("FB_SCHEMALESS_TEST", "*")
+	err := rd.ProcessWildcards()
+	if assert.Error(t, err, "expects a connection error, since no server runs") {
+		assert.NotContains(t, err.Error(), "Must specify schema")
+	}
+
+	// other sources keep the error
+	rd = newConfig("PG_SCHEMALESS_TEST", "*")
+	err = rd.ProcessWildcards()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "Must specify schema")
+	}
+
+	// "main." is removed from stream names
+	rd = newConfig("FB_SCHEMALESS_TEST", "main.TBL_A", "MAIN.tbl_b", "OTHER")
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"TBL_A", "tbl_b", "OTHER"}, rd.streamsOrdered)
+	for _, name := range rd.streamsOrdered {
+		assert.Contains(t, rd.Streams, name)
+	}
+	assert.NotContains(t, rd.Streams, "main.TBL_A")
+
+	// the other sources keep "main."
+	rd = newConfig("PG_SCHEMALESS_TEST", "main.t")
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"main.t"}, rd.streamsOrdered)
+}

@@ -674,3 +674,67 @@ func TestTableFinalizeAggregateFields(t *testing.T) {
 	sql := table.Select(SelectOptions{Fields: table.FinalizeAggregateFields([]string{"*"})})
 	assert.Equal(t, "select `id`, finalizeAggregation(`min_ts`) as `min_ts`, finalizeAggregation(`cnt`) as `cnt`, `mx` from `db`.`agg`", sql)
 }
+
+func TestSelectFirebirdLimit(t *testing.T) {
+	fb := dbio.Type("firebird")
+
+	table, err := ParseTableName("TBL", fb)
+	assert.NoError(t, err)
+
+	sql := table.Select(SelectOptions{Limit: g.Ptr(5)})
+	assert.Contains(t, sql, "select first 5")
+	assert.Contains(t, sql, `from "TBL"`)
+	assert.NotContains(t, sql, "limit 5")
+	assert.NotContains(t, sql, `"main"`)
+
+	sql = table.Select(SelectOptions{Limit: g.Ptr(5), Offset: 10})
+	assert.Contains(t, sql, "first 5 skip 10")
+	assert.NotContains(t, sql, "limit")
+
+	table, err = ParseTableName("select a from TBL", fb)
+	assert.NoError(t, err)
+	sql = table.Select(SelectOptions{Limit: g.Ptr(5)})
+	assert.Contains(t, sql, "select first 5 skip 0 * from (")
+}
+
+func TestFilterTablesEmptySchema(t *testing.T) {
+	newSchemata := func(schema string, names ...string) Schemata {
+		tables := map[string]Table{}
+		for _, name := range names {
+			tables[strings.ToLower(name)] = Table{
+				Name:   name,
+				Schema: schema,
+				Columns: iop.Columns{
+					{Name: "id", Table: name, Schema: schema, Type: iop.IntegerType},
+					{Name: "val", Table: name, Schema: schema, Type: iop.StringType},
+				},
+			}
+		}
+		return Schemata{Databases: map[string]Database{
+			"": {Schemas: map[string]Schema{strings.ToLower(schema): {Name: schema, Tables: tables}}},
+		}}
+	}
+
+	s := newSchemata("", "TBL_A", "TBL_B", "OTHER")
+
+	ns := s.Filtered(false, "TBL_*")
+	assert.Len(t, ns.Tables(), 2)
+	ns = s.Filtered(false, "*")
+	assert.Len(t, ns.Tables(), 3)
+
+	ns = s.Filtered(true, "TBL_A.*")
+	cols := ns.Columns()
+	assert.Len(t, cols, 2)
+	for _, col := range cols {
+		assert.Equal(t, "TBL_A", col.Table)
+	}
+
+	// schema-qualified keys are unchanged
+	pg := newSchemata("public", "t1", "t2")
+	ns = pg.Filtered(false, "public.*")
+	assert.Len(t, ns.Tables(), 2)
+	ns = pg.Filtered(false, "public.t1")
+	assert.Len(t, ns.Tables(), 1)
+	ns = pg.Filtered(true, "public.t1.*")
+	assert.Len(t, ns.Columns(), 2)
+}
