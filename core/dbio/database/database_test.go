@@ -4919,3 +4919,37 @@ func TestQueryContextCancelsChildren(t *testing.T) {
 	t.Logf("heap growth after 3000 queries: %d bytes", growth)
 	assert.Less(t, growth, int64(1<<20))
 }
+
+func TestSQLColumnsODBCTextAsNumeric(t *testing.T) {
+	newConn := func(connType dbio.Type) Connection {
+		bc := &BaseConn{Type: connType}
+		var inst Connection = bc
+		bc.instance = &inst
+		return bc
+	}
+	fetched := &iop.Column{Name: "n38", Type: iop.DecimalType, DbType: "NUMERIC(38,4)", DbPrecision: 38, DbScale: 4}
+	colTypes := []ColumnType{{Name: "n38", DatabaseTypeName: "VARCHAR", Length: 47, FetchedColumn: fetched}}
+
+	t.Run("odbc uses fetched decimal", func(t *testing.T) {
+		col := SQLColumns(colTypes, newConn(dbio.TypeDbODBC))[0]
+		assert.Equal(t, iop.DecimalType, col.Type)
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 4, col.DbScale)
+		assert.Equal(t, 0, col.Stats.MaxLen)
+		assert.True(t, col.Sourced)
+	})
+
+	t.Run("odbc keeps text when fetched type is text", func(t *testing.T) {
+		fetchedText := &iop.Column{Name: "n38", Type: iop.StringType}
+		cts := []ColumnType{{Name: "n38", DatabaseTypeName: "VARCHAR", Length: 47, FetchedColumn: fetchedText}}
+		col := SQLColumns(cts, newConn(dbio.TypeDbODBC))[0]
+		assert.True(t, col.IsString())
+		assert.Equal(t, 47, col.Stats.MaxLen)
+	})
+
+	t.Run("non-odbc is unchanged", func(t *testing.T) {
+		col := SQLColumns(colTypes, newConn(dbio.TypeDbPostgres))[0]
+		assert.True(t, col.IsString())
+		assert.Equal(t, 47, col.Stats.MaxLen)
+	})
+}

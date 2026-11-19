@@ -1682,6 +1682,8 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			Sourced:  colType.IsSourced(),
 		}
 
+		textAsNumeric := false
+
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
 		if fc := colType.FetchedColumn; fc != nil {
@@ -1706,6 +1708,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.Sourced = fc.Sourced
 			}
 
+			// ODBC drivers can report wide numerics (e.g. Firebird INT128) as text
+			textAsNumeric = colType.useFetchedNumeric(&col, conn.Base().Type)
+
 			col.Constraint = fc.Constraint
 
 			// fetch decimal info
@@ -1726,7 +1731,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			}
 		}
 
-		if colType.Length > 0 {
+		if colType.Length > 0 && !textAsNumeric {
 			col.Stats.MaxLen = colType.Length
 		}
 		col.Stats.MaxDecLen = 0

@@ -545,6 +545,42 @@ func TestCoerceUnsizedDecimalCast(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, nt, "decimal(24,6)")
 	})
+
+	t.Run("sized decimal over wide string source keeps user precision", func(t *testing.T) {
+		wide := Columns{{
+			Name:  "code",
+			Type:  StringType,
+			Stats: ColumnStats{MaxLen: 100},
+		}}
+		out := wide.Coerce(Columns{parseCast("decimal(38,4)")}, true, ColumnCasing(""), dbio.TypeDbSQLServer)
+		col := out[0]
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 4, col.DbScale)
+		assert.Equal(t, 0, col.Stats.MaxLen)
+
+		nt, err := col.GetNativeType(dbio.TypeDbSQLServer, ColumnTyping{})
+		require.NoError(t, err)
+		assert.Equal(t, "decimal(38,4)", nt)
+	})
+}
+
+func TestNativeTypeToGeneralFirebird(t *testing.T) {
+	cases := map[string]ColumnType{
+		"INT128":                   DecimalType,
+		"NUMERIC(38,4)":            DecimalType,
+		"DECIMAL(25,2)":            DecimalType,
+		"DECFLOAT(16)":             FloatType,
+		"DECFLOAT(34)":             FloatType,
+		"BOOLEAN":                  BoolType,
+		"TIME WITH TIME ZONE":      TimezType,
+		"TIMESTAMP WITH TIME ZONE": TimestampzType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.Type("firebird"))
+			assert.Equal(t, expected, colType)
+		})
+	}
 }
 
 // Additional test for JSON column typing

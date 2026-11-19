@@ -106,26 +106,47 @@ metadata:
     select
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      f.RDB$FIELD_PRECISION as "precision",
+      case when f.RDB$FIELD_TYPE = 26 and coalesce(f.RDB$FIELD_PRECISION, 0) = 0 then 38 else f.RDB$FIELD_PRECISION end as "precision",
       abs(f.RDB$FIELD_SCALE) as scale
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
@@ -159,19 +180,40 @@ metadata:
       trim(rf.RDB$RELATION_NAME) as table_name,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
@@ -196,19 +238,40 @@ metadata:
       end as is_view,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
@@ -247,19 +310,40 @@ metadata:
       for select
         trim(rf.RDB$FIELD_NAME),
         case f.RDB$FIELD_TYPE
-          when 7 then 'SMALLINT'
-          when 8 then 'INTEGER'
+          when 7 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'SMALLINT'
+            end
+          when 8 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'INTEGER'
+            end
           when 10 then 'FLOAT'
           when 12 then 'DATE'
           when 13 then 'TIME'
           when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
           when 16 then
             case f.RDB$FIELD_SUB_TYPE
-              when 0 then 'BIGINT'
               when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
               when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'BIGINT'
+            end
+          when 23 then 'BOOLEAN'
+          when 24 then 'DECFLOAT(16)'
+          when 25 then 'DECFLOAT(34)'
+          when 26 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'INT128'
             end
           when 27 then 'DOUBLE PRECISION'
+          when 28 then 'TIME WITH TIME ZONE'
+          when 29 then 'TIMESTAMP WITH TIME ZONE'
           when 35 then 'TIMESTAMP'
           when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
           when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
@@ -424,6 +508,10 @@ native_type_map:
   blob: text
   boolean: bool
   varying: text
+  int128: decimal
+  decfloat: float
+  time with time zone: timez
+  timestamp with time zone: timestampz
 
 general_type_map:
   bigint: bigint

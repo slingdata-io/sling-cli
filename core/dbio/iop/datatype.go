@@ -825,6 +825,8 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 			if newCols[i].Type.IsDecimal() && col.DbPrecision == 0 {
 				newCols[i].DbPrecision = 0
 				newCols[i].DbScale = 0
+			} else if newCols[i].Type.IsDecimal() {
+				newCols[i].Stats.MaxLen = 0 // user precision wins over source length
 			}
 			newCols[i].mergeDDLMetadata(col)
 			if !newCols[i].Type.IsValid() {
@@ -863,6 +865,8 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 				if newCols[i].Type.IsDecimal() && col.DbPrecision == 0 {
 					newCols[i].DbPrecision = 0
 					newCols[i].DbScale = 0
+				} else if newCols[i].Type.IsDecimal() {
+					newCols[i].Stats.MaxLen = 0 // user precision wins over source length
 				}
 			} else {
 				g.Warn("Provided unknown column type (%s) for column '%s'. Using string.", col.Type, col.Name)

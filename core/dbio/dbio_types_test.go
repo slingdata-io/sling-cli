@@ -171,3 +171,31 @@ func TestFirebirdTemplate(t *testing.T) {
 	assert.False(t, TypeDbPostgres.Schemaless())
 	assert.False(t, TypeDbSQLite.Schemaless())
 }
+
+func TestFirebirdTemplateWideTypes(t *testing.T) {
+	tpl, err := Type("firebird").Template(true)
+	require.NoError(t, err)
+
+	for _, key := range []string{"columns", "columns_full", "schemata", "ddl_table"} {
+		val := tpl.Metadata[key]
+		for _, want := range []string{
+			"when 23 then 'BOOLEAN'", "when 24 then 'DECFLOAT(16)'", "when 25 then 'DECFLOAT(34)'",
+			"when 26 then", "else 'INT128'", "when 28 then 'TIME WITH TIME ZONE'",
+			"when 29 then 'TIMESTAMP WITH TIME ZONE'",
+			"else 'SMALLINT'", "else 'INTEGER'", "else 'BIGINT'",
+		} {
+			assert.Contains(t, val, want, "metadata.%s", key)
+		}
+		// scaled integers (types 7, 8, 16, 26) report NUMERIC/DECIMAL with precision and scale
+		assert.Equal(t, 4, strings.Count(val, "when 1 then 'NUMERIC('"), "metadata.%s", key)
+		assert.Equal(t, 4, strings.Count(val, "when 2 then 'DECIMAL('"), "metadata.%s", key)
+	}
+
+	assert.Contains(t, tpl.Metadata["columns"], "RDB$FIELD_TYPE = 26 and coalesce(f.RDB$FIELD_PRECISION, 0) = 0 then 38")
+
+	assert.Equal(t, "decimal", tpl.NativeTypeMap["int128"])
+	assert.Equal(t, "float", tpl.NativeTypeMap["decfloat"])
+	assert.Equal(t, "bool", tpl.NativeTypeMap["boolean"])
+	assert.Equal(t, "timez", tpl.NativeTypeMap["time with time zone"])
+	assert.Equal(t, "timestampz", tpl.NativeTypeMap["timestamp with time zone"])
+}

@@ -1046,6 +1046,23 @@ type ColumnType struct {
 	Sourced          bool
 }
 
+// useFetchedNumeric takes the type, precision and scale of the fetched column
+// when an ODBC driver reports a numeric column as text.
+func (ct *ColumnType) useFetchedNumeric(col *iop.Column, connType dbio.Type) bool {
+	fc := ct.FetchedColumn
+	if connType != dbio.TypeDbODBC || fc == nil || !g.In(col.Type, iop.StringType, iop.TextType) {
+		return false
+	}
+	if !fc.IsDecimal() && !fc.IsInteger() {
+		return false
+	}
+	col.Type = fc.Type
+	col.DbPrecision = fc.DbPrecision
+	col.DbScale = fc.DbScale
+	col.Sourced = fc.Sourced
+	return true
+}
+
 func (ct *ColumnType) IsSourced() bool {
 	if ct.Sourced {
 		return true
