@@ -767,11 +767,17 @@ Match all tables in a schema:
 streams:
   # All tables in public schema
   public.*:
-  
+```
+
+```yaml
+streams:
   # All tables in multiple schemas with prefix/suffix
   sales.marketing_*:   # use a prefix
   inventory.*_latest:  # use a suffix
-  
+```
+
+```yaml
+streams:
   # Exclude specific tables
   public.*:
   public.temp_table:
@@ -1525,7 +1531,9 @@ sling run -r /path/to/replication.yaml
 # Good
 source: prod_postgres_crm
 target: dw_snowflake_analytics
+```
 
+```yaml
 # Avoid
 source: db1
 target: db2
