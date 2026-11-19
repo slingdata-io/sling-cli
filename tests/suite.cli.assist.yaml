@@ -310,7 +310,7 @@
   output_does_not_contain:
     - '/Users/'
 
-- id: 943
+- id: 18
   name: 'sling skills prints the index'
   group: assist
   run: |
@@ -324,7 +324,7 @@
   output_does_not_contain:
     - 'agent-browser'
 
-- id: 944
+- id: 19
   name: 'sling skills prints a sub-file'
   group: assist
   run: 'sling skills sling/CONNECTIONS.md'
@@ -332,7 +332,7 @@
     - '# Skill: sling (CONNECTIONS.md)'
     - '# Connection Management'
 
-- id: 945
+- id: 20
   name: 'sling skills unknown skill fails'
   group: assist
   err: true
@@ -340,7 +340,7 @@
   output_contains:
     - 'unknown skill'
 
-- id: 946
+- id: 21
   name: 'sling skills writes no files'
   group: assist
   run: |
@@ -350,7 +350,7 @@
     rm -rf "$H"
   output_contains: []
 
-- id: 947
+- id: 22
   name: 'sling assist removes the old full skills on upgrade'
   group: assist
   run: |
