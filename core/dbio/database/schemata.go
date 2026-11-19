@@ -79,6 +79,16 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
+// DropUnsupportedSchema clears the schema when the dialect has no schemas.
+// It returns the removed schema.
+func (t *Table) DropUnsupportedSchema() (dropped string) {
+	if t.Schema == "" || t.IsQuery() || !t.Dialect.Schemaless() {
+		return ""
+	}
+	dropped, t.Schema = t.Schema, ""
+	return dropped
+}
+
 func (t *Table) IsProcedural() bool {
 	// Convert to lowercase for case-insensitive matching
 	sqlLower := strings.ToLower(t.Raw)

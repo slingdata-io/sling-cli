@@ -162,9 +162,8 @@ func TestCreateSchemaIfNotExists_Schemaless(t *testing.T) {
 	assert.Zero(t, fb.execs.Load())
 
 	created, err = createSchemaIfNotExists(fb, "main")
-	require.Error(t, err)
+	require.NoError(t, err, "the schema is ignored")
 	assert.False(t, created)
-	assert.Contains(t, err.Error(), "does not support schemas")
 	assert.Zero(t, fb.getSchemas.Load())
 	assert.Zero(t, fb.execs.Load())
 

@@ -1518,14 +1518,20 @@ connections:
 		assert.Contains(t, err.Error(), "Must specify schema")
 	}
 
-	// "main." is removed from stream names
-	rd = newConfig("FB_SCHEMALESS_TEST", "main.TBL_A", "MAIN.tbl_b", "OTHER")
+	// any schema is removed from stream names
+	rd = newConfig("FB_SCHEMALESS_TEST", "main.TBL_A", "MAIN.tbl_b", "OTHER", "dbo.TBL_C", `"main"."My.T"`)
 	assert.NoError(t, rd.ProcessWildcards())
-	assert.Equal(t, []string{"TBL_A", "tbl_b", "OTHER"}, rd.streamsOrdered)
+	assert.Equal(t, []string{"TBL_A", "tbl_b", "OTHER", "TBL_C", `"My.T"`}, rd.streamsOrdered)
 	for _, name := range rd.streamsOrdered {
 		assert.Contains(t, rd.Streams, name)
 	}
 	assert.NotContains(t, rd.Streams, "main.TBL_A")
+
+	// file and sql streams keep their names
+	rd = newConfig("FB_SCHEMALESS_TEST", "file://q.sql", "custom.label")
+	rd.Streams["custom.label"].SQL = "select 1 from rdb$database"
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"file://q.sql", "custom.label"}, rd.streamsOrdered)
 
 	// the other sources keep "main."
 	rd = newConfig("PG_SCHEMALESS_TEST", "main.t")

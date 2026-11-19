@@ -191,6 +191,29 @@ func TestFormatMapConcurrentStreamID(t *testing.T) {
 	wg.Wait()
 }
 
+func TestFormatTargetObjectNameSchemaless(t *testing.T) {
+	cfg := &Config{
+		Source:     Source{Conn: "PG", Stream: "public.users"},
+		Target:     Target{Conn: "FB", Object: "{stream_schema}.{stream_table}", Options: &TargetOptions{TableTmp: "tmp.users_tmp"}},
+		StreamName: "public.users",
+	}
+	cfg.SrcConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Type = dbio.TypeDbODBC
+	cfg.TgtConn.Data = g.M("conn_template", "firebird")
+	cfg.initEvaluator()
+
+	assert.NoError(t, cfg.FormatTargetObjectName())
+	assert.Equal(t, `"USERS"`, cfg.Target.Object)
+	assert.Equal(t, `"USERS_TMP"`, cfg.Target.Options.TableTmp)
+
+	// other targets keep the schema
+	cfg.Target.Object = "{stream_schema}.{stream_table}"
+	cfg.TgtConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Data = g.M()
+	assert.NoError(t, cfg.FormatTargetObjectName())
+	assert.Equal(t, `"public"."users"`, cfg.Target.Object)
+}
+
 func TestPrepareLegacySQLHooks(t *testing.T) {
 	newCfg := func(src dbio.Type, postSQL *string) *Config {
 		cfg := &Config{

@@ -697,6 +697,26 @@ func TestSelectFirebirdLimit(t *testing.T) {
 	assert.Contains(t, sql, "select first 5 skip 0 * from (")
 }
 
+func TestTableDropUnsupportedSchema(t *testing.T) {
+	fb := dbio.Type("firebird")
+
+	table, _ := ParseTableName("dbo.TBL", fb)
+	assert.Equal(t, "DBO", table.DropUnsupportedSchema())
+	assert.Equal(t, `"TBL"`, table.FullName())
+
+	table, _ = ParseTableName("TBL", fb)
+	assert.Empty(t, table.DropUnsupportedSchema())
+
+	table, _ = ParseTableName("select 1 from rdb$database", fb)
+	assert.Empty(t, table.DropUnsupportedSchema())
+
+	for _, typ := range []dbio.Type{dbio.TypeDbPostgres, dbio.TypeDbSQLite} {
+		table, _ = ParseTableName("main.tbl", typ)
+		assert.Empty(t, table.DropUnsupportedSchema())
+		assert.Equal(t, "main", table.Schema)
+	}
+}
+
 func TestFilterTablesEmptySchema(t *testing.T) {
 	newSchemata := func(schema string, names ...string) Schemata {
 		tables := map[string]Table{}

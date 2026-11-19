@@ -17,6 +17,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -321,21 +322,25 @@ type Wildcard struct {
 	EndpointMap map[string]api.Endpoint
 }
 
-// stripLegacyMainSchema removes the "main." prefix from the stream names.
-// Old Firebird metadata returned "main" as a fake schema.
-func (rd *ReplicationConfig) stripLegacyMainSchema() {
-	const prefix = "main."
+// stripUnsupportedSchema removes the schema from the stream names
+// when the source has no schemas (for example "main." of old Firebird configs).
+func (rd *ReplicationConfig) stripUnsupportedSchema(dialect dbio.Type) {
 	ordered := make([]string, 0, len(rd.streamsOrdered))
 	for _, name := range rd.streamsOrdered {
-		if len(name) <= len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
+		cfg := rd.Streams[name]
+		table, err := database.ParseTableName(name, dialect)
+		isQuery := (cfg != nil && cfg.SQL != "") || connection.SchemeType(name).IsFile()
+		if err != nil || isQuery || table.DropUnsupportedSchema() == "" {
 			ordered = append(ordered, name)
 			continue
 		}
 
-		newName := name[len(prefix):]
-		g.Warn("stream '%s' has a schema, but %s does not support schemas. Use the table name only: '%s'", name, rd.Source, newName)
+		newName := name[strings.LastIndex(name, ".")+1:] // keep the user casing
+		if strings.Contains(name, `"`) {
+			newName = table.FullName()
+		}
+		g.Warn("stream '%s' has a schema, but %s does not support schemas. The schema is ignored: '%s'", name, rd.Source, newName)
 
-		cfg := rd.Streams[name]
 		mapEntry, hasMap := rd.maps.Streams[name]
 		delete(rd.Streams, name)
 		delete(rd.maps.Streams, name)
@@ -368,7 +373,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 	schemaless := conn.Connection.Type.IsDb() && conn.Connection.GetType().Schemaless()
 	if schemaless {
-		rd.stripLegacyMainSchema()
+		rd.stripUnsupportedSchema(conn.Connection.GetType())
 	}
 
 	patterns := []string{}

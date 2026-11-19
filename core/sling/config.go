@@ -883,6 +883,16 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.SrcConn = srcConn
 	}
 
+	// ignore the schema of a stream from a source without schemas
+	if cfg.SrcConn.Type.IsDb() && !connection.SchemeType(cfg.Source.Stream).IsFile() {
+		if sTable, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.GetType()); err == nil {
+			if schema := sTable.DropUnsupportedSchema(); schema != "" {
+				g.Warn("stream '%s' has a schema, but %s does not support schemas. The schema '%s' is ignored", cfg.Source.Stream, cfg.SrcConn.GetType(), schema)
+				cfg.Source.Stream = sTable.FullName()
+			}
+		}
+	}
+
 	// Set evaluator
 	cfg.initEvaluator()
 
@@ -1145,6 +1155,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		} else if table.Schema == "" {
 			table.Schema = cast.ToString(cfg.Target.Data["schema"])
 		}
+		if schema := table.DropUnsupportedSchema(); schema != "" {
+			g.Warn("target object '%s' has a schema, but %s does not support schemas. The schema '%s' is ignored", cfg.Target.Object, dbType, schema)
+		}
 
 		// clean table name as needed
 		table.Clean()
@@ -1164,6 +1177,8 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 						tableTmp.Schema = table.Schema
 					}
 				}
+
+				tableTmp.DropUnsupportedSchema()
 
 				// inherit the object's database so the temp table lands alongside it
 				if tableTmp.Database == "" {
