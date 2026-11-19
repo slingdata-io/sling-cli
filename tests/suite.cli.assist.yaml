@@ -8,9 +8,13 @@
     mkdir -p "$H/.claude"
     HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude
     test -f "$H/.agents/skills/sling/SKILL.md"
+    grep -q 'sling skills sling-replications' "$H/.agents/skills/sling/SKILL.md"
+    test ! -e "$H/.agents/skills/sling/CONNECTIONS.md"
+    test ! -e "$H/.agents/skills/sling-replications"
     test -f "$H/.agents/skills/agent-browser/SKILL.md"
     test -f "$H/.agents/skills/agent-browser/CORE.md"
     test -f "$H/.claude/skills/sling/SKILL.md"
+    test ! -e "$H/.claude/skills/sling-replications"
     test -f "$H/.claude.json"
     grep -q 'agent-browser' "$H/.claude.json"
     grep -q 'agent: claude' "$H/.sling/env.yaml"
@@ -194,10 +198,10 @@
     mkdir -p "$H/.claude"
     HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
     echo drifted-content > "$H/.agents/skills/sling/SKILL.md"
-    echo drifted-content > "$H/.agents/skills/sling-build/SKILL.md"
+    echo drifted-content > "$H/.agents/skills/agent-browser/CORE.md"
     HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
     grep -qv drifted-content "$H/.agents/skills/sling/SKILL.md"
-    grep -qv drifted-content "$H/.agents/skills/sling-build/SKILL.md"
+    grep -qv drifted-content "$H/.agents/skills/agent-browser/CORE.md"
     rm -rf "$H"
   output_contains:
     - '✓ skills: sling matches embedded'
@@ -343,4 +347,31 @@
     H=$(mktemp -d)
     HOME="$H" SLING_HOME_DIR="$H/.sling" sling skills sling >/dev/null
     test ! -e "$H/.agents"
+    rm -rf "$H"
+  output_contains: []
+
+- id: 947
+  name: 'sling assist removes the old full skills on upgrade'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    # Simulate the full skills of an older version, then an upgrade.
+    for s in sling-replications sling-api-specs; do
+      mkdir -p "$H/.agents/skills/$s" "$H/.claude/skills/$s"
+      echo old > "$H/.agents/skills/$s/SKILL.md"
+      echo "@$H/.agents/skills/$s/SKILL.md" > "$H/.claude/skills/$s/SKILL.md"
+    done
+    echo old > "$H/.agents/skills/sling/SKILL.md"
+    echo old > "$H/.agents/skills/sling/CONNECTIONS.md"
+    mkdir -p "$H/.agents/skills/my-own-skill" && echo mine > "$H/.agents/skills/my-own-skill/SKILL.md"
+    echo 0.0.0-old > "$H/.sling/assist/version"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
+    test ! -e "$H/.agents/skills/sling-replications"
+    test ! -e "$H/.agents/skills/sling-api-specs"
+    test ! -e "$H/.claude/skills/sling-replications"
+    test ! -e "$H/.agents/skills/sling/CONNECTIONS.md"
+    grep -q 'sling skills sling-replications' "$H/.agents/skills/sling/SKILL.md"
+    test -f "$H/.agents/skills/my-own-skill/SKILL.md"
     rm -rf "$H"

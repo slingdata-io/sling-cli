@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"gopkg.in/yaml.v3"
 )
 
 var embeddedSkillNames = "sling, sling-api-specs, sling-build, sling-pipelines, sling-platform, sling-python, sling-replications"
@@ -92,6 +94,84 @@ func TestSkillIndexFormat(t *testing.T) {
 	}
 	if strings.Count(got, "## Without the Sling MCP server") != 1 {
 		t.Fatal("the CLI table heading must show one time")
+	}
+}
+
+// TestSlingSkillStub keeps the installed stub in step with the catalog:
+// its frontmatter is valid, the description fits the 1024-character limit,
+// and its table names each topic.
+func TestSlingSkillStub(t *testing.T) {
+	block, ok := frontmatter(string(SlingSkillStub))
+	if !ok {
+		t.Fatal("stub has no frontmatter")
+	}
+	front := struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}{}
+	if err := yaml.Unmarshal([]byte(block), &front); err != nil {
+		t.Fatal(err)
+	}
+	if front.Name != "sling" {
+		t.Errorf("name is %q", front.Name)
+	}
+	if n := len(strings.TrimSpace(front.Description)); n == 0 || n > 1024 {
+		t.Errorf("description has %d characters, want 1-1024", n)
+	}
+
+	skills, err := NewSkillCatalog().Skills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmdRe := regexp.MustCompile("`sling skills ([a-z-]+)`")
+	listed := map[string]bool{}
+	for _, m := range cmdRe.FindAllStringSubmatch(string(SlingSkillStub), -1) {
+		listed[m[1]] = true
+	}
+	for _, s := range skills {
+		if !listed[s.Name] {
+			t.Errorf("stub does not route to topic %s", s.Name)
+		}
+		delete(listed, s.Name)
+	}
+	for name := range listed {
+		t.Errorf("stub routes to unknown topic %s", name)
+	}
+}
+
+func TestSkillRenderCrossTopicLinks(t *testing.T) {
+	got, err := NewSkillCatalog().Render("sling-replications")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, _, _ := strings.Cut(got, "\n---\n")
+	want := "Links such as [sling/PROJECT.md](../sling/PROJECT.md) mean: run `sling skills sling/PROJECT.md`.\n"
+	if !strings.Contains(head, want) {
+		t.Fatalf("header does not explain links to other topics\n--- got ---\n%s", head)
+	}
+
+	// each link to another topic must resolve in the catalog
+	c := NewSkillCatalog()
+	skills, err := c.Skills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range skills {
+		names := []string{skillMainFile}
+		for _, f := range s.Files {
+			names = append(names, f.Name)
+		}
+		for _, name := range names {
+			data, err := fs.ReadFile(SkillsFS, "skills/"+s.Name+"/"+name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range crossTopicLinkRe.FindAllStringSubmatch(string(data), -1) {
+				if _, err := c.Render(m[1] + "/" + m[2]); err != nil {
+					t.Errorf("%s/%s links to %s/%s: %v", s.Name, name, m[1], m[2], err)
+				}
+			}
+		}
 	}
 }
 

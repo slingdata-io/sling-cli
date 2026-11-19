@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -211,6 +212,9 @@ func (c *SkillCatalog) Render(ref string) (string, error) {
 		}
 		fmt.Fprintf(&b, "Links such as [%s](%s) in this text mean: run `sling skills %s/%s`.\n", example, example, skill.Name, example)
 	}
+	if m := crossTopicLinkRe.FindStringSubmatch(string(raw)); m != nil {
+		fmt.Fprintf(&b, "Links such as [%s/%s](../%s/%s) mean: run `sling skills %s/%s`.\n", m[1], m[2], m[1], m[2], m[1], m[2])
+	}
 	b.WriteString("\n")
 	if mentions {
 		b.WriteString(SkillsCLIMap)
@@ -219,6 +223,9 @@ func (c *SkillCatalog) Render(ref string) (string, error) {
 	b.Write(raw)
 	return b.String(), nil
 }
+
+// crossTopicLinkRe finds a link to a file of another topic, such as ](../sling/PROJECT.md).
+var crossTopicLinkRe = regexp.MustCompile(`\]\(\.\./([a-z0-9-]+)/([A-Za-z0-9_]+\.md)\)`)
 
 // parseSkillRef splits a reference into the skill and the file name (with .md).
 func parseSkillRef(ref string) (skill, file string, err error) {
