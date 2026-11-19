@@ -194,14 +194,22 @@ func (c *SkillCatalog) Render(ref string) (string, error) {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Skill: %s (%s)\n", skill.Name, fileName)
-	if fileName == skillMainFile && len(skill.Files) > 0 {
-		cmds := make([]string, len(skill.Files))
-		for i, f := range skill.Files {
-			cmds[i] = fmt.Sprintf("`sling skills %s/%s`", skill.Name, f.Name)
+	if len(skill.Files) > 0 {
+		example := skillMainFile
+		for _, f := range skill.Files {
+			if f.Name != fileName {
+				example = f.Name
+				break
+			}
 		}
-		first := skill.Files[0].Name
-		fmt.Fprintf(&b, "Sub-files: %s\n", strings.Join(cmds, ", "))
-		fmt.Fprintf(&b, "Links such as [%s](%s) in this text mean: run `sling skills %s/%s`.\n", first, first, skill.Name, first)
+		if fileName == skillMainFile {
+			cmds := make([]string, len(skill.Files))
+			for i, f := range skill.Files {
+				cmds[i] = fmt.Sprintf("`sling skills %s/%s`", skill.Name, f.Name)
+			}
+			fmt.Fprintf(&b, "Sub-files: %s\n", strings.Join(cmds, ", "))
+		}
+		fmt.Fprintf(&b, "Links such as [%s](%s) in this text mean: run `sling skills %s/%s`.\n", example, example, skill.Name, example)
 	}
 	b.WriteString("\n")
 	if mentions {

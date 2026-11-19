@@ -112,6 +112,24 @@ func TestSkillRenderSubFile(t *testing.T) {
 			t.Errorf("%s: sub-file output must not list sub-files", ref)
 		}
 	}
+
+	// sub-files link to their siblings, so their header explains the links too
+	got, err := testCatalog().Render("alpha/guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHead := "# Skill: alpha (GUIDE.md)\n" +
+		"Links such as [BASICS.md](BASICS.md) in this text mean: run `sling skills alpha/BASICS.md`.\n\n"
+	if !strings.HasPrefix(got, wantHead) {
+		t.Fatalf("render mismatch\n--- got ---\n%s", got[:min(len(got), 300)])
+	}
+	got, err = testCatalog().Render("alpha/basics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Links such as [GUIDE.md](GUIDE.md) in this text mean: run `sling skills alpha/GUIDE.md`.\n") {
+		t.Fatalf("example must name another file\n--- got ---\n%s", got[:min(len(got), 300)])
+	}
 }
 
 func TestSkillRenderMain(t *testing.T) {
