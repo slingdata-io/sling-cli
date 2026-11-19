@@ -4360,3 +4360,34 @@
     - '--force'
   output_does_not_contain:
     - 'FAIL: env.yaml was changed'
+
+# ClickHouse AggregateFunction source columns (SLING-537)
+- id: 951
+  name: 'ClickHouse AggregateFunction source columns'
+  run: |
+    SOURCE=clickhouse sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+    SOURCE=clickhouse_http sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+  output_contains:
+    - 'SUCCESS: AggregateFunction columns read with finalizeAggregation'
+
+- id: 952
+  name: 'ClickHouse AggregateFunction custom SQL hint'
+  err: true
+  run: |
+    for conn in clickhouse clickhouse_http; do
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      sling conns exec $conn "CREATE TABLE default.sling_agg_err (id UInt32, cnt AggregateFunction(count)) ENGINE = AggregatingMergeTree() ORDER BY id"
+      sling conns exec $conn "INSERT INTO default.sling_agg_err (id, cnt) SELECT 1, countState() FROM numbers(3)"
+      set +e
+      sling run --src-conn $conn --src-stream 'select * from default.sling_agg_err' --stdout
+      code=$?
+      set -e
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      [ $code -ne 0 ] || { echo "FAIL: $conn run did not fail"; exit 1; }
+    done
+    exit 1
+  output_contains:
+    - 'finalizeAggregation'
+    - '-Merge'
+  output_does_not_contain:
+    - 'FAIL:'

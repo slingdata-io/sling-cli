@@ -550,3 +550,47 @@ func TestSelectSQLServerOrderBy(t *testing.T) {
 	assert.NotContains(t, sql, "offset 0 rows")
 	assert.Contains(t, sql, "order by id")
 }
+
+func TestTableFinalizeAggregateFields(t *testing.T) {
+	newTable := func(dialect dbio.Type) Table {
+		return Table{
+			Name:    "agg",
+			Schema:  "db",
+			Dialect: dialect,
+			Columns: iop.Columns{
+				{Name: "id", DbType: "UInt32"},
+				{Name: "min_ts", DbType: "AggregateFunction(min, Nullable(DateTime64(6, 'Asia/Jakarta')))"},
+				{Name: "cnt", DbType: "AggregateFunction(count)"},
+				{Name: "mx", DbType: "SimpleAggregateFunction(max, UInt32)"},
+			},
+		}
+	}
+	table := newTable(dbio.TypeDbClickhouse)
+
+	all := []string{"id", "finalizeAggregation(`min_ts`) as `min_ts`", "finalizeAggregation(`cnt`) as `cnt`", "mx"}
+	assert.Equal(t, all, table.FinalizeAggregateFields([]string{"*"}))
+	assert.Equal(t, all, table.FinalizeAggregateFields(nil))
+
+	assert.Equal(t,
+		[]string{"id", "finalizeAggregation(`min_ts`) as `first_ts`"},
+		table.FinalizeAggregateFields([]string{"id", "min_ts as first_ts"}),
+	)
+	assert.Equal(t,
+		[]string{"finalizeAggregation(`min_ts`) as `min_ts`"},
+		table.FinalizeAggregateFields([]string{"MIN_TS"}),
+	)
+	assert.Equal(t, []string{"-cnt"}, table.FinalizeAggregateFields([]string{"-cnt"}))
+
+	// no AggregateFunction column
+	plain := newTable(dbio.TypeDbClickhouse)
+	plain.Columns = plain.Columns[:1]
+	assert.Equal(t, []string{"*"}, plain.FinalizeAggregateFields([]string{"*"}))
+	assert.Nil(t, plain.FinalizeAggregateFields(nil))
+
+	// other dialects are unchanged
+	pg := newTable(dbio.TypeDbPostgres)
+	assert.Equal(t, []string{"*"}, pg.FinalizeAggregateFields([]string{"*"}))
+
+	sql := table.Select(SelectOptions{Fields: table.FinalizeAggregateFields([]string{"*"})})
+	assert.Equal(t, "select `id`, finalizeAggregation(`min_ts`) as `min_ts`, finalizeAggregation(`cnt`) as `cnt`, `mx` from `db`.`agg`", sql)
+}
