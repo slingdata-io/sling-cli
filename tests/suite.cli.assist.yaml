@@ -1,6 +1,6 @@
 
 
-- id: 290
+- id: 1
   name: 'sling assist setup --non-interactive (headless)'
   group: assist
   run: |
@@ -20,7 +20,7 @@
     - 'claude'
     - 'sling assist setup --doctor'
 
-- id: 291
+- id: 2
   name: 'sling assist setup --doctor exits non-zero when nothing installed'
   group: assist
   err: true
@@ -31,7 +31,7 @@
   output_contains:
     - 'profile'
 
-- id: 292
+- id: 3
   name: 'sling assist --out - renders prompt without launching'
   group: assist
   run: |
@@ -48,7 +48,7 @@
     - 'from PG to SF'
     - 'Gather first'
 
-- id: 322
+- id: 4
   name: 'sling assist --out - works without setup'
   group: assist
   run: |
@@ -60,7 +60,7 @@
     - '# State'
     - 'hello'
 
-- id: 293
+- id: 5
   name: 'sling assist --out - with investigation ask'
   group: assist
   run: |
@@ -72,7 +72,7 @@
     - '# Ask'
     - 'column missing'
 
-- id: 294
+- id: 6
   name: 'sling assist --resume unknown id errors'
   group: assist
   err: true
@@ -83,7 +83,7 @@
   output_contains:
     - 'unknown session'
 
-- id: 295
+- id: 7
   name: 'sling assist setup --uninstall is idempotent'
   group: assist
   run: |
@@ -96,7 +96,7 @@
   output_contains:
     - 'Removed Sling skills'
 
-- id: 296
+- id: 8
   name: 'sling assist --out - with piped stdin still renders'
   group: assist
   run: |
@@ -110,7 +110,7 @@
     - '# State'
     - '# Context'
 
-- id: 297
+- id: 9
   name: 'sling run failure writes log snapshot + AI hint'
   group: assist
   err: true
@@ -145,7 +145,7 @@
     - 'failed run'
     - 'exec_assist_test297'
 
-- id: 300
+- id: 10
   name: 'sling conns test failure writes log snapshot + signature footer'
   group: assist
   err: true
@@ -166,7 +166,7 @@
     - 'error signature:'
     - 'exec_conns_test300'
 
-- id: 298
+- id: 11
   name: 'uninstall stamp prevents AutoRefresh resurrection'
   group: assist
   run: |
@@ -186,7 +186,7 @@
     rm -rf "$H"
   output_contains: []
 
-- id: 323
+- id: 12
   name: 'sling assist auto-heals drifted skills on every command'
   group: assist
   run: |
@@ -204,7 +204,7 @@
   output_does_not_contain:
     - 'drifted from embedded'
 
-- id: 299
+- id: 13
   name: 'sling assist --resume --out - restores saved prompt'
   group: assist
   run: |
@@ -227,7 +227,7 @@
   output_contains:
     - 'saved prompt: backfill orders'
 
-- id: 324
+- id: 14
   name: 'sling assist setup wires agent-browser MCP and skill'
   group: assist
   run: |
@@ -243,7 +243,7 @@
   output_contains:
     - 'Wired clients:'
     - 'claude'
-- id: 325
+- id: 15
   name: 'sling assist --exec investigates a failed run with its log'
   group: assist
   run: |
@@ -271,7 +271,7 @@
     - 'run log (tail):'
     - 'Investigate the failed run exec_suite325'
 
-- id: 326
+- id: 16
   name: 'sling assist --id rejects unknown execution id'
   group: assist
   err: true
@@ -283,7 +283,7 @@
   output_contains:
     - 'unknown exec id'
 
-- id: 329
+- id: 17
   name: 'sling assist report --id prints redacted draft'
   group: assist
   run: |

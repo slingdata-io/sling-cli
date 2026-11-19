@@ -3687,7 +3687,8 @@
     - 'OK: default.sling_ins_conc_lane matches the source'
     - 'SUCCESS: insert_concurrency kept all rows and left no partial table'
 
-# Nested CLI suites. Loader in sling_cli_test.go merges these in.
+# Nested CLI suites. Each one has its own IDs, selected as <key>.<id>
+# (e.g. "build.12"). The key comes from the file name, or from `key:`.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml

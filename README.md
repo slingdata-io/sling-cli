@@ -265,7 +265,10 @@ You can target specific tests or suites using environment variables:
    export SLING_BIN=./sling
    go test -v -run TestCLI             # run all CLI tests
    go test -v -run TestCLI -- 31+ # run CLI tests 31 and all subsequent tests
+   go test -v -run TestCLI -- build.1-5,validate # run cases of nested suites
    ```
+
+   The nested suites (`- suite: <file>` in `tests/suite.cli.yaml`) have their own IDs. Select their cases as `<key>.<id>`. The key comes from the file name: `suite.cli.build.yaml` gives `build`. A bare number selects a case of the root suite only.
 
 You can specify individual test numbers, ranges, or use the '+' suffix to run all tests from a certain number:
 

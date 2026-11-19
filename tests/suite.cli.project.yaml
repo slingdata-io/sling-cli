@@ -1,4 +1,4 @@
-- id: 530
+- id: 1
   name: 'sling init succeeds with no token'
   run: |
     DIR=$(mktemp -d)
@@ -15,7 +15,7 @@
     - invalid project token
     - did not provide the SLING_PROJECT_TOKEN
 
-- id: 531
+- id: 2
   name: 'sling init succeeds with leftover token and no network'
   run: |
     DIR=$(mktemp -d)
@@ -34,7 +34,7 @@
     - invalid project token
     - error validating project token
 
-- id: 532
+- id: 3
   name: 'sling init non-interactive writes canonical layout'
   run: |
     DIR=$(mktemp -d)
@@ -54,7 +54,7 @@
     - 'SUCCESS: canonical layout'
     - sling_project.yml
 
-- id: 534
+- id: 4
   name: 'sling validate succeeds on scaffolded pipeline'
   run: |
     DIR=$(mktemp -d)
@@ -69,7 +69,7 @@
     - '"ok": true'
     - daily.yaml
 
-- id: 535
+- id: 5
   name: 'sling platform status without a token fails fast'
   err: true
   run: |
@@ -89,7 +89,7 @@
 
 # DISABLED: `sling platform deploy` is not implemented yet (platform side not ready).
 # Re-enable this test once the deploy subcommand ships.
-# - id: 560
+# - id: 6
 #   name: 'sling platform deploy --check prints local job plan'
 #   run: |
 #     DIR=$(mktemp -d)
@@ -113,7 +113,7 @@
 #   output_does_not_contain:
 #     - not implemented yet
 
-- id: 561
+- id: 7
   name: 'sling run -j applies the job streams and mode'
   group: sqlite
   run: |
@@ -136,7 +136,7 @@
     - 'job_beta'
     - 'file://beta.csv'
 
-- id: 562
+- id: 8
   name: 'sling run <key> resolves a bare manifest key'
   group: sqlite
   run: |
@@ -154,7 +154,7 @@
     - 'bare_key'
     - 'full-refresh => truncate'
 
-- id: 563
+- id: 9
   name: 'a file path shadowing a job key wins over the key'
   group: sqlite
   run: |
@@ -175,7 +175,7 @@
     - 'from_key'
     - 'full-refresh => truncate'
 
-- id: 564
+- id: 10
   name: 'sling run -j with a missing key lists the available keys'
   err: true
   run: |
@@ -192,7 +192,7 @@
     - 'daily'
     - 'hourly'
 
-- id: 566
+- id: 11
   name: 'sling run -p --env overrides the pipeline env block'
   run: |
     DIR=$(mktemp -d)
@@ -208,7 +208,7 @@
     - 'who=fromfile'
     - 'who={env.WHO}'
 
-- id: 565
+- id: 12
   name: 'sling run -j applies job variables to a pipeline'
   run: |
     DIR=$(mktemp -d)
