@@ -4362,6 +4362,30 @@
   output_does_not_contain:
     - 'FAIL: env.yaml was changed'
 
+# SLING-536: a run that stops inside a big transaction saves the last commit
+# boundary, not a position inside the transaction. The next run must not fail
+# with "invalid table id". The env forces the drain to time out in run 1.
+- id: 950
+  name: 'CDC MySQL stops inside a transaction and resumes at the boundary'
+  group: cdc_value_fidelity
+  run: |
+    set -e
+    P=tests/pipelines/cdc/p.41.cdc_mysql_txn_boundary.yaml
+    LOG=$(mktemp -d)
+    PHASE=setup sling run -d -p $P
+    PHASE=run1 SLING_TEST_CDC_TXN_DRAIN_LIMIT=1ms sling run -d -p $P 2>&1 | tee $LOG/run1.log
+    grep -q 'is the last transaction boundary' $LOG/run1.log || { echo 'FAIL: no boundary warning in run 1'; exit 1; }
+    PHASE=run2 sling run -d -p $P 2>&1 | tee $LOG/run2.log
+    ! grep -q 'invalid table id' $LOG/run2.log || { echo 'FAIL: invalid table id in run 2'; exit 1; }
+    PHASE=check sling run -d -p $P
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_txn
+  output_contains:
+    - 'is the last transaction boundary'
+    - 'CDC txn boundary PASSED'
+  output_does_not_contain:
+    - 'invalid table id'
+
 # ClickHouse AggregateFunction source columns (SLING-537)
 - id: 951
   name: 'ClickHouse AggregateFunction source columns'
