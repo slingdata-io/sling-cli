@@ -241,6 +241,8 @@ func NewStreamProcessor() *StreamProcessor {
 		"2006-01-02 15:04:05 -0700",
 		"2006-01-02 15:04:05Z07:00", // RFC3339 without T
 		"2006-01-02 15:04:05Z0700",  // RFC3339 without T or timezone hh:mm colon
+		// CSV output with an hour-only offset ("+05"), must come before MST
+		"2006-01-02 15:04:05.999999999 -07",
 		"2006-01-02 15:04:05 MST",
 		time.Kitchen,
 		time.Stamp,
@@ -257,7 +259,6 @@ func NewStreamProcessor() *StreamProcessor {
 		"01/02/2006 03:04:05 PM", // "8/17/1994 12:00:00 AM"
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02T15:04:05.999999999-07:00",
-		"2006-01-02 15:04:05.999999999 -07",
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02 15:04",
@@ -1234,6 +1235,9 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
 			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"
+		} else if _, offset := tVal.Zone(); offset%3600 != 0 {
+			// keep the minutes of offsets such as +05:30 or -03:30
+			return tVal.Format("2006-01-02 15:04:05.999999999 -07:00")
 		}
 		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
 	case typ.IsBinary() && sp.Config.BinaryAsHex:
