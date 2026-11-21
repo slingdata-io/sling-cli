@@ -78,7 +78,7 @@ test-dbio-connection:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio connection"
-    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestDuckDbConnectionQuackURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs')
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestDuckDbConnectionQuackURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs|TestRejectLiteralSecretsSkipsMask|TestParseConnsInput')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:

@@ -222,3 +222,60 @@
     SLING_PROJECT_TOKEN: ''
   output_contains:
     - 'who=sling where=here'
+
+- id: 13
+  name: 'platform connections save refuses literal secrets by default'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    printf 'type: postgres\npassword: hunter2\n' > conn.yaml
+    sling platform connections save X -f conn.yaml
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: 'proj_fake'
+  output_contains:
+    - 'env-var ref'
+    - '--allow-literal'
+  output_does_not_contain:
+    - 'hunter2'
+
+- id: 14
+  name: 'platform connections save needs a name for a flat file'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    printf 'type: postgres\nhost: h\n' > conn.yaml
+    sling platform connections save -f conn.yaml
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: 'proj_fake'
+  output_contains:
+    - 'connections:'
+
+- id: 15
+  name: 'platform connections get rejects an unknown output format'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    sling platform connections get X -o xml
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: 'proj_fake'
+  output_contains:
+    - 'invalid output format'
+
+- id: 16
+  name: 'platform connections delete honors the N answer'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    echo N | sling platform connections delete X
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: 'proj_fake'
+  output_contains:
+    - 'cancelled by user'

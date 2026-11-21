@@ -4392,3 +4392,13 @@
     - '-Merge'
   output_does_not_contain:
     - 'FAIL:'
+
+# Platform CLI connections save, get and delete (SLING-547). Skips when SLING_TEST_WRITE_TOKEN is not set.
+- id: 953
+  name: 'sling platform connections save, get and delete'
+  run: |
+    if [ -z "$SLING_TEST_WRITE_TOKEN" ]; then
+      echo 'SKIPPED: SLING_TEST_WRITE_TOKEN is not set'
+      exit 0
+    fi
+    sling run -p tests/pipelines/p.65.platform_conns_write.yaml
