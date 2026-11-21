@@ -166,3 +166,65 @@ func TestNewExcelDatasetMissingSheet(t *testing.T) {
 		t.Fatal("expected an error for a sheet that does not exist, got nil")
 	}
 }
+
+func TestNewExcelFromReaderDeletedSheet(t *testing.T) {
+	// deleting a sheet leaves a gap in the sheetIds (1, 3), so the sheet names
+	// must not be looked up by position-derived sheetId.
+	f := excelize.NewFile()
+	f.NewSheet("Sheet2")
+	f.NewSheet("Sheet3")
+	f.SetCellValue("Sheet3", "A1", "id")
+	f.SetCellValue("Sheet3", "A2", 1)
+	if err := f.DeleteSheet("Sheet2"); err != nil {
+		t.Fatal(err)
+	}
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	xls, err := NewExcelFromReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Sheet1", "Sheet3"}
+	if len(xls.Sheets) != len(want) {
+		t.Fatalf("expected sheets %v, got %v", want, xls.Sheets)
+	}
+	for i := range want {
+		if xls.Sheets[i] != want[i] {
+			t.Fatalf("expected sheets %v, got %v", want, xls.Sheets)
+		}
+	}
+
+	if err = xls.RefreshSheets(); err != nil {
+		t.Fatal(err)
+	}
+	if len(xls.Sheets) != 2 || xls.Sheets[1] != "Sheet3" || xls.sheetIndex["Sheet3"] != 1 {
+		t.Fatalf("RefreshSheets: got sheets %v, index %v", xls.Sheets, xls.sheetIndex)
+	}
+}
+
+func TestNewExcelDatasetDeletedFirstSheet(t *testing.T) {
+	// deleting the first sheet leaves sheetIds (2, 3): the default sheet must be
+	// the first tab, not an empty name.
+	f := excelize.NewFile()
+	f.NewSheet("Sheet2")
+	f.SetCellValue("Sheet2", "A1", "id")
+	f.SetCellValue("Sheet2", "A2", 1)
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		t.Fatal(err)
+	}
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := NewExcelDataset(bytes.NewReader(buf.Bytes()), map[string]string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(data.Rows) != 2 {
+		t.Fatalf("expected 2 rows (header + 1) from the first remaining sheet, got %d", len(data.Rows))
+	}
+}
