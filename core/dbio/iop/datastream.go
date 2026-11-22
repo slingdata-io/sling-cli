@@ -3733,6 +3733,7 @@ func (ds *Datastream) NewExcelReaderChnl(sc StreamConfig) (readerChn chan *Batch
 	err := xls.WriteSheet(sc.Sheet, ds, "overwrite")
 	if err != nil {
 		ds.Context.CaptureErr(g.Error(err, "error writing sheet"))
+		close(readerChn) // nothing will be sent, do not leave the consumer waiting
 		return
 	}
 

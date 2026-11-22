@@ -2,6 +2,7 @@ package iop
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,6 +173,35 @@ func TestNewExcelDatasetMissingSheet(t *testing.T) {
 	}
 }
 
+// Excel sheets hold at most excelize.TotalRows (1,048,576) rows, header
+// included. Rows past that were silently dropped and the write reported success.
+func TestExcelWriteSheetRowLimit(t *testing.T) {
+	newDs := func(dataRows int) *Datastream {
+		n := 0
+		ds := NewDatastreamIt(context.Background(), NewColumnsFromFields("id"), func(it *Iterator) bool {
+			if n >= dataRows {
+				return false
+			}
+			n++
+			it.Row[0] = int64(n)
+			return true
+		})
+		if err := ds.Start(); err != nil {
+			t.Fatal(err)
+		}
+		return ds
+	}
+
+	// header + (TotalRows-1) data rows fills the sheet exactly: allowed
+	if err := NewExcel().WriteSheet("Sheet1", newDs(excelize.TotalRows-1), "overwrite"); err != nil {
+		t.Fatalf("a sheet filled to the limit should be written, got: %v", err)
+	}
+
+	// one more row cannot be stored: must be an error, not a silent drop
+	if err := NewExcel().WriteSheet("Sheet1", newDs(excelize.TotalRows), "overwrite"); err == nil {
+		t.Fatal("expected an error when rows exceed the Excel limit, got nil")
+	}
+}
 func TestExcelNumFmtKind(t *testing.T) {
 	tests := []struct {
 		id   int
