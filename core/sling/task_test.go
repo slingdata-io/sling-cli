@@ -1,10 +1,13 @@
 package sling
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,4 +53,30 @@ func TestErrorHelper(t *testing.T) {
 			assert.Contains(t, ErrorHelper(g.Error(msg), dbio.TypeDbDuckDb), want, msg)
 		}
 	})
+}
+
+func TestTaskDfConcurrentAccess(t *testing.T) {
+	task := &TaskExecution{df: iop.NewDataflow(), StartTime: g.Ptr(time.Now())}
+	last := iop.NewDataflow()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 499; i++ {
+			task.setDf(iop.NewDataflow())
+		}
+		task.setDf(last)
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			_ = task.Df()
+			_ = task.GetCount()
+			_, _ = task.GetBytes()
+		}
+	}()
+	wg.Wait()
+
+	assert.Same(t, last, task.Df())
 }

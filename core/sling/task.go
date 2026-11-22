@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -33,6 +34,7 @@ type TaskExecution struct {
 	Progress  string     `json:"progress"`
 
 	df            *iop.Dataflow `json:"-"`
+	dfMu          sync.RWMutex  // guards df; only the task goroutine reads t.df directly, others call Df()
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
@@ -101,7 +103,10 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 			for {
 				select {
 				case <-ticker1s.C:
-					cnt := t.df.Count()
+					cnt := uint64(0)
+					if df := t.Df(); df != nil {
+						cnt = df.Count()
+					}
 					if cnt > 1000 {
 						t.PBar.Start()
 						t.PBar.bar.SetCurrent(cast.ToInt64(cnt))
@@ -113,8 +118,11 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 
 				default:
 					time.Sleep(100 * time.Millisecond)
-					if t.PBar.finished || t.df.Err() != nil {
-						t.PBar.bar.SetCurrent(cast.ToInt64(t.df.Count()))
+					df := t.Df()
+					if t.PBar.finished || (df != nil && df.Err() != nil) {
+						if df != nil {
+							t.PBar.bar.SetCurrent(cast.ToInt64(df.Count()))
+						}
 						t.PBar.Finish()
 						return
 					}
@@ -254,11 +262,12 @@ func (t *TaskExecution) IsStalled(window float64) bool {
 
 // GetBytes return the current total of bytes processed
 func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
-	if t.df == nil {
+	df := t.Df()
+	if df == nil {
 		return
 	}
 
-	inBytes, outBytes = t.df.Bytes()
+	inBytes, outBytes = df.Bytes()
 	return
 }
 
@@ -288,12 +297,26 @@ func (t *TaskExecution) GetCount() (count uint64) {
 		return
 	}
 
-	return t.df.Count()
+	df := t.Df()
+	if df == nil {
+		return
+	}
+
+	return df.Count()
 }
 
 // Df return the dataflow object
 func (t *TaskExecution) Df() *iop.Dataflow {
+	t.dfMu.RLock()
+	defer t.dfMu.RUnlock()
 	return t.df
+}
+
+// setDf sets the dataflow object
+func (t *TaskExecution) setDf(df *iop.Dataflow) {
+	t.dfMu.Lock()
+	t.df = df
+	t.dfMu.Unlock()
 }
 
 // Data return the dataset object
@@ -452,8 +475,8 @@ func (t *TaskExecution) Cleanup() {
 		f()
 		t.cleanupFuncs[i] = func() {} // in case it gets called again
 	}
-	if t.df != nil {
-		t.df.CleanUp()
+	if df := t.Df(); df != nil {
+		df.CleanUp()
 	}
 	t.cleanedUp = true
 }

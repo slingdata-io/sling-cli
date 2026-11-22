@@ -202,8 +202,8 @@ func (t *TaskExecution) Execute() error {
 			t.SetProgress("execution failed")
 			newStatus = ExecStatusError
 		}
-		if t.df != nil {
-			if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
+		if df := t.Df(); df != nil {
+			if err := df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
 				eG := g.ErrorGroup{}
 				eG.Add(err)
 				eG.Add(t.Err)
@@ -416,7 +416,8 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("reading from source database")
 	defer t.Cleanup()
-	t.df, err = t.ReadFromDB(t.Config, srcConn)
+	df, err := t.ReadFromDB(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
@@ -499,7 +500,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config, tgtConn)
+	df, err := t.ReadFromFile(t.Config, tgtConn)
+	t.setDf(df)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
@@ -624,7 +626,8 @@ func (t *TaskExecution) runApiToDb() (err error) {
 	}
 skipGetState:
 
-	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	df, err := t.ReadFromApi(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromApi")
 		return
@@ -717,7 +720,8 @@ func (t *TaskExecution) runApiToFile() (err error) {
 	}
 skipGetState:
 
-	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	df, err := t.ReadFromApi(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromApi")
 		return
@@ -773,7 +777,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config, nil)
+	df, err := t.ReadFromFile(t.Config, nil)
+	t.setDf(df)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
@@ -873,7 +878,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(t.Config, srcConn)
+	df, err := t.ReadFromDB(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
