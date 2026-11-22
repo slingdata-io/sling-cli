@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -506,4 +507,15 @@ func BenchmarkNormalizeNumberText(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestCastToStringCSVDatetimeUTC(t *testing.T) {
+	sp := NewStreamProcessor()
+	sp.Config.DatetimeFormat = "2006-01-02 15:04:05.000Z"
+	sp.Config.DatetimeUTC = true
+
+	ts := time.Date(2026, 3, 8, 1, 30, 0, 0, time.FixedZone("", -5*3600))
+	assert.Equal(t, "2026-03-08 06:30:00.000Z", sp.CastToStringCSV(0, ts, TimestampzType))
+	ts = time.Date(2026, 11, 14, 9, 0, 0, 0, time.FixedZone("", 5*3600+1800))
+	assert.Equal(t, "2026-11-14 03:30:00.000Z", sp.CastToStringCSV(0, ts, TimestampzType))
 }
