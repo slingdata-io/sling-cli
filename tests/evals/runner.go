@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -2055,31 +2054,24 @@ func connPayload(v string) any {
 	return v
 }
 
+// writeEmbeddedSkills writes the skills that `sling assist setup` installs.
 func writeEmbeddedSkills(root string) error {
-	return fs.WalkDir(assist.SkillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
+	for _, name := range assist.InstalledSkillNames() {
+		files, err := assist.InstalledSkillFiles(name)
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel("skills", path)
-		if err != nil {
-			return err
+		for rel, data := range files {
+			dst := filepath.Join(root, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(dst, data, 0o644); err != nil {
+				return err
+			}
 		}
-		if rel == "." {
-			return nil
-		}
-		dst := filepath.Join(root, rel)
-		if d.IsDir() {
-			return os.MkdirAll(dst, 0o755)
-		}
-		data, err := assist.SkillsFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(dst, data, 0o644)
-	})
+	}
+	return nil
 }
 
 func skillStamp(home string) string {
@@ -2090,7 +2082,7 @@ func skillStamp(home string) string {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
-		sum, err := assist.MD5OfEmbeddedSkill(filepath.ToSlash(rel))
+		sum, err := assist.MD5OfInstalledSkill(filepath.ToSlash(rel))
 		if err != nil {
 			return nil
 		}

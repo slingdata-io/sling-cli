@@ -191,7 +191,9 @@ state:
 # ISO 8601 for API
 parameters:
   updated_since: '{date_format(state.since, "%Y-%m-%dT%H:%M:%SZ")}'
+```
 
+```yaml
 # Date only
 parameters:
   date: '{date_format(state.current_date, "%Y-%m-%d")}'
@@ -202,7 +204,9 @@ parameters:
 ```yaml
 # If-then-else
 expression: 'if(is_null(record.email), "none", lower(record.email))'
+```
 
+```yaml
 # Check before access
 expression: 'if(!is_null(record.meta), record.meta.tags, array())'
 ```

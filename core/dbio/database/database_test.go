@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -1673,6 +1674,49 @@ func TestSoftMergeGuardIsNullSafe(t *testing.T) {
 				"%s: soft-mark guard is not NULL-safe:\n%s", ty, mark)
 		}
 	}
+}
+
+// ClickHouse 21.x rejects an IN whose two sides have different integer widths
+// ("Types of column 1 in section IN don't match: Int32 on the left, Int64 on
+// the right"). The merge templates must select the source PK through a cast to
+// the target type, so every IN compares equal types.
+func TestClickhouseMergeTemplatesCastPK(t *testing.T) {
+	tmpl, err := dbio.TypeDbClickhouse.Template()
+	assert.NoError(t, err)
+
+	strategies := []string{
+		"merge_insert", "merge_delete_insert",
+		"merge_change_capture", "merge_change_capture_soft",
+	}
+
+	// every IN subquery takes the casted key, never the bare one
+	for _, name := range strategies {
+		sql := tmpl.Core[name]
+		if !assert.NotEmpty(t, sql, "%s is empty", name) {
+			continue
+		}
+		assert.NotContains(t, sql, "{src_pk_fields}",
+			"%s still selects the uncast source PK", name)
+		assert.Contains(t, sql, "{src_pk_fields_casted}",
+			"%s does not select the casted source PK", name)
+	}
+
+	c, err := NewConn("clickhouse://u:p@ch:9000/db")
+	assert.NoError(t, err)
+	conn := c.(*ClickhouseConn)
+
+	// differing widths produce a cast to the target type
+	src := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	tgt := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Int32"}
+	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgt))
+
+	// a Nullable target casts to the inner type, not to Nullable(T)
+	tgtNull := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Nullable(Int32)"}
+	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgtNull))
+
+	// equal types add no cast, so the common case renders as before
+	same := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	assert.Equal(t, "`id`", conn.CastColumnForSelect(src, same))
 }
 
 type fakeZerobusStream struct {
@@ -4473,4 +4517,169 @@ func TestDuckLakeConnDefaultVersion(t *testing.T) {
 
 	t.Setenv("DUCKDB_VERSION", "2.0.0")
 	assert.Equal(t, "", version(), "the env var wins over the DuckLake default")
+}
+
+type fakeResult struct{ rows int64 }
+
+func (r fakeResult) LastInsertId() (int64, error) { return 0, nil }
+func (r fakeResult) RowsAffected() (int64, error) { return r.rows, nil }
+
+func TestStatementRunner(t *testing.T) {
+	ctx := context.Background()
+	fakeErr := fmt.Errorf("fake failure")
+
+	newRunner := func(failOn string, ran *[]string) statementRunner {
+		return statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			*ran = append(*ran, q)
+			if failOn != "" && strings.Contains(q, failOn) {
+				return nil, fakeErr
+			}
+			return fakeResult{rows: 5}, nil
+		}}
+	}
+
+	t.Run("first fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("a", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fake failure")
+		assert.Contains(t, err.Error(), "statement 1 of 3")
+		assert.Equal(t, []string{"a"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+
+	t.Run("second fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("b", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "statement 2 of 3")
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(5), ra)
+	})
+
+	t.Run("all pass", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("", &ran).run(ctx, []string{"a", "b", "c"})
+		require.NoError(t, err)
+		assert.Len(t, ran, 3)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(15), ra)
+	})
+
+	t.Run("blank statements and nil result", func(t *testing.T) {
+		ran := []string{}
+		runner := statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			ran = append(ran, q)
+			return nil, nil
+		}}
+		res, err := runner.run(ctx, []string{"", "a", "  \n", "b"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+}
+
+// failingExecConn fails the statements that contain failOn
+type failingExecConn struct {
+	*PostgresConn
+	failOn string
+	ran    []string
+}
+
+func (c *failingExecConn) ExecContext(ctx context.Context, q string, args ...interface{}) (sql.Result, error) {
+	c.ran = append(c.ran, q)
+	if strings.Contains(q, c.failOn) {
+		return nil, fmt.Errorf("fake failure")
+	}
+	return fakeResult{rows: 1}, nil
+}
+
+func TestBaseConnExecMultiStopsAtFirstError(t *testing.T) {
+	newFake := func(t *testing.T) *failingExecConn {
+		conn, err := NewConn("postgres://u:p@localhost:5432/db")
+		require.NoError(t, err)
+		pg := conn.(*PostgresConn)
+		fake := &failingExecConn{PostgresConn: pg, failOn: "DELETE"}
+		var c Connection = fake
+		pg.BaseConn.instance = &c
+		return fake
+	}
+
+	t.Run("one element", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1;\nINSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+
+	t.Run("two elements", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1", "INSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+}
+
+func TestDuckDbConnExecMultiStopsAtFirstError(t *testing.T) {
+	conn, err := NewConn("duckdb://" + filepath.Join(t.TempDir(), "x.duckdb"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	_, err = conn.ExecMulti("create table t (id int);\ninsert into missing values (1);\ninsert into t values (1)")
+	require.Error(t, err)
+
+	data, err := conn.Query("select count(*) as cnt from t")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 1)
+	assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
+}
+
+func TestSQLServerOrderByOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain", "select id from t order by id", "select id from t order by id offset 0 rows"},
+		{"uppercase", "SELECT id FROM t ORDER BY id DESC", "SELECT id FROM t ORDER BY id DESC offset 0 rows"},
+		{"semicolon", "select id from t order by id;  ", "select id from t order by id offset 0 rows"},
+		{"line comment", "select id from t order by id -- sorted", "select id from t order by id offset 0 rows"},
+		{"block comment", "select id from t order by id /* c */ ;", "select id from t order by id offset 0 rows"},
+		{"multiline", "select id\nfrom t\norder by id\n", "select id\nfrom t\norder by id offset 0 rows"},
+		{"over only", "select row_number() over (order by x) as rn from t", "select row_number() over (order by x) as rn from t"},
+		{"over and order by", "select row_number() over (order by x) rn from t order by rn", "select row_number() over (order by x) rn from t order by rn offset 0 rows"},
+		{"subquery only", "select * from (select top 5 * from t order by id) s", "select * from (select top 5 * from t order by id) s"},
+		{"subquery and outer", "select * from (select * from t) s order by id", "select * from (select * from t) s order by id offset 0 rows"},
+		{"top", "select top 5 id from t order by id", "select top 5 id from t order by id"},
+		{"offset", "select id from t order by id offset 10 rows", "select id from t order by id offset 10 rows"},
+		{"offset fetch", "select id from t order by id offset 10 rows fetch next 5 rows only", "select id from t order by id offset 10 rows fetch next 5 rows only"},
+		{"for xml", "select id from t order by id for xml path('')", "select id from t order by id for xml path('')"},
+		{"cte", "with cte as (select id from t) select id from cte order by id", "with cte as (select id from t) select id from cte order by id"},
+		{"cte uppercase", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id"},
+		{"string literal", "select 'order by x' as a from t", "select 'order by x' as a from t"},
+		{"string escape", "select 'it''s order by' as a from t", "select 'it''s order by' as a from t"},
+		{"unicode string", "select N'order by' as a from t", "select N'order by' as a from t"},
+		{"bracket identifier", "select [order by] from t", "select [order by] from t"},
+		{"quoted identifier", `select "order by" from t`, `select "order by" from t`},
+		{"order by after string", "select 'a;' as a from t order by a", "select 'a;' as a from t order by a offset 0 rows"},
+		{"top in string", "select 'top' as a from t order by a", "select 'top' as a from t order by a offset 0 rows"},
+		{"order by in comment", "select id from t -- order by id\n", "select id from t -- order by id\n"},
+		{"union", "select id from a union all select id from b order by id", "select id from a union all select id from b order by id offset 0 rows"},
+		{"option", "select id from t order by id option (recompile)", "select id from t order by id offset 0 rows option (recompile)"},
+		{"option semicolon", "select id from t order by id OPTION (maxdop 1);", "select id from t order by id offset 0 rows OPTION (maxdop 1)"},
+		{"no order by", "select id from t where id > 1", "select id from t where id > 1"},
+		{"empty", "", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, sqlServerOrderByOffset(c.input))
+		})
+	}
 }

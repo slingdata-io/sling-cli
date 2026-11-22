@@ -105,15 +105,21 @@ Fail with error message:
 # Constant: 2s, 2s, 2s...
 backoff: "constant"
 backoff_base: 2
+```
 
+```yaml
 # Linear: 2s, 4s, 6s...
 backoff: "linear"
 backoff_base: 2
+```
 
+```yaml
 # Exponential: 2s, 4s, 8s, 16s...
 backoff: "exponential"
 backoff_base: 2
+```
 
+```yaml
 # Jitter: exponential + random
 backoff: "jitter"
 backoff_base: 2
@@ -255,19 +261,29 @@ Access response data in conditions:
 ```yaml
 # Status code
 condition: response.status == 429
+```
 
+```yaml
 # Header value
 condition: 'response.headers.x-rate-limit-remaining == "0"'
+```
 
+```yaml
 # JSON body
 condition: response.json.error_code == "RATE_LIMITED"
+```
 
+```yaml
 # Text content
 condition: 'contains(response.text, "error")'
+```
 
+```yaml
 # Combined
 condition: response.status >= 500 || response.status == 429
+```
 
+```yaml
 # State-based
 condition: request.attempts >= 3
 ```

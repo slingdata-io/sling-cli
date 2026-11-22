@@ -260,7 +260,11 @@ func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (r
 	if conn.useADBC() {
 		return conn.adbc.ExecMultiContext(ctx, sqls...)
 	}
-	return conn.duck.ExecMultiContext(ctx, sqls...)
+	stmts := []string{}
+	for _, q := range sqls {
+		stmts = append(stmts, ParseSQLMultiStatements(q, conn.GetType())...)
+	}
+	return conn.duck.ExecMultiContext(ctx, stmts...)
 }
 
 func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {

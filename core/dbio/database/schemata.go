@@ -530,7 +530,11 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
+			innerSQL := t.SQL
+			if isSQLServer {
+				innerSQL = sqlServerOrderByOffset(innerSQL)
+			}
+			sql = g.F("select %s from (\n%s\n) t", fieldsStr, innerSQL)
 		} else {
 			sql = t.SQL
 		}
@@ -549,6 +553,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
+			if isSQLServer {
+				sql = sqlServerOrderByOffset(sql)
+			}
 			sql = g.R(
 				template.Core["limit_sql"],
 				"sql", sql,
@@ -645,6 +652,58 @@ func (t *Table) GeometryWKBFields(fields []string) []string {
 		}
 		mapped = append(mapped, g.F("%s as %s", expr(quoted), name))
 	}
+	return mapped
+}
+
+// FinalizeAggregateFields maps ClickHouse AggregateFunction columns of fields
+// to finalizeAggregation expressions. The driver cannot read the state type;
+// the expression returns the final value. Returns fields unchanged for other
+// dialects or with no AggregateFunction column.
+func (t *Table) FinalizeAggregateFields(fields []string) []string {
+	if t.Dialect != dbio.TypeDbClickhouse {
+		return fields
+	}
+
+	aggs := map[string]string{} // lower name -> quoted name
+	for _, col := range t.Columns {
+		if strings.HasPrefix(col.DbType, "AggregateFunction(") {
+			aggs[strings.ToLower(col.Name)] = t.Dialect.Quote(col.Name)
+		}
+	}
+	if len(aggs) == 0 {
+		return fields
+	}
+
+	if len(fields) == 0 || (len(fields) == 1 && fields[0] == "*") {
+		fields = lo.Map(t.Columns, func(col iop.Column, _ int) string { return col.Name })
+	}
+
+	names := []string{}
+	mapped := make([]string, 0, len(fields))
+	for _, field := range fields {
+		original, alias, isExclude, _ := iop.ParseSelectExpr(field)
+		if isExclude {
+			mapped = append(mapped, field)
+			continue
+		}
+		quoted, ok := aggs[strings.ToLower(t.Dialect.Unquote(original))]
+		if !ok {
+			mapped = append(mapped, field)
+			continue
+		}
+		name := quoted
+		if alias != "" {
+			name = t.Dialect.Quote(alias)
+		}
+		names = append(names, t.Dialect.Unquote(original))
+		mapped = append(mapped, g.F("finalizeAggregation(%s) as %s", quoted, name))
+	}
+
+	if len(names) == 0 {
+		return mapped
+	}
+
+	g.Info("reading AggregateFunction columns with finalizeAggregation: %s. Rows that ClickHouse has not merged yet can show as duplicates. For merged values, use custom SQL with a -Merge combinator and GROUP BY.", strings.Join(names, ", "))
 	return mapped
 }
 

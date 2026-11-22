@@ -21,6 +21,8 @@ type ReplicationDTO struct {
 	Defaults any            `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Streams  map[string]any `json:"streams" yaml:"streams"`
 	Env      map[string]any `json:"env,omitempty" yaml:"env,omitempty"`
+
+	Continuous any `json:"continuous,omitempty" yaml:"continuous,omitempty"`
 }
 
 // PipelineDTO is a pipeline file without engine-only fields.
