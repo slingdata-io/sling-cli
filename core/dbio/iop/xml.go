@@ -3,6 +3,7 @@ package iop
 import (
 	"encoding/xml"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -163,9 +164,12 @@ func (xd *xmlDecoder) parseRecord(start *xml.StartElement) (map[string]interface
 			}
 
 			// Type conversion like mxj: try float64, then bool, else string.
-			if f, err := strconv.ParseFloat(text, 64); err == nil {
+			// Text such as "Nan", "Inf" or "Infinity" (names, codes) and single
+			// letters such as "F" or "t" must stay strings, so only finite
+			// numbers and true/false literals are converted.
+			if f, err := strconv.ParseFloat(text, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 				m[childKey] = f
-			} else if b, err := strconv.ParseBool(text); err == nil {
+			} else if b, err := strconv.ParseBool(text); err == nil && len(text) > 1 {
 				m[childKey] = b
 			} else {
 				m[childKey] = text
