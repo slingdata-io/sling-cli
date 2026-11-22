@@ -648,10 +648,36 @@ func (df *Dataflow) SyncStats() {
 	}
 }
 
+// readyStreams returns the ready flag and the stream list under the lock.
+// Streams are only appended, so the slice header copy is enough.
+func (df *Dataflow) readyStreams() (ready bool, streams []*Datastream) {
+	if df == nil {
+		return false, nil
+	}
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	return df.Ready, df.Streams
+}
+
+// StatsSnapshot returns the stats of each stream. It is safe on any goroutine.
+func (df *Dataflow) StatsSnapshot() []DatastreamStats {
+	if df == nil {
+		return nil
+	}
+	df.mux.Lock()
+	defer df.mux.Unlock()
+
+	out := make([]DatastreamStats, 0, len(df.Streams))
+	for _, ds := range df.Streams {
+		out = append(out, ds.StatsSnapshot())
+	}
+	return out
+}
+
 // Count returns the aggregate count
 func (df *Dataflow) Count() (cnt uint64) {
-	if df != nil && df.Ready {
-		for _, ds := range df.Streams {
+	if ready, streams := df.readyStreams(); ready {
+		for _, ds := range streams {
 			if ds.Ready {
 				cnt += atomic.LoadUint64(&ds.Count)
 			}
@@ -662,16 +688,16 @@ func (df *Dataflow) Count() (cnt uint64) {
 
 // AddEgressBytes add egress bytes
 func (df *Dataflow) AddEgressBytes(bytes uint64) {
-	df.EgressBytes = df.EgressBytes + bytes
+	atomic.AddUint64(&df.EgressBytes, bytes)
 }
 
 func (df *Dataflow) Bytes() (inBytes, outBytes uint64) {
-	return df.DsTotalBytes(), df.EgressBytes
+	return df.DsTotalBytes(), atomic.LoadUint64(&df.EgressBytes)
 }
 
 func (df *Dataflow) DsTotalBytes() (bytes uint64) {
-	if df != nil && df.Ready {
-		for _, ds := range df.Streams {
+	if ready, streams := df.readyStreams(); ready {
+		for _, ds := range streams {
 			if ds.Ready {
 				bytes += ds.Bytes.Load()
 			}

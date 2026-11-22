@@ -289,6 +289,9 @@ func (b *Batch) Push(row []any) {
 
 	atomic.AddUint64(&b.ds.pushed, 1)
 	b.ds.Sp.commitChecksum()
+	if b.ds.statsWanted.Load() {
+		b.ds.publishStats()
+	}
 
 	// Start the wall-clock on the first row so setup delays between
 	// NewBatch and the first Push don't burn the max-duration budget.

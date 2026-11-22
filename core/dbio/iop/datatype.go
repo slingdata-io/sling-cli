@@ -2,9 +2,11 @@ package iop
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -550,6 +552,21 @@ func (cols Columns) Clone() (newCols Columns) {
 			Metadata:    col.Metadata,
 			Constraint:  col.Constraint,
 		}
+	}
+	return newCols
+}
+
+// deepClone is Clone with its own Constraint and Metadata. The copy shares no
+// mutable state with the source columns.
+func (cols Columns) deepClone() Columns {
+	newCols := cols.Clone()
+	for j := range newCols {
+		if c := newCols[j].Constraint; c != nil {
+			cc := *c
+			cc.Errors = slices.Clone(c.Errors)
+			newCols[j].Constraint = &cc
+		}
+		newCols[j].Metadata = maps.Clone(newCols[j].Metadata)
 	}
 	return newCols
 }

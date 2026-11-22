@@ -80,10 +80,22 @@ type Datastream struct {
 	pauseChan     chan struct{}
 	unpauseChan   chan struct{}
 
+	stats       atomic.Pointer[DatastreamStats] // last published copy
+	statsWanted atomic.Bool                     // a reader asks for a new copy
+
 	// Arrow mode: the stream carries arrow records instead of rows. Set at
 	// creation by the arrow lane gate; never changes after Start.
 	rs        *RecordStream
 	ArrowOnly bool
+}
+
+// DatastreamStats is a copy of the stream stats. It is read-only: nobody
+// changes a value after it is published.
+type DatastreamStats struct {
+	ID      string
+	URI     string
+	Columns Columns
+	Count   uint64
 }
 
 type schemaChg struct {
@@ -461,10 +473,52 @@ func (ds *Datastream) DrainReprocess() []any {
 // SetReady sets the ds.ready
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {
+		ds.publishStats()
 		ds.Ready = true
 		ds.readyBuffer = ds.Buffer
 		go func() { ds.readyChn <- struct{}{} }()
 	}
+}
+
+// StatusEnabled reports whether a status URL is set. The private build
+// replaces it, because the public env package has no status URL.
+var StatusEnabled = func() bool { return false }
+
+// publishStats stores a copy of the columns and column stats. Call it only on
+// the producer goroutine, or before the stream is shared. It does nothing
+// without a status URL.
+func (ds *Datastream) publishStats() {
+	if !StatusEnabled() {
+		return
+	}
+	ds.statsWanted.Store(false) // first, so a request during the build is kept
+
+	st := &DatastreamStats{
+		ID:      ds.ID,
+		URI:     cast.ToString(ds.Metadata.StreamURL.Value),
+		Columns: ds.Columns.deepClone(),
+	}
+	if ds.Sp != nil {
+		colStats := ds.Sp.colStatsCopy()
+		for j := range st.Columns {
+			if cs, ok := colStats[j]; ok {
+				st.Columns[j].Stats = cs
+			}
+		}
+	}
+	ds.stats.Store(st)
+}
+
+// StatsSnapshot returns the last published stats and asks for a new copy.
+// It is safe on any goroutine. The caller must not change Columns.
+func (ds *Datastream) StatsSnapshot() DatastreamStats {
+	ds.statsWanted.Store(true)
+	st := DatastreamStats{ID: ds.ID}
+	if p := ds.stats.Load(); p != nil {
+		st = *p
+	}
+	st.Count = atomic.LoadUint64(&ds.Count)
+	return st
 }
 
 // SetEmpty sets the ds.Rows channel as empty
@@ -1189,6 +1243,7 @@ skipBuffer:
 
 		var err error
 		defer ds.Close()
+		defer ds.publishStats() // final copy, before Close
 
 		if ds.CurrentBatch == nil {
 			ds.CurrentBatch = ds.NewBatch(ds.Columns)

@@ -302,8 +302,22 @@ func LoaderStreamConfig(header bool) StreamConfig {
 	}
 }
 
+// ColStats returns the live map. Use it only on the stream goroutine or after
+// the stream ends. Other goroutines use Datastream.StatsSnapshot.
 func (sp *StreamProcessor) ColStats() map[int]*ColumnStats {
 	return sp.colStats
+}
+
+// colStatsCopy copies each entry of the live map. Call it only on the goroutine
+// that runs CastRow, or after the stream ends.
+func (sp *StreamProcessor) colStatsCopy() map[int]ColumnStats {
+	out := make(map[int]ColumnStats, len(sp.colStats))
+	for i, cs := range sp.colStats {
+		if cs != nil {
+			out[i] = *cs
+		}
+	}
+	return out
 }
 
 func (sp *StreamProcessor) ResetConfig() {

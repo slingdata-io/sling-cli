@@ -1208,3 +1208,201 @@ func TestDatastreamLimitedConcurrentPush(t *testing.T) {
 	assert.Same(t, df, ds.Df())
 	assert.False(t, ds.Limited())
 }
+
+// enableStatus turns the status on: publishStats does nothing without it.
+func enableStatus(t *testing.T) {
+	t.Helper()
+	setStatusEnabled(t, true)
+}
+
+func setStatusEnabled(t testing.TB, on bool) {
+	t.Helper()
+	old := StatusEnabled
+	StatusEnabled = func() bool { return on }
+	t.Cleanup(func() { StatusEnabled = old })
+}
+
+// TestDatastreamStatsSnapshotWhileStreaming reads the stats of a running
+// stream from another goroutine, while the stream adds a column type change,
+// constraint failures and column stats.
+func TestDatastreamStatsSnapshotWhileStreaming(t *testing.T) {
+	enableStatus(t)
+	const total = 50000
+	cols := NewColumns(
+		Column{Name: "id", Type: BigIntType},
+		Column{Name: "name", Type: StringType, Constraint: &ColumnConstraint{
+			Expression: "name !~ '000$'",
+			EvalFunc:   func(v any) bool { return !strings.HasSuffix(cast.ToString(v), "000") },
+		}},
+		Column{Name: "v", Type: BigIntType},
+	)
+	i := 0
+	ds := NewDatastreamIt(context.Background(), cols, func(it *Iterator) bool {
+		if i >= total {
+			return false
+		}
+		i++
+		v := any(int64(i))
+		if i == total/2 {
+			v = "abc" // changes the column type mid-stream
+		}
+		it.Row = []any{int64(i), fmt.Sprintf("n%d", i), v}
+		return true
+	})
+	require.NoError(t, ds.Start())
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				snap := df.StatsSnapshot()
+				_ = df.Count()
+				_, _ = df.Bytes()
+				_ = g.Marshal(snap)
+			}
+		}
+	}()
+
+	// df.Collect writes Position into the shared columns: drain instead
+	rows := 0
+	for range ds.Rows() {
+		rows++
+	}
+	close(stop)
+	<-done
+	require.NoError(t, ds.Err())
+	require.Equal(t, total, rows)
+
+	snaps := df.StatsSnapshot()
+	require.Len(t, snaps, 1)
+	snap := snaps[0]
+	assert.Equal(t, uint64(total), snap.Count)
+	require.Len(t, snap.Columns, 3)
+	assert.Equal(t, ds.Sp.ColStats()[0].TotalCnt, snap.Columns[0].Stats.TotalCnt)
+	assert.Greater(t, snap.Columns[0].Stats.TotalCnt, int64(0))
+	assert.True(t, snap.Columns[2].Type.IsString(), "type is %s", snap.Columns[2].Type)
+	require.NotNil(t, snap.Columns[1].Constraint)
+	assert.NotSame(t, ds.Columns[1].Constraint, snap.Columns[1].Constraint)
+	assert.Equal(t, ds.Columns[1].Constraint.FailCnt, snap.Columns[1].Constraint.FailCnt)
+	assert.Greater(t, snap.Columns[1].Constraint.FailCnt, uint64(0))
+}
+
+// TestDatastreamStatsSnapshotBeforeRows checks the copy at SetReady.
+func TestDatastreamStatsSnapshotBeforeRows(t *testing.T) {
+	newDs := func() *Datastream {
+		cols := NewColumns(Column{Name: "id", Type: BigIntType}, Column{Name: "name", Type: StringType})
+		i := 0
+		ds := NewDatastreamIt(context.Background(), cols, func(it *Iterator) bool {
+			if i >= 3 {
+				return false
+			}
+			i++
+			it.Row = []any{int64(i), "a"}
+			return true
+		})
+		ds.SetMetadata(`{"stream_url": {"key": "url", "value": "file://a.csv"}}`)
+		return ds
+	}
+
+	t.Run("with status url", func(t *testing.T) {
+		enableStatus(t)
+		ds := newDs()
+		require.NoError(t, ds.Start())
+
+		// no row is read yet
+		snap := ds.StatsSnapshot()
+		assert.Equal(t, ds.ID, snap.ID)
+		assert.Equal(t, "file://a.csv", snap.URI)
+		assert.Equal(t, []string{"id", "name"}, snap.Columns.Names()[:2])
+
+		// the stream ends before the columns change
+		for range ds.Rows() {
+		}
+		require.NoError(t, ds.Err())
+		ds.Columns[0].Name = "changed"
+		assert.Equal(t, "id", snap.Columns[0].Name)
+		assert.Equal(t, "id", ds.StatsSnapshot().Columns[0].Name)
+	})
+
+	t.Run("without status url", func(t *testing.T) {
+		setStatusEnabled(t, false)
+
+		ds := newDs()
+		require.NoError(t, ds.Start())
+		snap := ds.StatsSnapshot()
+		assert.Equal(t, ds.ID, snap.ID)
+		assert.Nil(t, snap.Columns)
+		for range ds.Rows() {
+		}
+	})
+}
+
+// BenchmarkDatastreamStartRows runs rows through Start, MakeDataFlow and
+// ds.Rows, without and with a status URL. With a status URL, a reader takes
+// df.StatsSnapshot every 10 ms, like the status ticker.
+func BenchmarkDatastreamStartRows(b *testing.B) {
+	const total = 300000
+	run := func(b *testing.B, withStatus bool) {
+		setStatusEnabled(b, withStatus)
+		b.ReportAllocs()
+
+		for range b.N {
+			cols := NewColumns(Column{Name: "id", Type: BigIntType}, Column{Name: "name", Type: StringType})
+			i := 0
+			ds := NewDatastreamIt(context.Background(), cols, func(it *Iterator) bool {
+				if i >= total {
+					return false
+				}
+				i++
+				it.Row = []any{int64(i), "abc"}
+				return true
+			})
+			if err := ds.Start(); err != nil {
+				b.Fatal(err)
+			}
+			df, err := MakeDataFlow(ds)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			stop := make(chan struct{})
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if !withStatus {
+					return
+				}
+				tick := time.NewTicker(10 * time.Millisecond)
+				defer tick.Stop()
+				for {
+					select {
+					case <-stop:
+						return
+					case <-tick.C:
+						_ = df.StatsSnapshot()
+					}
+				}
+			}()
+
+			rows := 0
+			for range ds.Rows() {
+				rows++
+			}
+			close(stop)
+			<-done
+			if rows != total {
+				b.Fatalf("got %d rows, want %d", rows, total)
+			}
+		}
+	}
+
+	b.Run("status_url_empty", func(b *testing.B) { run(b, false) })
+	b.Run("status_url_set", func(b *testing.B) { run(b, true) })
+}
