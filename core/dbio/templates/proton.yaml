@@ -291,7 +291,7 @@ native_type_map:
   fixedstring: text
   float32: float
   float64: float
-  int128: decimal
+  int128: "decimal(38,0)"
   int16: smallint
   int256: decimal
   int32: bigint
@@ -303,7 +303,7 @@ native_type_map:
   map: json
   string: text
   tuple: string
-  uint128: decimal
+  uint128: "decimal(38,0)"
   uint16: integer
   uint256: decimal
   uint32: bigint

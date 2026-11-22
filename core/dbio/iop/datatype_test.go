@@ -2,6 +2,7 @@ package iop
 
 import (
 	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -1453,11 +1454,11 @@ func TestNativeTypeToGeneralClickHouseWideIntegers(t *testing.T) {
 	// ClickHouse and Proton report 128/256-bit integers as Int128, Int256,
 	// UInt128 and UInt256, optionally wrapped in Nullable(...)
 	cases := map[string]ColumnType{
-		"Int128":            DecimalType,
+		"Int128":            ColumnType("decimal(38,0)"),
 		"Int256":            DecimalType,
-		"UInt128":           DecimalType,
+		"UInt128":           ColumnType("decimal(38,0)"),
 		"UInt256":           DecimalType,
-		"Nullable(Int128)":  DecimalType,
+		"Nullable(Int128)":  ColumnType("decimal(38,0)"),
 		"Nullable(UInt256)": DecimalType,
 		"Int64":             BigIntType,
 	}
@@ -1469,6 +1470,16 @@ func TestNativeTypeToGeneralClickHouseWideIntegers(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCastValBigIntOutsideInt64(t *testing.T) {
+	sp := NewStreamProcessor()
+	col := &Column{Name: "col", Type: DecimalType, Sourced: true}
+
+	maxU128, _ := new(big.Int).SetString("340282366920938463463374607431768211455", 10)
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, maxU128, col)))
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, *maxU128, col)))
+	assert.Equal(t, "-42", cast.ToString(sp.CastVal(0, big.NewInt(-42), col)))
 }
 
 func TestNativeTypeToGeneralProtonDate32(t *testing.T) {
