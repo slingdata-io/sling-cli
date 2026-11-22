@@ -57,7 +57,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	selectStreams := []string{}
 
 	// set function here due to scoping
-	sling.HookRunReplication = runReplication
+	sling.HookRunReplication = oneShotRun(runReplication)
 
 	// recover from panic
 	defer func() {
@@ -242,6 +242,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			if err != nil {
 				return ok, g.Error(err, "invalid cdc options -> %s", payload)
 			}
+		case "continuous":
+			if cast.ToBool(v) {
+				sling.SetContinuousRunMode(true)
+			}
 		}
 
 		// replace `-` with `_` in c.Vals for args map
@@ -293,6 +297,11 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 	os.Setenv("SLING_CLI_ARGS_MAP", g.Marshal(c.Vals))
+
+	// continuous mode runs one replication file. The label below skips this check.
+	if sling.IsContinuousRunMode() && replicationCfgPath == "" {
+		return ok, g.Error("--continuous needs a replication file (-r)")
+	}
 
 	// set run mode
 	if os.Getenv("SLING_RUN_MODE") == "" {
@@ -638,8 +647,24 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	return nil
 }
 
+// oneShotRun makes a runner for nested replications (run hooks). A nested
+// replication is one-shot, even inside a continuous run.
+func oneShotRun(run func(string, *sling.Config, ...string) error) func(string, *sling.Config, ...string) error {
+	return func(cfgPath string, cfg *sling.Config, selectStreams ...string) error {
+		if sling.IsContinuousRunMode() {
+			sling.SetContinuousRunMode(false)
+			defer sling.SetContinuousRunMode(true)
+		}
+		return run(cfgPath, cfg, selectStreams...)
+	}
+}
+
 func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
+
+	if sling.IsContinuousRunMode() {
+		return g.Error("continuous mode needs the official release")
+	}
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
@@ -785,10 +810,9 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 	}
 
-	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
-		state.SetStoreData("_replication_total_rows", state.Execution.TotalRows, false)
-		state.SetStoreData("_replication_total_bytes", state.Execution.TotalBytes, false)
-		sling.SetPipelineStoreEnv(state.GetStore())
+	// a thread child does not write: the parent owns the pipeline store
+	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() && !env.IsThreadChild {
+		state.WritePipelineStore()
 	}
 
 	return eG.Err()

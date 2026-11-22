@@ -51,13 +51,29 @@ The Sling Platform (hosted at `api.slingdata.io`, UI at `platform.slingdata.io`)
 
 ## 2. Authentication
 
-All `sling platform ...` commands require a project token via environment variable:
+All `sling platform ...` commands (except `login` and `trial`) require a project token via environment variable:
 
 ```bash
 export SLING_PROJECT_TOKEN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 A common place to put this is `~/.sling/env.yaml` under the `variables:` block, or export it in your shell profile. The token scopes every request to one specific project — you do not need to pass a project ID separately.
+
+### Sign in with `sling platform login`
+
+`sling platform login` gets a project token with a device code and writes it in the `env:` block of `~/.sling/env.yaml`. It prints a link and a code, opens the browser, and waits until a project admin clicks **Allow**. The code expires after 10 minutes.
+
+```bash
+sling platform login                   # opens the browser
+sling platform login --no-browser      # print the link only (SSH, containers)
+sling platform login --project <id>    # sign in to this project
+sling platform login --force           # replace a different token in env.yaml
+```
+
+- If `SLING_PROJECT_TOKEN` in the shell is already valid for the project, the command does nothing.
+- A token in the shell hides the value in env.yaml.
+- Without `--force`, a different token in env.yaml makes the command ask, or fail when stdin is not a terminal.
+- This needs a person in a browser. An agent cannot finish it alone.
 
 ### Base URL
 
@@ -95,9 +111,11 @@ Print a summary of the linked platform project: project ID, name, organization, 
 
 ```bash
 sling platform status
+sling platform status --project <id>   # fail if the token is for a different project
+sling platform status -o json          # {valid, project_id, project_name, token_source, env_file}
 ```
 
-Uses `GET /project/get?type=status_details`. Token required.
+Uses `GET /project/get?type=status_details`. Token required. The table output ends with `Token source:` (process env, `env.yaml`, or `.env.sling`).
 
 ---
 

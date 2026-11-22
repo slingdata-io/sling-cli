@@ -1,0 +1,15 @@
+# Continuous mode from MySQL (binlog) to Postgres, 2 streams.
+source: MYSQL_CDC_CONT
+target: POSTGRES_CDC_CONT
+
+defaults:
+  mode: change-capture
+  object: cdc_cont.{stream_table}
+
+continuous:
+  interval: 5s
+  status_interval: 1h
+
+streams:
+  cdc_cont_db.orders:
+  cdc_cont_db.items:

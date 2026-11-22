@@ -93,7 +93,26 @@ func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error
 		return
 	}
 
-	return bufio.NewReader(file), err
+	return bufio.NewReader(&eofClosingFile{file: file}), err
+}
+
+// eofClosingFile closes the file at EOF or on a read error, because callers
+// get a *bufio.Reader and cannot close it. Windows cannot delete an open file.
+type eofClosingFile struct {
+	file   *os.File
+	closed bool
+}
+
+func (f *eofClosingFile) Read(p []byte) (int, error) {
+	if f.closed {
+		return 0, io.EOF
+	}
+	n, err := f.file.Read(p)
+	if err != nil {
+		f.closed = true
+		f.file.Close()
+	}
+	return n, err
 }
 
 // GetDatastream return a datastream for the given path

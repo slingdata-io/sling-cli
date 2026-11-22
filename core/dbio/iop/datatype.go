@@ -1770,6 +1770,13 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 
 	switch connType {
 	case dbio.TypeDbClickhouse:
+		// SimpleAggregateFunction(fn, T) stores a plain value of type T
+		if strings.HasPrefix(dbType, "simpleaggregatefunction(") && strings.HasSuffix(dbType, ")") {
+			params := strings.TrimSuffix(strings.TrimPrefix(dbType, "simpleaggregatefunction("), ")")
+			if _, inner, found := strings.Cut(params, ","); found {
+				dbType = strings.TrimSpace(inner)
+			}
+		}
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")

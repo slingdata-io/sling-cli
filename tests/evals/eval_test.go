@@ -202,7 +202,7 @@ func TestFixtureSkillChecksum(t *testing.T) {
 				return err
 			}
 			rel = filepath.ToSlash(rel)
-			want, err := assist.MD5OfEmbeddedSkill(rel)
+			want, err := assist.MD5OfInstalledSkill(rel)
 			if err != nil {
 				t.Errorf("%s: embedded %s: %v", name, rel, err)
 				return nil

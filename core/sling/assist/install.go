@@ -134,7 +134,7 @@ func Install(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
 		res.ProfileWritten = true
 	}
 
-	skillNames := listSkillNames()
+	skillNames := InstalledSkillNames()
 	if !opts.MCPOnly {
 		if err := writeCanonicalBundle(skillNames); err != nil {
 			return nil, err
@@ -208,7 +208,8 @@ func Uninstall(ctx context.Context, opts UninstallOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	skillNames := listSkillNames()
+	// Also remove the skills that older versions installed.
+	skillNames := append(InstalledSkillNames(), retiredSkillNames...)
 
 	pickClient := func(name string) bool {
 		if len(opts.IncludeClients) == 0 {
@@ -297,7 +298,7 @@ func AutoRefresh(ctx context.Context) (string, error) {
 	}
 	defer unlock()
 
-	skillNames := listSkillNames()
+	skillNames := InstalledSkillNames()
 	changed := []string{}
 	var refreshErrs []string
 	for _, name := range skillNames {
@@ -384,12 +385,14 @@ func tryRefreshLock(lockPath string) (func(), bool) {
 	return unlock, true
 }
 
-// retiredSkillNames are Sling-owned skill names from earlier bundle versions
-// that no longer exist in the embed. Pruned on install/refresh so agents stop
-// picking up their stale content.
+// retiredSkillNames are Sling-owned skills that earlier versions installed.
+// Pruned on install/refresh so agents stop picking up their stale content.
+// The sling-* topics are still embedded, but only `sling skills` prints them.
 var retiredSkillNames = []string{
 	"sling-hooks", "sling-transforms", "sling-troubleshooting",
 	"sling-connections", "sling-project", "sling-monitors",
+	"sling-api-specs", "sling-build", "sling-pipelines",
+	"sling-platform", "sling-python", "sling-replications",
 }
 
 // pruneRetiredSkills removes retired skills from the canonical bundle and from
@@ -428,7 +431,7 @@ func pruneRetiredSkills(ctx context.Context, scope Scope) []string {
 // anyCurrentSkillsInstalled reports whether at least one embedded skill
 // is present in ~/.agents/skills/. Absence means the user has not run setup.
 func anyCurrentSkillsInstalled() bool {
-	for _, name := range listSkillNames() {
+	for _, name := range InstalledSkillNames() {
 		if g.PathExists(canonicalSkillPath(name)) {
 			return true
 		}
@@ -446,11 +449,18 @@ func MD5OfFile(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// MD5OfEmbeddedSkill returns the MD5 of an embedded skill file.
-func MD5OfEmbeddedSkill(rel string) (string, error) {
-	data, err := SkillsFS.ReadFile(filepath.ToSlash(filepath.Join("skills", rel)))
+// MD5OfInstalledSkill returns the MD5 of a file that setup writes, by its path
+// relative to ~/.agents/skills/ (for example sling/SKILL.md).
+func MD5OfInstalledSkill(rel string) (string, error) {
+	rel = filepath.ToSlash(rel)
+	skill, _, _ := strings.Cut(rel, "/")
+	files, err := InstalledSkillFiles(skill)
 	if err != nil {
 		return "", err
+	}
+	data, ok := files[rel]
+	if !ok {
+		return "", g.Error("setup does not install %s", rel)
 	}
 	sum := md5.Sum(data)
 	return hex.EncodeToString(sum[:]), nil

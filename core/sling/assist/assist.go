@@ -15,6 +15,11 @@ import (
 //go:embed all:skills
 var SkillsFS embed.FS
 
+// SlingSkillStub is the installed sling skill. It points to `sling skills`.
+//
+//go:embed sling_skill.md
+var SlingSkillStub []byte
+
 //go:embed prompts.yaml
 var PromptsYAML []byte
 

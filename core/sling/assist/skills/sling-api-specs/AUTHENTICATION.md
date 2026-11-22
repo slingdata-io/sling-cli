@@ -136,10 +136,14 @@ authentication:
 ```yaml
 # Kraken style
 signing_string: "{http_method}{http_path}{nonce}{http_body_sha256}"
+```
 
+```yaml
 # Simple timestamp
 signing_string: "{http_method}{unix_time}{http_body_raw}"
+```
 
+```yaml
 # AWS style
 signing_string: "{http_method}\n{http_path}\n{http_query}\n{http_headers}"
 ```

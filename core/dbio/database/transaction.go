@@ -50,6 +50,34 @@ func (r Result) RowsAffected() (int64, error) {
 	return r.rowsAffected, nil
 }
 
+// statementRunner runs SQL statements in order and stops at the first failed one
+type statementRunner struct {
+	exec  func(ctx context.Context, q string) (sql.Result, error)
+	delay time.Duration
+}
+
+func (r statementRunner) run(ctx context.Context, stmts []string) (Result, error) {
+	res := Result{}
+	for i, stmt := range stmts {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		out, err := r.exec(ctx, stmt)
+		if err != nil {
+			return res, g.Error(err, "Error executing statement %d of %d, the next statements did not run", i+1, len(stmts))
+		}
+		if out != nil {
+			ra, _ := out.RowsAffected()
+			g.Trace("RowsAffected: %d", ra)
+			res.rowsAffected += ra
+		}
+		if r.delay > 0 {
+			time.Sleep(r.delay)
+		}
+	}
+	return res, nil
+}
+
 // Connection return the connection
 func (t *BaseTransaction) Connection() Connection {
 	return t.Conn
@@ -143,27 +171,12 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 	return
 }
 
-// ExecMultiContext runs multiple sql queries with context, returns `error`
+// ExecMultiContext runs multiple sql queries with context, stops at the first error
 func (t *BaseTransaction) ExecMultiContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
-
-	Res := Result{rowsAffected: 0}
-
-	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q, t.Conn.GetType()) {
-		res, err := t.ExecContext(ctx, sql, args...)
-		if err != nil {
-			eG.Capture(g.Error(err, "Error executing query"))
-		} else {
-			ra, _ := res.RowsAffected()
-			g.Trace("RowsAffected: %d", ra)
-			Res.rowsAffected = Res.rowsAffected + ra
-		}
-	}
-
-	err = eG.Err()
-	result = Res
-
-	return
+	runner := statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+		return t.ExecContext(ctx, q, args...)
+	}}
+	return runner.run(ctx, ParseSQLMultiStatements(q, t.Conn.GetType()))
 }
 
 // DisableTrigger disables a trigger
