@@ -4,7 +4,7 @@
 # from tests/suite.cli.yaml as `- suite: suite.cli.arrow.yaml`.
 #
 # Run it with:
-#   cd cmd/sling && go build . && SLING_BIN=sling go test -v -run TestCLI -- --debug "700+"
+#   cd cmd/sling && go build . && SLING_BIN=sling go test -v -run TestCLI -- --debug "arrow"
 #
 # Groups:
 #   arrow-on     701-733, 734, 735       the stream must engage the lane:

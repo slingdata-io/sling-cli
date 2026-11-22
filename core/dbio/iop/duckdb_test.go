@@ -46,6 +46,23 @@ func TestDuckDb(t *testing.T) {
 		}
 	})
 
+	t.Run("ExecMultiContext stops at first error", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		_, err := duck.ExecMultiContext(
+			context.Background(),
+			"create table t (id int)",
+			"insert into missing values (1)",
+			"insert into t values (1)",
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+
+		data, err := duck.Query("select count(*) as cnt from t")
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+		assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
+	})
+
 	t.Run("ExecContext with erroneous query", func(t *testing.T) {
 		duck := NewDuckDb(context.Background())
 		_, err := duck.Exec("SELECT * FROM non_existent_table")

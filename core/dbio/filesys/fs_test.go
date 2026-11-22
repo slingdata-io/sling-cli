@@ -1,6 +1,7 @@
 package filesys
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -112,6 +113,27 @@ func TestFileSysLocalCsv(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 18, len(data1.Rows))
 
+}
+
+func TestFileSysLocalReaderClosesAtEOF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"a":1}`), 0o644))
+
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	require.NoError(t, err)
+	reader, err := fs.GetReader("file://" + filepath.ToSlash(path))
+	require.NoError(t, err)
+
+	br, ok := reader.(*bufio.Reader) // callers check for this type
+	require.True(t, ok)
+	content, err := io.ReadAll(br)
+	require.NoError(t, err)
+	assert.Equal(t, `{"a":1}`, string(content))
+
+	n, err := br.Read(make([]byte, 1))
+	assert.Equal(t, 0, n)
+	assert.Equal(t, io.EOF, err)        // not "file already closed"
+	require.NoError(t, os.Remove(path)) // Windows fails on an open file
 }
 
 func TestFileSysLocalFormat(t *testing.T) {

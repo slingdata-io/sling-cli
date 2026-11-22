@@ -1,6 +1,6 @@
 
 
-- id: 290
+- id: 1
   name: 'sling assist setup --non-interactive (headless)'
   group: assist
   run: |
@@ -8,9 +8,13 @@
     mkdir -p "$H/.claude"
     HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude
     test -f "$H/.agents/skills/sling/SKILL.md"
+    grep -q 'sling skills sling-replications' "$H/.agents/skills/sling/SKILL.md"
+    test ! -e "$H/.agents/skills/sling/CONNECTIONS.md"
+    test ! -e "$H/.agents/skills/sling-replications"
     test -f "$H/.agents/skills/agent-browser/SKILL.md"
     test -f "$H/.agents/skills/agent-browser/CORE.md"
     test -f "$H/.claude/skills/sling/SKILL.md"
+    test ! -e "$H/.claude/skills/sling-replications"
     test -f "$H/.claude.json"
     grep -q 'agent-browser' "$H/.claude.json"
     grep -q 'agent: claude' "$H/.sling/env.yaml"
@@ -20,7 +24,7 @@
     - 'claude'
     - 'sling assist setup --doctor'
 
-- id: 291
+- id: 2
   name: 'sling assist setup --doctor exits non-zero when nothing installed'
   group: assist
   err: true
@@ -31,7 +35,7 @@
   output_contains:
     - 'profile'
 
-- id: 292
+- id: 3
   name: 'sling assist --out - renders prompt without launching'
   group: assist
   run: |
@@ -48,7 +52,7 @@
     - 'from PG to SF'
     - 'Gather first'
 
-- id: 322
+- id: 4
   name: 'sling assist --out - works without setup'
   group: assist
   run: |
@@ -60,7 +64,7 @@
     - '# State'
     - 'hello'
 
-- id: 293
+- id: 5
   name: 'sling assist --out - with investigation ask'
   group: assist
   run: |
@@ -72,7 +76,7 @@
     - '# Ask'
     - 'column missing'
 
-- id: 294
+- id: 6
   name: 'sling assist --resume unknown id errors'
   group: assist
   err: true
@@ -83,7 +87,7 @@
   output_contains:
     - 'unknown session'
 
-- id: 295
+- id: 7
   name: 'sling assist setup --uninstall is idempotent'
   group: assist
   run: |
@@ -96,7 +100,7 @@
   output_contains:
     - 'Removed Sling skills'
 
-- id: 296
+- id: 8
   name: 'sling assist --out - with piped stdin still renders'
   group: assist
   run: |
@@ -110,7 +114,7 @@
     - '# State'
     - '# Context'
 
-- id: 297
+- id: 9
   name: 'sling run failure writes log snapshot + AI hint'
   group: assist
   err: true
@@ -145,7 +149,7 @@
     - 'failed run'
     - 'exec_assist_test297'
 
-- id: 300
+- id: 10
   name: 'sling conns test failure writes log snapshot + signature footer'
   group: assist
   err: true
@@ -166,7 +170,7 @@
     - 'error signature:'
     - 'exec_conns_test300'
 
-- id: 298
+- id: 11
   name: 'uninstall stamp prevents AutoRefresh resurrection'
   group: assist
   run: |
@@ -186,7 +190,7 @@
     rm -rf "$H"
   output_contains: []
 
-- id: 323
+- id: 12
   name: 'sling assist auto-heals drifted skills on every command'
   group: assist
   run: |
@@ -194,17 +198,17 @@
     mkdir -p "$H/.claude"
     HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
     echo drifted-content > "$H/.agents/skills/sling/SKILL.md"
-    echo drifted-content > "$H/.agents/skills/sling-build/SKILL.md"
+    echo drifted-content > "$H/.agents/skills/agent-browser/CORE.md"
     HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
     grep -qv drifted-content "$H/.agents/skills/sling/SKILL.md"
-    grep -qv drifted-content "$H/.agents/skills/sling-build/SKILL.md"
+    grep -qv drifted-content "$H/.agents/skills/agent-browser/CORE.md"
     rm -rf "$H"
   output_contains:
     - '✓ skills: sling matches embedded'
   output_does_not_contain:
     - 'drifted from embedded'
 
-- id: 299
+- id: 13
   name: 'sling assist --resume --out - restores saved prompt'
   group: assist
   run: |
@@ -227,7 +231,7 @@
   output_contains:
     - 'saved prompt: backfill orders'
 
-- id: 324
+- id: 14
   name: 'sling assist setup wires agent-browser MCP and skill'
   group: assist
   run: |
@@ -243,7 +247,7 @@
   output_contains:
     - 'Wired clients:'
     - 'claude'
-- id: 325
+- id: 15
   name: 'sling assist --exec investigates a failed run with its log'
   group: assist
   run: |
@@ -271,7 +275,7 @@
     - 'run log (tail):'
     - 'Investigate the failed run exec_suite325'
 
-- id: 326
+- id: 16
   name: 'sling assist --id rejects unknown execution id'
   group: assist
   err: true
@@ -283,7 +287,7 @@
   output_contains:
     - 'unknown exec id'
 
-- id: 329
+- id: 17
   name: 'sling assist report --id prints redacted draft'
   group: assist
   run: |
@@ -306,3 +310,68 @@
   output_does_not_contain:
     - '/Users/'
 
+- id: 18
+  name: 'sling skills prints the index'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling skills
+    rm -rf "$H"
+  output_contains:
+    - '# Sling skills'
+    - '## sling-api-specs'
+    - '## Without the Sling MCP server'
+  output_does_not_contain:
+    - 'agent-browser'
+
+- id: 19
+  name: 'sling skills prints a sub-file'
+  group: assist
+  run: 'sling skills sling/CONNECTIONS.md'
+  output_contains:
+    - '# Skill: sling (CONNECTIONS.md)'
+    - '# Connection Management'
+
+- id: 20
+  name: 'sling skills unknown skill fails'
+  group: assist
+  err: true
+  run: 'sling skills foo'
+  output_contains:
+    - 'unknown skill'
+
+- id: 21
+  name: 'sling skills writes no files'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling skills sling >/dev/null
+    test ! -e "$H/.agents"
+    rm -rf "$H"
+  output_contains: []
+
+- id: 22
+  name: 'sling assist removes the old full skills on upgrade'
+  group: assist
+  run: |
+    H=$(mktemp -d)
+    mkdir -p "$H/.claude"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" AGENT_BROWSER_SKIP_DOWNLOAD=1 sling assist setup --non-interactive --agent claude >/dev/null 2>&1
+    # Simulate the full skills of an older version, then an upgrade.
+    for s in sling-replications sling-api-specs; do
+      mkdir -p "$H/.agents/skills/$s" "$H/.claude/skills/$s"
+      echo old > "$H/.agents/skills/$s/SKILL.md"
+      echo "@$H/.agents/skills/$s/SKILL.md" > "$H/.claude/skills/$s/SKILL.md"
+    done
+    echo old > "$H/.agents/skills/sling/SKILL.md"
+    echo old > "$H/.agents/skills/sling/CONNECTIONS.md"
+    mkdir -p "$H/.agents/skills/my-own-skill" && echo mine > "$H/.agents/skills/my-own-skill/SKILL.md"
+    echo 0.0.0-old > "$H/.sling/assist/version"
+    HOME="$H" SLING_HOME_DIR="$H/.sling" sling assist setup --doctor
+    test ! -e "$H/.agents/skills/sling-replications"
+    test ! -e "$H/.agents/skills/sling-api-specs"
+    test ! -e "$H/.claude/skills/sling-replications"
+    test ! -e "$H/.agents/skills/sling/CONNECTIONS.md"
+    grep -q 'sling skills sling-replications' "$H/.agents/skills/sling/SKILL.md"
+    test -f "$H/.agents/skills/my-own-skill/SKILL.md"
+    rm -rf "$H"

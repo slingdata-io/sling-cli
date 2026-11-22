@@ -192,7 +192,9 @@ If `next_state` depends on `response.*`, Sling waits for the current request. Ot
 pagination:
   next_state:
     cursor: "{response.json.next_cursor}"
+```
 
+```yaml
 # Can parallelize - depends only on state
 pagination:
   next_state:
