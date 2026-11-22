@@ -397,7 +397,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	}
 
 	if t.isIncrementalStateWithUpdateKey() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -497,7 +497,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	if t.Config.IsFileStreamWithStateAndParts() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -625,7 +625,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 				goto skipGetState
 			}
 		} else {
-			if err = getIncrementalValueViaState(t); err != nil {
+			if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 				err = g.Error(err, "Could not get incremental value")
 				return err
 			}
@@ -719,7 +719,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 			}
 			goto skipGetState
 		}
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -883,7 +883,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	// get watermark
 	if t.isIncrementalStateWithUpdateKey() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}

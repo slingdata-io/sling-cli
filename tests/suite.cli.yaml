@@ -4676,3 +4676,18 @@
   output_contains:
     - 'wrote 2 rows'
     - 'parquet files: 2'
+
+# SLING-570: the state path formats the checkpoint with the ODBC template type
+- id: 958
+  name: 'SLING_STATE incremental value uses the ODBC template type (MSSQL_ODBC to file)'
+  run: |
+    rm -rf temp/sling_570
+    mkdir -p temp/sling_570/state
+    export SLING_STATE=LOCAL/temp/sling_570/state
+    sling run -d -r tests/replications/r.153.odbc_state_incremental.yaml
+    sling run -d -r tests/replications/r.153.odbc_state_incremental.yaml
+    rm -rf temp/sling_570
+  output_contains:
+    - "got incremental value from state => cast('"
+  output_does_not_contain:
+    - 'Incorrect syntax'

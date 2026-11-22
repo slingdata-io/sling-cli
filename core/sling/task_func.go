@@ -243,7 +243,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 }
 
 var (
-	getIncrementalValueViaState = func(*TaskExecution) (err error) {
+	getIncrementalValueViaState = func(*TaskExecution, dbio.Type) (err error) {
 		g.Warn("use the official release of sling-cli to use incremental via sling state")
 		return nil
 	}

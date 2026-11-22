@@ -42,3 +42,10 @@
     DBT_PROFILES_DIR: tests/files/dbt
   output_contains:
     - 'SHOP_DEV'
+
+# SLING-570: conns exec uses the ODBC template type for the limit wrapper
+- id: 5
+  name: 'sling conns exec --limit on an ODBC connection uses the template limit syntax'
+  run: sling conns exec MSSQL_ODBC "select 1 as a" --limit 5
+  output_does_not_contain:
+    - 'Incorrect syntax'
