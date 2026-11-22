@@ -31,17 +31,17 @@ core:
   merge_insert: |
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
-    WHERE ({src_pk_fields}) NOT IN (
+    WHERE ({src_pk_fields_casted}) NOT IN (
       SELECT {tgt_pk_fields} FROM {tgt_table}
       WHERE ({tgt_pk_fields}) IN (
-        SELECT {src_pk_fields} FROM {src_table}
+        SELECT {src_pk_fields_casted} FROM {src_table}
       )
     )
 
   merge_delete_insert: |
     ALTER TABLE {tgt_table} DELETE
     WHERE ({tgt_pk_fields}) IN (
-      SELECT {src_pk_fields} FROM {src_table}
+      SELECT {src_pk_fields_casted} FROM {src_table}
     ) SETTINGS mutations_sync = 1;
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM {src_table} src
@@ -54,7 +54,7 @@ core:
     SET allow_experimental_window_functions = 1;
     ALTER TABLE {tgt_table} DELETE
     WHERE ({tgt_pk_fields}) IN (
-      SELECT {src_pk_fields} FROM {src_table}
+      SELECT {src_pk_fields_casted} FROM {src_table}
     ) SETTINGS mutations_sync = 1;
     INSERT INTO {tgt_table} ({insert_fields})
     SELECT {src_fields} FROM (
@@ -74,14 +74,14 @@ core:
     ALTER TABLE {tgt_table} UPDATE _sling_synced_at = now64(6), _sling_synced_op = 'D'
     WHERE COALESCE(_sling_synced_op, '') != 'D'
     AND ({tgt_pk_fields}) IN (
-      SELECT {src_pk_fields} FROM (
+      SELECT {src_pk_fields_casted} FROM (
         SELECT *, row_number() OVER (PARTITION BY {pk_fields} ORDER BY _sling_cdc_seq DESC) as _rn
         FROM {src_table}
       ) WHERE _rn = 1 AND _sling_synced_op = 'D'
     ) SETTINGS mutations_sync = 1;
     ALTER TABLE {tgt_table} DELETE
     WHERE ({tgt_pk_fields}) IN (
-      SELECT {src_pk_fields} FROM {src_table}
+      SELECT {src_pk_fields_casted} FROM {src_table}
       WHERE _sling_synced_op != 'D'
     ) SETTINGS mutations_sync = 1;
     INSERT INTO {tgt_table} ({insert_fields})
@@ -420,10 +420,16 @@ native_type_map:
   array: json
   bool: bool
   date: date
+  date32: date
   datetime: datetime
   datetime64: datetime
   decimal: decimal
+  decimal128: decimal
+  decimal256: decimal
+  decimal32: decimal
+  decimal64: decimal
   enum: string
+  enum16: string
   enum8: string
   fixedstring: text
   float32: float

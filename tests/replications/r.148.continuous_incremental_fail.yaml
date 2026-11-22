@@ -1,0 +1,13 @@
+# Continuous mode supports only change-capture streams in this version.
+# An incremental stream must fail at the start, before any connection.
+source: MYSQL_GTID
+target: POSTGRES
+
+defaults:
+  object: public.cont_incr_fail
+
+streams:
+  test_db.cont_incr:
+    mode: incremental
+    primary_key: id
+    update_key: id

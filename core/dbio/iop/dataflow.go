@@ -171,13 +171,6 @@ func (df *Dataflow) SetBatchMaxDuration(d time.Duration) {
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
 		ds.Sp.Config.BatchMaxDuration = d
-		// Apply to every open batch — CurrentBatch alone is not enough if
-		// NewBatch ran before this setter (common: schema/sample before Unpause).
-		for _, b := range ds.Batches {
-			if b != nil && !b.closed {
-				b.MaxDuration = d
-			}
-		}
 		if ds.CurrentBatch != nil {
 			ds.CurrentBatch.MaxDuration = d
 		}

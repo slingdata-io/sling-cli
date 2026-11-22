@@ -163,38 +163,27 @@ func (conn *OracleConn) ConnString() string {
 	return connStr
 }
 
-// ExecMultiContext runs multiple sql queries with context, returns `error`
+// ExecMultiContext runs multiple sql queries with context, stops at the first error
 func (conn *OracleConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
-
-	Res := Result{rowsAffected: 0}
-
-	eG := g.ErrorGroup{}
-
+	stmts := []string{}
 	for _, q := range qs {
 		q2 := strings.TrimRight(strings.TrimSpace(strings.ToLower(q)), ";")
 		cond1 := strings.HasPrefix(q2, "begin") && strings.HasSuffix(q2, "end")
 		cond2 := strings.Contains(q2, "execute immediate")
 		if cond1 || cond2 {
-			return conn.Self().ExecContext(ctx, q)
+			stmts = append(stmts, q) // PL/SQL block is one statement
+			continue
 		}
 
 		for _, sql := range ParseSQLMultiStatements(q) {
-			sql := strings.TrimSuffix(sql, ";")
-			res, err := conn.Self().ExecContext(ctx, sql)
-			if err != nil {
-				eG.Capture(g.Error(err, "Error executing query"))
-			} else {
-				ra, _ := res.RowsAffected()
-				g.Trace("RowsAffected: %d", ra)
-				Res.rowsAffected = Res.rowsAffected + ra
-			}
+			stmts = append(stmts, strings.TrimSuffix(sql, ";"))
 		}
 	}
 
-	err = eG.Err()
-	result = Res
-
-	return
+	runner := statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+		return conn.Self().ExecContext(ctx, q)
+	}}
+	return runner.run(ctx, stmts)
 }
 
 func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {

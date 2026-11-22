@@ -1953,6 +1953,118 @@ type CDCOptions struct {
 	ChangeFeed *string `json:"change_feed,omitempty" yaml:"change_feed,omitempty"`
 }
 
+// ContinuousConfig is the replication-level `continuous:` block.
+type ContinuousConfig struct {
+	Interval       *string `json:"interval,omitempty" yaml:"interval,omitempty"`               // default "1m"
+	MaxRows        *int    `json:"max_rows,omitempty" yaml:"max_rows,omitempty"`               // default: resolved run_max_events
+	MaxBytes       *int64  `json:"max_bytes,omitempty" yaml:"max_bytes,omitempty"`             // default 0 (none)
+	MinInterval    *string `json:"min_interval,omitempty" yaml:"min_interval,omitempty"`       // default "auto"
+	StatusInterval *string `json:"status_interval,omitempty" yaml:"status_interval,omitempty"` // default "60s"
+	BehindAfter    *string `json:"behind_after,omitempty" yaml:"behind_after,omitempty"`       // default "5m"
+	MaxSession     *string `json:"max_session,omitempty" yaml:"max_session,omitempty"`         // default "24h"
+	OnStreamError  *string `json:"on_stream_error,omitempty" yaml:"on_stream_error,omitempty"` // "stop" | "quarantine"
+}
+
+// ContinuousSettings is the resolved form that the runner uses.
+type ContinuousSettings struct {
+	Interval, MinInterval, StatusInterval, BehindAfter, MaxSession time.Duration
+	MaxRows                                                        int
+	MaxBytes                                                       int64
+	OnStreamError                                                  string
+	RetryAttempts                                                  int           // from change_capture_options
+	RetryDelay                                                     time.Duration // first delay, doubles each attempt
+}
+
+// Resolve applies the defaults and parses the durations.
+// A nil receiver gives the defaults.
+func (cc *ContinuousConfig) Resolve(tgtType dbio.Type, runMaxEvents int) (s ContinuousSettings, err error) {
+	c := ContinuousConfigDefault
+	if cc != nil {
+		if cc.Interval != nil {
+			c.Interval = cc.Interval
+		}
+		if cc.MaxRows != nil {
+			c.MaxRows = cc.MaxRows
+		}
+		if cc.MaxBytes != nil {
+			c.MaxBytes = cc.MaxBytes
+		}
+		if cc.MinInterval != nil {
+			c.MinInterval = cc.MinInterval
+		}
+		if cc.StatusInterval != nil {
+			c.StatusInterval = cc.StatusInterval
+		}
+		if cc.BehindAfter != nil {
+			c.BehindAfter = cc.BehindAfter
+		}
+		if cc.MaxSession != nil {
+			c.MaxSession = cc.MaxSession
+		}
+		if cc.OnStreamError != nil {
+			c.OnStreamError = cc.OnStreamError
+		}
+	}
+
+	// positive: zero is an error. Negative is always an error.
+	parse := func(key, val string, positive bool) (time.Duration, error) {
+		d, err := time.ParseDuration(strings.TrimSpace(val))
+		if err != nil {
+			return 0, g.Error(err, "invalid continuous.%s: %s", key, val)
+		} else if d < 0 || (positive && d == 0) {
+			return 0, g.Error("continuous.%s must be greater than 0 (got %s)", key, val)
+		}
+		return d, nil
+	}
+
+	if s.Interval, err = parse("interval", *c.Interval, true); err != nil {
+		return
+	}
+	if s.StatusInterval, err = parse("status_interval", *c.StatusInterval, true); err != nil {
+		return
+	}
+	if s.MaxSession, err = parse("max_session", *c.MaxSession, true); err != nil {
+		return
+	}
+	if s.BehindAfter, err = parse("behind_after", *c.BehindAfter, false); err != nil {
+		return
+	}
+
+	if minInterval := strings.ToLower(strings.TrimSpace(*c.MinInterval)); minInterval == "auto" {
+		switch tgtType {
+		case dbio.TypeDbSnowflake:
+			s.MinInterval = time.Minute
+		case dbio.TypeDbBigQuery:
+			s.MinInterval = 5 * time.Minute
+		}
+	} else if s.MinInterval, err = parse("min_interval", minInterval, false); err != nil {
+		return
+	}
+
+	// 0 means not set
+	s.MaxRows = runMaxEvents
+	if c.MaxRows != nil && *c.MaxRows != 0 {
+		s.MaxRows = *c.MaxRows
+	}
+	if s.MaxRows == 0 {
+		s.MaxRows = *CDCOptionsDefault.RunMaxEvents
+	}
+	if s.MaxRows < 0 {
+		return s, g.Error("continuous.max_rows must not be negative (got %d)", s.MaxRows)
+	}
+
+	if s.MaxBytes = *c.MaxBytes; s.MaxBytes < 0 {
+		return s, g.Error("continuous.max_bytes must not be negative (got %d)", s.MaxBytes)
+	}
+
+	s.OnStreamError = strings.ToLower(strings.TrimSpace(*c.OnStreamError))
+	if s.OnStreamError != "stop" && s.OnStreamError != "quarantine" {
+		return s, g.Error("invalid continuous.on_stream_error: %s (use stop or quarantine)", *c.OnStreamError)
+	}
+
+	return s, nil
+}
+
 // SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
 func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o == nil {
@@ -2163,6 +2275,16 @@ var CDCOptionsDefault = CDCOptions{
 	RetryAttempts:     g.Int(3),
 	RetryDelay:        g.String("5s"),
 	SnapshotChunkSize: g.Int(100000),
+}
+
+var ContinuousConfigDefault = ContinuousConfig{
+	Interval:       g.String("1m"),
+	MaxBytes:       g.Int64(0),
+	MinInterval:    g.String("auto"),
+	StatusInterval: g.String("60s"),
+	BehindAfter:    g.String("5m"),
+	MaxSession:     g.String("24h"),
+	OnStreamError:  g.String("stop"),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

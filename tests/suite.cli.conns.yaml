@@ -1,4 +1,4 @@
-- id: 526
+- id: 1
   name: 'sling conns test --debug redacts password'
   err: true
   run: |
@@ -10,7 +10,7 @@
   output_does_not_contain:
     - 'DistinctivePassXYZ'
 
-- id: 527
+- id: 2
   name: 'sling conns set stores argv password literal'
   run: |
     HOME_DIR=$(mktemp -d)

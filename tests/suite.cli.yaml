@@ -2029,6 +2029,43 @@
     - 'CDC merge_cdc MySQL test PASSED'
     - 'CDC soft merge: rows=5 ids=5 deleted=2'
 
+# ClickHouse 21.x rejects an IN whose two sides have different integer widths
+# (Code: 53). The target id is Int32 and the _tmp id is Int64, so the merge
+# templates must cast the source PK. Run on both an old and a current server.
+- id: 938
+  name: CDC merge_cdc strategy - ClickHouse target (21.3)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
+- id: 939
+  name: CDC merge_cdc strategy - ClickHouse target (25.x)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse_top
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
+# A parent whose sling binary is gone cannot start its children. The error shows
+# with the stream name, and the run fails (exec on staging: streams stuck in created).
+- id: 941
+  name: 'Threaded replication shows the spawn error of a child process'
+  run: |
+    # Windows cannot remove a running binary: fake the expected output and skip
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo 'could not start process for stream (skipped) Replication failure (4 streams failed): '; exit 1 ;; esac
+    tmp=$(mktemp -d)
+    trap '/bin/rm -rf "$tmp"' EXIT
+    /bin/cp -f "$(type -P sling)" "$tmp/sling"
+    SLING_TEST_BIN="$tmp/sling" "$tmp/sling" run -r tests/replications/r.151.spawn_error_threads.yaml
+  err: true
+  output_contains:
+    - 'could not start process for stream'
+    - 'Replication failure (4 streams failed): '
+  output_does_not_contain:
+    - 'stream did not start: context canceled'
+
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
 # change_capture and change_capture_soft. Offline template rendering is also
@@ -3650,7 +3687,8 @@
     - 'OK: default.sling_ins_conc_lane matches the source'
     - 'SUCCESS: insert_concurrency kept all rows and left no partial table'
 
-# Nested CLI suites. Loader in sling_cli_test.go merges these in.
+# Nested CLI suites. Each one has its own IDs, selected as <key>.<id>
+# (e.g. "build.12"). The key comes from the file name, or from `key:`.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml
@@ -4197,3 +4235,170 @@
   output_does_not_contain:
     - 'execution succeeded'
     - 'reading from source file system'
+
+# SLING-368: continuous mode (sling run --continuous)
+- id: 932
+  name: 'Continuous mode needs a replication file'
+  run: 'sling run --src-conn POSTGRES --src-stream public.x --tgt-object file:///tmp/x.csv --continuous'
+  err: true
+  output_contains:
+    - '--continuous needs a replication file'
+
+- id: 933
+  name: 'Continuous mode rejects an incremental stream'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'supports only change-capture streams'
+
+- id: 934
+  name: 'Continuous mode rejects on_stream_error quarantine'
+  run: 'sling run -r tests/replications/r.149.continuous_quarantine_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'quarantine is not supported yet'
+
+- id: 935
+  name: 'Continuous mode from the SLING_CONTINUOUS env var'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml'
+  err: true
+  env:
+    SLING_CONTINUOUS: 'true'
+  output_contains:
+    - 'supports only change-capture streams'
+
+# MySQL to Postgres: run, SIGUSR1 status, second session refused, SIGTERM stop,
+# resume with no repeated rows, kill between the write and the state commit.
+- id: 936
+  name: 'Continuous mode MySQL to PG: stop, lease, resume, kill'
+  group: cdc_continuous
+  run: 'bash tests/pipelines/cdc_continuous/run_docker_test.sh'
+  output_contains:
+    - 'CDC continuous test:'
+    - 'state saved'
+
+# An Excel number cell with a thousands format (#,##0) must load the stored
+# number (3000), not the shown text (3,000, read as 3).
+- id: 937
+  name: 'SLING-320: Excel number formats load the stored number'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.number-formats.xlsx' --stdout
+  rows: 2
+  output_contains:
+    - 'wrote 2 rows to stdout'
+    - ',3000,'
+    - '1234567'
+    - '1234.5'
+    - '-1000'
+    - '50%'
+    - '2023-10-31'
+    - '123456789012'
+  output_does_not_contain:
+    - '3.000'
+    - '3,000'
+
+# Threaded pipeline replication steps reported 0 rows: the exec folder cleanup deleted the store file (SLING-481).
+- id: 942
+  name: 'Threaded replication step reports rows, bytes and store keys to the pipeline'
+  run: 'sling run -d -p tests/pipelines/p.64.threaded_replication_rows.yaml'
+  output_contains:
+    - 'threaded rows a=2018 b=2018'
+    - 'SUCCESS: threaded replication step reports rows'
+
+# `sling platform login` (SLING-533). The three cases need no server: they
+# check that the command fails fast and never prints or writes a token.
+- id: 947
+  name: 'sling platform login fails fast with no server'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - 'could not reach the Sling Platform'
+  output_does_not_contain:
+    - 'SLING_PROJECT_TOKEN='
+
+- id: 948
+  name: 'sling platform status json without a token'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform status --output json
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+  output_contains:
+    - 'sling platform login'
+
+- id: 949
+  name: 'sling platform login does not overwrite without consent'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    mkdir -p "$DIR/.sling"
+    printf 'env:\n  SLING_PROJECT_TOKEN: dummy\n' > "$DIR/.sling/env.yaml"
+    cd "$DIR"
+    set +e
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser < /dev/null
+    code=$?
+    set -e
+    grep -q dummy "$DIR/.sling/env.yaml" || { echo 'FAIL: env.yaml was changed'; exit 1; }
+    exit $code
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - '--force'
+  output_does_not_contain:
+    - 'FAIL: env.yaml was changed'
+
+# ClickHouse AggregateFunction source columns (SLING-537)
+- id: 951
+  name: 'ClickHouse AggregateFunction source columns'
+  run: |
+    SOURCE=clickhouse sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+    SOURCE=clickhouse_http sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+  output_contains:
+    - 'SUCCESS: AggregateFunction columns read with finalizeAggregation'
+
+- id: 952
+  name: 'ClickHouse AggregateFunction custom SQL hint'
+  err: true
+  run: |
+    for conn in clickhouse clickhouse_http; do
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      sling conns exec $conn "CREATE TABLE default.sling_agg_err (id UInt32, cnt AggregateFunction(count)) ENGINE = AggregatingMergeTree() ORDER BY id"
+      sling conns exec $conn "INSERT INTO default.sling_agg_err (id, cnt) SELECT 1, countState() FROM numbers(3)"
+      set +e
+      sling run --src-conn $conn --src-stream 'select * from default.sling_agg_err' --stdout
+      code=$?
+      set -e
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      [ $code -ne 0 ] || { echo "FAIL: $conn run did not fail"; exit 1; }
+    done
+    exit 1
+  output_contains:
+    - 'finalizeAggregation'
+    - '-Merge'
+  output_does_not_contain:
+    - 'FAIL:'
+
+# Platform CLI connections save, get and delete (SLING-547). Skips when SLING_TEST_WRITE_TOKEN is not set.
+- id: 953
+  name: 'sling platform connections save, get and delete'
+  run: |
+    if [ -z "$SLING_TEST_WRITE_TOKEN" ]; then
+      echo 'SKIPPED: SLING_TEST_WRITE_TOKEN is not set'
+      exit 0
+    fi
+    sling run -p tests/pipelines/p.65.platform_conns_write.yaml

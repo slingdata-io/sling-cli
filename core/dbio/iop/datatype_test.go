@@ -1431,6 +1431,28 @@ func TestFlattenRecord(t *testing.T) {
 	})
 }
 
+func TestNativeTypeToGeneralClickhouse(t *testing.T) {
+	cases := map[string]ColumnType{
+		"SimpleAggregateFunction(max, UInt32)":                                  BigIntType,
+		"SimpleAggregateFunction(any, Nullable(String))":                        TextType,
+		"SimpleAggregateFunction(max, Nullable(DateTime64(6, 'Asia/Jakarta')))": DatetimeType,
+		"SimpleAggregateFunction(sum, Decimal(18, 4))":                          DecimalType,
+		"Nullable(Int32)":                IntegerType,
+		"AggregateFunction(min, UInt32)": TextType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			assert.Equal(t, expected, NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse))
+		})
+	}
+
+	inner := "Nullable(DateTime64(6, 'UTC'))"
+	assert.Equal(t,
+		NativeTypeToGeneral("col", inner, dbio.TypeDbClickhouse),
+		NativeTypeToGeneral("col", "SimpleAggregateFunction(max, "+inner+")", dbio.TypeDbClickhouse),
+	)
+}
+
 func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 	// Databricks reports ShortType and ByteType as "short" and "byte"
 	cases := map[string]ColumnType{
@@ -1444,6 +1466,25 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 	for nativeType, expected := range cases {
 		t.Run(nativeType, func(t *testing.T) {
 			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbDatabricks)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralClickHouseDateAndDecimal(t *testing.T) {
+	cases := map[string]ColumnType{
+		"Date":           DateType,
+		"Date32":         DateType,
+		"Decimal(10, 2)": DecimalType,
+		"Decimal32(2)":   DecimalType,
+		"Decimal64(4)":   DecimalType,
+		"Decimal128(10)": DecimalType,
+		"Decimal256(20)": DecimalType,
+		"Enum16":         StringType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse)
 			assert.Equal(t, expected, colType)
 		})
 	}

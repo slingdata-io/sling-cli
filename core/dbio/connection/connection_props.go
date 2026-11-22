@@ -246,6 +246,10 @@ func RejectLiteralSecrets(name string, kv map[string]any) error {
 	return g.Error("secret field(s) %s must be an env-var ref such as %s or a secret reference such as op://vault/item/field. Do not pass secret values.", strings.Join(literals, ", "), example)
 }
 
+// secretMask is the placeholder for a stored secret. The platform keeps the
+// stored value when it gets the mask back.
+const secretMask = "********"
+
 func isLiteralSecret(v any) bool {
 	if v == nil {
 		return false
@@ -255,7 +259,7 @@ func isLiteralSecret(v any) bool {
 		return false
 	}
 	s := strings.TrimSpace(cast.ToString(v))
-	if s == "" {
+	if s == "" || s == secretMask {
 		return false
 	}
 	return !env.IsEnvVarRef(s) && !secrets.IsRef(s)
@@ -396,6 +400,33 @@ func ParsePropsInput(raw string) (map[string]any, error) {
 		return nil, g.Error(err, "could not parse YAML properties")
 	}
 	return lowercaseKeys(m), nil
+}
+
+// ParseConnsInput reads YAML or JSON text that holds either one property map
+// (key "") or a `connections:` map of many entries (names in upper case).
+func ParseConnsInput(raw string) (conns map[string]map[string]any, wrapped bool, err error) {
+	props, err := ParsePropsInput(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	wrap, ok := props["connections"]
+	if !ok {
+		return map[string]map[string]any{"": props}, false, nil
+	}
+
+	entries := asAnyMap(wrap)
+	if entries == nil {
+		return nil, false, g.Error("connections: must be a map of connection names")
+	}
+	conns = map[string]map[string]any{}
+	for name, v := range entries {
+		entry := asAnyMap(v)
+		if entry == nil {
+			return nil, false, g.Error("connections: must be a map of connection names")
+		}
+		conns[strings.ToUpper(name)] = lowercaseKeys(entry)
+	}
+	return conns, true, nil
 }
 
 func lowercaseKeys(m map[string]any) map[string]any {

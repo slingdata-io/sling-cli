@@ -1,17 +1,22 @@
-name: skills wire steps/transforms refs and prune retired skills
+name: skills stub, sub-file output and prune of retired skills
 seed: home_with_claude
 timeout_s: 40
 order:
-  # Simulate a stale skill left behind by an older sling version.
-  - run: "mkdir -p $HOME/.agents/skills/sling-hooks && echo old > $HOME/.agents/skills/sling-hooks/SKILL.md"
+  # Simulate skills left behind by an older sling version.
+  - run: "mkdir -p $HOME/.agents/skills/sling-hooks $HOME/.agents/skills/sling-replications && echo old > $HOME/.agents/skills/sling-hooks/SKILL.md && echo old > $HOME/.agents/skills/sling-replications/SKILL.md"
 
   - run: sling assist setup --non-interactive --agent claude
   - wait_for: "Wired clients:"
 
-  # Retired skill dir must be pruned from the canonical bundle.
+  # Retired skill dirs must be pruned from the canonical bundle.
   # Quoted marker so the typed command line can't satisfy the wait_for.
-  - run: 'test ! -d $HOME/.agents/skills/sling-hooks && echo PRUNE_"OK"'
+  - run: 'test ! -d $HOME/.agents/skills/sling-hooks && test ! -d $HOME/.agents/skills/sling-replications && echo PRUNE_"OK"'
   - wait_for: "PRUNE_OK"
+
+  # The topics come from the CLI, not from disk.
+  - run: "sling skills sling-pipelines/STEPS.md > $HOME/steps.out && sling skills sling-replications > $HOME/repl.out"
+  - run: 'test -s $HOME/repl.out && echo SKILLS_"OK"'
+  - wait_for: "SKILLS_OK"
 
   # Rendered prompt must point at Gather first / skill loading.
   - run: "sling assist --out - > $HOME/prompt.out"
@@ -19,23 +24,24 @@ order:
   - wait_for: "RENDER_OK"
 
 assert_files:
-  - path: "$HOME/.agents/skills/sling-pipelines/STEPS.md"
+  - path: "$HOME/.agents/skills/sling/SKILL.md"
     contains:
+      - "sling skills sling-pipelines"
+    md5_matches_embedded: true
+  - path: "$HOME/steps.out"
+    contains:
+      - "# Skill: sling-pipelines (STEPS.md)"
       - "Steps & Hooks Reference"
       - "pre_merge"
       - "### routine"
       - "### set"
-    md5_matches_embedded: true
-  - path: "$HOME/.agents/skills/sling-replications/TRANSFORMS.md"
-    contains:
-      - "Transform Syntax"
-    md5_matches_embedded: true
-  - path: "$HOME/.agents/skills/sling-replications/SKILL.md"
+  - path: "$HOME/repl.out"
     contains:
       - "## Hooks"
       - "../sling-pipelines/STEPS.md"
-    md5_matches_embedded: true
+      - "mean: run `sling skills sling/PROJECT.md`"
   - path: "$HOME/prompt.out"
     contains:
       - "Gather first"
       - "Load the matching Sling skill"
+      - "sling skills <topic>"

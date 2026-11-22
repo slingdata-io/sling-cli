@@ -138,7 +138,7 @@ func TestEnsureBinAgentBrowserSkipDownload(t *testing.T) {
 }
 
 func TestAgentBrowserSkillEmbedded(t *testing.T) {
-	names := listSkillNames()
+	names := InstalledSkillNames()
 	found := false
 	for _, n := range names {
 		if n == "agent-browser" {
@@ -147,7 +147,7 @@ func TestAgentBrowserSkillEmbedded(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("listSkillNames missing agent-browser: %v", names)
+		t.Fatalf("InstalledSkillNames missing agent-browser: %v", names)
 	}
 	stub, err := SkillsFS.ReadFile("skills/agent-browser/SKILL.md")
 	if err != nil {
