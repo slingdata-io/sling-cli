@@ -420,10 +420,16 @@ native_type_map:
   array: json
   bool: bool
   date: date
+  date32: date
   datetime: datetime
   datetime64: datetime
   decimal: decimal
+  decimal128: decimal
+  decimal256: decimal
+  decimal32: decimal
+  decimal64: decimal
   enum: string
+  enum16: string
   enum8: string
   fixedstring: text
   float32: float

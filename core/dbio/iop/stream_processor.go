@@ -52,6 +52,7 @@ type StreamConfig struct {
 	NullIf           string         `json:"null_if"`
 	NullAs           string         `json:"null_as"`
 	DatetimeFormat   string         `json:"datetime_format"`
+	DatetimeUTC      bool           `json:"-"` // convert datetimes to UTC before DatetimeFormat
 	SkipBlankLines   bool           `json:"skip_blank_lines"`
 	SkipLines        int            `json:"skip_lines"`
 	Format           dbio.FileType  `json:"format"`
@@ -1241,6 +1242,9 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 		if err != nil {
 			return cast.ToString(val)
 		} else if sp.Config.DatetimeFormat != "" && strings.ToLower(sp.Config.DatetimeFormat) != "auto" {
+			if sp.Config.DatetimeUTC {
+				tVal = tVal.UTC()
+			}
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
 			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"

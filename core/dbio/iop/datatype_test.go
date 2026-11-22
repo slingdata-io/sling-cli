@@ -1472,6 +1472,47 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 	}
 }
 
+func TestNativeTypeToGeneralClickHouseDateAndDecimal(t *testing.T) {
+	cases := map[string]ColumnType{
+		"Date":           DateType,
+		"Date32":         DateType,
+		"Decimal(10, 2)": DecimalType,
+		"Decimal32(2)":   DecimalType,
+		"Decimal64(4)":   DecimalType,
+		"Decimal128(10)": DecimalType,
+		"Decimal256(20)": DecimalType,
+		"Enum16":         StringType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralOracleBinaryFloatAndLocalTZ(t *testing.T) {
+	// go-ora reports BINARY_FLOAT, BINARY_DOUBLE and TIMESTAMP WITH LOCAL
+	// TIME ZONE columns as "IBFloat", "IBDouble" and "TimeStampLTZ_DTY";
+	// all_tab_columns reports the first two as BINARY_FLOAT / BINARY_DOUBLE
+	cases := map[string]ColumnType{
+		"IBFloat":          FloatType,
+		"IBDouble":         FloatType,
+		"BINARY_FLOAT":     FloatType,
+		"BINARY_DOUBLE":    FloatType,
+		"TimeStampLTZ_DTY": TimestampzType,
+		"FLOAT":            FloatType,
+		"TimeStampDTY":     TimestampType,
+		"TimeStampTZ_DTY":  TimestampzType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbOracle)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
 func TestNativeTypeToGeneralClickHouseWideIntegers(t *testing.T) {
 	// ClickHouse and Proton report 128/256-bit integers as Int128, Int256,
 	// UInt128 and UInt256, optionally wrapped in Nullable(...)
