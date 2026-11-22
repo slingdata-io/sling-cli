@@ -2,6 +2,7 @@ package iop
 
 import (
 	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -1507,6 +1508,52 @@ func TestNativeTypeToGeneralOracleBinaryFloatAndLocalTZ(t *testing.T) {
 	for nativeType, expected := range cases {
 		t.Run(nativeType, func(t *testing.T) {
 			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbOracle)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralClickHouseWideIntegers(t *testing.T) {
+	// ClickHouse and Proton report 128/256-bit integers as Int128, Int256,
+	// UInt128 and UInt256, optionally wrapped in Nullable(...)
+	cases := map[string]ColumnType{
+		"Int128":            ColumnType("decimal(38,0)"),
+		"Int256":            DecimalType,
+		"UInt128":           ColumnType("decimal(38,0)"),
+		"UInt256":           DecimalType,
+		"Nullable(Int128)":  ColumnType("decimal(38,0)"),
+		"Nullable(UInt256)": DecimalType,
+		"Int64":             BigIntType,
+	}
+	for _, connType := range []dbio.Type{dbio.TypeDbClickhouse, dbio.TypeDbProton} {
+		for nativeType, expected := range cases {
+			t.Run(connType.String()+"/"+nativeType, func(t *testing.T) {
+				colType := NativeTypeToGeneral("col", nativeType, connType)
+				assert.Equal(t, expected, colType)
+			})
+		}
+	}
+}
+
+func TestCastValBigIntOutsideInt64(t *testing.T) {
+	sp := NewStreamProcessor()
+	col := &Column{Name: "col", Type: DecimalType, Sourced: true}
+
+	maxU128, _ := new(big.Int).SetString("340282366920938463463374607431768211455", 10)
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, maxU128, col)))
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, *maxU128, col)))
+	assert.Equal(t, "-42", cast.ToString(sp.CastVal(0, big.NewInt(-42), col)))
+}
+
+func TestNativeTypeToGeneralProtonDate32(t *testing.T) {
+	cases := map[string]ColumnType{
+		"date":             DateType,
+		"date32":           DateType,
+		"nullable(date32)": DateType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbProton)
 			assert.Equal(t, expected, colType)
 		})
 	}

@@ -707,10 +707,10 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 	}
 
 	switch v := val.(type) {
-	case big.Int:
-		val = v.Int64()
+	case big.Int: // keep all digits of values outside int64 (e.g. Int128)
+		val = lo.Ternary[any](v.IsInt64(), v.Int64(), v.String())
 	case *big.Int:
-		val = v.Int64()
+		val = lo.Ternary[any](v.IsInt64(), v.Int64(), v.String())
 	case big.Rat:
 		decCount := lo.Ternary(col.DbScale > 0, col.DbScale, maxDec)
 		val = v.FloatString(decCount)
