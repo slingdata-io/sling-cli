@@ -514,7 +514,7 @@ func (data *Dataset) InferColumnTypes() {
 
 				columns[j].Stats.DecCnt++
 
-				valStr = strings.Replace(valStr, ",", ".", 1) // when comma is used a a decimal point
+				valStr = normalizeNumberText(valStr)
 				if parts := strings.Split(valStr, "."); len(parts) == 2 {
 
 					val0 := cast.ToInt64(parts[0])

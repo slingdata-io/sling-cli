@@ -48,8 +48,8 @@ type Datastream struct {
 	Columns       Columns
 	Buffer        [][]any
 	BatchChan     chan *Batch
-	Batches       []*Batch
 	CurrentBatch  *Batch
+	batchCount    int    // batches made, and next batch id
 	Count         uint64 // rows taken by the consumer
 	pushed        uint64 // rows pushed by the producer
 	Context       *g.Context
@@ -224,7 +224,6 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 	ds = &Datastream{
 		ID:            g.NewTsID("ds"),
 		BatchChan:     make(chan *Batch, 1000),
-		Batches:       []*Batch{},
 		Buffer:        make([][]any, 0, SampleSize),
 		Columns:       columns,
 		Context:       g.NewContext(ctx),

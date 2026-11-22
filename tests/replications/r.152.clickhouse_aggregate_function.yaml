@@ -1,0 +1,108 @@
+# ClickHouse AggregateFunction source columns (SLING-537)
+# The driver cannot read AggregateFunction; sling selects finalizeAggregation(col).
+
+source: '{SOURCE}'
+target: postgres
+
+env:
+  SOURCE: ${SOURCE}
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP VIEW IF EXISTS default.sling_agg_min_v;
+        DROP TABLE IF EXISTS default.sling_agg_min;
+        CREATE TABLE default.sling_agg_min (
+          id UInt32,
+          min_ts AggregateFunction(min, Nullable(DateTime64(6, 'Asia/Jakarta'))),
+          cnt AggregateFunction(count),
+          mx SimpleAggregateFunction(max, UInt32)
+        ) ENGINE = AggregatingMergeTree() ORDER BY id;
+        INSERT INTO default.sling_agg_min (id, min_ts, cnt, mx)
+          SELECT 1, minState(toNullable(toDateTime64('2024-01-15 10:00:00', 6, 'Asia/Jakarta'))), countState(), 5 FROM numbers(3);
+        INSERT INTO default.sling_agg_min (id, min_ts, cnt, mx)
+          SELECT 2, minState(toNullable(toDateTime64('2024-02-20 11:30:00', 6, 'Asia/Jakarta'))), countState(), 6 FROM numbers(3);
+        INSERT INTO default.sling_agg_min (id, min_ts, cnt, mx)
+          SELECT 3, minState(toNullable(toDateTime64('2024-03-25 12:45:00', 6, 'Asia/Jakarta'))), countState(), 7 FROM numbers(4);
+        CREATE VIEW default.sling_agg_min_v AS SELECT * FROM default.sling_agg_min;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_agg_min;
+        DROP TABLE IF EXISTS public.sling_agg_min_v;
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select count(*) as n, sum(cnt) as total, count(min_ts) as ts_n
+        from public.sling_agg_min
+      into: table_result
+
+    - type: check
+      check: int_parse(store.table_result[0].n) == 3 && int_parse(store.table_result[0].total) == 10 && int_parse(store.table_result[0].ts_n) == 3
+      failure_message: "Unexpected table stream result: {store.table_result}"
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select count(*) as n, count(min_ts) as ts_n
+        from public.sling_agg_min_v
+      into: view_result
+
+    - type: check
+      check: int_parse(store.view_result[0].n) == 3 && int_parse(store.view_result[0].ts_n) == 3
+      failure_message: "Unexpected view stream result: {store.view_result}"
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select table_name, column_name, data_type
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name in ('sling_agg_min', 'sling_agg_min_v')
+          and column_name in ('min_ts', 'mx')
+        order by table_name, column_name
+      into: types
+
+    - type: check
+      check: length(store.types) == 4
+      failure_message: "Expected 4 typed columns: {store.types}"
+
+    - type: check
+      check: contains(store.types[0].data_type, "timestamp") && store.types[1].data_type == "bigint" && contains(store.types[2].data_type, "timestamp") && store.types[3].data_type == "bigint"
+      failure_message: "Unexpected column types: {store.types}"
+
+    - type: log
+      message: "SUCCESS: AggregateFunction columns read with finalizeAggregation"
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP VIEW IF EXISTS default.sling_agg_min_v;
+        DROP TABLE IF EXISTS default.sling_agg_min;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.sling_agg_min;
+        DROP TABLE IF EXISTS public.sling_agg_min_v;
+
+streams:
+  default.sling_agg_min:
+    object: public.sling_agg_min
+    mode: full-refresh
+
+  default.sling_agg_min_v:
+    object: public.sling_agg_min_v
+    mode: incremental
+    primary_key: [id]
+    update_key: id
+    select: [id, min_ts, mx]

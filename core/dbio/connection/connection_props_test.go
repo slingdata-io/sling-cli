@@ -168,6 +168,37 @@ func TestRejectLiteralSecretsAcceptsRefs(t *testing.T) {
 	assert.ErrorContains(t, err, "or a secret reference such as op://vault/item/field")
 }
 
+func TestRejectLiteralSecretsSkipsMask(t *testing.T) {
+	assert.NoError(t, RejectLiteralSecrets("MY_PG", map[string]any{"type": "postgres", "password": "********"}))
+	assert.Error(t, RejectLiteralSecrets("MY_PG", map[string]any{"type": "postgres", "password": "hunter2"}))
+}
+
+func TestParseConnsInput(t *testing.T) {
+	conns, wrapped, err := ParseConnsInput("type: postgres\nHost: h\n")
+	require.NoError(t, err)
+	assert.False(t, wrapped)
+	assert.Equal(t, map[string]map[string]any{"": {"type": "postgres", "host": "h"}}, conns)
+
+	conns, wrapped, err = ParseConnsInput("connections:\n  my_pg:\n    type: postgres\n    Host: h\n  other:\n    type: mysql\n")
+	require.NoError(t, err)
+	assert.True(t, wrapped)
+	assert.Equal(t, map[string]map[string]any{
+		"MY_PG": {"type": "postgres", "host": "h"},
+		"OTHER": {"type": "mysql"},
+	}, conns)
+
+	conns, wrapped, err = ParseConnsInput(`{"connections": {"a": {"type": "postgres"}}}`)
+	require.NoError(t, err)
+	assert.True(t, wrapped)
+	assert.Equal(t, map[string]map[string]any{"A": {"type": "postgres"}}, conns)
+
+	_, _, err = ParseConnsInput("connections: [1]")
+	assert.ErrorContains(t, err, "connections: must be a map of connection names")
+
+	_, _, err = ParseConnsInput("  ")
+	assert.ErrorContains(t, err, "stdin is empty")
+}
+
 func TestSecretRefEmbeddedURL(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "embedded.db")
