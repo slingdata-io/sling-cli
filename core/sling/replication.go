@@ -172,7 +172,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
-			fMap, err := task.formatMap(true)
+			fMap, _, err := task.formatMap(true)
 			if err != nil {
 				return rd.state, err
 			}

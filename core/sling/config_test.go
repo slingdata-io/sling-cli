@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,6 +127,67 @@ func TestGetFormatMapAPISourceStreamTable(t *testing.T) {
 	if !strings.Contains(strings.ToLower(cfg.Target.Options.TableTmp), "users") {
 		t.Fatalf("temp table should include endpoint name, got %s", cfg.Target.Options.TableTmp)
 	}
+}
+
+func newFormatNamesConfig() *Config {
+	cfg := &Config{
+		Source:     Source{Conn: "POSTGRES", Stream: "select 1 as id"},
+		Target:     Target{Conn: "CLICKHOUSE", Object: "default.t_{stream_name}", Options: &TargetOptions{TableTmp: "default.t_{stream_table}_tmp"}},
+		StreamName: "{source_name}_s1",
+	}
+	cfg.SrcConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Type = dbio.TypeDbClickhouse
+	cfg.initEvaluator()
+	return cfg
+}
+
+func TestFormatMapKeepsConfig(t *testing.T) {
+	cfg := newFormatNamesConfig()
+
+	m, names, err := cfg.formatMap(true)
+	assert.NoError(t, err)
+	assert.Equal(t, "select 1 as id", cfg.Source.Stream)
+	assert.Equal(t, "{source_name}_s1", cfg.StreamName)
+	assert.Equal(t, "default.t_{stream_name}", cfg.Target.Object)
+	assert.Equal(t, "default.t_{stream_table}_tmp", cfg.Target.Options.TableTmp)
+	assert.Equal(t, "postgres_s1", m["stream_name"])
+	assert.Equal(t, "default.t_postgres_s1", m["object_name"])
+	assert.Equal(t, "postgres_s1", names.streamName)
+	assert.Equal(t, "default.t_postgres_s1", names.targetObject)
+	assert.Equal(t, "default.t_postgres_s1_tmp", names.tableTmp)
+
+	_, err = cfg.GetFormatMap()
+	assert.NoError(t, err)
+	assert.Equal(t, "select 1 as id", cfg.Source.Stream)
+	assert.Equal(t, "postgres_s1", cfg.StreamName)
+	assert.Equal(t, "default.t_postgres_s1", cfg.Target.Object)
+	assert.Equal(t, "default.t_postgres_s1_tmp", cfg.Target.Options.TableTmp)
+}
+
+func TestFormatMapConcurrentStreamID(t *testing.T) {
+	cfg := newFormatNamesConfig()
+	_, err := cfg.GetFormatMap()
+	assert.NoError(t, err)
+
+	want := cfg.StreamID()
+	task := &TaskExecution{Config: cfg}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_, _, _ = cfg.formatMap(true)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			assert.Equal(t, want, cfg.StreamID())
+			_, _ = task.GetSourceTable()
+		}
+	}()
+	wg.Wait()
 }
 
 func TestPrepareLegacySQLHooks(t *testing.T) {

@@ -1163,17 +1163,58 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	return nil
 }
 
-// GetFormatMap returns a map to format a string with provided with variables
+// GetFormatMap returns a map to format a string with provided with variables.
+// It also stores the rendered names in the config.
 func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
-	return cfg.formatMap(false)
+	// the lock guards the state maps and Env against concurrent writers
+	if rs := cfg.runtimeState(); rs != nil {
+		rs.rlock()
+		defer rs.runlock()
+	}
+
+	m, names, err := cfg.formatMap(true)
+	cfg.setFormatNames(names)
+	return m, err
 }
 
-// formatMap builds the format map. Set stateLocked when the caller holds the replication state lock.
-func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
+// formatNames holds the rendered values of the config fields that formatMap renders.
+type formatNames struct {
+	sourceStream, streamName, targetObject, tableTmp string
+}
+
+// setFormatNames writes only the names that changed, so a settled config gets no write.
+func (cfg *Config) setFormatNames(names formatNames) {
+	if cfg.Source.Stream != names.sourceStream {
+		cfg.Source.Stream = names.sourceStream
+	}
+	if cfg.StreamName != names.streamName {
+		cfg.StreamName = names.streamName
+	}
+	if cfg.Target.Object != names.targetObject {
+		cfg.Target.Object = names.targetObject
+	}
+	if cfg.Target.Options != nil && cfg.Target.Options.TableTmp != names.tableTmp {
+		cfg.Target.Options.TableTmp = names.tableTmp
+	}
+}
+
+// formatMap builds the format map. It does not write to the config:
+// the caller applies the returned names with setFormatNames.
+// Set stateLocked when the caller holds the replication state lock.
+func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, names formatNames, err error) {
 	// the lock guards the state maps and Env against concurrent writers
 	if rs := cfg.runtimeState(); rs != nil && !stateLocked {
 		rs.rlock()
 		defer rs.runlock()
+	}
+
+	names = formatNames{
+		sourceStream: cfg.Source.Stream,
+		streamName:   cfg.StreamName,
+		targetObject: cfg.Target.Object,
+	}
+	if cfg.Target.Options != nil {
+		names.tableTmp = cfg.Target.Options.TableTmp
 	}
 
 	m = g.M(
@@ -1222,25 +1263,25 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
-		cfg.Source.Stream, err = cfg.evaluator.RenderString(cfg.Source.Stream, m)
+		names.sourceStream, err = cfg.evaluator.RenderString(names.sourceStream, m)
 		if err != nil {
-			return m, g.Error(err, "could not pre-render source stream")
+			return m, names, g.Error(err, "could not pre-render source stream")
 		}
 
-		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
+		table, err := database.ParseTableName(names.sourceStream, cfg.SrcConn.Type)
 		if err != nil {
-			return m, g.Error(err, "could not parse stream table name")
+			return m, names, g.Error(err, "could not parse stream table name")
 		}
 
-		if table.SQL != "" && cfg.StreamName != "" {
-			cfg.StreamName, err = cfg.evaluator.RenderString(cfg.StreamName, m)
+		if table.SQL != "" && names.streamName != "" {
+			names.streamName, err = cfg.evaluator.RenderString(names.streamName, m)
 			if err != nil {
-				return m, g.Error(err, "could not pre-render stream name")
+				return m, names, g.Error(err, "could not pre-render stream name")
 			}
 
-			table, err = database.ParseTableName(cfg.StreamName, cfg.SrcConn.Type)
+			table, err = database.ParseTableName(names.streamName, cfg.SrcConn.Type)
 			if err != nil {
-				return m, g.Error(err, "could not parse stream name: %s", cfg.StreamName)
+				return m, names, g.Error(err, "could not parse stream name: %s", names.streamName)
 			}
 		}
 		if table.Schema != "" {
@@ -1255,8 +1296,8 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 			m["stream_full_name"] = table.FDQN()
 		}
 
-		if cfg.StreamName != "" {
-			m["stream_name"] = strings.ToLower(cfg.StreamName)
+		if names.streamName != "" {
+			m["stream_name"] = strings.ToLower(names.streamName)
 		}
 		if cfg.Source.UpdateKey != "" {
 			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
@@ -1268,18 +1309,18 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 	if cfg.TgtConn.Type.IsDb() {
 		// pre-render
-		cfg.Target.Object, err = cfg.evaluator.RenderString(cfg.Target.Object, m)
+		names.targetObject, err = cfg.evaluator.RenderString(names.targetObject, m)
 		if err != nil {
-			return m, g.Error(err, "could not pre-render target object")
+			return m, names, g.Error(err, "could not pre-render target object")
 		}
 
-		m["object_name"] = cfg.Target.Object
+		m["object_name"] = names.targetObject
 
-		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		table, err := database.ParseTableName(names.targetObject, cfg.TgtConn.Type)
 		if err != nil {
-			return m, g.Error(err, "could not parse target table name")
+			return m, names, g.Error(err, "could not parse target table name")
 		} else if table.IsQuery() {
-			return m, g.Error("invalid table name: %s", table.Raw)
+			return m, names, g.Error("invalid table name: %s", table.Raw)
 		}
 
 		m["object_schema"] = table.Schema
@@ -1295,13 +1336,13 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 		m["object_full_name"] = table.FDQN()
 
 		// set temp table
-		if tOpts := cfg.Target.Options; tOpts != nil {
-			tOpts.TableTmp, err = cfg.evaluator.RenderString(tOpts.TableTmp, m)
+		if cfg.Target.Options != nil {
+			names.tableTmp, err = cfg.evaluator.RenderString(names.tableTmp, m)
 			if err != nil {
-				return m, g.Error(err, "could not pre-render temp table")
+				return m, names, g.Error(err, "could not pre-render temp table")
 			}
 
-			tableTmp, _ := database.ParseTableName(tOpts.TableTmp, cfg.TgtConn.Type)
+			tableTmp, _ := database.ParseTableName(names.tableTmp, cfg.TgtConn.Type)
 			m["object_temp_schema"] = tableTmp.Schema
 			m["object_temp_table"] = tableTmp.Name
 			m["object_temp_full_name"] = tableTmp.FDQN()
@@ -1312,11 +1353,11 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
+		m["stream_name"] = strings.ToLower(names.streamName)
 
 		fc, err := cfg.SrcConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
-			return m, g.Error(err, "could not init source conn as file")
+			return m, names, g.Error(err, "could not init source conn as file")
 		}
 
 		uri := cfg.SrcConn.URL()
@@ -1324,7 +1365,7 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 		filePath, err := fc.GetPath(uri)
 		if err != nil {
-			return m, g.Error(err, "could not parse file path")
+			return m, names, g.Error(err, "could not parse file path")
 		}
 		if filePath != "" {
 			m["stream_file_path"] = strings.Trim(filePath, "/")
@@ -1378,7 +1419,7 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 				fileFormat = filesys.InferFileFormat(uri, dbio.FileTypeNone)
 			}
 			if fileFormat == dbio.FileTypeNone {
-				g.Warn("%s: stream format is empty, cannot determine stream_scanner", cfg.StreamName)
+				g.Warn("%s: stream format is empty, cannot determine stream_scanner", names.streamName)
 			} else {
 				duck := iop.NewDuckDb(context.Background())
 				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
@@ -1394,11 +1435,11 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 		fc, err := cfg.TgtConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
-			return m, g.Error(err, "could not init target conn as file")
+			return m, names, g.Error(err, "could not init target conn as file")
 		}
 
-		m["object_name"] = strings.ToLower(cfg.Target.Object)
-		m["object_full_name"] = filesys.NormalizeURI(fc, cfg.Target.Object)
+		m["object_name"] = strings.ToLower(names.targetObject)
+		m["object_full_name"] = filesys.NormalizeURI(fc, names.targetObject)
 
 		switch t {
 		case dbio.TypeFileS3:
@@ -1412,9 +1453,9 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsAPI() {
-		streamName := strings.TrimSpace(cfg.StreamName)
+		streamName := strings.TrimSpace(names.streamName)
 		if streamName == "" {
-			streamName = strings.TrimSpace(cfg.Source.Stream)
+			streamName = strings.TrimSpace(names.sourceStream)
 		}
 		if streamName != "" {
 			m["stream_name"] = strings.ToLower(streamName)

@@ -287,7 +287,7 @@ func (t *TaskExecution) StateSet() {
 			g.Unmarshal(args, &state.Execution.CLIArgs)
 		}
 
-		fMap, _ := t.Config.formatMap(true)
+		fMap, _, _ := t.Config.formatMap(true)
 
 		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		if id := cast.ToString(fMap["stream_run_id"]); id != "" {
