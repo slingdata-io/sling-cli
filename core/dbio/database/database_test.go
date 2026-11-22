@@ -4293,6 +4293,41 @@ func TestSummarizeBcpOutput(t *testing.T) {
 
 // A target numeric with no precision takes the type of its values, so no
 // fraction digit is cut (SLING-166).
+// emptyBatchStmt is an adbc.Statement whose only used method is Close.
+type emptyBatchStmt struct{ adbc.Statement }
+
+func (emptyBatchStmt) Close() error { return nil }
+
+// A zero-row record batch is valid Arrow (issue #836: the Redis driver sends one).
+func TestArrowDBConnMakeRecordNextFuncEmptyBatches(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "label", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	record := func(vals ...string) arrow.Record {
+		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+		defer b.Release()
+		b.Field(0).(*array.StringBuilder).AppendValues(vals, nil)
+		return b.NewRecord()
+	}
+
+	read := func(records ...arrow.Record) []string {
+		reader, err := array.NewRecordReader(schema, records)
+		require.NoError(t, err)
+		queryContext := g.NewContext(context.Background())
+		conn := &ArrowDBConn{}
+		ds := iop.NewDatastreamIt(queryContext.Ctx, iop.ArrowSchemaToColumns(schema), conn.makeRecordNextFunc(queryContext, reader, emptyBatchStmt{}, 0))
+		require.NoError(t, ds.Start())
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		labels := []string{}
+		for _, row := range data.Rows {
+			labels = append(labels, cast.ToString(row[0]))
+		}
+		return labels
+	}
+
+	assert.Equal(t, []string{}, read(record()))
+	assert.Equal(t, []string{"a", "b", "c"}, read(record(), record("a", "b"), record(), record(), record("c"), record()))
+}
+
 func TestArrowDBConnBatchToRecordReader_OpenDecimal(t *testing.T) {
 	cols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType}}
 	tgtCols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType, DbType: "numeric"}}

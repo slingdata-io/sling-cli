@@ -1449,10 +1449,14 @@ func (conn *ArrowDBConn) makeRecordNextFunc(queryContext *g.Context, reader arra
 			previousRecord = nil
 		}
 
-		// Check if we need to fetch next record batch
-		if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
-			// Move current to previous (will be released on next iteration)
-			previousRecord = currentRecord
+		// Fetch the next record batch. Skip zero-row batches, which are valid Arrow.
+		for currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
+			if currentRecord != nil && currentRecord.NumRows() == 0 {
+				currentRecord.Release() // no row of it was read
+			} else {
+				// Move current to previous (will be released on next iteration)
+				previousRecord = currentRecord
+			}
 			currentRecord = nil
 
 			select {
