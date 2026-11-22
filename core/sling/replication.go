@@ -35,6 +35,8 @@ type ReplicationConfig struct {
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
 
+	Continuous *ContinuousConfig `json:"continuous,omitempty" yaml:"continuous,omitempty"`
+
 	// Tasks are compiled tasks
 	Tasks    []*Config `json:"tasks"`
 	Compiled bool      `json:"compiled"`
@@ -74,14 +76,18 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 
 // JSON returns json payload
 func (rd *ReplicationConfig) JSON() string {
-	payload := g.Marshal([]any{
+	items := []any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
 		g.M("hooks", rd.Hooks),
 		g.M("defaults", rd.Defaults),
 		g.M("streams", rd.Streams),
 		g.M("env", rd.Env),
-	})
+	}
+	if rd.Continuous != nil {
+		items = append(items, g.M("continuous", rd.Continuous))
+	}
+	payload := g.Marshal(items)
 
 	// clean up
 	if strings.Contains(rd.Source, "://") {
@@ -1049,6 +1055,9 @@ func (rd *ReplicationConfig) checkConnections() error {
 		if name == "" || strings.Contains(name, "://") || !connection.SchemeType(name).IsUnknown() {
 			continue
 		} else if _, ok := connsMap[strings.ToLower(name)]; !ok {
+			if err := connection.LocalConnLoadError(name); err != nil {
+				name = g.F("%s (could not load: %s)", name, g.ErrMsgSimple(err))
+			}
 			missing = append(missing, name)
 		}
 	}
@@ -1477,6 +1486,86 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 	return
 }
 
+// ValidateContinuous checks the compiled tasks for continuous mode and
+// returns the resolved settings. Run it after Compile.
+func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, err error) {
+	if len(rd.Tasks) == 0 {
+		return settings, g.Error("did not match any streams")
+	}
+
+	runMaxEvents := 0
+	hasRunMaxDuration, sharedReaderOnly := false, true
+	var retryAttempts *int
+	var retryDelay time.Duration
+	retryDelaySet := false
+	for _, task := range rd.Tasks {
+		if task.Mode != ChangeCaptureMode {
+			return settings, g.Error("continuous mode supports only change-capture streams in this version (stream %s has mode %s)", task.StreamName, task.Mode)
+		}
+
+		if rs := task.ReplicationStream; rs != nil {
+			if len(rs.Hooks.Pre)+len(rs.Hooks.Post) > 0 {
+				return settings, g.Error("stream hooks are not supported yet in continuous mode (stream %s)", task.StreamName)
+			}
+			if opts := rs.CDCOptions; opts != nil {
+				runMaxEvents = max(runMaxEvents, g.PtrVal(opts.RunMaxEvents))
+				hasRunMaxDuration = hasRunMaxDuration || opts.RunMaxDuration != nil
+				if opts.RetryAttempts != nil && (retryAttempts == nil || *opts.RetryAttempts > *retryAttempts) {
+					retryAttempts = opts.RetryAttempts
+				}
+				if opts.RetryDelay != nil {
+					d, err := time.ParseDuration(strings.TrimSpace(*opts.RetryDelay))
+					if err != nil || d < 0 {
+						return settings, g.Error("invalid retry_delay for stream %s: %s", task.StreamName, *opts.RetryDelay)
+					}
+					retryDelay, retryDelaySet = max(retryDelay, d), true
+				}
+			}
+		}
+
+		if srcType := task.SrcConn.Type; !srcType.IsMySQLLike() && !srcType.IsPostgresLike() {
+			sharedReaderOnly = false
+		}
+	}
+
+	if cc := rd.Continuous; cc != nil && cc.OnStreamError != nil && strings.EqualFold(strings.TrimSpace(*cc.OnStreamError), "quarantine") {
+		return settings, g.Error("on_stream_error: quarantine is not supported yet")
+	}
+
+	if !rd.Tasks[0].TgtConn.Type.IsDb() {
+		return settings, g.Error("continuous mode needs a database target")
+	}
+
+	settings, err = rd.Continuous.Resolve(rd.Tasks[0].TgtConn.Type, runMaxEvents)
+	if err != nil {
+		return settings, err
+	}
+
+	// the retry options of the streams, else the defaults
+	if settings.RetryAttempts = *CDCOptionsDefault.RetryAttempts; retryAttempts != nil {
+		settings.RetryAttempts = max(*retryAttempts, 0)
+	}
+	if settings.RetryDelay = retryDelay; !retryDelaySet {
+		settings.RetryDelay, _ = time.ParseDuration(*CDCOptionsDefault.RetryDelay)
+	}
+
+	if hasRunMaxDuration {
+		interval := *ContinuousConfigDefault.Interval
+		if rd.Continuous != nil && rd.Continuous.Interval != nil {
+			interval = *rd.Continuous.Interval
+		}
+		g.Warn("run_max_duration is ignored in continuous mode, interval (%s) is used", interval)
+	}
+	if settings.MaxBytes > 0 && !sharedReaderOnly {
+		g.Warn("max_bytes applies only to MySQL, MariaDB and PG groups")
+	}
+	if settings.BehindAfter > 0 && settings.BehindAfter <= settings.Interval {
+		g.Warn("behind_after (%s) is not greater than interval (%s), so streams show behind between cycles", settings.BehindAfter, settings.Interval)
+	}
+
+	return settings, nil
+}
+
 // buildCDCRunner scans rd.Tasks for shared-reader-eligible CDC streams and, if
 // any are found, creates a single CDC runner and auto-injects a `read_cdc`
 // start-stage hook attached to it. A replication has exactly one source, so
@@ -1523,6 +1612,11 @@ func (rd *ReplicationConfig) buildCDCRunner() {
 	}
 
 	rd.CDCRunner = newCDCRunner(groupKey, groupTasks, rd)
+
+	// the continuous runner reads in its own cycles
+	if IsContinuousRunMode() {
+		return
+	}
 
 	// inject hook so shared read phase runs before loads
 	rd.startHooks = append(rd.startHooks, Hooks{rd.CDCRunner.NewReadCDCHook()}...)
@@ -1852,6 +1946,14 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	var continuous *ContinuousConfig
+	if val, ok := m["continuous"]; ok && val != nil {
+		if err = g.Unmarshal(g.Marshal(val), &continuous); err != nil {
+			err = g.Error(err, "could not parse 'continuous'")
+			return
+		}
+	}
+
 	maps := replicationConfigMaps{}
 	g.Unmarshal(g.Marshal(defaults), &maps.Defaults)
 	g.Unmarshal(g.Marshal(streams), &maps.Streams)
@@ -1860,6 +1962,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		Source:      cast.ToString(source),
 		Target:      cast.ToString(target),
 		Env:         Env,
+		Continuous:  continuous,
 		maps:        maps,
 		originalCfg: replicYAML, // set originalCfg
 	}

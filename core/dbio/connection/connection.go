@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -99,6 +100,8 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 func NewConnectionFromURL(Name, URL string) (conn Connection, err error) {
 	return NewConnection(Name, "", g.M("url", URL))
 }
+
+var oracleTNSSpaceRegex = regexp.MustCompile(`\s*([()=])\s*`)
 
 // NewConnectionFromMap loads a Connection from a Map
 func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
@@ -781,9 +784,12 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		// no default client_charset: go-ora then encodes binds in the server charset (GH #759)
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
-			if !strings.HasPrefix(cast.ToString(tns), "(") {
-				c.Data["tns"] = "(" + cast.ToString(tns) + ")"
+			// strip whitespace of multi-line descriptors (tnsnames.ora style)
+			tnsStr := oracleTNSSpaceRegex.ReplaceAllString(strings.TrimSpace(cast.ToString(tns)), "$1")
+			if !strings.HasPrefix(tnsStr, "(") {
+				tnsStr = "(" + tnsStr + ")"
 			}
+			c.Data["tns"] = tnsStr
 			template = "oracle://{username}:{password}@{tns}"
 		} else {
 			template = "oracle://{username}:{password}@{host}:{port}/{database}"
@@ -1511,7 +1517,15 @@ func ReadConnectionsFromFile(path string) (conns map[string]Connection, err erro
 }
 
 func ReadConnections(env map[string]interface{}) (conns map[string]Connection, err error) {
+	conns, _ = readConnections(env)
+	return conns, nil
+}
+
+// readConnections is ReadConnections that also returns the entries it could
+// not load, keyed by upper-case name.
+func readConnections(env map[string]interface{}) (conns map[string]Connection, failed map[string]error) {
 	conns = map[string]Connection{}
+	failed = map[string]error{}
 
 	if connections, ok := env["connections"]; ok {
 		switch connectionsV := connections.(type) {
@@ -1528,10 +1542,12 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 					conn, err := NewConnectionFromMap(g.M("name", name, "data", data, "type", data["type"]))
 					if err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 					if err = conn.setURL(); err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 

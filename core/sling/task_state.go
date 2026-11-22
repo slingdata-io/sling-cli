@@ -99,6 +99,16 @@ func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {
 	}
 }
 
+// WritePipelineStore writes the store and the execution totals to the pipeline store file.
+// The replication step of the pipeline reads them.
+func (rs *ReplicationState) WritePipelineStore() {
+	rs.MergeStore(map[string]any{
+		"_replication_total_rows":  rs.Execution.TotalRows,
+		"_replication_total_bytes": rs.Execution.TotalBytes,
+	})
+	SetPipelineStoreEnv(rs.GetStore())
+}
+
 func (rs *ReplicationState) SetStateData(id string, data map[string]any) {
 	rs.lock()
 	defer rs.unlock()

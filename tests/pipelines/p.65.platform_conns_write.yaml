@@ -1,0 +1,77 @@
+# Platform CLI connections save, get and delete (SLING-547).
+# Run it with SLING_TEST_WRITE_TOKEN set to a project token with the scope connections:write.
+# The default SLING_PROJECT_TOKEN must not have that scope.
+env:
+  DIR: temp/p65_conns
+  CONN: TMP_CLI_CONN
+
+steps:
+  - log: '=== clean start ==='
+
+  - id: clean_start
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections delete {env.CONN} -f
+    on_failure: quiet
+
+  - id: write_full
+    command: |
+      mkdir -p {env.DIR}
+      printf 'type: postgres\nhost: db.example.com\nuser: app\ndatabase: app\npassword: \044{TMP_CLI_PASS}\n' > {env.DIR}/full.yaml
+
+  - id: write_small
+    command: |
+      printf 'type: postgres\nhost: db2.example.com\npassword: \044{TMP_CLI_PASS}\n' > {env.DIR}/small.yaml
+
+  - log: '=== save two times ==='
+
+  - id: save_1
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections save {env.CONN} -f {env.DIR}/full.yaml
+
+  - id: save_2
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections save {env.CONN} -f {env.DIR}/full.yaml
+
+  - log: '=== get shows the ref ==='
+
+  - id: get_1
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections get {env.CONN}
+
+  - check: 'contains(state.get_1.output.stdout, "TMP_CLI_PASS")'
+    failure_message: 'connections get did not show the env-var ref'
+
+  - log: '=== round trip: get yaml into save ==='
+
+  - id: round_trip
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections get {env.CONN} -o yaml | SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections save -f -
+
+  - log: '=== save --replace with fewer keys ==='
+
+  - id: save_replace
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections save {env.CONN} -f {env.DIR}/small.yaml --replace
+
+  - id: get_replaced
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections get {env.CONN} -o json
+
+  - check: 'contains(state.get_replaced.output.stdout, "db2.example.com") && !contains(state.get_replaced.output.stdout, "database")'
+    failure_message: 'save --replace did not remove the dropped key'
+
+  - log: '=== save without the scope fails ==='
+
+  - id: save_no_scope
+    command: sling platform connections save {env.CONN} -f {env.DIR}/small.yaml
+    on_failure: quiet
+
+  - check: 'contains(state.save_no_scope.output.combined, "does not have the scope connections:write")'
+    failure_message: 'save with a token without the scope did not fail with the scope error'
+
+  - log: '=== delete ==='
+
+  - id: delete_conn
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections delete {env.CONN} -f
+
+  - id: get_deleted
+    command: SLING_PROJECT_TOKEN="$SLING_TEST_WRITE_TOKEN" sling platform connections get {env.CONN}
+    on_failure: quiet
+
+  - check: 'contains(state.get_deleted.output.combined, "could not find connection")'
+    failure_message: 'connections get found a deleted connection'
+
+  - log: 'SUCCESS: platform connections write flow'
