@@ -1643,3 +1643,29 @@ func TestFormatValueSQLiteTimestamp(t *testing.T) {
 		assert.Equal(t, "'2026-10-01 00:00:00.000000'", FormatValue(ts("2026-10-01 00:00:00"), TimestampType, dbio.TypeDbPostgres))
 	})
 }
+
+func TestFormatValueFirebird(t *testing.T) {
+	utc := time.Date(2026, 11, 16, 13, 50, 10, 0, time.UTC)
+	frac := time.Date(2026, 11, 16, 13, 50, 10, 123_490_000, time.UTC)
+	fracZone := time.Date(2026, 11, 16, 13, 50, 10, 123_490_000, time.FixedZone("", 3600))
+	firebird := dbio.Type("firebird")
+
+	cases := []struct {
+		name     string
+		val      time.Time
+		colType  ColumnType
+		connType dbio.Type
+		expected string
+	}{
+		{"datetime", utc, DatetimeType, firebird, "'2026-11-16 13:50:10.0000'"},
+		{"timestamp truncates", frac, TimestampType, firebird, "'2026-11-16 13:50:10.1234'"},
+		{"timestampz has no zone", fracZone, TimestampzType, firebird, "'2026-11-16 13:50:10.1234'"},
+		{"date", utc, DateType, firebird, "'2026-11-16'"},
+		{"odbc keeps base layout", frac, TimestampType, dbio.TypeDbODBC, "'2026-11-16 13:50:10.123490'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, FormatValue(tc.val, tc.colType, tc.connType))
+		})
+	}
+}

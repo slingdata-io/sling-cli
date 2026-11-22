@@ -489,6 +489,9 @@ variable:
   max_column_length: 31
   schemaless: true
   column_upper: true
+  # Firebird TIMESTAMP holds 1/10000 s; more than 4 fractional digits fail with -413
+  timestamp_layout: '2006-01-02 15:04:05.0000'
+  timestampz_layout: '2006-01-02 15:04:05.0000'
 
 native_type_map:
   smallint: smallint

@@ -758,3 +758,79 @@ func TestFilterTablesEmptySchema(t *testing.T) {
 	ns = pg.Filtered(true, "public.t1.*")
 	assert.Len(t, ns.Columns(), 2)
 }
+
+func TestFirebirdSelectLimit(t *testing.T) {
+	firebird := dbio.Type("firebird")
+	queryTable, err := ParseTableName(`select "ID" from "CUSTOMER"`, firebird)
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		table    Table
+		opts     SelectOptions
+		expected string
+	}{
+		{
+			"limit",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5)},
+			`select first 5 * from "CUSTOMER"`,
+		},
+		{
+			"limit and offset",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5), Offset: 10},
+			`select first 5 skip 10 * from "CUSTOMER"`,
+		},
+		{
+			"limit and where",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5), Where: `"ID" > 1`},
+			`select first 5 * from "CUSTOMER" where ("ID" > 1)`,
+		},
+		{
+			"query table",
+			queryTable,
+			SelectOptions{Limit: g.Ptr(1)},
+			"select first 1 skip 0 * from (\n  select \"ID\" from \"CUSTOMER\"\n) as t\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sql := tc.table.Select(tc.opts)
+			assert.Equal(t, tc.expected, sql)
+			assert.NotContains(t, sql, " limit ")
+			assert.NotContains(t, sql, " offset ")
+		})
+	}
+}
+
+func TestFirebirdIncrementalSelectLimit(t *testing.T) {
+	firebird := dbio.Type("firebird")
+	template, err := firebird.Template()
+	assert.NoError(t, err)
+
+	const tail = `"ID", "LOGDATE" from "DELETELOG" where ("LOGDATE" > '2026-11-16 13:50:10.0000') order by "LOGDATE" asc`
+	cases := []struct {
+		key      string
+		offset   int
+		expected string
+	}{
+		{"incremental_select_limit", 0, "select first 5 " + tail},
+		{"incremental_select_limit_offset", 10, "select first 5 skip 10 " + tail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			sql := g.R(
+				template.Core[tc.key],
+				"fields", `"ID", "LOGDATE"`,
+				"table", `"DELETELOG"`,
+				"incremental_where_cond", `"LOGDATE" > '2026-11-16 13:50:10.0000'`,
+				"update_key", `"LOGDATE"`,
+			)
+			table := Table{SQL: sql, Dialect: firebird}
+			got := table.Select(SelectOptions{Fields: []string{"*"}, Limit: g.Ptr(5), Offset: tc.offset})
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
