@@ -42,6 +42,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -3477,6 +3478,142 @@ func TestAdbcLaneRead_NoLabels(t *testing.T) {
 	r := newAdbcLaneRead(src, nil)
 	assert.True(t, r.schema.Equal(src))
 	assert.Empty(t, r.decimals)
+}
+
+// A driver that sling does not know has no metadata templates, so the
+// metadata comes from ADBC GetObjects (issue #836). SQLite has no schemas.
+func TestArrowDBConnGenericMetadata(t *testing.T) {
+	dir := t.TempDir()
+	drivers := map[string][]string{
+		"duckdb": {"driver=duckdb", "path=" + filepath.Join(dir, "generic.duckdb")},
+		"sqlite": {"driver=sqlite", "uri=file:" + filepath.Join(dir, "generic.sqlite")},
+	}
+
+	for name, props := range drivers {
+		t.Run(name, func(t *testing.T) {
+			conn, err := NewConnContext(context.Background(), "adbc://", append(props, "type=adbc")...)
+			if err == nil {
+				err = conn.Connect()
+			}
+			if err != nil {
+				t.Skipf("ADBC %s driver is not available: %s", name, err)
+			}
+			defer conn.Close()
+
+			ac := conn.(*ArrowDBConn)
+			assert.Equal(t, dbio.TypeDbArrowDBC, ac.driverType)
+			assert.False(t, ac.hasMetadata("columns"))
+			assert.NotEmpty(t, conn.GetTemplateValue("core.rename_table"))
+			cached, _ := dbio.TypeDbArrowDBC.Template()
+			assert.Empty(t, cached.Core["rename_table"], "the template cache is not changed")
+
+			_, err = conn.ExecMulti(`create table generic_t (id integer, label text, amt numeric(18,2), code varchar(12));
+				insert into generic_t values (1, 'a', 12.34, 'x');
+				create view generic_v as select id from generic_t`)
+			require.NoError(t, err)
+
+			table := Table{Schema: "main", Name: "generic_t", Dialect: conn.GetType()}
+			exists, err := conn.TableExists(table)
+			assert.NoError(t, err)
+			assert.True(t, exists)
+			exists, err = conn.TableExists(Table{Schema: "main", Name: "generic_none"})
+			assert.NoError(t, err)
+			assert.False(t, exists)
+
+			tables, err := conn.GetTables("main")
+			assert.NoError(t, err)
+			assert.Equal(t, []any{"generic_t"}, tables.ColValues(1))
+			views, err := conn.GetViews("main")
+			assert.NoError(t, err)
+			assert.Equal(t, []any{"generic_v"}, views.ColValues(1))
+
+			cols, err := conn.GetColumns("main.generic_t")
+			require.NoError(t, err)
+			assert.Equal(t, []string{"id", "label", "amt", "code"}, cols.Names())
+			assert.Equal(t, iop.TextType, cols[1].Type)
+			assert.Equal(t, iop.DecimalType, cols[2].Type)
+			assert.Equal(t, []int{18, 2}, []int{cols[2].DbPrecision, cols[2].DbScale})
+
+			cols, err = conn.GetColumns("main.generic_t", "code", "id")
+			assert.NoError(t, err)
+			assert.Equal(t, []string{"code", "id"}, cols.Names())
+			_, err = conn.GetColumns("main.generic_none")
+			assert.Error(t, err)
+
+			schemata, err := conn.GetSchemata(SchemataLevelColumn, "main", "generic_t")
+			require.NoError(t, err)
+			if tables := lo.Values(schemata.Tables("generic_t")); assert.Len(t, tables, 1) {
+				assert.Len(t, tables[0].Columns, 4)
+			}
+
+			// the read keeps the catalog text type (gap 3 of issue #836)
+			table.Columns, _ = conn.GetColumns("main.generic_t")
+			df, err := conn.BulkExportFlow(table)
+			require.NoError(t, err)
+			data, err := iop.MergeDataflow(df).Collect(0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, len(data.Rows))
+			assert.Equal(t, iop.TextType, data.Columns[1].Type)
+
+			// DuckDB 2.0 casts at most 2048 rows (a data chunk) from one record
+			_, err = conn.Exec("create table generic_big (id integer, ts timestamp)")
+			require.NoError(t, err)
+			big := iop.NewDataset(iop.NewColumnsFromFields("id", "ts"))
+			big.Columns[0].Type, big.Columns[1].Type = iop.IntegerType, iop.DatetimeType
+			for i := 0; i < 5000; i++ {
+				big.Append([]any{i, time.Unix(int64(i), 0).UTC()})
+			}
+			df, err = iop.MakeDataFlow(big.Stream())
+			require.NoError(t, err)
+			count, err := conn.BulkImportFlow("main.generic_big", df)
+			require.NoError(t, err)
+			assert.EqualValues(t, 5000, count)
+			assert.NoError(t, conn.DropTable("main.generic_big"))
+
+			// a missing table is not dropped, an existing one is
+			assert.NoError(t, conn.DropTable("main.generic_none"))
+			_, err = conn.Exec("drop view generic_v")
+			assert.NoError(t, err)
+			assert.NoError(t, conn.DropTable("main.generic_t"))
+			exists, _ = conn.TableExists(table)
+			assert.False(t, exists)
+		})
+	}
+}
+
+func TestArrowDBConn_IngestReaderSlices(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	newRecord := func(rows int) arrow.RecordBatch {
+		b := array.NewInt64Builder(memory.NewGoAllocator())
+		defer b.Release()
+		for i := 0; i < rows; i++ {
+			b.Append(int64(i))
+		}
+		arr := b.NewArray()
+		defer arr.Release()
+		return array.NewRecord(schema, []arrow.Array{arr}, int64(rows))
+	}
+	records := []arrow.RecordBatch{newRecord(5000), newRecord(0), newRecord(10)}
+	reader, err := array.NewRecordReader(schema, records)
+	require.NoError(t, err)
+	for _, rec := range records {
+		rec.Release()
+	}
+
+	conn := &ArrowDBConn{BaseConn: BaseConn{context: g.NewContext(context.Background())}, driverType: dbio.TypeDbPostgres}
+	assert.Equal(t, reader, conn.ingestReader(reader), "other drivers get the records as they are")
+
+	conn.driverType = dbio.TypeDbDuckDb
+	sliced := conn.ingestReader(reader)
+	sliced.Retain()
+	sizes := []int64{}
+	for sliced.Next() {
+		sizes = append(sizes, sliced.RecordBatch().NumRows())
+	}
+	assert.Equal(t, []int64{2048, 2048, 904, 10}, sizes)
+	assert.NoError(t, sliced.Err())
+	sliced.Release()
+	sliced.Release()
 }
 
 func TestArrowDBConn_IngestSchema(t *testing.T) {

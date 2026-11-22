@@ -448,6 +448,34 @@ func (cols Columns) KeepSourcedTypes(described Columns) Columns {
 	return cols
 }
 
+// KeepCatalogTypes sets the catalog type on the Arrow columns that it makes
+// more exact: text or the varchar length of a utf8 column (Arrow has no
+// length), a decimal that the driver gives as utf8, and the precision of a
+// decimal. Other columns keep the Arrow type.
+func (cols Columns) KeepCatalogTypes(catalog Columns) Columns {
+	catMap := catalog.FieldMap(true)
+	for i, col := range cols {
+		j, ok := catMap[strings.ToLower(col.Name)]
+		if !ok {
+			continue
+		}
+		switch cc := catalog[j]; {
+		case col.Type == StringType && g.In(cc.Type, StringType, TextType):
+			cols[i].Type, cols[i].DbType, cols[i].DbPrecision = cc.Type, cc.DbType, cc.DbPrecision
+			// the length can be only in the type name, e.g. character varying(12)
+			if m := g.Matches(cc.DbType, regexExtractPrecisionScale); cc.DbPrecision == 0 && len(m) == 1 {
+				cols[i].Type, cols[i].DbPrecision = StringType, cast.ToInt(m[0].Group[0])
+			}
+		case col.Type == StringType && cc.IsDecimal():
+			cols[i].Type, cols[i].DbType = DecimalType, cc.DbType
+			cols[i].DbPrecision, cols[i].DbScale = cc.DbPrecision, cc.DbScale
+		case col.IsDecimal() && cc.IsDecimal() && cc.DbPrecision > 0:
+			cols[i].DbPrecision, cols[i].DbScale = cc.DbPrecision, cc.DbScale
+		}
+	}
+	return cols
+}
+
 // GetMissing returns the missing columns from newCols
 func (cols Columns) GetMissing(newCols ...Column) (missing Columns) {
 	fm := cols.FieldMap(true)

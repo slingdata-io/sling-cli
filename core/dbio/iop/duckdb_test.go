@@ -1246,6 +1246,42 @@ func TestColumnTypingKeepSourced(t *testing.T) {
 	}
 }
 
+func TestColumnsKeepCatalogTypes(t *testing.T) {
+	arrowCols := Columns{
+		{Name: "id", Type: BigIntType, DbType: "INT64", Sourced: true},
+		{Name: "label", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "code", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "amt", Type: DecimalType, DbType: "DECIMAL", DbPrecision: 38, DbScale: 9, Sourced: true},
+		{Name: "note", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "extra", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "vc", Type: StringType, DbType: "STRING", Sourced: true},
+	}
+	catalog := Columns{
+		{Name: "ID", Type: DecimalType, DbType: "numeric", DbPrecision: 38},
+		{Name: "LABEL", Type: TextType, DbType: "text"},
+		{Name: "code", Type: StringType, DbType: "varchar", DbPrecision: 12},
+		{Name: "amt", Type: DecimalType, DbType: "numeric", DbPrecision: 18, DbScale: 2},
+		{Name: "note", Type: DecimalType, DbType: "numeric(18,2)", DbPrecision: 18, DbScale: 2},
+		{Name: "vc", Type: TextType, DbType: "character varying(12)"},
+	}
+
+	cols := arrowCols.Clone().KeepCatalogTypes(catalog)
+	assert.Equal(t, BigIntType, cols[0].Type, "a non-string Arrow type is kept")
+	assert.Equal(t, TextType, cols[1].Type)
+	assert.Equal(t, "text", cols[1].DbType)
+	assert.Equal(t, StringType, cols[2].Type)
+	assert.Equal(t, 12, cols[2].DbPrecision)
+	assert.Equal(t, []int{18, 2}, []int{cols[3].DbPrecision, cols[3].DbScale})
+	assert.Equal(t, DecimalType, cols[4].Type, "a decimal that the driver gives as utf8")
+	assert.Equal(t, []int{18, 2}, []int{cols[4].DbPrecision, cols[4].DbScale})
+	assert.Equal(t, "STRING", cols[5].DbType, "a column not in the catalog is kept")
+	assert.Equal(t, StringType, cols[6].Type, "the length in the type name")
+	assert.Equal(t, 12, cols[6].DbPrecision)
+
+	// no catalog: no change
+	assert.Equal(t, arrowCols, arrowCols.Clone().KeepCatalogTypes(nil))
+}
+
 func TestDuckDbCopyFormat(t *testing.T) {
 	cases := []struct {
 		props    []string

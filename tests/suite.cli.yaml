@@ -4402,3 +4402,25 @@
       exit 0
     fi
     sling run -p tests/pipelines/p.65.platform_conns_write.yaml
+
+# ADBC driver that sling does not know (issue #836): no driver_name, so no
+# metadata templates. The metadata comes from ADBC GetObjects, and the read
+# keeps the catalog text and numeric types.
+- id: 954
+  name: 'ADBC driver without a template: write, read and keep catalog types (issue #836)'
+  run: |
+    export ADBC_GENERIC='{"type": "adbc", "driver": "duckdb", "path": "/tmp/sling_adbc_generic_954.duckdb"}'
+    /bin/rm -f /tmp/sling_adbc_generic_954.duckdb
+    sling conns exec POSTGRES "drop table if exists public.adbc_generic_954; create table public.adbc_generic_954 (id bigint, label text, amt numeric(18,2), code varchar(12)); insert into public.adbc_generic_954 values (1, 'a', 12.34, 'x'), (2, null, null, '')"
+    sling run --src-conn POSTGRES --src-stream public.adbc_generic_954 --tgt-conn ADBC_GENERIC --tgt-object main.adbc_generic_954 --mode full-refresh
+    sling run --src-conn POSTGRES --src-stream public.adbc_generic_954 --tgt-conn ADBC_GENERIC --tgt-object main.adbc_generic_954 --mode full-refresh
+    sling conns discover ADBC_GENERIC --pattern 'main.adbc_generic_954' --columns
+    sling run --src-conn ADBC_GENERIC --src-stream main.adbc_generic_954 --tgt-conn POSTGRES --tgt-object public.adbc_generic_954_back --mode full-refresh
+    sling conns exec POSTGRES "select string_agg(column_name || ':' || data_type, ',' order by ordinal_position) as ddl from information_schema.columns where table_schema = 'public' and table_name = 'adbc_generic_954_back'"
+    sling conns exec POSTGRES "drop table if exists public.adbc_generic_954; drop table if exists public.adbc_generic_954_back"
+    /bin/rm -f /tmp/sling_adbc_generic_954.duckdb
+  output_contains:
+    - 'inserted 2 rows into "main"."adbc_generic_954"'
+    - '| adbc     | main   | adbc_generic_954 |  3 | amt    | DECIMAL'
+    - 'inserted 2 rows into "public"."adbc_generic_954_back"'
+    - 'id:bigint,label:text,amt:numeric,code:text'
