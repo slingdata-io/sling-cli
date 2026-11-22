@@ -244,11 +244,8 @@ func NewExcelFromReader(reader io.Reader, opts ...excelize.Options) (xls *Excel,
 		return
 	}
 
-	sheetMap := f.GetSheetMap()
-	sheets := make([]string, len(sheetMap))
-	for i := range sheets {
-		sheets[i] = sheetMap[i+1]
-	}
+	// GetSheetMap is keyed by sheetId, which has gaps once a sheet is deleted
+	sheets := f.GetSheetList()
 
 	xls = &Excel{
 		File:    f,
@@ -263,12 +260,11 @@ func NewExcelFromReader(reader io.Reader, opts ...excelize.Options) (xls *Excel,
 // RefreshSheets refresh sheet index data
 func (xls *Excel) RefreshSheets() (err error) {
 
-	sheetMap := xls.File.GetSheetMap()
-	sheets := make([]string, len(sheetMap))
+	// GetSheetMap is keyed by sheetId, which has gaps once a sheet is deleted
+	sheets := xls.File.GetSheetList()
 	sheetIndex := map[string]int{}
-	for i := range sheets {
-		sheets[i] = sheetMap[i+1]
-		sheetIndex[sheetMap[i+1]] = i
+	for i, name := range sheets {
+		sheetIndex[name] = i
 	}
 	xls.Sheets = sheets
 	xls.sheetIndex = sheetIndex
