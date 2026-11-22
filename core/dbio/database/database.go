@@ -1133,9 +1133,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
-		} else if err = result.Err(); err != nil {
+		} else if iterErr := result.Err(); iterErr != nil {
 			// if any error occurs during iteration
-			it.Context.CaptureErr(g.Error(err, "error during row iteration"))
+			it.Context.CaptureErr(g.Error(iterErr, "error during row iteration"))
 			result.Close()
 			return false
 		} else if Limit > 0 && it.Counter >= Limit {
@@ -1146,19 +1146,20 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 		next := result.Next()
 		if next {
+			var scanErr error
 			// add row
 			if conn.Type == dbio.TypeDbHana {
-				it.Row, err = scanHanaRow(result, colTypes)
+				it.Row, scanErr = scanHanaRow(result, colTypes)
 			} else {
-				it.Row, err = result.SliceScan()
+				it.Row, scanErr = result.SliceScan()
 				for _, i := range timetzCols {
 					if val, ok := it.Row[i].(string); ok {
 						it.Row[i] = formatTimetz(val)
 					}
 				}
 			}
-			if err != nil {
-				it.Context.CaptureErr(g.Error(err, "failed to scan"))
+			if scanErr != nil {
+				it.Context.CaptureErr(g.Error(scanErr, "failed to scan"))
 			} else {
 				return true
 			}
@@ -1167,9 +1168,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		// Check for context cancellation when Next() returns false
 		if ctxErr := queryContext.Ctx.Err(); ctxErr != nil {
 			it.Context.CaptureErr(g.Error(ctxErr, "query context canceled"))
-		} else if err = result.Err(); err != nil {
+		} else if iterErr := result.Err(); iterErr != nil {
 			// Double check result.Err() in case error occurred between previous check
-			it.Context.CaptureErr(g.Error(err, "error after row iteration"))
+			it.Context.CaptureErr(g.Error(iterErr, "error after row iteration"))
 		}
 
 		result.Close()

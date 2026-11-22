@@ -4797,6 +4797,32 @@ func TestBaseConnExecMultiStopsAtFirstError(t *testing.T) {
 	})
 }
 
+func TestBaseConnStreamRowsContextIterator(t *testing.T) {
+	conn, err := NewConn("sqlite://" + filepath.Join(t.TempDir(), "iter.db"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	sql := `with recursive seq(n) as (select 1 union all select n+1 from seq where n < 5000)
+		select n, 'v' || n as txt from seq`
+
+	t.Run("all rows", func(t *testing.T) {
+		ds, err := conn.StreamRowsContext(context.Background(), sql)
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, 5000)
+	})
+
+	t.Run("limit", func(t *testing.T) {
+		ds, err := conn.StreamRowsContext(context.Background(), sql, g.M("limit", 10))
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, 10)
+	})
+}
+
 func TestDuckDbConnExecMultiStopsAtFirstError(t *testing.T) {
 	conn, err := NewConn("duckdb://" + filepath.Join(t.TempDir(), "x.duckdb"))
 	require.NoError(t, err)

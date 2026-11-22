@@ -555,6 +555,7 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 			// Convert the row data to the right format
 			it.Row = make([]interface{}, len(row.Data))
+			var castErr error
 			for i, cell := range row.Data {
 				if cell.VarCharValue == nil {
 					it.Row[i] = nil
@@ -566,19 +567,19 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 				if i < len(fetchedColumns) {
 					switch fetchedColumns[i].Type {
 					case iop.IntegerType, iop.BigIntType, iop.SmallIntType:
-						it.Row[i], err = cast.ToInt64E(value)
+						it.Row[i], castErr = cast.ToInt64E(value)
 					case iop.FloatType, iop.DecimalType:
-						it.Row[i], err = cast.ToFloat64E(value)
+						it.Row[i], castErr = cast.ToFloat64E(value)
 					case iop.BoolType:
-						it.Row[i], err = cast.ToBoolE(value)
+						it.Row[i], castErr = cast.ToBoolE(value)
 					case iop.DateType, iop.DatetimeType, iop.TimestampType, iop.TimestampzType:
-						it.Row[i], err = it.Ds().Sp.ParseTime(value)
+						it.Row[i], castErr = it.Ds().Sp.ParseTime(value)
 					case iop.JsonType:
 						it.Row[i] = value // Keep as string for JSON
 					default:
 						it.Row[i] = value
 					}
-					if err != nil {
+					if castErr != nil {
 						it.Row[i] = value
 					}
 				} else {
