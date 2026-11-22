@@ -660,7 +660,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 		if r := recover(); r != nil {
 			err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 		}
-		te.EndTime = g.Ptr(time.Now())
+		te.setEndTime(time.Now())
 		te.StateSet()
 	}()
 
@@ -676,20 +676,20 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	switch stage {
 	case HookStageStart:
 		if err = rd.startHooks.Execute(); err != nil {
-			te.Status = ExecStatusError
-			te.Err = g.Error(err, "error executing start hooks")
+			te.setStatus(ExecStatusError)
+			te.setErr(g.Error(err, "error executing start hooks"))
 			return te.Err
 		}
 	case HookStageEnd:
 		if err = rd.endHooks.Execute(); err != nil {
-			te.Status = ExecStatusError
-			te.Err = g.Error(err, "error executing end hooks")
+			te.setStatus(ExecStatusError)
+			te.setErr(g.Error(err, "error executing end hooks"))
 			return te.Err
 		}
 	}
 
 	// set success
-	te.Status = ExecStatusSuccess
+	te.setStatus(ExecStatusSuccess)
 
 	return nil
 }

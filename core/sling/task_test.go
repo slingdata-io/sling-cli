@@ -80,3 +80,32 @@ func TestTaskDfConcurrentAccess(t *testing.T) {
 
 	assert.Same(t, last, task.Df())
 }
+
+// GetRate runs on the ticker and the task goroutines while the task ends.
+// Run with -race.
+func TestTaskStatusSnapshotGetRate(t *testing.T) {
+	task := &TaskExecution{df: iop.NewDataflow(), StartTime: g.Ptr(time.Now().Add(-time.Minute))}
+
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				_, _ = task.GetRate(1)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 500 {
+			task.setEndTime(time.Now())
+		}
+	}()
+	wg.Wait()
+
+	st := task.StatusSnapshot()
+	assert.NotNil(t, st.EndTime)
+	assert.Same(t, task.StartTime, st.StartTime)
+}

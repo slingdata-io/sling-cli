@@ -101,7 +101,7 @@ func (t *TaskExecution) Execute() error {
 		// recover from panic
 		defer func() {
 			if r := recover(); r != nil {
-				t.Err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				t.setErr(g.Error("panic occurred! %#v\n%s", r, string(debug.Stack())))
 			}
 		}()
 
@@ -109,7 +109,7 @@ func (t *TaskExecution) Execute() error {
 			t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 		}
 
-		t.Status = ExecStatusRunning
+		t.setStatus(ExecStatusRunning)
 
 		if t.Err != nil {
 			return
@@ -125,7 +125,7 @@ func (t *TaskExecution) Execute() error {
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
 		// pre-hooks
-		if t.Err = t.ExecuteHooks(HookStagePre); t.Err != nil {
+		if t.setErr(t.ExecuteHooks(HookStagePre)); t.Err != nil {
 			return
 		} else if t.skipStream {
 			t.SetProgress("skipping stream")
@@ -135,22 +135,22 @@ func (t *TaskExecution) Execute() error {
 
 		switch t.Type {
 		case DbSQL:
-			t.Err = t.runDbSQL()
+			t.setErr(t.runDbSQL())
 		case FileToDB:
-			t.Err = t.runFileToDB()
+			t.setErr(t.runFileToDB())
 		case DbToDb:
-			t.Err = t.runDbToDb()
+			t.setErr(t.runDbToDb())
 		case DbToFile:
-			t.Err = t.runDbToFile()
+			t.setErr(t.runDbToFile())
 		case FileToFile:
-			t.Err = t.runFileToFile()
+			t.setErr(t.runFileToFile())
 		case ApiToDB:
-			t.Err = t.runApiToDb()
+			t.setErr(t.runApiToDb())
 		case ApiToFile:
-			t.Err = t.runApiToFile()
+			t.setErr(t.runApiToFile())
 		default:
 			t.SetProgress("task execution configuration is invalid")
-			t.Err = g.Error("Cannot Execute. Task Type is not specified")
+			t.setErr(g.Error("Cannot Execute. Task Type is not specified"))
 		}
 
 		// warn constrains
@@ -182,7 +182,7 @@ func (t *TaskExecution) Execute() error {
 			g.Debug("error after interrupt: %s", t.Err.Error())
 		}
 		newStatus = ExecStatusTerminated
-		t.Err = g.Error("Execution interrupted")
+		t.setErr(g.Error("Execution interrupted"))
 	}
 
 	if t.Err == nil {
@@ -207,17 +207,17 @@ func (t *TaskExecution) Execute() error {
 				eG := g.ErrorGroup{}
 				eG.Add(err)
 				eG.Add(t.Err)
-				t.Err = g.Error(eG.Err())
+				t.setErr(g.Error(eG.Err()))
 			} else {
-				t.Err = g.Error(t.Err)
+				t.setErr(g.Error(t.Err))
 			}
 		} else {
-			t.Err = g.Error(t.Err)
+			t.setErr(g.Error(t.Err))
 		}
 	}
 
 	now2 := time.Now()
-	t.EndTime = &now2
+	t.setEndTime(now2)
 
 	// since t.Status is still "running", let's use the context.Map for real status
 	t.Context.Map.Set("new_status", newStatus)
@@ -229,12 +229,12 @@ func (t *TaskExecution) Execute() error {
 	// post-hooks
 	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
 		if t.Err == nil {
-			t.Err = hookErr
+			t.setErr(hookErr)
 			newStatus = ExecStatusError
 		}
 	}
 
-	t.Status = newStatus
+	t.setStatus(newStatus)
 
 	return t.Err
 }

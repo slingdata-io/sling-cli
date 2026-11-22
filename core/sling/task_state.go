@@ -332,12 +332,13 @@ func (t *TaskExecution) StateSet() {
 		state.Stream = run.Stream
 		state.Object = run.Object
 
+		st := t.StatusSnapshot()
 		bytes, _ := t.GetBytes()
 		run.TotalBytes = bytes
 		run.TotalRows = t.GetCount()
-		run.Status = t.Status
-		run.StartTime = t.StartTime
-		run.EndTime = t.EndTime
+		run.Status = st.Status
+		run.StartTime = st.StartTime
+		run.EndTime = st.EndTime
 		run.IncrValue = t.Config.IncrementalVal
 		run.Range = g.PtrVal(g.PtrVal(t.Config.Source.Options).Range)
 		run.Config = g.PtrVal(t.Config.ReplicationStream)
@@ -351,8 +352,8 @@ func (t *TaskExecution) StateSet() {
 		}
 		run.Task = t
 
-		if t.Err != nil {
-			run.Error = g.Ptr(t.Err.Error())
+		if st.Err != nil {
+			run.Error = g.Ptr(st.Err.Error())
 		}
 
 		// aggregate statuses, rows and bytes
@@ -409,7 +410,7 @@ func (t *TaskExecution) StateSet() {
 		t.setLogDetails()
 
 		// write runtime state file if finished
-		if env.IsThreadChild && t.Status.IsFinished() {
+		if env.IsThreadChild && st.Status.IsFinished() {
 			stateFile := env.RuntimeFilePath(t.Config.StreamName)
 			if err := os.WriteFile(stateFile, []byte(state.Marshall()), 0755); err != nil {
 				g.Warn("could not write runtime state file (%s): %s", stateFile, err.Error())

@@ -1205,6 +1205,59 @@ streams:
 	assert.Equal(t, 2, state.Execution.Status.Count)
 }
 
+// The ticker calls StateSet while the task goroutine sets status, error and
+// end time. Run with -race.
+func TestStateSetConcurrentStatusWrites(t *testing.T) {
+	replication, err := LoadReplicationConfig(`
+source: local
+target: local
+defaults:
+  mode: full-refresh
+streams:
+  file:///tmp/sling_race_e.csv:
+    object: file:///tmp/sling_race_e_out.csv
+`)
+	if !assert.NoError(t, err) || !assert.NoError(t, replication.Compile(nil)) {
+		return
+	}
+
+	te := &TaskExecution{
+		Config:      replication.Tasks[0],
+		Replication: &replication,
+		Context:     g.NewContext(context.Background()),
+		Status:      ExecStatusRunning,
+		StartTime:   g.Ptr(time.Now()),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 300 {
+			te.StateSet()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 300 {
+			te.setStatus(ExecStatusRunning)
+			te.setErr(g.Error("boom"))
+			te.setEndTime(time.Now())
+		}
+	}()
+	wg.Wait()
+
+	te.setStatus(ExecStatusSuccess)
+	te.StateSet()
+
+	state, _ := replication.RuntimeState()
+	if assert.Len(t, state.Runs, 1) {
+		for _, run := range state.Runs {
+			assert.Equal(t, ExecStatusSuccess, run.Status)
+		}
+	}
+}
+
 func TestExecuteReplicationHookSetsError(t *testing.T) {
 	runID := "__sling_replication_hook_end__"
 	cases := []struct {

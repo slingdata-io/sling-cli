@@ -22,19 +22,22 @@ var StoreSet = func(val any) error { return nil }
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
-	ExecID    string     `json:"exec_id"`
-	Config    *Config    `json:"config"`
-	Type      JobType    `json:"type"`
-	Status    ExecStatus `json:"status"`
-	Err       error      `json:"error"`
+	ExecID string     `json:"exec_id"`
+	Config *Config    `json:"config"`
+	Type   JobType    `json:"type"`
+	Status ExecStatus `json:"status"` // while a ticker can run, write through setStatus
+	Err    error      `json:"error"`  // same: setErr
+	// StartTime is set only before the tickers start.
 	StartTime *time.Time `json:"start_time"`
-	EndTime   *time.Time `json:"end_time"`
+	EndTime   *time.Time `json:"end_time"` // same as Status: setEndTime
 	Bytes     uint64     `json:"bytes"`
 	Context   *g.Context `json:"-"`
 	Progress  string     `json:"progress"`
 
 	df            *iop.Dataflow `json:"-"`
 	dfMu          sync.RWMutex  // guards df; only the task goroutine reads t.df directly, others call Df()
+	statusMu      sync.RWMutex  // guards Status, Err and EndTime for readers on other goroutines; they call StatusSnapshot()
+	rateMu        sync.Mutex    // guards prevRowCount, prevByteCount and lastIncrement
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
@@ -154,10 +157,44 @@ func (t *TaskExecution) SetProgress(text string, args ...interface{}) {
 	}
 }
 
+// TaskStatusSnapshot is a consistent copy of the status fields
+type TaskStatusSnapshot struct {
+	Status    ExecStatus
+	Err       error
+	StartTime *time.Time
+	EndTime   *time.Time
+}
+
+// StatusSnapshot returns the status fields under the read lock
+func (t *TaskExecution) StatusSnapshot() TaskStatusSnapshot {
+	t.statusMu.RLock()
+	defer t.statusMu.RUnlock()
+	return TaskStatusSnapshot{Status: t.Status, Err: t.Err, StartTime: t.StartTime, EndTime: t.EndTime}
+}
+
+func (t *TaskExecution) setStatus(status ExecStatus) {
+	t.statusMu.Lock()
+	t.Status = status
+	t.statusMu.Unlock()
+}
+
+func (t *TaskExecution) setErr(err error) {
+	t.statusMu.Lock()
+	t.Err = err
+	t.statusMu.Unlock()
+}
+
+func (t *TaskExecution) setEndTime(end time.Time) {
+	t.statusMu.Lock()
+	t.EndTime = &end
+	t.statusMu.Unlock()
+}
+
 func (t *TaskExecution) setLogDetails() {
+	st := t.StatusSnapshot()
 	var duration int
-	if t.StartTime != nil {
-		duration = int(time.Since(*t.StartTime).Seconds())
+	if st.StartTime != nil {
+		duration = int(time.Since(*st.StartTime).Seconds())
 	}
 	rowCount := t.GetCount()
 	rowRate, byteRate := t.GetRate(1)
@@ -175,7 +212,7 @@ func (t *TaskExecution) setLogDetails() {
 		"row_rate", rowRate,
 		"byte_count", bytes,
 		"byte_rate", byteRate,
-		"status", t.Status,
+		"status", st.Status,
 		"duration", duration,
 	)))
 }
@@ -330,15 +367,18 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 	var secElapsed float64
 	count := t.GetCount()
 	bytes, _ := t.GetBytes()
-	if t.StartTime == nil || t.StartTime.IsZero() {
+	st := t.StatusSnapshot()
+	if st.StartTime == nil || st.StartTime.IsZero() {
 		return
-	} else if t.EndTime == nil || t.EndTime.IsZero() {
-		st := *t.StartTime
+	} else if st.EndTime == nil || st.EndTime.IsZero() {
+		start := *st.StartTime
 		if secWindow <= 0 {
-			secElapsed = time.Since(st).Seconds()
+			secElapsed = time.Since(start).Seconds()
 			rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
 			byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 		} else {
+			t.rateMu.Lock()
+			defer t.rateMu.Unlock()
 			rowRate = cast.ToInt64(math.Round(cast.ToFloat64((count - t.prevRowCount) / cast.ToUint64(secWindow))))
 			byteRate = cast.ToInt64(math.Round(cast.ToFloat64((bytes - t.prevByteCount) / cast.ToUint64(secWindow))))
 			if t.prevRowCount < count {
@@ -348,9 +388,9 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 			t.prevByteCount = bytes
 		}
 	} else {
-		st := *t.StartTime
-		et := *t.EndTime
-		secElapsed = cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
+		start := *st.StartTime
+		et := *st.EndTime
+		secElapsed = cast.ToFloat64(et.UnixNano()-start.UnixNano()) / 1000000000.0
 		rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
 		byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 	}
