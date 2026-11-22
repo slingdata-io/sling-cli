@@ -8,6 +8,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -138,7 +139,8 @@ func (t *TaskExecution) SetProgress(text string, args ...interface{}) {
 			text = env.RedString(text)
 		}
 		t.setLogDetails()
-		g.Info(text, args...)
+		// a continuous run makes a task for each stream in each cycle
+		lo.Ternary(IsContinuousRunMode(), g.Debug, g.Info)(text, args...)
 	} else {
 		t.PBar.SetStatus(progressText)
 	}

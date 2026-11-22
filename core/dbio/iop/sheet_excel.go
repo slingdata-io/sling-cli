@@ -46,13 +46,152 @@ func NewExcelDataset(reader io.Reader, props map[string]string) (data Dataset, e
 			return data, err
 		}
 	} else {
-		rows, err := xls.File.GetRows(sheetName)
+		rows, err := xls.readRows(sheetName)
 		if err != nil {
 			return data, g.Error(err, "Unable to get rows for sheet %s", sheetName)
 		}
 		data = xls.makeDatasetAuto(rows)
 	}
 	return
+}
+
+type excelFmtKind int
+
+const (
+	excelFmtNumber excelFmtKind = iota
+	excelFmtDate
+	excelFmtPercent
+	excelFmtText
+)
+
+// excelStoredNumFmtID is an id that excelize does not know. A cell with this
+// format id reads as the stored value (excelize formattedValue).
+const excelStoredNumFmtID = -1
+
+// numFmtKind classifies an Excel number format. code is the custom format
+// code, or "" for a built-in id.
+func numFmtKind(id int, code string) excelFmtKind {
+	if code == "" {
+		switch {
+		case id >= 14 && id <= 22, id >= 27 && id <= 36, id >= 45 && id <= 47, id >= 50 && id <= 58:
+			return excelFmtDate
+		case id == 9 || id == 10:
+			return excelFmtPercent
+		case id == 49:
+			return excelFmtText
+		}
+		return excelFmtNumber
+	}
+
+	// drop quoted literals, escapes, padding and [...] parts, except elapsed time
+	var sb strings.Builder
+	for i := 0; i < len(code); i++ {
+		switch c := code[i]; c {
+		case '"':
+			j := strings.IndexByte(code[i+1:], '"')
+			if j < 0 {
+				i = len(code)
+			} else {
+				i += j + 1
+			}
+		case '\\', '_', '*':
+			i++
+		case '[':
+			j := strings.IndexByte(code[i+1:], ']')
+			if j < 0 {
+				i = len(code)
+				break
+			}
+			inner := strings.ToLower(code[i+1 : i+1+j])
+			if inner != "" && strings.ContainsRune("hms", rune(inner[0])) &&
+				strings.Trim(inner, inner[:1]) == "" {
+				sb.WriteString(inner) // elapsed time: [h], [mm], [ss]
+			}
+			i += j + 1
+		default:
+			sb.WriteByte(c)
+		}
+	}
+
+	f := strings.ToLower(sb.String())
+	switch {
+	case strings.Contains(f, "%"):
+		return excelFmtPercent
+	case strings.ContainsAny(f, "ymdhs"):
+		return excelFmtDate
+	case strings.TrimSpace(f) == "@":
+		return excelFmtText
+	}
+	return excelFmtNumber
+}
+
+// useStoredNumbers sets the format id of each number-kind cell style to
+// excelStoredNumFmtID, so that GetRows returns the stored number. Date, percent
+// and text styles keep their format. restore puts the old ids back.
+func (xls *Excel) useStoredNumbers() (restore func(), err error) {
+	restore = func() {}
+
+	// loads xls.File.Styles. An empty cellXfs gives an invalid style id error
+	if _, err = xls.File.GetStyle(0); err != nil && !strings.HasPrefix(err.Error(), "invalid style ID") {
+		return restore, err
+	}
+
+	styles := xls.File.Styles
+	if styles == nil || styles.CellXfs == nil {
+		return restore, nil
+	}
+
+	customCode := func(id int) string {
+		if styles.NumFmts == nil {
+			return ""
+		}
+		for _, nf := range styles.NumFmts.NumFmt {
+			if nf != nil && nf.NumFmtID == id {
+				if nf.FormatCode16 != "" {
+					return nf.FormatCode16
+				}
+				return nf.FormatCode
+			}
+		}
+		return ""
+	}
+
+	storedID := excelStoredNumFmtID
+	old := map[int]*int{}
+	for i := range styles.CellXfs.Xf {
+		xf := &styles.CellXfs.Xf[i]
+		id := 0
+		if xf.NumFmtID != nil {
+			id = *xf.NumFmtID
+		}
+		if numFmtKind(id, customCode(id)) != excelFmtNumber {
+			continue
+		}
+		old[i] = xf.NumFmtID
+		xf.NumFmtID = &storedID
+	}
+
+	return func() {
+		for i, p := range old {
+			styles.CellXfs.Xf[i].NumFmtID = p
+		}
+	}, nil
+}
+
+// readRows is GetRows, with number cells read as the stored value.
+// Not safe for concurrent use.
+func (xls *Excel) readRows(sheet string) ([][]string, error) {
+	restore, err := xls.useStoredNumbers()
+	if err != nil {
+		return nil, g.Error(err, "could not get rows for sheet %s", sheet)
+	}
+	defer restore()
+
+	rows, err := xls.File.GetRows(sheet)
+	if err != nil {
+		return nil, g.Error(err, "could not get rows for sheet %s", sheet)
+	}
+	return rows, nil
 }
 
 // Excel represent an Excel object pointing to its file
@@ -135,7 +274,7 @@ func (xls *Excel) RefreshSheets() (err error) {
 
 // GetDataset returns a dataset of the provided sheet
 func (xls *Excel) GetDataset(sheet string) (data Dataset) {
-	rows, _ := xls.File.GetRows(sheet)
+	rows, _ := xls.readRows(sheet)
 	return xls.makeDatasetAuto(rows)
 }
 
@@ -150,7 +289,7 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 	regexAlpha := *regexp.MustCompile(`[^a-zA-Z]`)
 	regexNum := *regexp.MustCompile(`[^0-9]`)
 
-	allRows, err := xls.File.GetRows(sheet)
+	allRows, err := xls.readRows(sheet)
 	if err != nil {
 		return data, g.Error(err, "could not get rows")
 	}

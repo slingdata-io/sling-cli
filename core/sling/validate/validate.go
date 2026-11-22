@@ -383,14 +383,18 @@ func compiledReplication(cfg sling.ReplicationConfig) map[string]any {
 	if err == nil {
 		_ = json.Unmarshal(b, &streams)
 	}
-	return dtoToMap(ReplicationDTO{
+	dto := ReplicationDTO{
 		Source:   cfg.Source,
 		Target:   cfg.Target,
 		Hooks:    cfg.Hooks,
 		Defaults: cfg.Defaults,
 		Streams:  streams,
 		Env:      cfg.Env,
-	})
+	}
+	if cfg.Continuous != nil {
+		dto.Continuous = cfg.Continuous
+	}
+	return dtoToMap(dto)
 }
 
 func compiledBuild(project *build.BuildProject) map[string]any {

@@ -1,0 +1,17 @@
+# A child that cannot start shows its error and fails the streams that did not start.
+# The start hook removes the sling binary that runs this replication (SLING_TEST_BIN).
+source: LOCAL
+target: LOCAL
+env:
+  SLING_THREADS: 2
+hooks:
+  start:
+    - type: command
+      command: rm -f "{env.SLING_TEST_BIN}"
+defaults:
+  object: /tmp/sling/spawn_error_{stream_file_name}.csv
+streams:
+  file://tests/files/test1.1.csv:
+  file://tests/files/test1.2.csv:
+  file://tests/files/test.wide.csv:
+  file://tests/files/test_wide_columns.csv:

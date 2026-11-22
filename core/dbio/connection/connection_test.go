@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/microsoft/go-mssqldb/msdsn"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
@@ -802,4 +803,32 @@ func TestConnEntriesTestCancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("test did not stop on cancel")
 	}
+}
+
+func TestOracleMultiLineTNS(t *testing.T) {
+	tns := "(DESCRIPTION =\n\t(FAILOVER = ON)\n\t(CONNECT_TIMEOUT = 5)\n" +
+		"\t(ADDRESS_LIST =\n\t\t(ADDRESS = (PROTOCOL = TCP)(HOST = db1.example.com)(PORT = 1521))\n" +
+		"\t\t(ADDRESS = (PROTOCOL = TCP)(HOST = db2.example.com)(PORT = 1521))\n\t)\n" +
+		"\t(CONNECT_DATA = (SERVICE_NAME = my_service))\n)\n"
+	expected := "(DESCRIPTION=(FAILOVER=ON)(CONNECT_TIMEOUT=5)(ADDRESS_LIST=" +
+		"(ADDRESS=(PROTOCOL=TCP)(HOST=db1.example.com)(PORT=1521))" +
+		"(ADDRESS=(PROTOCOL=TCP)(HOST=db2.example.com)(PORT=1521)))" +
+		"(CONNECT_DATA=(SERVICE_NAME=my_service)))"
+
+	c, err := NewConnection("ORA", "oracle", g.M("user", "scott", "password", "tiger", "tns", tns))
+	require.NoError(t, err)
+
+	assert.Equal(t, expected, c.Data["tns"])
+	assert.Equal(t, "oracle://scott:tiger@"+expected, c.URL())
+	assert.NotRegexp(t, `\s`, c.Data["tns"])
+
+	u, err := net.NewURL(c.URL())
+	require.NoError(t, err)
+	assert.Equal(t, "scott", u.Username())
+	assert.Equal(t, "tiger", u.Password())
+
+	// the descriptor without outer parentheses is wrapped
+	c, err = NewConnection("ORA", "oracle", g.M("user", "scott", "password", "tiger", "tns", "\n DESCRIPTION = (X = y)\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "(DESCRIPTION=(X=y))", c.Data["tns"])
 }

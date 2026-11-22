@@ -172,6 +172,7 @@ streams: <streams_map>
 defaults: <default_stream_config>
 hooks: <replication_hooks>
 env: <environment_variables>
+continuous: <continuous_mode_settings>  # change-capture streams only, used with `sling run --continuous`
 ```
 
 ### Stream Configuration Map
@@ -208,6 +209,10 @@ streams:
     # Options
     source_options: <source_options_map>
     target_options: <target_options_map>
+    change_capture_options: <cdc_options_map>  # for change-capture mode
+    
+    # Selection
+    tags: [tag1, tag2]  # select with --streams tag:tag1
     
     # Hooks
     hooks: <stream_hooks>
@@ -410,7 +415,7 @@ streams:
 ```yaml
 defaults:
   target_options:
-    column_casing: snake  # source | target | snake | upper | lower | normalize
+    column_casing: snake  # source | target | snake | camel | upper | lower | normalize
 ```
 
 #### Column Typing
@@ -762,11 +767,17 @@ Match all tables in a schema:
 streams:
   # All tables in public schema
   public.*:
-  
+```
+
+```yaml
+streams:
   # All tables in multiple schemas with prefix/suffix
   sales.marketing_*:   # use a prefix
   inventory.*_latest:  # use a suffix
-  
+```
+
+```yaml
+streams:
   # Exclude specific tables
   public.*:
   public.temp_table:
@@ -1360,7 +1371,6 @@ env:
 ```yaml
 env:
   SLING_RETRIES: 3           # Retry failed streams 3 times
-  SLING_RETRY_DELAY: 30s     # Wait 30 seconds between retries
 ```
 
 ### Performance Optimization
@@ -1521,7 +1531,9 @@ sling run -r /path/to/replication.yaml
 # Good
 source: prod_postgres_crm
 target: dw_snowflake_analytics
+```
 
+```yaml
 # Avoid
 source: db1
 target: db2
@@ -1873,7 +1885,6 @@ sling run -r /path/to/replication.yaml --streams failed_stream
 ```yaml
 env:
   SLING_RETRIES: 3
-  SLING_RETRY_DELAY: 60s
 ```
 
 This comprehensive guide provides everything needed to effectively use Sling replications: validate with MCP, then execute with `sling run`.
