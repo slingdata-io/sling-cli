@@ -78,7 +78,7 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 	}
 	ds.batchCount++
 	ds.CurrentBatch = batch
-	if !ds.closed {
+	if !ds.IsClosed() {
 		ds.BatchChan <- batch
 	}
 	if !ds.NoDebug {

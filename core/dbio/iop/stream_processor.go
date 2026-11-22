@@ -645,7 +645,6 @@ func (sp *StreamProcessor) commitChecksum() {
 			cs = sp.colStats[i]
 		}
 		cs.Checksum = cs.Checksum + val
-		sp.ds.Columns[i].Stats.Checksum = cs.Checksum
 	}
 }
 

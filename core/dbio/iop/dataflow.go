@@ -224,7 +224,7 @@ func (df *Dataflow) Pause(exceptDs ...string) bool {
 		// try to pause all datastreams, or none
 		pauseMap := map[string]bool{}
 		for _, ds := range df.Streams {
-			if !lo.Contains(exceptDs, ds.ID) && !ds.closed {
+			if !lo.Contains(exceptDs, ds.ID) && !ds.IsClosed() {
 				pauseMap[ds.ID] = ds.TryPause()
 			}
 		}
@@ -742,7 +742,7 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 			// push stream, keep retrying
 		tryPush:
 			df.mux.Lock()
-			ds.df = df
+			ds.setDf(df)
 			select {
 			case df.StreamCh <- ds:
 				df.StreamMap[ds.ID] = ds

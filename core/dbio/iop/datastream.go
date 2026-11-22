@@ -61,11 +61,11 @@ type Datastream struct {
 	NoDebug       bool
 	Inferred      bool
 	deferFuncs    []func()
-	closed        bool
+	closed        atomic.Bool
 	empty         bool
 	it            *Iterator
 	config        StreamConfig
-	df            *Dataflow
+	df            atomic.Pointer[Dataflow]
 	bwRows        chan [][]any // for correct byte written
 	bwMu          sync.Mutex
 	bwClosed      bool
@@ -245,7 +245,11 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 }
 
 func (ds *Datastream) Df() *Dataflow {
-	return ds.df
+	return ds.df.Load()
+}
+
+func (ds *Datastream) setDf(df *Dataflow) {
+	ds.df.Store(df)
 }
 
 // NewDatastreamArrow returns a datastream that carries arrow records instead
@@ -362,10 +366,11 @@ func (ds *Datastream) Limited(limit ...int) bool {
 	if len(limit) > 0 && count >= uint64(limit[0]) {
 		return true
 	}
-	if ds.df == nil || ds.df.Limit == 0 {
+	df := ds.Df()
+	if df == nil || df.Limit == 0 {
 		return false
 	}
-	return count >= ds.df.Limit
+	return count >= df.Limit
 }
 
 func (ds *Datastream) processBwRows() {
@@ -549,7 +554,7 @@ func (ds *Datastream) Push(row []any) {
 
 // IsClosed is true is ds is closed
 func (ds *Datastream) IsClosed() bool {
-	return ds.closed
+	return ds.closed.Load()
 }
 
 // WaitReady waits until datastream is ready
@@ -570,7 +575,7 @@ func (ds *Datastream) WaitReady() error {
 func (ds *Datastream) Defer(f func()) {
 	ds.deferFuncs = append(ds.deferFuncs, f)
 
-	if ds.closed { // mutex?
+	if ds.IsClosed() { // mutex?
 		for _, f := range ds.deferFuncs {
 			f()
 		}
@@ -585,7 +590,7 @@ func (ds *Datastream) Close() {
 
 	ds.Context.Lock()
 
-	if !ds.closed {
+	if !ds.IsClosed() {
 		close(ds.BatchChan)
 
 		if batch := ds.LatestBatch(); batch != nil {
@@ -621,7 +626,7 @@ func (ds *Datastream) Close() {
 	if ds.it != nil {
 		ds.it.close()
 	}
-	ds.closed = true
+	ds.closed.Store(true)
 	ds.Context.Unlock()
 }
 
@@ -1086,8 +1091,8 @@ loop:
 							// set directly since we're still profiling
 							g.Debug("column type change from transforms for %s (from %s to %s)", col.Name, col.Type, newType)
 							ds.Columns[i].Type = newType
-							if ds.df != nil {
-								if col := ds.df.Columns.GetColumn(ds.Columns[i].Name); col != nil {
+							if df := ds.Df(); df != nil {
+								if col := df.Columns.GetColumn(ds.Columns[i].Name); col != nil {
 									col.Type = newType
 								}
 							}
@@ -1246,7 +1251,7 @@ skipBuffer:
 					break loop
 				}
 
-				if df := ds.df; df != nil {
+				if df := ds.Df(); df != nil {
 					select {
 					case <-ds.pauseChan:
 						<-ds.unpauseChan // wait for unpause
@@ -1287,16 +1292,16 @@ skipBuffer:
 
 			select {
 			case <-ds.Context.Ctx.Done():
-				if ds.df != nil {
-					ds.df.Context.CaptureErr(ds.Err())
+				if df := ds.Df(); df != nil {
+					df.Context.CaptureErr(ds.Err())
 				}
 				break loop
 			case <-ds.it.Context.Ctx.Done():
 				if ds.it.Context.Err() != nil {
 					err = g.Error(ds.it.Context.Err())
 					ds.Context.CaptureErr(err, "Failed to scan")
-					if ds.df != nil {
-						ds.df.Context.CaptureErr(ds.Err())
+					if df := ds.Df(); df != nil {
+						df.Context.CaptureErr(ds.Err())
 					}
 				}
 				break loop
@@ -2647,7 +2652,7 @@ func (ds *Datastream) Pause() {
 		ds.paused = true
 		return
 	}
-	if ds.Ready && !ds.closed {
+	if ds.Ready && !ds.IsClosed() {
 		g.Trace("pausing %s", ds.ID)
 		ds.pauseChan <- struct{}{}
 		ds.paused = true
@@ -4109,15 +4114,15 @@ func (it *Iterator) next() bool {
 
 			// logic to improve perf but not checking if
 			// df limit is reached each cycle
-			if it.ds.df != nil && it.ds.df.Limit > 0 {
+			if df := it.ds.Df(); df != nil && df.Limit > 0 {
 				it.limitCnt++
 
-				if it.Counter > it.ds.df.Limit {
+				if it.Counter > df.Limit {
 					return false
 				} else if it.limitCnt >= 30 {
 					// to check for limit reached each 30 rows
 					it.limitCnt = 0
-					if it.ds.df.Count() > it.ds.df.Limit {
+					if df.Count() > df.Limit {
 						return false
 					}
 				}
@@ -4131,7 +4136,7 @@ func (it *Iterator) next() bool {
 // hack to make sure all streams are pushed
 func (ds *Datastream) WaitClosed() {
 	for {
-		if ds.closed {
+		if ds.IsClosed() {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // startFakeStreamConsumer simulates the part of ds.Start()'s row loop
@@ -160,3 +161,30 @@ func TestPauseSucceedsWhenStreamAlreadyRunning(t *testing.T) {
 	df.Unpause()
 }
 
+// TestPauseWhileStreamCloses pauses and unpauses the dataflow while the
+// stream loop ends and closes the stream.
+func TestPauseWhileStreamCloses(t *testing.T) {
+	ds := intRowsDatastream(t, 3000)
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range ds.Rows() {
+		}
+	}()
+
+	paused := false
+	for !ds.IsClosed() {
+		if df.Pause() {
+			paused = true
+		}
+		df.Unpause()
+	}
+	<-drained
+
+	assert.True(t, paused)
+	assert.True(t, ds.IsClosed())
+	require.NoError(t, ds.Err())
+}

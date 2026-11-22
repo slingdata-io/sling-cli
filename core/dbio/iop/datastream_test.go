@@ -1129,3 +1129,82 @@ func TestBatchShapeMissingColumn(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "column z not found in target columns")
 }
+
+// intRowsDatastream returns a started datastream of n integer rows.
+func intRowsDatastream(t *testing.T, n int) *Datastream {
+	t.Helper()
+	cols := NewColumns(Column{Name: "id", Type: BigIntType})
+	i := 0
+	nextFunc := func(it *Iterator) bool {
+		if i >= n {
+			return false
+		}
+		i++
+		it.Row = []any{int64(i)}
+		return true
+	}
+	ds := NewDatastreamIt(context.Background(), cols, nextFunc)
+	ds.Inferred = true
+	require.NoError(t, ds.Start())
+	return ds
+}
+
+// TestCommitChecksumKeepsColumnStats reads df.Columns while the stream
+// processor commits the checksum. SyncStats must still get the checksum.
+func TestCommitChecksumKeepsColumnStats(t *testing.T) {
+	const total = 3000
+	ds := intRowsDatastream(t, total)
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = df.Columns.Types()
+			}
+		}
+	}()
+
+	// df.Collect writes Position into the shared columns: drain instead
+	rows := 0
+	for range ds.Rows() {
+		rows++
+	}
+	close(stop)
+	<-done
+	require.NoError(t, ds.Err())
+	require.Equal(t, total, rows)
+
+	df.SyncStats()
+	want := ds.Sp.ColStats()[0].Checksum
+	assert.Equal(t, uint64(total*(total+1)/2), want)
+	assert.Equal(t, want, df.Columns[0].Stats.Checksum)
+}
+
+// TestDatastreamLimitedConcurrentPush calls Limited while the dataflow
+// sets ds.df.
+func TestDatastreamLimitedConcurrentPush(t *testing.T) {
+	const total = 3000
+	ds := intRowsDatastream(t, total)
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+
+	for range 100 {
+		_ = ds.Limited()
+	}
+
+	rows := 0
+	for range ds.Rows() {
+		rows++
+	}
+	require.NoError(t, ds.Err())
+	assert.Equal(t, total, rows)
+	assert.Same(t, df, ds.Df())
+	assert.False(t, ds.Limited())
+}
