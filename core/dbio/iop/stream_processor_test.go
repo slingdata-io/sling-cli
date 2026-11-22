@@ -519,3 +519,48 @@ func TestCastToStringCSVDatetimeUTC(t *testing.T) {
 	ts = time.Date(2026, 11, 14, 9, 0, 0, 0, time.FixedZone("", 5*3600+1800))
 	assert.Equal(t, "2026-11-14 03:30:00.000Z", sp.CastToStringCSV(0, ts, TimestampzType))
 }
+
+func TestStreamProcessor_DatetimeOffsetCSVRoundTrip(t *testing.T) {
+	inputs := []string{
+		"2026-11-14T09:00:00+05:30",
+		"2026-11-14T09:00:00-03:30",
+		"2026-03-08T01:30:00-05:00",
+		"2026-11-14T09:00:00.123456+05:45",
+	}
+
+	for _, input := range inputs {
+		sp := NewStreamProcessor()
+		want, err := time.Parse(time.RFC3339Nano, input)
+		if !assert.NoError(t, err) {
+			continue
+		}
+
+		csvVal := sp.CastToStringCSV(0, want, DatetimeType)
+		got, err := NewStreamProcessor().ParseTime(csvVal)
+		if assert.NoError(t, err, csvVal) {
+			assert.True(t, want.Equal(got), "%s -> %s -> %s", input, csvVal, got.Format(time.RFC3339Nano))
+			_, wantOffset := want.Zone()
+			_, gotOffset := got.Zone()
+			assert.Equal(t, wantOffset, gotOffset, "%s -> %s", input, csvVal)
+		}
+	}
+
+	// whole-hour offsets keep the short form
+	sp := NewStreamProcessor()
+	ts, _ := time.Parse(time.RFC3339, "2026-03-08T01:30:00-05:00")
+	assert.Equal(t, "2026-03-08 01:30:00 -05", sp.CastToStringCSV(0, ts, DatetimeType))
+
+	// CSV values written by earlier versions with an hour-only offset
+	for csvVal, want := range map[string]string{
+		"2026-03-08 01:30:00 -05":   "2026-03-08T06:30:00Z",
+		"2026-11-14 09:00:00 +05":   "2026-11-14T04:00:00Z",
+		"2026-11-14 09:00:00.5 +01": "2026-11-14T08:00:00.5Z",
+		"2026-11-14 09:00:00 +00":   "2026-11-14T09:00:00Z",
+		"2026-11-14 09:00:00 UTC":   "2026-11-14T09:00:00Z",
+	} {
+		got, err := NewStreamProcessor().ParseTime(csvVal)
+		if assert.NoError(t, err, csvVal) {
+			assert.Equal(t, want, got.UTC().Format(time.RFC3339Nano), csvVal)
+		}
+	}
+}
