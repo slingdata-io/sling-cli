@@ -95,7 +95,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
-	github.com/slingdata-io/godbc v0.0.9
+	github.com/slingdata-io/godbc v0.0.10
 	github.com/slingdata-io/golyglot v1.0.20
 	github.com/slingdata-io/sling v0.0.0-00010101000000-000000000000
 	github.com/snowflakedb/gosnowflake v1.19.1
