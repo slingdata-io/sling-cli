@@ -4424,3 +4424,21 @@
     - '| adbc     | main   | adbc_generic_954 |  3 | amt    | DECIMAL'
     - 'inserted 2 rows into "public"."adbc_generic_954_back"'
     - 'id:bigint,label:text,amt:numeric,code:text'
+
+# SLING-581: limit and limit_offset keys of base.yaml were swapped, so a table read lost the offset.
+- id: 956
+  name: 'table and view read with limit and offset skips the offset rows (SLING-581)'
+  group: duckdb
+  env:
+    LIMIT_DUCK: 'duckdb:///tmp/sling_956/limit.duckdb'
+  run: |
+    rm -rf /tmp/sling_956 && mkdir -p /tmp/sling_956
+    sling run -d -r tests/replications/r.154.limit_offset.yaml
+    sling run -d --src-conn LIMIT_DUCK --src-stream main.limit_offset_956 --tgt-object file:///tmp/sling_956/flags.csv --limit 4 --offset 7
+    rm -rf /tmp/sling_956
+  output_contains:
+    - 'wrote 5 rows'
+    - 'wrote 2 rows'
+    - 'wrote 3 rows'
+  output_does_not_contain:
+    - 'limit 5 offset 0'

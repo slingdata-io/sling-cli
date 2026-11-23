@@ -198,8 +198,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 				// Limit handling:
 				//  - limit > 0: wrap the SQL with the dialect's limit_sql template via
-				//    sQuery.Select(...) so the database truncates server-side. This
-				//    works for both bare tables and raw SELECT queries.
+				//    sQuery.Select(...) so the database truncates server-side. A bare
+				//    table name uses the `limit` key (offset 0); a query uses `limit_sql`.
 				//  - limit == 0: unlimited; for raw queries fall back to sQuery.Raw so
 				//    we don't wrap with `LIMIT 0`.
 				//  - procedural calls (stored procs, etc.) cannot be wrapped, so they

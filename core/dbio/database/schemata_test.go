@@ -551,6 +551,86 @@ func TestSelectSQLServerOrderBy(t *testing.T) {
 	assert.Contains(t, sql, "order by id")
 }
 
+func TestTableSelectLimitOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		dialect  dbio.Type
+		offset   int
+		where    string
+		equal    string
+		prefix   string
+		suffix   string
+		contains string
+	}{
+		{name: "postgres limit", dialect: dbio.TypeDbPostgres, equal: `select * from "public"."t" limit 5`},
+		{name: "postgres offset", dialect: dbio.TypeDbPostgres, offset: 10, equal: `select * from "public"."t" limit 5 offset 10`},
+		{name: "postgres where", dialect: dbio.TypeDbPostgres, offset: 10, where: "id > 1", equal: `select * from "public"."t" where (id > 1) limit 5 offset 10`},
+		{name: "duckdb limit", dialect: dbio.TypeDbDuckDb, equal: `select * from "public"."t" limit 5`},
+		{name: "duckdb offset", dialect: dbio.TypeDbDuckDb, offset: 10, equal: `select * from "public"."t" limit 5 offset 10`},
+		{name: "duckdb where", dialect: dbio.TypeDbDuckDb, offset: 10, where: "id > 1", equal: `select * from "public"."t" where (id > 1) limit 5 offset 10`},
+		{name: "odbc offset", dialect: dbio.TypeDbODBC, offset: 10, suffix: " limit 5 offset 10"},
+		{name: "adbc offset", dialect: dbio.TypeDbArrowDBC, offset: 10, suffix: " limit 5 offset 10"},
+		{name: "athena limit", dialect: dbio.TypeDbAthena, suffix: " limit 5"},
+		{name: "athena offset", dialect: dbio.TypeDbAthena, offset: 10, suffix: " offset 10 limit 5"},
+		{name: "trino limit", dialect: dbio.TypeDbTrino, where: "id > 1", suffix: " where (id > 1) limit 5"},
+		{name: "trino offset", dialect: dbio.TypeDbTrino, offset: 10, where: "id > 1", suffix: " where (id > 1) offset 10 limit 5"},
+		{name: "sqlserver limit", dialect: dbio.TypeDbSQLServer, prefix: "select top 5 "},
+		{name: "sqlserver offset", dialect: dbio.TypeDbSQLServer, offset: 10, contains: "offset 10 rows) as t"},
+		{name: "oracle offset", dialect: dbio.TypeDbOracle, offset: 10, contains: "offset 10 rows fetch next 5 rows only"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			table := Table{Name: "t", Schema: "public", Dialect: c.dialect}
+			sql := table.Select(SelectOptions{Limit: g.Ptr(5), Offset: c.offset, Where: c.where})
+			if c.equal != "" {
+				assert.Equal(t, c.equal, sql)
+			}
+			if c.prefix != "" {
+				assert.True(t, strings.HasPrefix(sql, c.prefix), sql)
+			}
+			if c.suffix != "" {
+				assert.True(t, strings.HasSuffix(sql, c.suffix), sql)
+			}
+			if c.contains != "" {
+				assert.Contains(t, sql, c.contains)
+			}
+		})
+	}
+}
+
+func TestTableSelectOffsetAllDialects(t *testing.T) {
+	// these dialects return before they read the template
+	noTemplate := []dbio.Type{
+		dbio.TypeDbPrometheus, dbio.TypeDbIceberg, dbio.TypeDbDynamoDB, dbio.TypeDbMongoDB,
+		dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable,
+	}
+
+	types := []dbio.Type{
+		dbio.TypeDbAzureDWH, dbio.Type("db2"), dbio.Type("firebird"),
+		dbio.Type("hive"), dbio.Type("spark"), dbio.Type("vertica"),
+	}
+	for _, td := range dbio.AllType {
+		if td.Value.IsDb() {
+			types = append(types, td.Value)
+		}
+	}
+
+	for _, dialect := range types {
+		if g.In(dialect, noTemplate...) {
+			continue
+		}
+		if _, err := dialect.Template(); err != nil {
+			continue
+		}
+		t.Run(string(dialect), func(t *testing.T) {
+			table := Table{Name: "t", Schema: "public", Dialect: dialect}
+			sql := table.Select(SelectOptions{Limit: g.Ptr(5), Offset: 10})
+			assert.Contains(t, sql, "10", "offset is lost for %s: %s", dialect, sql)
+		})
+	}
+}
+
 func TestTableFinalizeAggregateFields(t *testing.T) {
 	newTable := func(dialect dbio.Type) Table {
 		return Table{
