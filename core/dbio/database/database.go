@@ -931,9 +931,10 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 	query = strings.TrimSpace(query)
 	query = strings.TrimSuffix(query, ";")
 
+	// keep only the last queries: a long-lived conn (CDC state, lease) logs each cycle
 	conn.Log = append(conn.Log, query)
-	if len(conn.Log) > 9000 {
-		conn.Log = conn.Log[1:]
+	if len(conn.Log) > 100 {
+		conn.Log = conn.Log[len(conn.Log)-100:]
 	}
 
 	env.LogSQL(conn.Props(), query, args...)
