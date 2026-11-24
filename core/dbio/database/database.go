@@ -1476,9 +1476,13 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 		return
 	}
 
+	// cancel the query contexts after Collect, so a long-lived conn does not keep them
+	qctx := g.NewContext(ctx)
+	defer qctx.Cancel()
+
 	for _, sql := range ParseSQLMultiStatements(sql, conn.GetType()) {
 
-		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
+		ds, err := conn.Self().StreamRowsContext(qctx.Ctx, sql, options...)
 		if err != nil {
 			err = g.Error(err, "Error with StreamRows")
 			return iop.Dataset{SQL: sql}, err

@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -4884,4 +4885,37 @@ func TestSQLServerOrderByOffset(t *testing.T) {
 			assert.Equal(t, c.expected, sqlServerOrderByOffset(c.input))
 		})
 	}
+}
+
+// QueryContext must cancel the contexts of its queries, so a long-lived
+// connection does not keep them in its children map.
+func TestQueryContextCancelsChildren(t *testing.T) {
+	conn, err := NewConn("sqlite://" + filepath.Join(t.TempDir(), "q.db"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	run := func(n int) {
+		for i := 0; i < n; i++ {
+			data, err := conn.Query("select 1")
+			require.NoError(t, err)
+			require.Len(t, data.Rows, 1)
+			require.NoError(t, conn.Context().Ctx.Err())
+		}
+	}
+	heap := func() uint64 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+
+	run(200)
+	before := heap()
+	run(3000)
+	after := heap()
+
+	growth := int64(after) - int64(before)
+	t.Logf("heap growth after 3000 queries: %d bytes", growth)
+	assert.Less(t, growth, int64(1<<20))
 }
