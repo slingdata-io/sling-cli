@@ -63,7 +63,7 @@ test-core:
     (cd core/sling && go test -v -run 'TestColumnCasing')
     (cd core/sling && go test -run 'TestCheck')
     (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestCreateTableIfNotExists|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestFormatMapKeepsConfig|TestFormatMapConcurrentStreamID|TestMarkdownLines|TestPrepareLegacySQLHooks|TestStateSetConcurrentTasks|TestStateSetConcurrentStatusWrites|TestTaskStatusSnapshot|TestTaskDfConcurrentAccess|TestUnmarshalTaskEnv|TestContinuous|TestCDCGroupRunnerSnapshotStreams|TestCDCStreamUnitCopy|TestCDCGroupRunnerKillHook|TestCDCGroupRunnerTaskContexts|TestCDCWriteContextCancel')
-    (cd core/sling && go test -race -run 'TestFormatMapKeepsConfig|TestFormatMapConcurrentStreamID|TestTaskDfConcurrentAccess|TestStateSetConcurrentTasks|TestStateSetConcurrentStatusWrites|TestTaskStatusSnapshot|TestRuntimeStateConcurrentAccess')
+    (cd core/sling && go test -race -run 'TestFormatMapKeepsConfig|TestFormatMapConcurrentStreamID|TestTaskDfConcurrentAccess|TestStateSetConcurrentTasks|TestStateSetConcurrentStatusWrites|TestTaskStatusSnapshot|TestRuntimeStateConcurrentAccess|TestContinuousLeaseDuckDbState')
     (cd core/env && go test -v)
     (cd core/secrets && go test -v)
     (cd core/sling/assist && go test -v)
