@@ -2759,6 +2759,32 @@
   output_contains:
     - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
 
+# The named pipe and csv file import paths (copy_method: named_pipes|csv_files)
+# built their own read_csv without buffer_size, so the 256MB max_line_size raise
+# still demanded a 4 GiB block. Both paths share DuckDb.ReadCsvExpr now.
+- id: 955
+  name: 'duckdb named pipe and csv file imports load large rows under low memory_limit'
+  run: |
+    mkdir -p temp/duckdb_low_mem
+    python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
+    for m in named_pipes csv_files; do
+      rm -f temp/duckdb_low_mem/test_$m.duckdb
+      DUCK_LOW_MEM="{type: duckdb, instance: \"temp/duckdb_low_mem/test_$m.duckdb\", memory_limit: 1GB, copy_method: $m}" sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml || exit 1
+    done
+  output_contains:
+    - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+- id: 957
+  name: 'ducklake named pipe import loads large rows under low memory_limit'
+  run: |
+    mkdir -p temp/duckdb_low_mem/ducklake_data
+    rm -f temp/duckdb_low_mem/meta.sqlite
+    rm -rf temp/duckdb_low_mem/ducklake_data/*
+    python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
+    DUCK_LOW_MEM='{type: ducklake, catalog_conn_string: "temp/duckdb_low_mem/meta.sqlite", data_path: "temp/duckdb_low_mem/ducklake_data/", memory_limit: 1GB, copy_method: named_pipes}' sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
+  output_contains:
+    - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
 # Chunking with ad-hoc CLI flags (no -r) was silently ignored, since only the
 # replication path calls ProcessChunks. The task path now routes to the
 # replication path when a pro feature needs it.

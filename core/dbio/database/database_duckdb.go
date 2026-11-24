@@ -411,7 +411,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		}
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select %s from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=%d, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), selectExpr, file.Node.Path(), conn.generateCsvColumns(file.Columns), conn.duck.MaxLineSize(file.Columns)),
+			g.F(`insert into %s (%s) select %s from %s;`, table.FDQN(), strings.Join(columnNames, ", "), selectExpr, conn.duck.ReadCsvExpr(file.Node.Path(), file.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -511,10 +511,6 @@ func (conn *DuckDbConn) defaultCsvConfig() (config iop.StreamConfig) {
 		config.FileMaxRows = cast.ToInt64(val)
 	}
 	return config
-}
-
-func (conn *DuckDbConn) generateCsvColumns(columns iop.Columns) (colStr string) {
-	return conn.duck.GenerateCsvColumns(columns)
 }
 
 // GenerateMergeSQL generates the upsert SQL using the database default strategy.
