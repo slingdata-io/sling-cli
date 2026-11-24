@@ -1711,13 +1711,17 @@ func TestClickhouseMergeTemplatesCastPK(t *testing.T) {
 	tgt := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Int32"}
 	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgt))
 
-	// a Nullable target casts to the inner type, not to Nullable(T)
+	// a Nullable target keeps Nullable(T), so a NULL does not fail the cast
 	tgtNull := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Nullable(Int32)"}
-	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgtNull))
+	assert.Equal(t, "cast(`id` as Nullable(Int32))", conn.CastColumnForSelect(src, tgtNull))
+	srcNull := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Nullable(Int64)"}
+	assert.Equal(t, "cast(`id` as Nullable(Int32))", conn.CastColumnForSelect(srcNull, tgtNull))
 
 	// equal types add no cast, so the common case renders as before
 	same := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
 	assert.Equal(t, "`id`", conn.CastColumnForSelect(src, same))
+	sameNull := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Nullable(Int64)"}
+	assert.Equal(t, "`id`", conn.CastColumnForSelect(srcNull, sameNull))
 }
 
 type fakeZerobusStream struct {
