@@ -48,8 +48,8 @@ type Datastream struct {
 	Columns       Columns
 	Buffer        [][]any
 	BatchChan     chan *Batch
-	Batches       []*Batch
 	CurrentBatch  *Batch
+	batchCount    int    // batches made, and next batch id
 	Count         uint64 // rows taken by the consumer
 	pushed        uint64 // rows pushed by the producer
 	Context       *g.Context
@@ -61,15 +61,16 @@ type Datastream struct {
 	NoDebug       bool
 	Inferred      bool
 	deferFuncs    []func()
-	closed        bool
+	closed        atomic.Bool
 	empty         bool
 	it            *Iterator
 	config        StreamConfig
-	df            *Dataflow
+	df            atomic.Pointer[Dataflow]
 	bwRows        chan [][]any // for correct byte written
 	bwMu          sync.Mutex
 	bwClosed      bool
-	bwOn          bool // SLING_PROCESS_BW
+	bwOn          bool                         // SLING_PROCESS_BW
+	bwTypes       atomic.Pointer[[]ColumnType] // copy of the column types for the bytes-written processor
 	readyChn      chan struct{}
 	readyBuffer   [][]any // the Buffer at SetReady: Close can clear Buffer before the dataflow reads it
 	schemaChgChan chan schemaChg
@@ -80,10 +81,22 @@ type Datastream struct {
 	pauseChan     chan struct{}
 	unpauseChan   chan struct{}
 
+	stats       atomic.Pointer[DatastreamStats] // last published copy
+	statsWanted atomic.Bool                     // a reader asks for a new copy
+
 	// Arrow mode: the stream carries arrow records instead of rows. Set at
 	// creation by the arrow lane gate; never changes after Start.
 	rs        *RecordStream
 	ArrowOnly bool
+}
+
+// DatastreamStats is a copy of the stream stats. It is read-only: nobody
+// changes a value after it is published.
+type DatastreamStats struct {
+	ID      string
+	URI     string
+	Columns Columns
+	Count   uint64
 }
 
 type schemaChg struct {
@@ -224,7 +237,6 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 	ds = &Datastream{
 		ID:            g.NewTsID("ds"),
 		BatchChan:     make(chan *Batch, 1000),
-		Batches:       []*Batch{},
 		Buffer:        make([][]any, 0, SampleSize),
 		Columns:       columns,
 		Context:       g.NewContext(ctx),
@@ -246,7 +258,11 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 }
 
 func (ds *Datastream) Df() *Dataflow {
-	return ds.df
+	return ds.df.Load()
+}
+
+func (ds *Datastream) setDf(df *Dataflow) {
+	ds.df.Store(df)
 }
 
 // NewDatastreamArrow returns a datastream that carries arrow records instead
@@ -363,10 +379,11 @@ func (ds *Datastream) Limited(limit ...int) bool {
 	if len(limit) > 0 && count >= uint64(limit[0]) {
 		return true
 	}
-	if ds.df == nil || ds.df.Limit == 0 {
+	df := ds.Df()
+	if df == nil || df.Limit == 0 {
 		return false
 	}
-	return count >= ds.df.Limit
+	return count >= df.Limit
 }
 
 func (ds *Datastream) processBwRows() {
@@ -384,8 +401,12 @@ func (ds *Datastream) processBwRows() {
 
 		for rows := range ds.bwRows {
 			if processBw {
+				var types []ColumnType
+				if p := ds.bwTypes.Load(); p != nil {
+					types = *p
+				}
 				for _, row := range rows {
-					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row, types))
 				}
 				ds.bwCsv.Flush()
 			}
@@ -439,7 +460,22 @@ func (ds *Datastream) sendBwRows(rows [][]any) {
 // This should be called when creating a datastream that pushes rows
 // directly without calling Start() (e.g., chunked streaming).
 func (ds *Datastream) StartBwProcessor() {
+	ds.publishBwTypes()
 	go ds.processBwRows()
+}
+
+// publishBwTypes stores a copy of the column types for the bytes-written
+// processor, which runs in a different goroutine. Call it on the goroutine
+// that changes ds.Columns, after each change.
+func (ds *Datastream) publishBwTypes() {
+	if !ds.bwOn {
+		return
+	}
+	types := make([]ColumnType, len(ds.Columns))
+	for i, col := range ds.Columns {
+		types[i] = col.Type
+	}
+	ds.bwTypes.Store(&types)
 }
 
 // DrainReprocess returns any row that was sent to the Reprocess channel
@@ -457,10 +493,52 @@ func (ds *Datastream) DrainReprocess() []any {
 // SetReady sets the ds.ready
 func (ds *Datastream) SetReady() {
 	if !ds.Ready {
+		ds.publishStats()
 		ds.Ready = true
 		ds.readyBuffer = ds.Buffer
 		go func() { ds.readyChn <- struct{}{} }()
 	}
+}
+
+// StatusEnabled reports whether a status URL is set. The private build
+// replaces it, because the public env package has no status URL.
+var StatusEnabled = func() bool { return false }
+
+// publishStats stores a copy of the columns and column stats. Call it only on
+// the producer goroutine, or before the stream is shared. It does nothing
+// without a status URL.
+func (ds *Datastream) publishStats() {
+	if !StatusEnabled() {
+		return
+	}
+	ds.statsWanted.Store(false) // first, so a request during the build is kept
+
+	st := &DatastreamStats{
+		ID:      ds.ID,
+		URI:     cast.ToString(ds.Metadata.StreamURL.Value),
+		Columns: ds.Columns.deepClone(),
+	}
+	if ds.Sp != nil {
+		colStats := ds.Sp.colStatsCopy()
+		for j := range st.Columns {
+			if cs, ok := colStats[j]; ok {
+				st.Columns[j].Stats = cs
+			}
+		}
+	}
+	ds.stats.Store(st)
+}
+
+// StatsSnapshot returns the last published stats and asks for a new copy.
+// It is safe on any goroutine. The caller must not change Columns.
+func (ds *Datastream) StatsSnapshot() DatastreamStats {
+	ds.statsWanted.Store(true)
+	st := DatastreamStats{ID: ds.ID}
+	if p := ds.stats.Load(); p != nil {
+		st = *p
+	}
+	st.Count = atomic.LoadUint64(&ds.Count)
+	return st
 }
 
 // SetEmpty sets the ds.Rows channel as empty
@@ -507,11 +585,16 @@ func (ds *Datastream) CastRowToString(row []any) []string {
 	return rowStr
 }
 
-// CastToStringSafeMask returns the row as string mask casted ( evensafer)
-func (ds *Datastream) CastToStringSafeMask(row []any) []string {
+// CastToStringSafeMask returns the row as string mask casted ( evensafer).
+// types are the column types. A value without a type is cast by its value.
+func (ds *Datastream) CastToStringSafeMask(row []any, types []ColumnType) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
-		rowStr[i] = ds.Sp.CastToStringSafeMask(i, val, ds.Columns[i].Type)
+		if i < len(types) {
+			rowStr[i] = ds.Sp.CastToStringSafeMask(i, val, types[i])
+		} else {
+			rowStr[i] = ds.Sp.CastToStringSafeMask(i, val)
+		}
 	}
 	return rowStr
 }
@@ -550,7 +633,7 @@ func (ds *Datastream) Push(row []any) {
 
 // IsClosed is true is ds is closed
 func (ds *Datastream) IsClosed() bool {
-	return ds.closed
+	return ds.closed.Load()
 }
 
 // WaitReady waits until datastream is ready
@@ -571,7 +654,7 @@ func (ds *Datastream) WaitReady() error {
 func (ds *Datastream) Defer(f func()) {
 	ds.deferFuncs = append(ds.deferFuncs, f)
 
-	if ds.closed { // mutex?
+	if ds.IsClosed() { // mutex?
 		for _, f := range ds.deferFuncs {
 			f()
 		}
@@ -586,7 +669,7 @@ func (ds *Datastream) Close() {
 
 	ds.Context.Lock()
 
-	if !ds.closed {
+	if !ds.IsClosed() {
 		close(ds.BatchChan)
 
 		if batch := ds.LatestBatch(); batch != nil {
@@ -622,7 +705,7 @@ func (ds *Datastream) Close() {
 	if ds.it != nil {
 		ds.it.close()
 	}
-	ds.closed = true
+	ds.closed.Store(true)
 	ds.Context.Unlock()
 }
 
@@ -635,6 +718,7 @@ func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns
 
 	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
 	ds.Columns = mergedCols.ValidateNames(ds.Sp.Config.TargetType)
+	ds.publishBwTypes()
 	added = colsAdded.AddedCols
 
 	ds.schemaChgChan <- colsAdded
@@ -664,6 +748,7 @@ func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
 
 	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, oldType, newType)
 	setChangedType(&ds.Columns[i], newType)
+	ds.publishBwTypes()
 	ds.schemaChgChan <- schemaChg{ChangedIndex: i, ChangedType: newType}
 }
 
@@ -1087,8 +1172,8 @@ loop:
 							// set directly since we're still profiling
 							g.Debug("column type change from transforms for %s (from %s to %s)", col.Name, col.Type, newType)
 							ds.Columns[i].Type = newType
-							if ds.df != nil {
-								if col := ds.df.Columns.GetColumn(ds.Columns[i].Name); col != nil {
+							if df := ds.Df(); df != nil {
+								if col := df.Columns.GetColumn(ds.Columns[i].Name); col != nil {
 									col.Type = newType
 								}
 							}
@@ -1166,6 +1251,7 @@ skipBuffer:
 		}
 	}
 
+	ds.publishBwTypes()
 	go ds.processBwRows()
 
 	if !ds.NoDebug && ds.Metadata.StreamURL.Value != nil {
@@ -1185,6 +1271,7 @@ skipBuffer:
 
 		var err error
 		defer ds.Close()
+		defer ds.publishStats() // final copy, before Close
 
 		if ds.CurrentBatch == nil {
 			ds.CurrentBatch = ds.NewBatch(ds.Columns)
@@ -1247,7 +1334,7 @@ skipBuffer:
 					break loop
 				}
 
-				if df := ds.df; df != nil {
+				if df := ds.Df(); df != nil {
 					select {
 					case <-ds.pauseChan:
 						<-ds.unpauseChan // wait for unpause
@@ -1288,16 +1375,16 @@ skipBuffer:
 
 			select {
 			case <-ds.Context.Ctx.Done():
-				if ds.df != nil {
-					ds.df.Context.CaptureErr(ds.Err())
+				if df := ds.Df(); df != nil {
+					df.Context.CaptureErr(ds.Err())
 				}
 				break loop
 			case <-ds.it.Context.Ctx.Done():
 				if ds.it.Context.Err() != nil {
 					err = g.Error(ds.it.Context.Err())
 					ds.Context.CaptureErr(err, "Failed to scan")
-					if ds.df != nil {
-						ds.df.Context.CaptureErr(ds.Err())
+					if df := ds.Df(); df != nil {
+						df.Context.CaptureErr(ds.Err())
 					}
 				}
 				break loop
@@ -2648,7 +2735,7 @@ func (ds *Datastream) Pause() {
 		ds.paused = true
 		return
 	}
-	if ds.Ready && !ds.closed {
+	if ds.Ready && !ds.IsClosed() {
 		g.Trace("pausing %s", ds.ID)
 		ds.pauseChan <- struct{}{}
 		ds.paused = true
@@ -3734,6 +3821,7 @@ func (ds *Datastream) NewExcelReaderChnl(sc StreamConfig) (readerChn chan *Batch
 	err := xls.WriteSheet(sc.Sheet, ds, "overwrite")
 	if err != nil {
 		ds.Context.CaptureErr(g.Error(err, "error writing sheet"))
+		close(readerChn) // nothing will be sent, do not leave the consumer waiting
 		return
 	}
 
@@ -4109,15 +4197,15 @@ func (it *Iterator) next() bool {
 
 			// logic to improve perf but not checking if
 			// df limit is reached each cycle
-			if it.ds.df != nil && it.ds.df.Limit > 0 {
+			if df := it.ds.Df(); df != nil && df.Limit > 0 {
 				it.limitCnt++
 
-				if it.Counter > it.ds.df.Limit {
+				if it.Counter > df.Limit {
 					return false
 				} else if it.limitCnt >= 30 {
 					// to check for limit reached each 30 rows
 					it.limitCnt = 0
-					if it.ds.df.Count() > it.ds.df.Limit {
+					if df.Count() > df.Limit {
 						return false
 					}
 				}
@@ -4131,7 +4219,7 @@ func (it *Iterator) next() bool {
 // hack to make sure all streams are pushed
 func (ds *Datastream) WaitClosed() {
 	for {
-		if ds.closed {
+		if ds.IsClosed() {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)

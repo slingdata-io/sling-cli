@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -128,6 +130,90 @@ func TestGetFormatMapAPISourceStreamTable(t *testing.T) {
 	}
 }
 
+func newFormatNamesConfig() *Config {
+	cfg := &Config{
+		Source:     Source{Conn: "POSTGRES", Stream: "select 1 as id"},
+		Target:     Target{Conn: "CLICKHOUSE", Object: "default.t_{stream_name}", Options: &TargetOptions{TableTmp: "default.t_{stream_table}_tmp"}},
+		StreamName: "{source_name}_s1",
+	}
+	cfg.SrcConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Type = dbio.TypeDbClickhouse
+	cfg.initEvaluator()
+	return cfg
+}
+
+func TestFormatMapKeepsConfig(t *testing.T) {
+	cfg := newFormatNamesConfig()
+
+	m, names, err := cfg.formatMap(true)
+	assert.NoError(t, err)
+	assert.Equal(t, "select 1 as id", cfg.Source.Stream)
+	assert.Equal(t, "{source_name}_s1", cfg.StreamName)
+	assert.Equal(t, "default.t_{stream_name}", cfg.Target.Object)
+	assert.Equal(t, "default.t_{stream_table}_tmp", cfg.Target.Options.TableTmp)
+	assert.Equal(t, "postgres_s1", m["stream_name"])
+	assert.Equal(t, "default.t_postgres_s1", m["object_name"])
+	assert.Equal(t, "postgres_s1", names.streamName)
+	assert.Equal(t, "default.t_postgres_s1", names.targetObject)
+	assert.Equal(t, "default.t_postgres_s1_tmp", names.tableTmp)
+
+	_, err = cfg.GetFormatMap()
+	assert.NoError(t, err)
+	assert.Equal(t, "select 1 as id", cfg.Source.Stream)
+	assert.Equal(t, "postgres_s1", cfg.StreamName)
+	assert.Equal(t, "default.t_postgres_s1", cfg.Target.Object)
+	assert.Equal(t, "default.t_postgres_s1_tmp", cfg.Target.Options.TableTmp)
+}
+
+func TestFormatMapConcurrentStreamID(t *testing.T) {
+	cfg := newFormatNamesConfig()
+	_, err := cfg.GetFormatMap()
+	assert.NoError(t, err)
+
+	want := cfg.StreamID()
+	task := &TaskExecution{Config: cfg}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_, _, _ = cfg.formatMap(true)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			assert.Equal(t, want, cfg.StreamID())
+			_, _ = task.GetSourceTable()
+		}
+	}()
+	wg.Wait()
+}
+
+func TestFormatTargetObjectNameSchemaless(t *testing.T) {
+	cfg := &Config{
+		Source:     Source{Conn: "PG", Stream: "public.users"},
+		Target:     Target{Conn: "FB", Object: "{stream_schema}.{stream_table}", Options: &TargetOptions{TableTmp: "tmp.users_tmp"}},
+		StreamName: "public.users",
+	}
+	cfg.SrcConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Type = dbio.TypeDbODBC
+	cfg.TgtConn.Data = g.M("conn_template", "firebird")
+	cfg.initEvaluator()
+
+	assert.NoError(t, cfg.FormatTargetObjectName())
+	assert.Equal(t, `"USERS"`, cfg.Target.Object)
+	assert.Equal(t, `"USERS_TMP"`, cfg.Target.Options.TableTmp)
+
+	// other targets keep the schema
+	cfg.Target.Object = "{stream_schema}.{stream_table}"
+	cfg.TgtConn.Type = dbio.TypeDbPostgres
+	cfg.TgtConn.Data = g.M()
+	assert.NoError(t, cfg.FormatTargetObjectName())
+	assert.Equal(t, `"public"."users"`, cfg.Target.Object)
+}
+
 func TestPrepareLegacySQLHooks(t *testing.T) {
 	newCfg := func(src dbio.Type, postSQL *string) *Config {
 		cfg := &Config{
@@ -220,4 +306,61 @@ func TestUnmarshalTaskEnv(t *testing.T) {
 
 	var missing Config
 	assert.Error(t, missing.UnmarshalTaskEnv("file://"+path+".missing"))
+}
+
+func TestValidateFileTargetLimits(t *testing.T) {
+	newCfg := func(url string, rows, bytes int64) *Config {
+		opts := &TargetOptions{Format: dbio.FileTypeParquet}
+		if rows > 0 {
+			opts.FileMaxRows = g.Ptr(rows)
+		}
+		if bytes > 0 {
+			opts.FileMaxBytes = g.Ptr(bytes)
+		}
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal, Data: g.M("url", url)}
+		cfg.Target = Target{Object: url, Options: opts}
+		return cfg
+	}
+
+	partitioned := "file://out/{part_year}/{part_month}"
+	assert.ErrorContains(t, newCfg(partitioned, 100, 0).validateFileTargetLimits(), "not supported with partitioned file targets")
+	assert.ErrorContains(t, newCfg(partitioned, 0, 1000).validateFileTargetLimits(), "not supported with partitioned file targets")
+	assert.NoError(t, newCfg(partitioned, 0, 0).validateFileTargetLimits())
+	assert.NoError(t, newCfg("file://out/orders/", 100, 1000).validateFileTargetLimits())
+	assert.NoError(t, newCfg("file://out/orders.parquet", 100, 0).validateFileTargetLimits())
+}
+
+func TestValidateIncrementalFileTarget(t *testing.T) {
+	newCfg := func(url, updateKey string) *Config {
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal, Data: g.M("url", url)}
+		cfg.Source.UpdateKey = updateKey
+		return cfg
+	}
+
+	assert.ErrorContains(t, newCfg("file://out/{run_timestamp}.parquet", "updated_at").validateIncrementalFileTarget(), "needs partition fields")
+	assert.ErrorContains(t, newCfg("file://out/{part_year}/{part_month}", "").validateIncrementalFileTarget(), "needs an update_key")
+	assert.NoError(t, newCfg("file://out/{part_year}/{part_month}", "updated_at").validateIncrementalFileTarget())
+}
+
+func TestCheckIncrementalFileUpdateKey(t *testing.T) {
+	cols := iop.NewColumnsFromFields("id", "ts", "name")
+	cols[0].Type = iop.IntegerType
+	cols[1].Type = iop.TimestampType
+	cols[2].Type = iop.StringType
+	df := iop.NewDataflow()
+	df.Columns = cols
+
+	newTask := func(updateKey string) *TaskExecution {
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal}
+		cfg.Source.UpdateKey = updateKey
+		return &TaskExecution{Config: cfg}
+	}
+
+	assert.NoError(t, newTask("ts").checkIncrementalFileUpdateKey(df))
+	assert.ErrorContains(t, newTask("id").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
+	assert.ErrorContains(t, newTask("name").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
+	assert.ErrorContains(t, newTask("missing").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
 }

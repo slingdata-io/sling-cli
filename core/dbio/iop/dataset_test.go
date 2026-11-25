@@ -371,3 +371,39 @@ func TestEmptyStringHandling(t *testing.T) {
 	assert.True(t, ds.Columns[1].Stats.NullCnt > 0, "Empty strings should be counted as nulls")
 	assert.True(t, ds.Columns[2].Stats.NullCnt > 0, "Empty strings should be counted as nulls")
 }
+
+func TestDatasetInferThousandsSeparator(t *testing.T) {
+	tests := []struct {
+		name string
+		vals []string
+		typ  ColumnType
+		max  int64
+		dec  int
+	}{
+		{"thousands int", []string{"1,234,567", "2,000,000"}, IntegerType, 2000000, 0},
+		{"thousands decimal", []string{"1,234.50", "2,000.25"}, DecimalType, 0, 2},
+		{"decimal comma", []string{"1,5", "2,25"}, DecimalType, 0, 2},
+		{"ambiguous", []string{"3,000", "4,000"}, StringType, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := [][]any{}
+			for _, v := range tt.vals {
+				rows = append(rows, []any{v})
+			}
+			ds := Dataset{Columns: NewColumnsFromFields("c"), Rows: rows, Sp: NewStreamProcessor()}
+			ds.InferColumnTypes()
+			col := ds.Columns[0]
+			assert.Equal(t, tt.typ, col.Type)
+			if tt.max > 0 {
+				assert.Equal(t, tt.max, col.Stats.Max)
+			}
+			if tt.dec > 0 {
+				assert.Equal(t, tt.dec, col.Stats.MaxDecLen)
+			}
+			for i, v := range tt.vals {
+				assert.Equal(t, v, ds.Rows[i][0], "rows stay as read")
+			}
+		})
+	}
+}

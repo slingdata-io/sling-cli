@@ -91,12 +91,12 @@ authentication:
   password: "{secrets.password}"
 
   # OAuth2 Client Credentials Flow (most common for API integrations)
-  type: "oauth2"
-  flow: "client_credentials"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  authentication_url: "https://api.example.com/oauth/token"
-  scopes: ["read:data", "write:data"]
+  # type: "oauth2"
+  # flow: "client_credentials"
+  # client_id: "{secrets.oauth_client_id}"
+  # client_secret: "{secrets.oauth_client_secret}"
+  # authentication_url: "https://api.example.com/oauth/token"
+  # scopes: ["read:data", "write:data"]
 
   expires: 3600  # Re-auth interval in seconds; automatic before each request if expired
 
@@ -205,9 +205,9 @@ endpoints:
               output: state.data_url
 
     # Main request now uses the download URL from setup
-    request:
-      url: "{state.data_url}"  # URL obtained from setup
-      method: "GET"
+    # request:
+    #   url: "{state.data_url}"  # URL obtained from setup
+    #   method: "GET"
 
     # Teardown: runs once after all requests complete (cleanup, logging, notifications)
     teardown:
@@ -395,17 +395,26 @@ Supported authentication types:
 authentication:
   # No Authentication
   type: "" # or omit the authentication block
+```
 
+```yaml
+authentication:
   # Static Header Authentication (API Key / Bearer Token)
   type: "static"
   headers:
     Authorization: "Bearer {secrets.api_token}"  # or X-API-Key, etc.
+```
 
+```yaml
+authentication:
   # Basic Auth
   type: "basic"
   username: "{secrets.username}"
   password: "{secrets.password}"
+```
 
+```yaml
+authentication:
   # OAuth2 - Client Credentials Flow (recommended for server-to-server)
   type: "oauth2"
   flow: "client_credentials"
@@ -415,7 +424,10 @@ authentication:
   scopes:
     - "read:data"
     - "write:data"
+```
 
+```yaml
+authentication:
   # OAuth2 - Authorization Code (browser-based; Sling handles the callback)
   type: "oauth2"
   flow: "authorization_code"
@@ -425,7 +437,10 @@ authentication:
   authorization_url: "https://api.example.com/oauth/authorize"  # Auto-derived if omitted
   # redirect_uri: "http://localhost:8080/callback" # optional; defaults to a random local port
   scopes: ["read:data"]
+```
 
+```yaml
+authentication:
   # OAuth2 - Device Code Flow (for CLI/headless environments - Google, Microsoft, GitHub)
   type: "oauth2"
   flow: "device_code"
@@ -436,7 +451,10 @@ authentication:
   scopes:
     - "https://www.googleapis.com/auth/spreadsheets.readonly"
   # User will be prompted to visit a URL and enter a code; token is stored automatically
+```
 
+```yaml
+authentication:
   # AWS Signature v4 Authentication
   type: "aws-sigv4"
   aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
@@ -445,7 +463,10 @@ authentication:
   aws_secret_access_key: "{secrets.aws_secret_access_key}"
   aws_session_token: "{secrets.aws_session_token}"  # Optional for temporary credentials
   aws_profile: "{secrets.aws_profile}"  # Optional, use AWS profile instead of keys
+```
 
+```yaml
+authentication:
   # HMAC Authentication (e.g., Kraken, Binance, custom APIs)
   type: "hmac"
   algorithm: "sha256"  # sha256 or sha512
@@ -456,7 +477,10 @@ authentication:
     X-Timestamp: "{unix_time}"
     X-API-Key: "{secrets.api_key}"
   nonce_length: 16  # Optional: generates random nonce (in bytes, hex-encoded)
+```
 
+```yaml
+authentication:
   # Custom Authentication Sequence
   type: "sequence"
   sequence:
@@ -562,7 +586,9 @@ state:
   users_url: "{state.base_url}/users"      # Depends on base_url
   full_url: "{state.users_url}?limit=100"  # Depends on users_url
 # Renders: base_url → users_url → full_url
+```
 
+```yaml
 # ❌ Circular dependency error:
 state:
   var_a: "{state.var_b}"  # A → B

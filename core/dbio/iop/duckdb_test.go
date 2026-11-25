@@ -46,6 +46,23 @@ func TestDuckDb(t *testing.T) {
 		}
 	})
 
+	t.Run("ExecMultiContext stops at first error", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		_, err := duck.ExecMultiContext(
+			context.Background(),
+			"create table t (id int)",
+			"insert into missing values (1)",
+			"insert into t values (1)",
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+
+		data, err := duck.Query("select count(*) as cnt from t")
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
+		assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
+	})
+
 	t.Run("ExecContext with erroneous query", func(t *testing.T) {
 		duck := NewDuckDb(context.Background())
 		_, err := duck.Exec("SELECT * FROM non_existent_table")
@@ -711,6 +728,25 @@ func TestGenerateCopyStatementEpochPartitionKey(t *testing.T) {
 	assert.NotContains(t, sql, "strftime(_sling_loaded_at,")
 }
 
+func TestGenerateCopyStatementPartitionSkipsFileSize(t *testing.T) {
+	duck := NewDuckDb(context.Background())
+	cols := NewColumnsFromFields("id", "ts")
+	cols[0].Type = IntegerType
+	cols[1].Type = TimestampType
+
+	opts := DuckDbCopyOptions{Format: dbio.FileTypeParquet, PartitionKey: "ts", FileSizeBytes: 1000, Columns: cols}
+	sql, err := duck.GenerateCopyStatement("main.t", "/tmp/out", opts)
+	assert.NoError(t, err)
+	assert.Contains(t, sql, "file_size_bytes 1000")
+
+	opts.PartitionFields = []PartitionLevel{PartitionLevelYear}
+	sql, err = duck.GenerateCopyStatement("main.t", "/tmp/out", opts)
+	assert.NoError(t, err)
+	assert.Contains(t, sql, "partition_by")
+	assert.NotContains(t, sql, "file_size_bytes")
+	assert.NotContains(t, sql, "per_thread_output")
+}
+
 // regression guard for the v1.5.25 OOM: DuckDB sizes its read_csv buffer as
 // 16 × max_line_size and allocates it eagerly. The 256MB raise thus demands a
 // 4 GiB block, which fails on hosts with memory_limit below ~4 GiB. The bridge
@@ -784,6 +820,43 @@ func TestDuckDbHttpTimeout(t *testing.T) {
 			assert.Equal(t, int64(9999), cast.ToInt64(data.Rows[0][0]),
 				"http_timeout should be raised from DuckDB's 30s default")
 		}
+	})
+}
+
+// The session time zone must be UTC, not the local OS zone. Otherwise a
+// TIMESTAMPTZ to TIMESTAMP cast (read_arrow into a timestamp column) shifts values.
+func TestDuckDbSessionTimeZone(t *testing.T) {
+	t.Setenv("TZ", "America/Sao_Paulo")
+
+	query := func(t *testing.T, duck *DuckDb, sql string) string {
+		data, err := duck.Query(sql)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(data.Rows))
+		return cast.ToString(data.Rows[0][0])
+	}
+
+	t.Run("SQL defaults to UTC", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		assert.Contains(t, duck.getSessionSettingsSQL(), "SET TimeZone = 'UTC'")
+	})
+
+	t.Run("default is UTC with a local zone set", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		defer duck.Close()
+
+		assert.Equal(t, "UTC", query(t, duck, "SELECT current_setting('TimeZone') AS tz"))
+		got := query(t, duck, "SELECT '2026-01-01 00:07:00+00'::timestamptz::timestamp AS ts")
+		assert.Contains(t, got, "2026-01-01 00:07:00")
+	})
+
+	t.Run("timezone prop override", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "timezone=America/Sao_Paulo")
+		defer duck.Close()
+
+		assert.Contains(t, duck.getSessionSettingsSQL(), "SET TimeZone = 'America/Sao_Paulo'")
+		assert.Equal(t, "America/Sao_Paulo", query(t, duck, "SELECT current_setting('TimeZone') AS tz"))
+		got := query(t, duck, "SELECT '2026-01-01 00:07:00+00'::timestamptz::timestamp AS ts")
+		assert.Contains(t, got, "2025-12-31 21:07:00")
 	})
 }
 
@@ -1227,6 +1300,42 @@ func TestColumnTypingKeepSourced(t *testing.T) {
 		cols = arrowCols.Clone().KeepSourcedTypes(other)
 		assert.Equal(t, BigIntType, cols[0].Type)
 	}
+}
+
+func TestColumnsKeepCatalogTypes(t *testing.T) {
+	arrowCols := Columns{
+		{Name: "id", Type: BigIntType, DbType: "INT64", Sourced: true},
+		{Name: "label", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "code", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "amt", Type: DecimalType, DbType: "DECIMAL", DbPrecision: 38, DbScale: 9, Sourced: true},
+		{Name: "note", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "extra", Type: StringType, DbType: "STRING", Sourced: true},
+		{Name: "vc", Type: StringType, DbType: "STRING", Sourced: true},
+	}
+	catalog := Columns{
+		{Name: "ID", Type: DecimalType, DbType: "numeric", DbPrecision: 38},
+		{Name: "LABEL", Type: TextType, DbType: "text"},
+		{Name: "code", Type: StringType, DbType: "varchar", DbPrecision: 12},
+		{Name: "amt", Type: DecimalType, DbType: "numeric", DbPrecision: 18, DbScale: 2},
+		{Name: "note", Type: DecimalType, DbType: "numeric(18,2)", DbPrecision: 18, DbScale: 2},
+		{Name: "vc", Type: TextType, DbType: "character varying(12)"},
+	}
+
+	cols := arrowCols.Clone().KeepCatalogTypes(catalog)
+	assert.Equal(t, BigIntType, cols[0].Type, "a non-string Arrow type is kept")
+	assert.Equal(t, TextType, cols[1].Type)
+	assert.Equal(t, "text", cols[1].DbType)
+	assert.Equal(t, StringType, cols[2].Type)
+	assert.Equal(t, 12, cols[2].DbPrecision)
+	assert.Equal(t, []int{18, 2}, []int{cols[3].DbPrecision, cols[3].DbScale})
+	assert.Equal(t, DecimalType, cols[4].Type, "a decimal that the driver gives as utf8")
+	assert.Equal(t, []int{18, 2}, []int{cols[4].DbPrecision, cols[4].DbScale})
+	assert.Equal(t, "STRING", cols[5].DbType, "a column not in the catalog is kept")
+	assert.Equal(t, StringType, cols[6].Type, "the length in the type name")
+	assert.Equal(t, 12, cols[6].DbPrecision)
+
+	// no catalog: no change
+	assert.Equal(t, arrowCols, arrowCols.Clone().KeepCatalogTypes(nil))
 }
 
 func TestDuckDbCopyFormat(t *testing.T) {

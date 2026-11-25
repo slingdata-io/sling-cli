@@ -2029,6 +2029,43 @@
     - 'CDC merge_cdc MySQL test PASSED'
     - 'CDC soft merge: rows=5 ids=5 deleted=2'
 
+# ClickHouse 21.x rejects an IN whose two sides have different integer widths
+# (Code: 53). The target id is Int32 and the _tmp id is Int64, so the merge
+# templates must cast the source PK. Run on both an old and a current server.
+- id: 938
+  name: CDC merge_cdc strategy - ClickHouse target (21.3)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
+- id: 939
+  name: CDC merge_cdc strategy - ClickHouse target (25.x)
+  run: 'sling run -d -p tests/pipelines/cdc/p.38.cdc_merge_clickhouse.yaml'
+  env:
+    TARGET: clickhouse_top
+  output_contains:
+    - 'CDC merge_cdc ClickHouse test PASSED'
+
+# A parent whose sling binary is gone cannot start its children. The error shows
+# with the stream name, and the run fails (exec on staging: streams stuck in created).
+- id: 941
+  name: 'Threaded replication shows the spawn error of a child process'
+  run: |
+    # Windows cannot remove a running binary: fake the expected output and skip
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo 'could not start process for stream (skipped) Replication failure (4 streams failed): '; exit 1 ;; esac
+    tmp=$(mktemp -d)
+    trap '/bin/rm -rf "$tmp"' EXIT
+    /bin/cp -f "$(type -P sling)" "$tmp/sling"
+    SLING_TEST_BIN="$tmp/sling" "$tmp/sling" run -r tests/replications/r.151.spawn_error_threads.yaml
+  err: true
+  output_contains:
+    - 'could not start process for stream'
+    - 'Replication failure (4 streams failed): '
+  output_does_not_contain:
+    - 'stream did not start: context canceled'
+
 # Redshift merge templates: DELETE/UPDATE targets must not carry a table alias
 # (Redshift grammar has no alias slot for the target). Covers delete_insert,
 # change_capture and change_capture_soft. Offline template rendering is also
@@ -2719,6 +2756,32 @@
     rm -f temp/duckdb_low_mem/test.duckdb temp/duckdb_low_mem/big.csv
     python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
     sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
+  output_contains:
+    - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+# The named pipe and csv file import paths (copy_method: named_pipes|csv_files)
+# built their own read_csv without buffer_size, so the 256MB max_line_size raise
+# still demanded a 4 GiB block. Both paths share DuckDb.ReadCsvExpr now.
+- id: 955
+  name: 'duckdb named pipe and csv file imports load large rows under low memory_limit'
+  run: |
+    mkdir -p temp/duckdb_low_mem
+    python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
+    for m in named_pipes csv_files; do
+      rm -f temp/duckdb_low_mem/test_$m.duckdb
+      DUCK_LOW_MEM="{type: duckdb, instance: \"temp/duckdb_low_mem/test_$m.duckdb\", memory_limit: 1GB, copy_method: $m}" sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml || exit 1
+    done
+  output_contains:
+    - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
+
+- id: 957
+  name: 'ducklake named pipe import loads large rows under low memory_limit'
+  run: |
+    mkdir -p temp/duckdb_low_mem/ducklake_data
+    rm -f temp/duckdb_low_mem/meta.sqlite
+    rm -rf temp/duckdb_low_mem/ducklake_data/*
+    python3 -c 'import csv; w=csv.writer(open("temp/duckdb_low_mem/big.csv","w")); w.writerow(["id","payload"]); w.writerow([1,"x"*5242880]); w.writerow([2,"small"])'
+    DUCK_LOW_MEM='{type: ducklake, catalog_conn_string: "temp/duckdb_low_mem/meta.sqlite", data_path: "temp/duckdb_low_mem/ducklake_data/", memory_limit: 1GB, copy_method: named_pipes}' sling run -d -r tests/replications/r.103.duckdb_low_mem_buffer.yaml
   output_contains:
     - 'SUCCESS: 5MB row loaded into duckdb with 1GB memory_limit'
 
@@ -3650,7 +3713,8 @@
     - 'OK: default.sling_ins_conc_lane matches the source'
     - 'SUCCESS: insert_concurrency kept all rows and left no partial table'
 
-# Nested CLI suites. Loader in sling_cli_test.go merges these in.
+# Nested CLI suites. Each one has its own IDs, selected as <key>.<id>
+# (e.g. "build.12"). The key comes from the file name, or from `key:`.
 - suite: suite.cli.assist.yaml
 - suite: suite.cli.build.yaml
 - suite: suite.cli.validate.yaml
@@ -4197,3 +4261,446 @@
   output_does_not_contain:
     - 'execution succeeded'
     - 'reading from source file system'
+
+# SLING-368: continuous mode (sling run --continuous)
+- id: 932
+  name: 'Continuous mode needs a replication file'
+  run: 'sling run --src-conn POSTGRES --src-stream public.x --tgt-object file:///tmp/x.csv --continuous'
+  err: true
+  output_contains:
+    - '--continuous needs a replication file'
+
+- id: 933
+  name: 'Continuous mode rejects an incremental stream'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'supports only change-capture streams'
+
+- id: 934
+  name: 'Continuous mode rejects on_stream_error quarantine'
+  run: 'sling run -r tests/replications/r.149.continuous_quarantine_fail.yaml --continuous'
+  err: true
+  output_contains:
+    - 'quarantine is not supported yet'
+
+- id: 935
+  name: 'Continuous mode from the SLING_CONTINUOUS env var'
+  run: 'sling run -r tests/replications/r.148.continuous_incremental_fail.yaml'
+  err: true
+  env:
+    SLING_CONTINUOUS: 'true'
+  output_contains:
+    - 'supports only change-capture streams'
+
+# MySQL to Postgres: run, SIGUSR1 status, second session refused, SIGTERM stop,
+# resume with no repeated rows, kill between the write and the state commit.
+- id: 936
+  name: 'Continuous mode MySQL to PG: stop, lease, resume, kill'
+  group: cdc_continuous
+  run: 'bash tests/pipelines/cdc_continuous/run_docker_test.sh'
+  output_contains:
+    - 'CDC continuous test:'
+    - 'state saved'
+
+# An Excel number cell with a thousands format (#,##0) must load the stored
+# number (3000), not the shown text (3,000, read as 3).
+- id: 937
+  name: 'SLING-320: Excel number formats load the stored number'
+  run: |
+    sling run --src-stream 'file://tests/files/test.excel.number-formats.xlsx' --stdout
+  rows: 2
+  output_contains:
+    - 'wrote 2 rows to stdout'
+    - ',3000,'
+    - '1234567'
+    - '1234.5'
+    - '-1000'
+    - '50%'
+    - '2023-10-31'
+    - '123456789012'
+  output_does_not_contain:
+    - '3.000'
+    - '3,000'
+
+# Threaded pipeline replication steps reported 0 rows: the exec folder cleanup deleted the store file (SLING-481).
+- id: 942
+  name: 'Threaded replication step reports rows, bytes and store keys to the pipeline'
+  run: 'sling run -d -p tests/pipelines/p.64.threaded_replication_rows.yaml'
+  output_contains:
+    - 'threaded rows a=2018 b=2018'
+    - 'SUCCESS: threaded replication step reports rows'
+
+# `sling platform login` (SLING-533). The three cases need no server: they
+# check that the command fails fast and never prints or writes a token.
+- id: 947
+  name: 'sling platform login fails fast with no server'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - 'could not reach the Sling Platform'
+  output_does_not_contain:
+    - 'SLING_PROJECT_TOKEN='
+
+- id: 948
+  name: 'sling platform status json without a token'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    cd "$DIR"
+    SLING_HOME_DIR="$DIR/.sling" sling platform status --output json
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+  output_contains:
+    - 'sling platform login'
+
+- id: 949
+  name: 'sling platform login does not overwrite without consent'
+  err: true
+  run: |
+    DIR=$(mktemp -d)
+    mkdir -p "$DIR/.sling"
+    printf 'env:\n  SLING_PROJECT_TOKEN: dummy\n' > "$DIR/.sling/env.yaml"
+    cd "$DIR"
+    set +e
+    SLING_HOME_DIR="$DIR/.sling" sling platform login --no-browser < /dev/null
+    code=$?
+    set -e
+    grep -q dummy "$DIR/.sling/env.yaml" || { echo 'FAIL: env.yaml was changed'; exit 1; }
+    exit $code
+  env:
+    SLING_PROJECT_TOKEN: ''
+    SLING_PROJECT_ID: ''
+    SLING_PROJECT_PATH: ''
+    SLING_PLATFORM_HOST: 'https://127.0.0.1:1'
+  output_contains:
+    - '--force'
+  output_does_not_contain:
+    - 'FAIL: env.yaml was changed'
+
+# SLING-536: a run that stops inside a big transaction saves the last commit
+# boundary, not a position inside the transaction. The next run must not fail
+# with "invalid table id". The env forces the drain to time out in run 1.
+- id: 950
+  name: 'CDC MySQL stops inside a transaction and resumes at the boundary'
+  group: cdc_value_fidelity
+  run: |
+    set -e
+    P=tests/pipelines/cdc/p.41.cdc_mysql_txn_boundary.yaml
+    LOG=$(mktemp -d)
+    PHASE=setup sling run -d -p $P
+    PHASE=run1 SLING_TEST_CDC_TXN_DRAIN_LIMIT=1ms sling run -d -p $P 2>&1 | tee $LOG/run1.log
+    grep -q 'is the last transaction boundary' $LOG/run1.log || { echo 'FAIL: no boundary warning in run 1'; exit 1; }
+    PHASE=run2 sling run -d -p $P 2>&1 | tee $LOG/run2.log
+    ! grep -q 'invalid table id' $LOG/run2.log || { echo 'FAIL: invalid table id in run 2'; exit 1; }
+    PHASE=check sling run -d -p $P
+  env:
+    SLING_STATE: POSTGRES/sling_state_cdc_txn
+  output_contains:
+    - 'is the last transaction boundary'
+    - 'CDC txn boundary PASSED'
+  output_does_not_contain:
+    - 'invalid table id'
+
+# ClickHouse AggregateFunction source columns (SLING-537)
+- id: 951
+  name: 'ClickHouse AggregateFunction source columns'
+  run: |
+    SOURCE=clickhouse sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+    SOURCE=clickhouse_http sling run -d -r tests/replications/r.152.clickhouse_aggregate_function.yaml
+  output_contains:
+    - 'SUCCESS: AggregateFunction columns read with finalizeAggregation'
+
+- id: 952
+  name: 'ClickHouse AggregateFunction custom SQL hint'
+  err: true
+  run: |
+    for conn in clickhouse clickhouse_http; do
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      sling conns exec $conn "CREATE TABLE default.sling_agg_err (id UInt32, cnt AggregateFunction(count)) ENGINE = AggregatingMergeTree() ORDER BY id"
+      sling conns exec $conn "INSERT INTO default.sling_agg_err (id, cnt) SELECT 1, countState() FROM numbers(3)"
+      set +e
+      sling run --src-conn $conn --src-stream 'select * from default.sling_agg_err' --stdout
+      code=$?
+      set -e
+      sling conns exec $conn "DROP TABLE IF EXISTS default.sling_agg_err"
+      [ $code -ne 0 ] || { echo "FAIL: $conn run did not fail"; exit 1; }
+    done
+    exit 1
+  output_contains:
+    - 'finalizeAggregation'
+    - '-Merge'
+  output_does_not_contain:
+    - 'FAIL:'
+
+# Platform CLI connections save, get and delete (SLING-547). Skips when SLING_TEST_WRITE_TOKEN is not set.
+- id: 953
+  name: 'sling platform connections save, get and delete'
+  run: |
+    if [ -z "$SLING_TEST_WRITE_TOKEN" ]; then
+      echo 'SKIPPED: SLING_TEST_WRITE_TOKEN is not set'
+      exit 0
+    fi
+    sling run -p tests/pipelines/p.65.platform_conns_write.yaml
+
+# ADBC driver that sling does not know (issue #836): no driver_name, so no
+# metadata templates. The metadata comes from ADBC GetObjects, and the read
+# keeps the catalog text and numeric types.
+- id: 954
+  name: 'ADBC driver without a template: write, read and keep catalog types (issue #836)'
+  run: |
+    export ADBC_GENERIC='{"type": "adbc", "driver": "duckdb", "path": "/tmp/sling_adbc_generic_954.duckdb"}'
+    /bin/rm -f /tmp/sling_adbc_generic_954.duckdb
+    sling conns exec POSTGRES "drop table if exists public.adbc_generic_954; create table public.adbc_generic_954 (id bigint, label text, amt numeric(18,2), code varchar(12)); insert into public.adbc_generic_954 values (1, 'a', 12.34, 'x'), (2, null, null, '')"
+    sling run --src-conn POSTGRES --src-stream public.adbc_generic_954 --tgt-conn ADBC_GENERIC --tgt-object main.adbc_generic_954 --mode full-refresh
+    sling run --src-conn POSTGRES --src-stream public.adbc_generic_954 --tgt-conn ADBC_GENERIC --tgt-object main.adbc_generic_954 --mode full-refresh
+    sling conns discover ADBC_GENERIC --pattern 'main.adbc_generic_954' --columns
+    sling run --src-conn ADBC_GENERIC --src-stream main.adbc_generic_954 --tgt-conn POSTGRES --tgt-object public.adbc_generic_954_back --mode full-refresh
+    sling conns exec POSTGRES "select string_agg(column_name || ':' || data_type, ',' order by ordinal_position) as ddl from information_schema.columns where table_schema = 'public' and table_name = 'adbc_generic_954_back'"
+    sling conns exec POSTGRES "drop table if exists public.adbc_generic_954; drop table if exists public.adbc_generic_954_back"
+    /bin/rm -f /tmp/sling_adbc_generic_954.duckdb
+  output_contains:
+    - 'inserted 2 rows into "main"."adbc_generic_954"'
+    - '| adbc     | main   | adbc_generic_954 |  3 | amt    | DECIMAL'
+    - 'inserted 2 rows into "public"."adbc_generic_954_back"'
+    - 'id:bigint,label:text,amt:numeric,code:text'
+
+# SLING-581: limit and limit_offset keys of base.yaml were swapped, so a table read lost the offset.
+- id: 956
+  name: 'table and view read with limit and offset skips the offset rows (SLING-581)'
+  group: duckdb
+  env:
+    LIMIT_DUCK: 'duckdb:///tmp/sling_956/limit.duckdb'
+  run: |
+    rm -rf /tmp/sling_956 && mkdir -p /tmp/sling_956
+    sling run -d -r tests/replications/r.154.limit_offset.yaml
+    sling run -d --src-conn LIMIT_DUCK --src-stream main.limit_offset_956 --tgt-object file:///tmp/sling_956/flags.csv --limit 4 --offset 7
+    rm -rf /tmp/sling_956
+  output_contains:
+    - 'wrote 5 rows'
+    - 'wrote 2 rows'
+    - 'wrote 3 rows'
+  output_does_not_contain:
+    - 'limit 5 offset 0'
+
+# SLING-497: the SQLite incremental filter used a zero fraction ('... 00:00:00.000000').
+# SQLite compares text, so the row at the partition start was lost.
+- id: 970
+  name: 'SQLite text datetimes to a partitioned file target keep all rows on incremental runs (SLING-497)'
+  run: 'sling run -d -p tests/pipelines/p.66.sqlite_text_incremental_file_target.yaml'
+  group: sqlite,duckdb
+  output_contains:
+    - 'SUCCESS: sqlite incremental file target keeps all rows'
+  output_does_not_contain:
+    - 'Row loss'
+
+# SLING-498: DuckDB sessions run in UTC. Timestamps must not shift by the local zone.
+- id: 971
+  name: 'DuckDB, partitioned file and DuckLake targets keep SQLite timestamps under a local time zone (SLING-498)'
+  run: 'sling run -d -p tests/pipelines/p.67.duckdb_utc_session_timestamps.yaml'
+  group: sqlite,duckdb
+  env:
+    TZ: America/Sao_Paulo
+  output_contains:
+    - 'SUCCESS: duckdb timestamps keep the source values'
+    - 'SUCCESS: file target partitions keep the source values'
+    - 'SUCCESS: ducklake incremental does not re-read rows'
+  output_does_not_contain:
+    - 'updated_at_year=2025'
+    - 'shifted'
+
+# SLING-505: a first load to a new DuckLake table logged "Catalog Error: Table ... does not exist".
+- id: 972
+  name: 'first DuckLake load to a new table does not log a catalog error (SLING-505)'
+  run: |
+    sling conns exec SQLITE "drop table if exists main.no_cat_err_505"
+    sling conns exec SQLITE "create table main.no_cat_err_505 (id integer primary key, name text, updated_at datetime)"
+    sling conns exec SQLITE "insert into main.no_cat_err_505 values (1, 'a', '2026-10-01 00:00:00'), (2, 'b', '2026-10-02 00:00:00')"
+    sling conns exec DUCKLAKE "drop table if exists main.no_cat_err_505"
+    sling run -d --src-conn SQLITE --src-stream main.no_cat_err_505 --tgt-conn DUCKLAKE --tgt-object main.no_cat_err_505 --mode full-refresh
+    sling conns exec DUCKLAKE "drop table if exists main.no_cat_err_505"
+    sling run -d --src-conn SQLITE --src-stream main.no_cat_err_505 --tgt-conn DUCKLAKE --tgt-object main.no_cat_err_505 --mode incremental --update-key updated_at
+    sling conns exec DUCKLAKE "drop table main.no_cat_err_505"
+    sling conns exec SQLITE "drop table main.no_cat_err_505"
+  group: sqlite,duckdb
+  output_contains:
+    - 'inserted 2 rows into "main"."no_cat_err_505"'
+  output_does_not_contain:
+    - 'Catalog Error'
+
+# SLING-499: full-refresh with SLING_STATE and a source without CDC must not enter the CDC snapshot path.
+- id: 980
+  name: 'full-refresh with SLING_STATE on a SQLite source skips the CDC snapshot (SLING-499)'
+  env:
+    STATE_SQLITE_980: 'sqlite:///tmp/sling_980/src.db'
+    STATE_DUCK_980: 'duckdb:///tmp/sling_980/tgt.duckdb'
+    SLING_STATE: 'LOCAL/temp/sling_980/state'
+  run: |
+    rm -rf /tmp/sling_980 temp/sling_980 && mkdir -p /tmp/sling_980
+    sling run -d -r tests/replications/r.160.full_refresh_state_sqlite.yaml
+    rm -rf /tmp/sling_980 temp/sling_980
+  output_contains:
+    - 'inserted 3 rows'
+  output_does_not_contain:
+    - 'CDC mode is currently'
+
+# SLING-501: incremental with SLING_STATE and no valid CLI Pro token must fail before the read. Full-refresh keeps working.
+- id: 981
+  name: 'incremental with SLING_STATE and no CLI Pro token fails, no file written (SLING-501)'
+  err: true
+  env:
+    SRC_STATE_981: 'sqlite:///tmp/sling_981/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_981/state'
+    SLING_CLI_TOKEN: ''
+    SLING_PROJECT_TOKEN: ''
+  run: |
+    rm -rf /tmp/sling_981 temp/sling_981 && mkdir -p /tmp/sling_981
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_STATE_981 --tgt-object main.state_token_981 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_STATE_981 --src-stream main.state_token_981 --tgt-object 'file://temp/sling_981/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key update_dt || code=$?
+    echo "parquet files: $(find temp/sling_981 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_981 temp/sling_981
+    exit $code
+  output_contains:
+    - 'unable to validate CLI Pro token'
+    - 'parquet files: 0'
+
+- id: 982
+  name: 'full-refresh with SLING_STATE and no CLI Pro token still runs (SLING-501)'
+  env:
+    SRC_STATE_982: 'sqlite:///tmp/sling_982/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_982/state'
+    SLING_CLI_TOKEN: ''
+    SLING_PROJECT_TOKEN: ''
+  run: |
+    rm -rf /tmp/sling_982 temp/sling_982 && mkdir -p /tmp/sling_982
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_STATE_982 --tgt-object main.state_token_982 --mode full-refresh
+    sling run --src-conn SRC_STATE_982 --src-stream main.state_token_982 --tgt-object file://temp/sling_982/out.parquet --mode full-refresh --update-key update_dt
+    echo "parquet files: $(find temp/sling_982 -name '*.parquet' | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_982 temp/sling_982
+  output_contains:
+    - 'wrote 1000 rows'
+  output_does_not_contain:
+    - 'parquet files: 0'
+
+# SLING-503: file_max_rows with a folder target must not nest data_001.parquet inside a folder of the same name.
+- id: 983
+  name: 'file_max_rows with a folder target writes flat parquet files (SLING-503)'
+  run: |
+    rm -rf temp/sling_983
+    sling run --src-stream file://tests/files/test1.csv --tgt-object file://temp/sling_983/ --tgt-options '{format: parquet, file_max_rows: 500}'
+    echo "nested dirs: $(find temp/sling_983 -type d -name '*.parquet' | wc -l | tr -d ' ')"
+    echo "files: $(find temp/sling_983 -type f -name '*.parquet' | wc -l | tr -d ' ')"
+    sling run --src-stream 'file://temp/sling_983/*.parquet' --tgt-object file://temp/sling_983_back.csv
+    rm -rf temp/sling_983 temp/sling_983_back.csv
+  output_contains:
+    - 'nested dirs: 0'
+    - 'wrote 1000 rows'
+
+# SLING-503: size limits with partitions fail before the source read.
+- id: 984
+  name: 'file_max_bytes with a partitioned file target fails before the read (SLING-503)'
+  err: true
+  run: |
+    rm -rf temp/sling_984
+    code=0
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-object 'file://temp/sling_984/{part_year}/' --update-key create_dt --tgt-options '{format: parquet, file_max_bytes: 1000000}' || code=$?
+    echo "files: $(find temp/sling_984 -type f 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf temp/sling_984
+    exit $code
+  output_contains:
+    - 'not supported with partitioned file targets'
+    - 'files: 0'
+  output_does_not_contain:
+    - 'reading from source'
+
+# SLING-504: an incremental run to a file target checks the target rules before the read and the write.
+- id: 985
+  name: 'incremental file target without partition fields fails before the write (SLING-504)'
+  err: true
+  env:
+    SRC_FILE_985: 'sqlite:///tmp/sling_985/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_985/state'
+  run: |
+    rm -rf /tmp/sling_985 temp/sling_985 && mkdir -p /tmp/sling_985
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_FILE_985 --tgt-object main.inc_file_985 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_FILE_985 --src-stream main.inc_file_985 --tgt-object 'file://temp/sling_985/{run_timestamp}.parquet' --mode incremental --update-key update_dt || code=$?
+    echo "parquet files: $(find temp/sling_985 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_985 temp/sling_985
+    exit $code
+  output_contains:
+    - 'needs partition fields'
+    - 'parquet files: 0'
+
+- id: 986
+  name: 'incremental file target with an integer update key fails before the write (SLING-504)'
+  err: true
+  env:
+    SRC_FILE_986: 'sqlite:///tmp/sling_986/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_986/state'
+  run: |
+    rm -rf /tmp/sling_986 temp/sling_986 && mkdir -p /tmp/sling_986
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_FILE_986 --tgt-object main.inc_file_986 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_FILE_986 --src-stream main.inc_file_986 --tgt-object 'file://temp/sling_986/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key id || code=$?
+    echo "parquet files: $(find temp/sling_986 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_986 temp/sling_986
+    exit $code
+  output_contains:
+    - 'must be timestamp or date'
+    - 'parquet files: 0'
+
+- id: 987
+  name: 'incremental file target with partitions and a timestamp update key still runs (SLING-504)'
+  env:
+    SLING_STATE: 'LOCAL/temp/sling_987/state'
+  run: |
+    rm -rf /tmp/sling_987 temp/sling_987 && mkdir -p /tmp/sling_987
+    sling conns exec POSTGRES "drop table if exists public.inc_file_987; create table public.inc_file_987 (id int, ts timestamp); insert into public.inc_file_987 values (1, '2026-10-01 00:00:00'), (2, '2026-11-05 10:00:00')"
+    sling run --src-conn POSTGRES --src-stream public.inc_file_987 --tgt-object 'file://temp/sling_987/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key ts
+    sling run --src-conn POSTGRES --src-stream public.inc_file_987 --tgt-object 'file://temp/sling_987/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key ts
+    echo "parquet files: $(find temp/sling_987 -name '*.parquet' | wc -l | tr -d ' ')"
+    sling conns exec POSTGRES "drop table if exists public.inc_file_987"
+    rm -rf /tmp/sling_987 temp/sling_987
+  output_contains:
+    - 'wrote 2 rows'
+    - 'parquet files: 2'
+
+# SLING-570: the state path formats the checkpoint with the ODBC template type
+- id: 958
+  name: 'SLING_STATE incremental value uses the ODBC template type (MSSQL_ODBC to file)'
+  run: |
+    rm -rf temp/sling_570
+    mkdir -p temp/sling_570/state
+    export SLING_STATE=LOCAL/temp/sling_570/state
+    sling run -d -r tests/replications/r.153.odbc_state_incremental.yaml
+    sling run -d -r tests/replications/r.153.odbc_state_incremental.yaml
+    rm -rf temp/sling_570
+  output_contains:
+    - "got incremental value from state => cast('"
+  output_does_not_contain:
+    - 'Incorrect syntax'
+
+- id: 988
+  name: 'copy keeps the cause when it cannot init from or to'
+  run: sling run -d -p tests/pipelines/p.68.copy_init_error_cause.yaml
+  env:
+    P68_GCS: '{"type":"gs","bucket":"p68-bucket","key_file":"/tmp/sling/p68/missing-key.json"}'
+  err: true
+  output_contains:
+    - "connection 'POSTGRES' is not a file/storage connection"
+    - "could not init 'to': P68_GCS/out/a.csv"
+    - 'could not init file connection: P68_GCS'
+    - 'could not read google cloud key file'
+    - 'missing-key.json: no such file or directory'

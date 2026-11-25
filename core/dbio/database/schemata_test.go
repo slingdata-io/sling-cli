@@ -522,3 +522,315 @@ func TestTrimSQLComments(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectSQLServerOrderBy(t *testing.T) {
+	query := "select id, name from dbo.t order by id"
+
+	table, err := ParseTableName(query, dbio.TypeDbSQLServer)
+	assert.NoError(t, err)
+
+	sql := table.Select(SelectOptions{Limit: g.Ptr(10)})
+	assert.Contains(t, sql, "select top 10 * from (")
+	assert.Contains(t, sql, "order by id offset 0 rows")
+
+	sql = table.Select(SelectOptions{Limit: g.Ptr(10), Fields: []string{"id"}})
+	assert.Contains(t, sql, "top 10")
+	assert.Contains(t, sql, "order by id offset 0 rows\n) t")
+
+	sql = table.Select(SelectOptions{Fields: []string{"id"}})
+	assert.Contains(t, sql, "order by id offset 0 rows\n) t")
+
+	// no wrap, no change
+	assert.Equal(t, query, table.Select())
+
+	// postgres is unchanged
+	table, err = ParseTableName(query, dbio.TypeDbPostgres)
+	assert.NoError(t, err)
+	sql = table.Select(SelectOptions{Limit: g.Ptr(10), Fields: []string{"id"}})
+	assert.NotContains(t, sql, "offset 0 rows")
+	assert.Contains(t, sql, "order by id")
+}
+
+func TestTableSelectLimitOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		dialect  dbio.Type
+		offset   int
+		where    string
+		equal    string
+		prefix   string
+		suffix   string
+		contains string
+	}{
+		{name: "postgres limit", dialect: dbio.TypeDbPostgres, equal: `select * from "public"."t" limit 5`},
+		{name: "postgres offset", dialect: dbio.TypeDbPostgres, offset: 10, equal: `select * from "public"."t" limit 5 offset 10`},
+		{name: "postgres where", dialect: dbio.TypeDbPostgres, offset: 10, where: "id > 1", equal: `select * from "public"."t" where (id > 1) limit 5 offset 10`},
+		{name: "duckdb limit", dialect: dbio.TypeDbDuckDb, equal: `select * from "public"."t" limit 5`},
+		{name: "duckdb offset", dialect: dbio.TypeDbDuckDb, offset: 10, equal: `select * from "public"."t" limit 5 offset 10`},
+		{name: "duckdb where", dialect: dbio.TypeDbDuckDb, offset: 10, where: "id > 1", equal: `select * from "public"."t" where (id > 1) limit 5 offset 10`},
+		{name: "odbc offset", dialect: dbio.TypeDbODBC, offset: 10, suffix: " limit 5 offset 10"},
+		{name: "adbc offset", dialect: dbio.TypeDbArrowDBC, offset: 10, suffix: " limit 5 offset 10"},
+		{name: "athena limit", dialect: dbio.TypeDbAthena, suffix: " limit 5"},
+		{name: "athena offset", dialect: dbio.TypeDbAthena, offset: 10, suffix: " offset 10 limit 5"},
+		{name: "trino limit", dialect: dbio.TypeDbTrino, where: "id > 1", suffix: " where (id > 1) limit 5"},
+		{name: "trino offset", dialect: dbio.TypeDbTrino, offset: 10, where: "id > 1", suffix: " where (id > 1) offset 10 limit 5"},
+		{name: "sqlserver limit", dialect: dbio.TypeDbSQLServer, prefix: "select top 5 "},
+		{name: "sqlserver offset", dialect: dbio.TypeDbSQLServer, offset: 10, contains: "offset 10 rows) as t"},
+		{name: "oracle offset", dialect: dbio.TypeDbOracle, offset: 10, contains: "offset 10 rows fetch next 5 rows only"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			table := Table{Name: "t", Schema: "public", Dialect: c.dialect}
+			sql := table.Select(SelectOptions{Limit: g.Ptr(5), Offset: c.offset, Where: c.where})
+			if c.equal != "" {
+				assert.Equal(t, c.equal, sql)
+			}
+			if c.prefix != "" {
+				assert.True(t, strings.HasPrefix(sql, c.prefix), sql)
+			}
+			if c.suffix != "" {
+				assert.True(t, strings.HasSuffix(sql, c.suffix), sql)
+			}
+			if c.contains != "" {
+				assert.Contains(t, sql, c.contains)
+			}
+		})
+	}
+}
+
+func TestTableSelectOffsetAllDialects(t *testing.T) {
+	// these dialects return before they read the template
+	noTemplate := []dbio.Type{
+		dbio.TypeDbPrometheus, dbio.TypeDbIceberg, dbio.TypeDbDynamoDB, dbio.TypeDbMongoDB,
+		dbio.TypeDbElasticsearch, dbio.TypeDbOpenSearch, dbio.TypeDbAzureTable,
+	}
+
+	types := []dbio.Type{
+		dbio.TypeDbAzureDWH, dbio.Type("db2"), dbio.Type("firebird"),
+		dbio.Type("hive"), dbio.Type("spark"), dbio.Type("vertica"),
+	}
+	for _, td := range dbio.AllType {
+		if td.Value.IsDb() {
+			types = append(types, td.Value)
+		}
+	}
+
+	for _, dialect := range types {
+		if g.In(dialect, noTemplate...) {
+			continue
+		}
+		if _, err := dialect.Template(); err != nil {
+			continue
+		}
+		t.Run(string(dialect), func(t *testing.T) {
+			table := Table{Name: "t", Schema: "public", Dialect: dialect}
+			sql := table.Select(SelectOptions{Limit: g.Ptr(5), Offset: 10})
+			assert.Contains(t, sql, "10", "offset is lost for %s: %s", dialect, sql)
+		})
+	}
+}
+
+func TestTableFinalizeAggregateFields(t *testing.T) {
+	newTable := func(dialect dbio.Type) Table {
+		return Table{
+			Name:    "agg",
+			Schema:  "db",
+			Dialect: dialect,
+			Columns: iop.Columns{
+				{Name: "id", DbType: "UInt32"},
+				{Name: "min_ts", DbType: "AggregateFunction(min, Nullable(DateTime64(6, 'Asia/Jakarta')))"},
+				{Name: "cnt", DbType: "AggregateFunction(count)"},
+				{Name: "mx", DbType: "SimpleAggregateFunction(max, UInt32)"},
+			},
+		}
+	}
+	table := newTable(dbio.TypeDbClickhouse)
+
+	all := []string{"id", "finalizeAggregation(`min_ts`) as `min_ts`", "finalizeAggregation(`cnt`) as `cnt`", "mx"}
+	assert.Equal(t, all, table.FinalizeAggregateFields([]string{"*"}))
+	assert.Equal(t, all, table.FinalizeAggregateFields(nil))
+
+	assert.Equal(t,
+		[]string{"id", "finalizeAggregation(`min_ts`) as `first_ts`"},
+		table.FinalizeAggregateFields([]string{"id", "min_ts as first_ts"}),
+	)
+	assert.Equal(t,
+		[]string{"finalizeAggregation(`min_ts`) as `min_ts`"},
+		table.FinalizeAggregateFields([]string{"MIN_TS"}),
+	)
+	assert.Equal(t, []string{"-cnt"}, table.FinalizeAggregateFields([]string{"-cnt"}))
+
+	// no AggregateFunction column
+	plain := newTable(dbio.TypeDbClickhouse)
+	plain.Columns = plain.Columns[:1]
+	assert.Equal(t, []string{"*"}, plain.FinalizeAggregateFields([]string{"*"}))
+	assert.Nil(t, plain.FinalizeAggregateFields(nil))
+
+	// other dialects are unchanged
+	pg := newTable(dbio.TypeDbPostgres)
+	assert.Equal(t, []string{"*"}, pg.FinalizeAggregateFields([]string{"*"}))
+
+	sql := table.Select(SelectOptions{Fields: table.FinalizeAggregateFields([]string{"*"})})
+	assert.Equal(t, "select `id`, finalizeAggregation(`min_ts`) as `min_ts`, finalizeAggregation(`cnt`) as `cnt`, `mx` from `db`.`agg`", sql)
+}
+
+func TestSelectFirebirdLimit(t *testing.T) {
+	fb := dbio.Type("firebird")
+
+	table, err := ParseTableName("TBL", fb)
+	assert.NoError(t, err)
+
+	sql := table.Select(SelectOptions{Limit: g.Ptr(5)})
+	assert.Contains(t, sql, "select first 5")
+	assert.Contains(t, sql, `from "TBL"`)
+	assert.NotContains(t, sql, "limit 5")
+	assert.NotContains(t, sql, `"main"`)
+
+	sql = table.Select(SelectOptions{Limit: g.Ptr(5), Offset: 10})
+	assert.Contains(t, sql, "first 5 skip 10")
+	assert.NotContains(t, sql, "limit")
+
+	table, err = ParseTableName("select a from TBL", fb)
+	assert.NoError(t, err)
+	sql = table.Select(SelectOptions{Limit: g.Ptr(5)})
+	assert.Contains(t, sql, "select first 5 skip 0 * from (")
+}
+
+func TestTableDropUnsupportedSchema(t *testing.T) {
+	fb := dbio.Type("firebird")
+
+	table, _ := ParseTableName("dbo.TBL", fb)
+	assert.Equal(t, "DBO", table.DropUnsupportedSchema())
+	assert.Equal(t, `"TBL"`, table.FullName())
+
+	table, _ = ParseTableName("TBL", fb)
+	assert.Empty(t, table.DropUnsupportedSchema())
+
+	table, _ = ParseTableName("select 1 from rdb$database", fb)
+	assert.Empty(t, table.DropUnsupportedSchema())
+
+	for _, typ := range []dbio.Type{dbio.TypeDbPostgres, dbio.TypeDbSQLite} {
+		table, _ = ParseTableName("main.tbl", typ)
+		assert.Empty(t, table.DropUnsupportedSchema())
+		assert.Equal(t, "main", table.Schema)
+	}
+}
+
+func TestFilterTablesEmptySchema(t *testing.T) {
+	newSchemata := func(schema string, names ...string) Schemata {
+		tables := map[string]Table{}
+		for _, name := range names {
+			tables[strings.ToLower(name)] = Table{
+				Name:   name,
+				Schema: schema,
+				Columns: iop.Columns{
+					{Name: "id", Table: name, Schema: schema, Type: iop.IntegerType},
+					{Name: "val", Table: name, Schema: schema, Type: iop.StringType},
+				},
+			}
+		}
+		return Schemata{Databases: map[string]Database{
+			"": {Schemas: map[string]Schema{strings.ToLower(schema): {Name: schema, Tables: tables}}},
+		}}
+	}
+
+	s := newSchemata("", "TBL_A", "TBL_B", "OTHER")
+
+	ns := s.Filtered(false, "TBL_*")
+	assert.Len(t, ns.Tables(), 2)
+	ns = s.Filtered(false, "*")
+	assert.Len(t, ns.Tables(), 3)
+
+	ns = s.Filtered(true, "TBL_A.*")
+	cols := ns.Columns()
+	assert.Len(t, cols, 2)
+	for _, col := range cols {
+		assert.Equal(t, "TBL_A", col.Table)
+	}
+
+	// schema-qualified keys are unchanged
+	pg := newSchemata("public", "t1", "t2")
+	ns = pg.Filtered(false, "public.*")
+	assert.Len(t, ns.Tables(), 2)
+	ns = pg.Filtered(false, "public.t1")
+	assert.Len(t, ns.Tables(), 1)
+	ns = pg.Filtered(true, "public.t1.*")
+	assert.Len(t, ns.Columns(), 2)
+}
+
+func TestFirebirdSelectLimit(t *testing.T) {
+	firebird := dbio.Type("firebird")
+	queryTable, err := ParseTableName(`select "ID" from "CUSTOMER"`, firebird)
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		table    Table
+		opts     SelectOptions
+		expected string
+	}{
+		{
+			"limit",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5)},
+			`select first 5 * from "CUSTOMER"`,
+		},
+		{
+			"limit and offset",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5), Offset: 10},
+			`select first 5 skip 10 * from "CUSTOMER"`,
+		},
+		{
+			"limit and where",
+			Table{Name: "CUSTOMER", Dialect: firebird},
+			SelectOptions{Limit: g.Ptr(5), Where: `"ID" > 1`},
+			`select first 5 * from "CUSTOMER" where ("ID" > 1)`,
+		},
+		{
+			"query table",
+			queryTable,
+			SelectOptions{Limit: g.Ptr(1)},
+			"select first 1 skip 0 * from (\n  select \"ID\" from \"CUSTOMER\"\n) as t\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sql := tc.table.Select(tc.opts)
+			assert.Equal(t, tc.expected, sql)
+			assert.NotContains(t, sql, " limit ")
+			assert.NotContains(t, sql, " offset ")
+		})
+	}
+}
+
+func TestFirebirdIncrementalSelectLimit(t *testing.T) {
+	firebird := dbio.Type("firebird")
+	template, err := firebird.Template()
+	assert.NoError(t, err)
+
+	const tail = `"ID", "LOGDATE" from "DELETELOG" where ("LOGDATE" > '2026-11-16 13:50:10.0000') order by "LOGDATE" asc`
+	cases := []struct {
+		key      string
+		offset   int
+		expected string
+	}{
+		{"incremental_select_limit", 0, "select first 5 " + tail},
+		{"incremental_select_limit_offset", 10, "select first 5 skip 10 " + tail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			sql := g.R(
+				template.Core[tc.key],
+				"fields", `"ID", "LOGDATE"`,
+				"table", `"DELETELOG"`,
+				"incremental_where_cond", `"LOGDATE" > '2026-11-16 13:50:10.0000'`,
+				"update_key", `"LOGDATE"`,
+			)
+			table := Table{SQL: sql, Dialect: firebird}
+			got := table.Select(SelectOptions{Fields: []string{"*"}, Limit: g.Ptr(5), Offset: tc.offset})
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}

@@ -171,13 +171,6 @@ func (df *Dataflow) SetBatchMaxDuration(d time.Duration) {
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
 		ds.Sp.Config.BatchMaxDuration = d
-		// Apply to every open batch — CurrentBatch alone is not enough if
-		// NewBatch ran before this setter (common: schema/sample before Unpause).
-		for _, b := range ds.Batches {
-			if b != nil && !b.closed {
-				b.MaxDuration = d
-			}
-		}
 		if ds.CurrentBatch != nil {
 			ds.CurrentBatch.MaxDuration = d
 		}
@@ -231,7 +224,7 @@ func (df *Dataflow) Pause(exceptDs ...string) bool {
 		// try to pause all datastreams, or none
 		pauseMap := map[string]bool{}
 		for _, ds := range df.Streams {
-			if !lo.Contains(exceptDs, ds.ID) && !ds.closed {
+			if !lo.Contains(exceptDs, ds.ID) && !ds.IsClosed() {
 				pauseMap[ds.ID] = ds.TryPause()
 			}
 		}
@@ -655,10 +648,36 @@ func (df *Dataflow) SyncStats() {
 	}
 }
 
+// readyStreams returns the ready flag and the stream list under the lock.
+// Streams are only appended, so the slice header copy is enough.
+func (df *Dataflow) readyStreams() (ready bool, streams []*Datastream) {
+	if df == nil {
+		return false, nil
+	}
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	return df.Ready, df.Streams
+}
+
+// StatsSnapshot returns the stats of each stream. It is safe on any goroutine.
+func (df *Dataflow) StatsSnapshot() []DatastreamStats {
+	if df == nil {
+		return nil
+	}
+	df.mux.Lock()
+	defer df.mux.Unlock()
+
+	out := make([]DatastreamStats, 0, len(df.Streams))
+	for _, ds := range df.Streams {
+		out = append(out, ds.StatsSnapshot())
+	}
+	return out
+}
+
 // Count returns the aggregate count
 func (df *Dataflow) Count() (cnt uint64) {
-	if df != nil && df.Ready {
-		for _, ds := range df.Streams {
+	if ready, streams := df.readyStreams(); ready {
+		for _, ds := range streams {
 			if ds.Ready {
 				cnt += atomic.LoadUint64(&ds.Count)
 			}
@@ -669,16 +688,16 @@ func (df *Dataflow) Count() (cnt uint64) {
 
 // AddEgressBytes add egress bytes
 func (df *Dataflow) AddEgressBytes(bytes uint64) {
-	df.EgressBytes = df.EgressBytes + bytes
+	atomic.AddUint64(&df.EgressBytes, bytes)
 }
 
 func (df *Dataflow) Bytes() (inBytes, outBytes uint64) {
-	return df.DsTotalBytes(), df.EgressBytes
+	return df.DsTotalBytes(), atomic.LoadUint64(&df.EgressBytes)
 }
 
 func (df *Dataflow) DsTotalBytes() (bytes uint64) {
-	if df != nil && df.Ready {
-		for _, ds := range df.Streams {
+	if ready, streams := df.readyStreams(); ready {
+		for _, ds := range streams {
 			if ds.Ready {
 				bytes += ds.Bytes.Load()
 			}
@@ -749,7 +768,7 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 			// push stream, keep retrying
 		tryPush:
 			df.mux.Lock()
-			ds.df = df
+			ds.setDf(df)
 			select {
 			case df.StreamCh <- ds:
 				df.StreamMap[ds.ID] = ds

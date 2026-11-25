@@ -172,6 +172,7 @@ streams: <streams_map>
 defaults: <default_stream_config>
 hooks: <replication_hooks>
 env: <environment_variables>
+continuous: <continuous_mode_settings>  # change-capture streams only, used with `sling run --continuous`
 ```
 
 ### Stream Configuration Map
@@ -208,6 +209,10 @@ streams:
     # Options
     source_options: <source_options_map>
     target_options: <target_options_map>
+    change_capture_options: <cdc_options_map>  # for change-capture mode
+    
+    # Selection
+    tags: [tag1, tag2]  # select with --streams tag:tag1
     
     # Hooks
     hooks: <stream_hooks>
@@ -410,7 +415,7 @@ streams:
 ```yaml
 defaults:
   target_options:
-    column_casing: snake  # source | target | snake | upper | lower | normalize
+    column_casing: snake  # source | target | snake | camel | upper | lower | normalize
 ```
 
 #### Column Typing
@@ -635,11 +640,11 @@ streams:
       # Stage 1: Clean and normalize
       - first_name: 'trim_space(upper(value))'
         email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9]", "")'
+        phone: 'regex_replace(value, "[^0-9]", "")'
       
       # Stage 2: Create computed fields
       - full_name: 'record.first_name + " " + record.last_name'
-        email_domain: 'substring(record.email, strpos(record.email, "@") + 1)'
+        email_domain: 'split_part(record.email, "@", 1)'
       
       # Stage 3: Business logic
       - customer_type: |
@@ -762,11 +767,17 @@ Match all tables in a schema:
 streams:
   # All tables in public schema
   public.*:
-  
+```
+
+```yaml
+streams:
   # All tables in multiple schemas with prefix/suffix
   sales.marketing_*:   # use a prefix
   inventory.*_latest:  # use a suffix
-  
+```
+
+```yaml
+streams:
   # Exclude specific tables
   public.*:
   public.temp_table:
@@ -852,7 +863,7 @@ hooks:
     
     - type: query
       connection: MY_DB
-      sql: 'UPDATE job_status SET status = "running" WHERE job_id = "repl_001"'
+      query: 'UPDATE job_status SET status = "running" WHERE job_id = "repl_001"'
   
   end:
     - type: command
@@ -868,19 +879,19 @@ defaults:
     pre:
       - type: query
         connection: TARGET_DB
-        sql: 'CREATE SCHEMA IF NOT EXISTS {target_schema}'
+        query: 'CREATE SCHEMA IF NOT EXISTS {target.schema}'
     
     post:
       - type: query
         connection: TARGET_DB
-        sql: 'ANALYZE TABLE {object_name}'
+        query: 'ANALYZE TABLE {object.full_name}'
 
 streams:
   important_table:
     hooks:
       post:
         - type: command
-          command: 'python validate_data.py {object_name}'
+          command: 'python validate_data.py {object.full_name}'
 ```
 
 ### Available Hook Types
@@ -905,7 +916,7 @@ hooks:
       method: POST
       headers:
         Authorization: 'Bearer ${SLACK_TOKEN}'
-      body: |
+      payload: |
         {
           "channel": "#data-pipeline",
           "text": "Starting data replication"
@@ -919,7 +930,7 @@ hooks:
     # Update status
     - type: query
       connection: METADATA_DB
-      sql: |
+      query: |
         INSERT INTO replication_log (job_id, status, completed_at)
         VALUES ('repl_001', 'completed', NOW())
 ```
@@ -1216,9 +1227,6 @@ defaults:
 streams:
   # Partitioned parquet files
   'data/year=*/month=*/*.parquet':
-    transforms:
-      - year: 'int_parse(substring(record._file_path, strpos(record._file_path, "year=") + 5, 4))'
-        month: 'int_parse(substring(record._file_path, strpos(record._file_path, "month=") + 6, 2))'
 
 env:
   SLING_THREADS: 10
@@ -1360,7 +1368,6 @@ env:
 ```yaml
 env:
   SLING_RETRIES: 3           # Retry failed streams 3 times
-  SLING_RETRY_DELAY: 30s     # Wait 30 seconds between retries
 ```
 
 ### Performance Optimization
@@ -1405,7 +1412,7 @@ streams:
     transforms:
       # Stage 1: Data cleansing
       - email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9+]", "")'
+        phone: 'regex_replace(value, "[^0-9+]", "")'
         name: 'trim_space(value)'
       
       # Stage 2: Computed metrics
@@ -1521,7 +1528,9 @@ sling run -r /path/to/replication.yaml
 # Good
 source: prod_postgres_crm
 target: dw_snowflake_analytics
+```
 
+```yaml
 # Avoid
 source: db1
 target: db2
@@ -1608,8 +1617,7 @@ streams:
 #### Data Encryption
 ```yaml
 target_options:
-  encryption: true        # Enable if supported by target
-  compression: gzip       # Compress sensitive data
+  compression: gzip       # File targets only; there is no encryption target option
 ```
 
 ### Monitoring and Observability
@@ -1627,12 +1635,12 @@ hooks:
   start:
     - type: http
       url: 'https://monitoring.company.com/api/jobs/start'
-      body: '{"job": "data_replication", "status": "started"}'
+      payload: '{"job": "data_replication", "status": "started"}'
   
   end:
     - type: http
       url: 'https://monitoring.company.com/api/jobs/complete'
-      body: '{"job": "data_replication", "status": "completed"}'
+      payload: '{"job": "data_replication", "status": "completed"}'
 ```
 
 ### Testing Strategies
@@ -1657,14 +1665,9 @@ streams:
   critical_table:
     hooks:
       post:
-        - type: query
-          connection: TARGET_DB
-          sql: |
-            SELECT 
-              COUNT(*) as row_count,
-              COUNT(DISTINCT id) as unique_ids
-            FROM {object_name}
-            HAVING COUNT(*) < 1000  -- Fail if too few rows
+        - type: check
+          check: 'run.total_rows >= 1000'  # Fail if too few rows
+          failure_message: 'only {run.total_rows} rows loaded'
 ```
 
 ---
@@ -1873,7 +1876,6 @@ sling run -r /path/to/replication.yaml --streams failed_stream
 ```yaml
 env:
   SLING_RETRIES: 3
-  SLING_RETRY_DELAY: 60s
 ```
 
 This comprehensive guide provides everything needed to effectively use Sling replications: validate with MCP, then execute with `sling run`.

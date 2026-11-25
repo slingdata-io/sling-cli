@@ -178,6 +178,9 @@ Double quotes (`"`) are the usual form. Single-quoted SQL-style literals (`'%Y-%
 ```yaml
 # ✅ Either quote style
 expression: 'record.status == "active"'
+```
+
+```yaml
 expression: "date_format(now(), '%Y-%m-%d')"
 ```
 

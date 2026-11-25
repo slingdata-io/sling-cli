@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -69,11 +70,6 @@ type Connection struct {
 
 // NewConnection creates a new connection
 func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn Connection, err error) {
-	// prevent infinite recursion
-	if localConnsExclude != "" && strings.EqualFold(Name, localConnsExclude) {
-		return
-	}
-
 	conn = Connection{
 		Name:    strings.TrimLeft(Name, "$"),
 		Type:    t,
@@ -99,6 +95,8 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 func NewConnectionFromURL(Name, URL string) (conn Connection, err error) {
 	return NewConnection(Name, "", g.M("url", URL))
 }
+
+var oracleTNSSpaceRegex = regexp.MustCompile(`\s*([()=])\s*`)
 
 // NewConnectionFromMap loads a Connection from a Map
 func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
@@ -129,7 +127,7 @@ func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
 
 // NewConnectionFromDbt loads a Connection from a DBT Profile
 func NewConnectionFromDbt(name string) (c Connection, err error) {
-	conns, err := ReadDbtConnections()
+	conns, failed, err := ReadDbtConnections()
 	if err != nil {
 		err = g.Error(err)
 		return
@@ -137,6 +135,9 @@ func NewConnectionFromDbt(name string) (c Connection, err error) {
 
 	if conn, ok := conns[name]; ok {
 		return conn, nil
+	}
+	if ferr, ok := failed[name]; ok {
+		return c, g.Error(ferr, "dbt connection '%s' did not load", name)
 	}
 	return c, g.Error("dbt connection '%s' was not found", name)
 }
@@ -350,6 +351,32 @@ func (c *Connection) Close() error {
 
 var Cache = cmap.New[*Connection]()
 
+// ResolveIcebergSQLCatalog sets sql_conn_payload from the sql_catalog_conn
+// connection. It runs when the connection opens, not when Sling loads it,
+// so that loading one connection never loads another.
+func (c *Connection) ResolveIcebergSQLCatalog() error {
+	if c.Type != dbio.TypeDbIceberg || !strings.EqualFold(cast.ToString(c.Data["catalog_type"]), "sql") {
+		return nil
+	}
+	connName := cast.ToString(c.Data["sql_catalog_conn"])
+	if connName == "" || c.Data["sql_conn_payload"] != nil {
+		return nil
+	}
+	if strings.EqualFold(connName, c.Name) {
+		return g.Error("sql_catalog_conn cannot refer to its own connection: %s", connName)
+	}
+
+	entry := GetLocalConns().Get(connName)
+	if entry.Name == "" {
+		return g.Error("did not find provided sql_catalog_conn: %s", connName)
+	}
+	c.Data["sql_conn_payload"] = g.M(
+		"url", entry.Connection.URL(),
+		"data", entry.Connection.DataS(),
+	)
+	return nil
+}
+
 type AsConnOptions struct {
 	UseCache bool
 	Expire   int // in seconds
@@ -374,11 +401,18 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 		opt = options[0]
 	}
 
+	if err = c.ResolveIcebergSQLCatalog(); err != nil {
+		return nil, err
+	}
+
 	// build input data
 
+	// a cached connection with a cancelled context cannot connect again
 	if cc, ok := Cache.Get(c.Hash()); ok && opt.UseCache {
 		if cc.Database != nil {
-			return cc.Database, nil
+			if dctx := cc.Database.Context(); dctx == nil || dctx.Ctx.Err() == nil {
+				return cc.Database, nil
+			}
 		}
 	}
 
@@ -781,9 +815,12 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		// no default client_charset: go-ora then encodes binds in the server charset (GH #759)
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
-			if !strings.HasPrefix(cast.ToString(tns), "(") {
-				c.Data["tns"] = "(" + cast.ToString(tns) + ")"
+			// strip whitespace of multi-line descriptors (tnsnames.ora style)
+			tnsStr := oracleTNSSpaceRegex.ReplaceAllString(strings.TrimSpace(cast.ToString(tns)), "$1")
+			if !strings.HasPrefix(tnsStr, "(") {
+				tnsStr = "(" + tnsStr + ")"
 			}
+			c.Data["tns"] = tnsStr
 			template = "oracle://{username}:{password}@{tns}"
 		} else {
 			template = "oracle://{username}:{password}@{host}:{port}/{database}"
@@ -979,6 +1016,10 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("schema", "main")
 		template = "dbase://{path}"
 	case dbio.TypeDbDuckDb:
+		// dbt-duckdb uses path
+		if cast.ToString(c.Data["instance"]) == "" && cast.ToString(c.Data["path"]) != "" {
+			c.Data["instance"] = c.Data["path"]
+		}
 		if val, ok := c.Data["instance"]; ok && strings.HasPrefix(cast.ToString(val), "quack:") {
 			// remote Quack server: keep as-is
 		} else if ok {
@@ -1233,18 +1274,6 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("sql_catalog_init", "true")
 		}
 
-		if connName := c.Data["sql_catalog_conn"]; connName != nil {
-			// create database object and pass for connection
-			exclude := LocalConnsExclude(c.Name)
-			entry := GetLocalConns(exclude).Get(cast.ToString(connName))
-			if entry.Name != "" {
-				c.Data["sql_conn_payload"] = g.M(
-					"url", entry.Connection.URL(),
-					"data", entry.Connection.DataS(),
-				)
-			}
-		}
-
 		template = "iceberg://{catalog_type}"
 	case dbio.TypeDbAthena:
 		// use dbt inputs
@@ -1340,8 +1369,18 @@ func CopyDirect(conn database.Connection, tableFName string, srcFile Connection)
 	return
 }
 
-func ReadDbtConnections() (conns map[string]Connection, err error) {
+// dbtUnknownAdapterError marks a dbt output with a type that Sling does not know.
+type dbtUnknownAdapterError struct{ Adapter string }
+
+func (e *dbtUnknownAdapterError) Error() string {
+	return g.F("dbt adapter type %q is not a Sling connection type", e.Adapter)
+}
+
+// ReadDbtConnections reads the dbt profiles. The failed map holds the outputs
+// that did not load, keyed by name.
+func ReadDbtConnections() (conns map[string]Connection, failed map[string]error, err error) {
 	conns = map[string]Connection{}
+	failed = map[string]error{}
 	envVarRegex := `{{ *env_var\(['"]+([0-9a-zA-Z_-]+)['"]+\) *}}`
 
 	profileDir := strings.TrimSuffix(os.Getenv("DBT_PROFILES_DIR"), "/")
@@ -1400,11 +1439,18 @@ func ReadDbtConnections() (conns map[string]Connection, err error) {
 				}
 			}
 
+			adapter := cast.ToString(data["type"])
+			if _, ok := dbio.ValidateType(adapter); !ok {
+				failed[connName] = &dbtUnknownAdapterError{Adapter: adapter}
+				continue
+			}
+
 			conn, err := NewConnectionFromMap(
 				g.M("name", connName, "data", data, "type", data["type"]),
 			)
 			if err != nil {
-				g.Trace("could not load dbt connection %s, connName: %s", data["type"], connName, err.Error())
+				g.Trace("could not load dbt connection %s (%s): %s", connName, adapter, g.ErrMsgSimple(err))
+				failed[connName] = err
 				continue
 			}
 
@@ -1511,7 +1557,15 @@ func ReadConnectionsFromFile(path string) (conns map[string]Connection, err erro
 }
 
 func ReadConnections(env map[string]interface{}) (conns map[string]Connection, err error) {
+	conns, _ = readConnections(env)
+	return conns, nil
+}
+
+// readConnections is ReadConnections that also returns the entries it could
+// not load, keyed by upper-case name.
+func readConnections(env map[string]interface{}) (conns map[string]Connection, failed map[string]error) {
 	conns = map[string]Connection{}
+	failed = map[string]error{}
 
 	if connections, ok := env["connections"]; ok {
 		switch connectionsV := connections.(type) {
@@ -1528,10 +1582,12 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 					conn, err := NewConnectionFromMap(g.M("name", name, "data", data, "type", data["type"]))
 					if err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 					if err = conn.setURL(); err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						failed[strings.ToUpper(name)] = err
 						continue
 					}
 

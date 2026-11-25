@@ -1,0 +1,32 @@
+# SLING-570: the state path formats the checkpoint with the ODBC template type
+# (sqlserver: cast('...' as datetime2)), not the generic `odbc` layout.
+# Hooks use MSSQL: the ODBC hook query path fails on statements without a result set.
+# Needs SLING_STATE (a local folder) in the environment.
+
+source: MSSQL_ODBC
+target: LOCAL
+
+defaults:
+  mode: incremental
+
+hooks:
+  start:
+    - type: query
+      connection: MSSQL
+      query: |
+        IF OBJECT_ID('dbo.sling_odbc_state_inc') IS NOT NULL DROP TABLE dbo.sling_odbc_state_inc;
+        CREATE TABLE dbo.sling_odbc_state_inc (id int, ts datetime2(7));
+        INSERT INTO dbo.sling_odbc_state_inc VALUES
+          (1, '2024-01-15 10:00:00.1234567'),
+          (2, '2024-01-15 10:00:01.7654321'),
+          (3, '2024-01-15 10:00:02.5000000');
+
+  end:
+    - type: query
+      connection: MSSQL
+      query: DROP TABLE dbo.sling_odbc_state_inc
+
+streams:
+  dbo.sling_odbc_state_inc:
+    object: file://temp/sling_570/out/{part_year}/{part_month}/{part_day}
+    update_key: ts

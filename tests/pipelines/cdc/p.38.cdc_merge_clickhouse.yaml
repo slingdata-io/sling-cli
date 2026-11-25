@@ -3,7 +3,7 @@
 # Note: ClickHouse uses INSERT with ReplacingMergeTree for deduplication
 
 env:
-  TARGET: clickhouse
+  TARGET: ${TARGET}
 
 steps:
   # Clean up
@@ -38,6 +38,7 @@ steps:
         cdc_staging:
           sql: |
             SELECT 1 as id, 'Alice Updated' as name, 150 as amount, 'U' as _sling_synced_op, 1::bigint as _sling_cdc_seq, CURRENT_TIMESTAMP as _sling_synced_at
+            UNION ALL SELECT 2, 'Bob', 200, 'D', 2, CURRENT_TIMESTAMP
             UNION ALL SELECT 4, 'Diana', 400, 'I', 3, CURRENT_TIMESTAMP
             UNION ALL SELECT 1, 'Alice Final', 175, 'U', 4, CURRENT_TIMESTAMP
           object: default.cdc_merge_test

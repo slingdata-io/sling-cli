@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/microsoft/go-mssqldb/msdsn"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
@@ -802,4 +803,53 @@ func TestConnEntriesTestCancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("test did not stop on cancel")
 	}
+}
+
+func TestOracleMultiLineTNS(t *testing.T) {
+	tns := "(DESCRIPTION =\n\t(FAILOVER = ON)\n\t(CONNECT_TIMEOUT = 5)\n" +
+		"\t(ADDRESS_LIST =\n\t\t(ADDRESS = (PROTOCOL = TCP)(HOST = db1.example.com)(PORT = 1521))\n" +
+		"\t\t(ADDRESS = (PROTOCOL = TCP)(HOST = db2.example.com)(PORT = 1521))\n\t)\n" +
+		"\t(CONNECT_DATA = (SERVICE_NAME = my_service))\n)\n"
+	expected := "(DESCRIPTION=(FAILOVER=ON)(CONNECT_TIMEOUT=5)(ADDRESS_LIST=" +
+		"(ADDRESS=(PROTOCOL=TCP)(HOST=db1.example.com)(PORT=1521))" +
+		"(ADDRESS=(PROTOCOL=TCP)(HOST=db2.example.com)(PORT=1521)))" +
+		"(CONNECT_DATA=(SERVICE_NAME=my_service)))"
+
+	c, err := NewConnection("ORA", "oracle", g.M("user", "scott", "password", "tiger", "tns", tns))
+	require.NoError(t, err)
+
+	assert.Equal(t, expected, c.Data["tns"])
+	assert.Equal(t, "oracle://scott:tiger@"+expected, c.URL())
+	assert.NotRegexp(t, `\s`, c.Data["tns"])
+
+	u, err := net.NewURL(c.URL())
+	require.NoError(t, err)
+	assert.Equal(t, "scott", u.Username())
+	assert.Equal(t, "tiger", u.Password())
+
+	// the descriptor without outer parentheses is wrapped
+	c, err = NewConnection("ORA", "oracle", g.M("user", "scott", "password", "tiger", "tns", "\n DESCRIPTION = (X = y)\n"))
+	require.NoError(t, err)
+	assert.Equal(t, "(DESCRIPTION=(X=y))", c.Data["tns"])
+}
+
+// A cached database connection with a cancelled context must not be reused.
+func TestConnectionCacheSkipsCancelled(t *testing.T) {
+	c, err := NewConnection("TEST_CACHE_SQLITE", dbio.TypeDbSQLite, g.M("instance", filepath.Join(t.TempDir(), "c.db")))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stale, err := c.AsDatabaseContext(ctx, AsConnOptions{UseCache: false})
+	require.NoError(t, err)
+	cancel()
+
+	db, err := c.AsDatabaseContext(context.Background(), AsConnOptions{UseCache: true})
+	require.NoError(t, err)
+	defer db.Close()
+	assert.True(t, stale != db, "the cached connection with a cancelled context is reused")
+	require.NoError(t, db.Connect())
+
+	again, err := c.AsDatabaseContext(context.Background(), AsConnOptions{UseCache: true})
+	require.NoError(t, err)
+	assert.True(t, db == again, "the live cached connection is not reused")
 }

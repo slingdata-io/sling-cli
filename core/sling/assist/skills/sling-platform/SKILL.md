@@ -10,11 +10,12 @@ The Sling Platform stores replications, pipelines, jobs, and connections on a se
 
 ## Authentication
 
-Every platform command requires `SLING_PROJECT_TOKEN`. Project tokens are created in the platform UI (Settings → Tokens). Sling never reads the token from an AI agent's environment — only its own.
+Every platform command requires `SLING_PROJECT_TOKEN`. Project tokens are created in the platform UI (Settings → Tokens), or by `sling platform login` (device-code sign-in in a browser; it writes the token to `~/.sling/env.yaml`). Sling never reads the token from an AI agent's environment — only its own.
 
 ```bash
 export SLING_PROJECT_TOKEN=...   # required
-sling platform status             # smoke test: project info + counts
+sling platform login              # or: sign in with a browser (a person must click Allow)
+sling platform status             # smoke test: project info + counts + token source
 ```
 
 ## Subcommand map
@@ -22,6 +23,7 @@ sling platform status             # smoke test: project info + counts
 | Subcommand                        | Purpose                                            |
 |-----------------------------------|----------------------------------------------------|
 | `sling init`                      | Scaffold a local project folder (no token needed)  |
+| `sling platform login`             | Device-code sign-in; writes the token to env.yaml  |
 | `sling platform status`            | Platform project overview (needs a token)          |
 | `sling platform sync [--force]`    | Two-way file sync (local dir ↔ platform, by mtime) |
 | `sling platform jobs list`         | List jobs; `--type`, `--name`, `--file-name` filters |
@@ -42,7 +44,10 @@ sling platform status             # smoke test: project info + counts
 | `sling platform files delete <name>` | Delete a file (`--force` skips confirm)          |
 | `sling platform files rename`      | Rename a file                                      |
 | `sling platform connections list`  | Project-scoped connections                         |
-| `sling platform connections test <name>` | Test a project connection                    |
+| `sling platform connections get <name>` | Show a connection, secrets masked; `-o yaml` round-trips to `save` |
+| `sling platform connections save [name]` | Create/update: `-f <path>` or `-f -`; `--replace`, `--allow-literal` |
+| `sling platform connections delete <name>` | Remove a connection (`--force` skips confirm) |
+| `sling platform connections test <name>` | Test a project connection; `--agent <id>` picks the agent |
 
 Most list/get commands accept `-o json` — prefer it when parsing output.
 

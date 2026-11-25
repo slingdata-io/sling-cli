@@ -1,0 +1,18 @@
+# copy must keep the cause when it cannot init 'from' or 'to'.
+steps:
+  - type: write
+    to: local//tmp/sling/p68/a.csv
+    content: |
+      id
+      1
+
+  - type: copy
+    from: POSTGRES/public/a.csv
+    to: local//tmp/sling/p68/out/a.csv
+    on_failure: warn
+
+  # P68_GCS has a key file that does not exist (set in the test env).
+  - type: copy
+    from: local//tmp/sling/p68/a.csv
+    to: P68_GCS/out/a.csv
+    on_failure: abort

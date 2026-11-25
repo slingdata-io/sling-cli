@@ -402,3 +402,86 @@ func TestCSVSkipLines(t *testing.T) {
 	// asset row count
 	assert.Len(t, data.Rows, 6)
 }
+
+func TestCsvCarriageReturnLongLine(t *testing.T) {
+	// longer than the 64 KiB default of bufio.Scanner
+	input := "id,val\r1,a\r2," + strings.Repeat("x", 70*1024) + "\r3,c\r"
+
+	c := CSV{Reader: strings.NewReader(input), NoDebug: true}
+	data, err := c.Read()
+	assert.NoError(t, err)
+	assert.Len(t, data.Rows, 3)
+}
+
+func TestCsvCarriageReturnLineTooLong(t *testing.T) {
+	orig := CsvCleanupMaxLineSize
+	CsvCleanupMaxLineSize = 64 * 1024
+	t.Cleanup(func() { CsvCleanupMaxLineSize = orig })
+
+	input := "id,val\r1,a\r2," + strings.Repeat("x", 70*1024) + "\r3,c\r"
+
+	t.Run("ReadStream", func(t *testing.T) {
+		c := CSV{Reader: strings.NewReader(input), NoDebug: true}
+		_, err := c.Read()
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), bufio.ErrTooLong.Error())
+		}
+	})
+
+	t.Run("ConsumeCsvReader", func(t *testing.T) {
+		ds := NewDatastream(nil)
+		ds.SetConfig(map[string]string{"header": "true"})
+		err := ds.ConsumeCsvReader(strings.NewReader(input))
+		if err == nil {
+			_, err = ds.Collect(0)
+		}
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), bufio.ErrTooLong.Error())
+		}
+	})
+}
+
+func TestScanCarrRet(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader("a\rb\r\nc\nd\r\re"))
+	scanner.Split(ScanCarrRet)
+	lines := []string{}
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	assert.NoError(t, scanner.Err())
+	assert.Equal(t, []string{"a", "b", "c", "d", "", "e"}, lines)
+}
+
+func TestDetectCarrRet(t *testing.T) {
+	cases := map[string]bool{
+		"id,val\r1,a\r2,b\r":                true,
+		"id,val\r\r\n1,a\r\r\n":             true,
+		"id,val\r\n1,a\r\n":                 false,
+		"id,val\n1,a\n":                     false,
+		"id,val\n1,\"a\rb\rc\"\n2,b\n3,c\n": false,
+	}
+	for input, want := range cases {
+		assert.Equal(t, want, detectCarrRet([]byte(input)), "%q", input)
+	}
+}
+
+func TestCsvLineFeedWithQuotedCarriageReturn(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("id,val\n1,\"a\rb\rc\"\n")
+	for i := 2; i <= 5000; i++ {
+		sb.WriteString(fmt.Sprintf("%d,%s\n", i, strings.Repeat("y", 20)))
+	}
+
+	c := CSV{Reader: strings.NewReader(sb.String()), NoDebug: true}
+	data, err := c.Read()
+	assert.NoError(t, err)
+	if assert.Len(t, data.Rows, 5000) {
+		assert.Equal(t, "a\rb\rc", data.Rows[0][1])
+	}
+
+	// the cleanup also splits on \n, so long runs of \n lines are not lost
+	c = CSV{Reader: strings.NewReader(sb.String()), NoDebug: true, cleanup: true}
+	data, err = c.Read()
+	assert.NoError(t, err)
+	assert.Len(t, data.Rows, 5000)
+}

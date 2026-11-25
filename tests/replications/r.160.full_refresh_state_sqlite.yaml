@@ -1,0 +1,28 @@
+# SLING-499: full-refresh with SLING_STATE on a source without CDC support must run as a plain load
+source: STATE_SQLITE_980
+target: STATE_DUCK_980
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        drop table if exists full_refresh_state_980;
+        create table full_refresh_state_980 (id integer, updated_at text);
+        insert into full_refresh_state_980 values (1, '2026-10-01 00:00:00'), (2, '2026-10-02 00:00:00'), (3, '2026-10-03 00:00:00');
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: check
+      check: runs["main_full_refresh_state_980"].total_rows == 3
+      failure_message: 'expected 3 rows, got: {runs["main_full_refresh_state_980"].total_rows}'
+
+defaults:
+  mode: full-refresh
+
+streams:
+  main.full_refresh_state_980:
+    object: main.full_refresh_state_980

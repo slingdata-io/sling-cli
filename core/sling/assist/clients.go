@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -139,21 +140,31 @@ func readRedirectTarget(redirectPath string) string {
 	return target
 }
 
-// listSkillNames walks the embedded skills FS and returns canonical names
-// (one per top-level directory). Skill bundles with multiple files (like
-// sling-api-specs) still come back as one name.
-func listSkillNames() []string {
-	entries, err := SkillsFS.ReadDir("skills")
-	if err != nil {
-		return nil
+// InstalledSkillNames returns the skills that setup installs. The other embedded
+// topics are printed by `sling skills`, not installed.
+func InstalledSkillNames() []string {
+	return []string{"agent-browser", "sling"}
+}
+
+// InstalledSkillFiles returns the files that setup writes for one skill,
+// keyed by the path relative to ~/.agents/skills/.
+func InstalledSkillFiles(name string) (map[string][]byte, error) {
+	if name == "sling" {
+		return map[string][]byte{"sling/SKILL.md": SlingSkillStub}, nil
 	}
-	out := []string{}
-	for _, e := range entries {
-		if e.IsDir() {
-			out = append(out, e.Name())
+	files := map[string][]byte{}
+	err := fs.WalkDir(SkillsFS, "skills/"+name, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
+			return werr
 		}
-	}
-	return out
+		data, err := SkillsFS.ReadFile(p)
+		if err != nil {
+			return g.Error(err, "read embedded %s", p)
+		}
+		files[strings.TrimPrefix(p, "skills/")] = data
+		return nil
+	})
+	return files, err
 }
 
 // writeCanonicalBundle copies the embedded skills tree to ~/.agents/skills/.
@@ -168,43 +179,29 @@ func writeCanonicalBundle(skillNames []string) error {
 	return nil
 }
 
-// syncCanonicalSkill writes one skill from the embed FS onto the canonical
-// disk tree and removes on-disk files under that skill that are no longer
-// embedded. Shared by writeCanonicalBundle and AutoRefresh.
+// syncCanonicalSkill writes one installed skill onto the canonical disk tree
+// and removes on-disk files under that skill that it no longer has (for
+// example the sub-files of the old full sling skill). Shared by
+// writeCanonicalBundle and AutoRefresh.
 func syncCanonicalSkill(name string) (changed bool, err error) {
 	root := CanonicalSkillsDir()
-	embeddedRoot := filepath.ToSlash(filepath.Join("skills", name))
-	wantFiles := map[string]bool{} // path relative to root, slash-separated
-
-	err = fs.WalkDir(SkillsFS, embeddedRoot, func(p string, d fs.DirEntry, werr error) error {
-		if werr != nil {
-			return werr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(p, "skills/")
-		wantFiles[rel] = true
+	wantFiles, err := InstalledSkillFiles(name)
+	if err != nil {
+		return false, err
+	}
+	for rel, want := range wantFiles {
 		dst := filepath.Join(root, filepath.FromSlash(rel))
-		want, rerr := SkillsFS.ReadFile(p)
-		if rerr != nil {
-			return g.Error(rerr, "read embedded %s", p)
-		}
 		got, _ := os.ReadFile(dst)
 		if bytes.Equal(want, got) {
-			return nil
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return g.Error(err, "mkdir %s", filepath.Dir(dst))
+			return changed, g.Error(err, "mkdir %s", filepath.Dir(dst))
 		}
 		if err := os.WriteFile(dst, want, 0o644); err != nil {
-			return g.Error(err, "write %s", dst)
+			return changed, g.Error(err, "write %s", dst)
 		}
 		changed = true
-		return nil
-	})
-	if err != nil {
-		return changed, err
 	}
 
 	// Prune files on disk that are no longer in the embed (stale supporting docs).
@@ -219,7 +216,7 @@ func syncCanonicalSkill(name string) (changed bool, err error) {
 				return nil
 			}
 			rel = filepath.ToSlash(rel)
-			if !wantFiles[rel] {
+			if _, ok := wantFiles[rel]; !ok {
 				if rmErr := os.Remove(p); rmErr == nil {
 					changed = true
 				}
@@ -230,39 +227,25 @@ func syncCanonicalSkill(name string) (changed bool, err error) {
 	return changed, nil
 }
 
-// skillMatchesEmbedded compares every embedded file for a skill against disk.
+// skillMatchesEmbedded compares every installed file of a skill against disk.
 // Returns ok=false with a short detail when any file is missing or drifted.
 func skillMatchesEmbedded(name string) (ok bool, detail string, err error) {
 	root := CanonicalSkillsDir()
-	embeddedRoot := filepath.ToSlash(filepath.Join("skills", name))
-	var mismatches []string
-	err = fs.WalkDir(SkillsFS, embeddedRoot, func(p string, d fs.DirEntry, werr error) error {
-		if werr != nil {
-			return werr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel := strings.TrimPrefix(p, "skills/")
-		dst := filepath.Join(root, filepath.FromSlash(rel))
-		want, rerr := SkillsFS.ReadFile(p)
-		if rerr != nil {
-			return rerr
-		}
-		got, rerr := os.ReadFile(dst)
-		if rerr != nil {
-			mismatches = append(mismatches, rel+": missing")
-			return nil
-		}
-		if !bytes.Equal(want, got) {
-			mismatches = append(mismatches, rel+": drifted")
-		}
-		return nil
-	})
+	files, err := InstalledSkillFiles(name)
 	if err != nil {
 		return false, "", err
 	}
+	var mismatches []string
+	for rel, want := range files {
+		got, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if rerr != nil {
+			mismatches = append(mismatches, rel+": missing")
+		} else if !bytes.Equal(want, got) {
+			mismatches = append(mismatches, rel+": drifted")
+		}
+	}
 	if len(mismatches) > 0 {
+		sort.Strings(mismatches)
 		return false, strings.Join(mismatches, "; "), nil
 	}
 	return true, "", nil
