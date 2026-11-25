@@ -1,0 +1,96 @@
+# SLING-497: incremental run from SQLite text datetimes to a partitioned file target.
+# The state filter must match the stored text, or the row at the partition start is lost.
+
+env:
+  TABLE: inc_txt_497
+  OUT: temp/inc_txt_497
+  SLING_STATE: LOCAL/temp/inc_txt_497_state
+
+steps:
+  - connection: SQLITE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - connection: SQLITE
+    query: CREATE TABLE main.{env.TABLE} (id integer primary key, name text, updated_at datetime)
+
+  - connection: SQLITE
+    query: |
+      INSERT INTO main.{env.TABLE} VALUES
+        (1, 'a', '2026-09-15 10:00:00'),
+        (2, 'b', '2026-09-30 23:59:59'),
+        (3, 'c', '2026-10-01 00:00:00'),
+        (4, 'd', '2026-10-05 12:30:00'),
+        (5, 'e', '2026-10-20 08:15:30')
+
+  - type: delete
+    location: LOCAL/{env.OUT}
+    recursive: true
+    on_failure: warn
+
+  - type: delete
+    location: LOCAL/temp/inc_txt_497_state
+    recursive: true
+    on_failure: warn
+
+  - replication:
+      source: SQLITE
+      target: LOCAL
+      streams:
+        main.{env.TABLE}:
+          object: file://{env.OUT}/{part_year}/{part_month}
+          mode: incremental
+          primary_key: [id]
+          update_key: updated_at
+          target_options:
+            format: parquet
+      env:
+        SLING_STATE: '{env.SLING_STATE}'
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: SQLITE
+    query: |
+      INSERT INTO main.{env.TABLE} VALUES
+        (6, 'f', '2026-10-25 09:00:00'),
+        (7, 'g', '2026-10-31 23:00:00')
+
+  - replication:
+      source: SQLITE
+      target: LOCAL
+      streams:
+        main.{env.TABLE}:
+          object: file://{env.OUT}/{part_year}/{part_month}
+          mode: incremental
+          primary_key: [id]
+          update_key: updated_at
+          target_options:
+            format: parquet
+      env:
+        SLING_STATE: '{env.SLING_STATE}'
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKDB
+    query: SELECT count(*) AS cnt FROM read_parquet('{env.OUT}/**/*.parquet')
+    into: target_count
+
+  - connection: SQLITE
+    query: SELECT count(*) AS cnt FROM main.{env.TABLE}
+    into: source_count
+
+  - log: "source rows {store.source_count[0].cnt}, target rows {store.target_count[0].cnt}"
+
+  - check: int_parse(store.target_count[0].cnt) == int_parse(store.source_count[0].cnt)
+    failure_message: "Row loss: source {store.source_count[0].cnt}, target {store.target_count[0].cnt}"
+
+  - log: "SUCCESS: sqlite incremental file target keeps all rows"
+
+  - connection: SQLITE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - type: delete
+    location: LOCAL/{env.OUT}
+    recursive: true
+    on_failure: warn

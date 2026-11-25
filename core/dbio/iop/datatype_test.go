@@ -1588,3 +1588,22 @@ func TestNativeTypeToGeneralStarRocksLargeInt(t *testing.T) {
 		assert.True(t, col.Sourced)
 	})
 }
+
+func TestFormatValueSQLiteTimestamp(t *testing.T) {
+	ts := func(s string) time.Time {
+		v, err := time.Parse("2006-01-02 15:04:05.999999", s)
+		require.NoError(t, err)
+		return v
+	}
+
+	t.Run("sqlite drops zero fraction", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00'", FormatValue(ts("2026-10-01 00:00:00"), TimestampType, dbio.TypeDbSQLite))
+	})
+	t.Run("sqlite keeps non-zero fraction", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00.5'", FormatValue(ts("2026-10-01 00:00:00.5"), TimestampType, dbio.TypeDbSQLite))
+		assert.Equal(t, "'2026-10-01 00:00:00.123456'", FormatValue(ts("2026-10-01 00:00:00.123456"), TimestampType, dbio.TypeDbSQLite))
+	})
+	t.Run("postgres unchanged", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00.000000'", FormatValue(ts("2026-10-01 00:00:00"), TimestampType, dbio.TypeDbPostgres))
+	})
+}

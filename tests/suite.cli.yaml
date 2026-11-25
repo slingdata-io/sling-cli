@@ -4492,3 +4492,14 @@
     - 'wrote 3 rows'
   output_does_not_contain:
     - 'limit 5 offset 0'
+
+# SLING-497: the SQLite incremental filter used a zero fraction ('... 00:00:00.000000').
+# SQLite compares text, so the row at the partition start was lost.
+- id: 970
+  name: 'SQLite text datetimes to a partitioned file target keep all rows on incremental runs (SLING-497)'
+  run: 'sling run -d -p tests/pipelines/p.66.sqlite_text_incremental_file_target.yaml'
+  group: sqlite,duckdb
+  output_contains:
+    - 'SUCCESS: sqlite incremental file target keeps all rows'
+  output_does_not_contain:
+    - 'Row loss'
