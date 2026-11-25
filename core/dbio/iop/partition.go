@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/flarco/g"
-	"github.com/spf13/cast"
 )
 
 type PartitionLevel string
@@ -361,15 +360,15 @@ func ExtractPartitionTimeValue(mask, path string) (timestamp time.Time, err erro
 
 			switch pcTemplate {
 			case PartitionLevelSecond:
-				timeComponents[TimeLevelSecond], err = cast.ToIntE(value)
+				timeComponents[TimeLevelSecond], err = strconv.Atoi(value)
 			case PartitionLevelMinute:
-				timeComponents[TimeLevelMinute], err = cast.ToIntE(value)
+				timeComponents[TimeLevelMinute], err = strconv.Atoi(value)
 			case PartitionLevelHour:
-				timeComponents[TimeLevelHour24], err = cast.ToIntE(value)
+				timeComponents[TimeLevelHour24], err = strconv.Atoi(value)
 			case PartitionLevelDay:
-				timeComponents[TimeLevelDay], err = cast.ToIntE(value)
+				timeComponents[TimeLevelDay], err = strconv.Atoi(value)
 			case PartitionLevelWeek:
-				weekNum, err = cast.ToIntE(value)
+				weekNum, err = strconv.Atoi(value)
 				if err != nil {
 					err = g.Error("invalid week format: %s", value)
 				}
@@ -379,15 +378,15 @@ func ExtractPartitionTimeValue(mask, path string) (timestamp time.Time, err erro
 					err = g.Error("invalid year_month format: %s", value)
 					break
 				}
-				timeComponents[TimeLevelYear], err = cast.ToIntE(parts[0])
+				timeComponents[TimeLevelYear], err = strconv.Atoi(parts[0])
 				if err != nil {
 					break
 				}
-				timeComponents[TimeLevelMonth], err = cast.ToIntE(parts[1])
+				timeComponents[TimeLevelMonth], err = strconv.Atoi(parts[1])
 			case PartitionLevelMonth:
-				timeComponents[TimeLevelMonth], err = cast.ToIntE(value)
+				timeComponents[TimeLevelMonth], err = strconv.Atoi(value)
 			case PartitionLevelYear:
-				timeComponents[TimeLevelYear], err = cast.ToIntE(value)
+				timeComponents[TimeLevelYear], err = strconv.Atoi(value)
 			}
 
 			if err != nil {
