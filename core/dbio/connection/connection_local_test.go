@@ -1,14 +1,18 @@
 package connection
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 func writeEnvFile(t *testing.T, body string) (path string, ec *EnvFileConns) {
@@ -659,5 +663,194 @@ func TestDiscoverUnknownConnection(t *testing.T) {
 	_, _, _, err := ConnEntries{}.Discover("NOT_THERE", &DiscoverOptions{})
 	if err == nil || !strings.Contains(err.Error(), "Invalid Connection name: NOT_THERE") {
 		t.Fatalf("want invalid connection name error, got %v", err)
+	}
+}
+
+// TestConnectionEnvFileVariablesFirstLoad: the first parse in a process must
+// expand ${VAR} refs from the variables block of the same file.
+func TestConnectionEnvFileVariablesFirstLoad(t *testing.T) {
+	t.Cleanup(func() {
+		for _, k := range []string{"CEV_HOST", "CEV_USER", "CEV_PASS"} {
+			os.Unsetenv(k)
+		}
+	})
+	body := `
+variables:
+  CEV_HOST: localhost
+  CEV_USER: u
+  CEV_PASS: p
+connections:
+  CEV_DW:
+    type: sqlserver
+    host: ${CEV_HOST}
+    user: ${CEV_USER}
+    password: ${CEV_PASS}
+    database: db
+    port: 1433
+`
+	ef, err := env.LoadSlingEnvFileBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := g.M()
+	g.JSONConvert(ef, &m)
+	conns, err := ReadConnections(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, ok := conns["CEV_DW"]
+	if !ok {
+		t.Fatal("CEV_DW did not load")
+	}
+	if strings.Contains(conn.URL(), "${") {
+		t.Errorf("URL has an unexpanded ref: %s", conn.URL())
+	}
+}
+
+func TestConnectionLoadErrorRecorded(t *testing.T) {
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD:
+    type: sqlserver
+    host: ${CLE_UNSET_HOST}
+    user: ${CLE_UNSET_USER}
+    password: ${CLE_UNSET_PASS}
+`)
+	GetLocalConns(true)
+	if name := GetLocalConns().Get("CLE_BAD").Name; name != "" {
+		t.Fatalf("CLE_BAD should not load, got %q", name)
+	}
+	want := "could not parse provided credentials / url for CLE_BAD"
+	if err := LocalConnLoadError("cle_bad"); err == nil || !strings.Contains(g.ErrMsgSimple(err), want) {
+		t.Fatalf("want error with %q, got %v", want, err)
+	}
+
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD:
+    type: sqlserver
+    host: localhost
+    user: u
+    password: p
+    database: db
+`)
+	GetLocalConns(true)
+	if err := LocalConnLoadError("CLE_BAD"); err != nil {
+		t.Errorf("the error should clear after a valid load, got %v", err)
+	}
+}
+
+func setIcebergCatalogEnv(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("ICE_A", "{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_A}")
+	t.Setenv("ICE_B", "{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_B}")
+	t.Setenv("CAT_A", "sqlite://"+dir+"/a.db")
+	t.Setenv("CAT_B", "sqlite://"+dir+"/b.db")
+}
+
+func TestGetLocalConnsIcebergSQLCatalog(t *testing.T) {
+	setIcebergCatalogEnv(t)
+
+	done := make(chan ConnEntries, 1)
+	go func() { done <- GetLocalConns(true) }()
+
+	select {
+	case entries := <-done:
+		for _, name := range []string{"ICE_A", "ICE_B", "CAT_A", "CAT_B"} {
+			if entries.Get(name).Name == "" {
+				t.Errorf("connection %s did not load", name)
+			}
+		}
+		if entries.Get("ICE_A").Connection.Data["sql_conn_payload"] != nil {
+			t.Error("loading must not set sql_conn_payload")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetLocalConns did not return in 5s")
+	}
+}
+
+func TestResolveIcebergSQLCatalog(t *testing.T) {
+	setIcebergCatalogEnv(t)
+	t.Setenv("ICE_MISSING", "{type: iceberg, catalog_type: sql, sql_catalog_conn: NO_SUCH_CONN}")
+	t.Setenv("ICE_SELF", "{type: iceberg, catalog_type: sql, sql_catalog_conn: ICE_SELF}")
+	GetLocalConns(true)
+
+	t.Run("sets payload", func(t *testing.T) {
+		entry := GetLocalConns().Get("ICE_A")
+		conn := entry.Connection
+		if err := conn.ResolveIcebergSQLCatalog(); err != nil {
+			t.Fatal(err)
+		}
+		payload := g.AsMap(conn.Data["sql_conn_payload"])
+		cat := GetLocalConns().Get("CAT_A").Connection
+		want := cat.URL()
+		if got := cast.ToString(payload["url"]); got == "" || got != want {
+			t.Errorf("payload url = %q, want %q", got, want)
+		}
+	})
+
+	for name, want := range map[string]string{
+		"ICE_MISSING": "did not find provided sql_catalog_conn: NO_SUCH_CONN",
+		"ICE_SELF":    "sql_catalog_conn cannot refer to its own connection: ICE_SELF",
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn := GetLocalConns().Get(name).Connection
+			err := conn.ResolveIcebergSQLCatalog()
+			if err == nil || !strings.Contains(g.ErrMsgSimple(err), want) {
+				t.Errorf("want error with %q, got %v", want, err)
+			}
+		})
+	}
+}
+
+func TestReadDbtConnections(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DBT_PROFILES_DIR", dir)
+	profiles := `
+shop:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: /tmp/warehouse.duckdb
+    bad_pg:
+      type: postgres
+    odd:
+      type: sparkx
+      host: localhost
+`
+	if err := os.WriteFile(filepath.Join(dir, "profiles.yml"), []byte(profiles), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	conns, failed, err := ReadDbtConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, ok := conns["SHOP/DEV"]
+	if !ok {
+		t.Fatalf("SHOP/DEV did not load: %v", failed)
+	}
+	if conn.Type != dbio.TypeDbDuckDb || !strings.Contains(conn.URL(), "/tmp/warehouse.duckdb") {
+		t.Errorf("want duckdb with the path, got %s %s", conn.Type, conn.URL())
+	}
+
+	if failed["SHOP/BAD_PG"] == nil {
+		t.Error("SHOP/BAD_PG should fail")
+	}
+	var unknown *dbtUnknownAdapterError
+	if !errors.As(failed["SHOP/ODD"], &unknown) {
+		t.Errorf("SHOP/ODD should fail as an unknown adapter, got %v", failed["SHOP/ODD"])
+	}
+
+	// GetLocalConns maps / to _ and records the failures
+	GetLocalConns(true)
+	if GetLocalConns().Get("SHOP_DEV").Name == "" {
+		t.Error("SHOP_DEV should be a local connection")
+	}
+	if LocalConnLoadError("SHOP_BAD_PG") == nil || LocalConnLoadError("SHOP_ODD") == nil {
+		t.Error("failed dbt outputs should have a load error")
 	}
 }

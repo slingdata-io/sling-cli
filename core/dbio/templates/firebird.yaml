@@ -56,6 +56,14 @@ core:
     when matched then
       update set {set_fields2}
   sample: select first {n} {fields} from {table}
+  limit: select first {limit} {fields} from {table}{where_clause}
+  limit_offset: select first {limit} skip {offset} {fields} from {table}{where_clause}
+  limit_sql: |
+    select first {limit} skip {offset} * from (
+      {sql}
+    ) as t
+  incremental_select_limit: select first {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
+  incremental_select_limit_offset: select first {limit} skip {offset} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
   rename_table: alter table {table} rename to {new_table}
   modify_column: alter table {table} alter column {column} type {type}
   use_database: -- firebird doesn't support USE DATABASE
@@ -71,12 +79,12 @@ metadata:
     from MON$DATABASE
 
   schemas: |
-    select 'main' as schema_name
+    select cast('' as varchar(31)) as schema_name
     from RDB$DATABASE
 
   tables: |
     select 
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
       'false' as is_view
     from RDB$RELATIONS r
@@ -86,7 +94,7 @@ metadata:
 
   views: |
     select 
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
       'true' as is_view
     from RDB$RELATIONS r
@@ -98,26 +106,47 @@ metadata:
     select
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      f.RDB$FIELD_PRECISION as "precision",
+      case when f.RDB$FIELD_TYPE = 26 and coalesce(f.RDB$FIELD_PRECISION, 0) = 0 then 38 else f.RDB$FIELD_PRECISION end as "precision",
       abs(f.RDB$FIELD_SCALE) as scale
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
@@ -127,7 +156,7 @@ metadata:
   primary_keys: |
     select
       trim(rc.RDB$CONSTRAINT_NAME) as pk_name,
-      sg.RDB$FIELD_POSITION + 1 as position,
+      sg.RDB$FIELD_POSITION + 1 as "position",
       trim(sg.RDB$FIELD_NAME) as column_name
     from RDB$RELATION_CONSTRAINTS rc
     join RDB$INDEX_SEGMENTS sg on rc.RDB$INDEX_NAME = sg.RDB$INDEX_NAME
@@ -147,30 +176,51 @@ metadata:
 
   columns_full: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(rf.RDB$RELATION_NAME) as table_name,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      rf.RDB$FIELD_POSITION + 1 as position
+      rf.RDB$FIELD_POSITION + 1 as "position"
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
     join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
@@ -180,34 +230,55 @@ metadata:
 
   schemata: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(rf.RDB$RELATION_NAME) as table_name,
-      case 
-        when r.RDB$VIEW_BLR is null then false
-        else true
+      case
+        when r.RDB$VIEW_BLR is null then 'false'
+        else 'true'
       end as is_view,
       trim(rf.RDB$FIELD_NAME) as column_name,
       case f.RDB$FIELD_TYPE
-        when 7 then 'SMALLINT'
-        when 8 then 'INTEGER'
+        when 7 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'SMALLINT'
+          end
+        when 8 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INTEGER'
+          end
         when 10 then 'FLOAT'
         when 12 then 'DATE'
         when 13 then 'TIME'
         when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 16 then
           case f.RDB$FIELD_SUB_TYPE
-            when 0 then 'BIGINT'
             when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
             when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'BIGINT'
+          end
+        when 23 then 'BOOLEAN'
+        when 24 then 'DECFLOAT(16)'
+        when 25 then 'DECFLOAT(34)'
+        when 26 then
+          case f.RDB$FIELD_SUB_TYPE
+            when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+            else 'INT128'
           end
         when 27 then 'DOUBLE PRECISION'
+        when 28 then 'TIME WITH TIME ZONE'
+        when 29 then 'TIMESTAMP WITH TIME ZONE'
         when 35 then 'TIMESTAMP'
         when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
         when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
         when 261 then 'BLOB'
         else 'UNKNOWN'
       end as data_type,
-      rf.RDB$FIELD_POSITION + 1 as position
+      rf.RDB$FIELD_POSITION + 1 as "position"
     from RDB$RELATION_FIELDS rf
     join RDB$FIELDS f on rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME
     join RDB$RELATIONS r on rf.RDB$RELATION_NAME = r.RDB$RELATION_NAME
@@ -217,9 +288,9 @@ metadata:
 
   row_count_estimates: |
     select
-      'main' as schema_name,
+      cast('' as varchar(31)) as schema_name,
       trim(r.RDB$RELATION_NAME) as table_name,
-      0 as count
+      0 as "count"
     from RDB$RELATIONS r
     where r.RDB$SYSTEM_FLAG = 0
       and r.RDB$VIEW_BLR is null
@@ -239,19 +310,40 @@ metadata:
       for select
         trim(rf.RDB$FIELD_NAME),
         case f.RDB$FIELD_TYPE
-          when 7 then 'SMALLINT'
-          when 8 then 'INTEGER'
+          when 7 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'SMALLINT'
+            end
+          when 8 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'INTEGER'
+            end
           when 10 then 'FLOAT'
           when 12 then 'DATE'
           when 13 then 'TIME'
           when 14 then 'CHAR(' || f.RDB$FIELD_LENGTH || ')'
           when 16 then
             case f.RDB$FIELD_SUB_TYPE
-              when 0 then 'BIGINT'
               when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
               when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'BIGINT'
+            end
+          when 23 then 'BOOLEAN'
+          when 24 then 'DECFLOAT(16)'
+          when 25 then 'DECFLOAT(34)'
+          when 26 then
+            case f.RDB$FIELD_SUB_TYPE
+              when 1 then 'NUMERIC(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              when 2 then 'DECIMAL(' || f.RDB$FIELD_PRECISION || ',' || abs(f.RDB$FIELD_SCALE) || ')'
+              else 'INT128'
             end
           when 27 then 'DOUBLE PRECISION'
+          when 28 then 'TIME WITH TIME ZONE'
+          when 29 then 'TIMESTAMP WITH TIME ZONE'
           when 35 then 'TIMESTAMP'
           when 37 then 'VARCHAR(' || f.RDB$FIELD_LENGTH || ')'
           when 40 then 'CSTRING(' || f.RDB$FIELD_LENGTH || ')'
@@ -297,7 +389,7 @@ metadata:
 analysis:
   field_chars: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       sum(case when {field} containing ascii_char(10) then 1 else 0 end) as cnt_nline,
@@ -310,7 +402,7 @@ analysis:
 
   field_stat_len: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       count(*) as tot_cnt,
@@ -320,7 +412,7 @@ analysis:
 
   field_stat_deep: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
       count(*) as tot_cnt,
@@ -340,7 +432,7 @@ analysis:
     select first 1000
       '{table}' as table_nm,
       '{field}' as field,
-      {field} as value,
+      {field} as "value",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -352,7 +444,7 @@ analysis:
       '{table}' as table_nm,
       '{field}' as field,
       {group_expr} as group_exp,
-      {field} as value,
+      {field} as "value",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -361,12 +453,12 @@ analysis:
 
   distro_field_date: |
     select
-      'main' as schema_nm,
+      '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
-      extract(year from {field}) as year,
-      extract(month from {field}) as month,
-      extract(day from {field}) as day,
+      extract(year from {field}) as "year",
+      extract(month from {field}) as "month",
+      extract(day from {field}) as "day",
       count(*) as cnt,
       cast(100.0 * count(*) / (select count(*) from {table}) as numeric(5,2)) as prct
     from {table}
@@ -395,6 +487,11 @@ variable:
   max_string_type: varchar(8000)
   max_string_length: 8000
   max_column_length: 31
+  schemaless: true
+  column_upper: true
+  # Firebird TIMESTAMP holds 1/10000 s; more than 4 fractional digits fail with -413
+  timestamp_layout: '2006-01-02 15:04:05.0000'
+  timestampz_layout: '2006-01-02 15:04:05.0000'
 
 native_type_map:
   smallint: smallint
@@ -414,6 +511,10 @@ native_type_map:
   blob: text
   boolean: bool
   varying: text
+  int128: decimal
+  decfloat: float
+  time with time zone: timez
+  timestamp with time zone: timestampz
 
 general_type_map:
   bigint: bigint

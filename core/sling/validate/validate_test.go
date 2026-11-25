@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/sling/build"
 )
 
@@ -585,5 +586,55 @@ func TestResultRowCompiled(t *testing.T) {
 	row = resultRow(FileResult{Kind: KindReplication, OK: true, Compiled: true}, false)
 	if row["compiled"] != true {
 		t.Fatalf("compiled = %#v, want true", row["compiled"])
+	}
+}
+
+func TestValidateReplicationContinuous(t *testing.T) {
+	const body = `
+source: MY_PG
+target: MY_TGT
+defaults:
+  mode: change-capture
+  object: public.{stream_table}
+streams:
+  public.orders:
+`
+	path := writeFile(t, t.TempDir(), "r.yaml", body+`continuous:
+  interval: 30s
+  max_rows: 500
+`)
+
+	// parse path
+	res := ParseFile(path, Options{})
+	if !res.OK {
+		t.Fatalf("parse failed: %s", res.Error)
+	}
+	parsed, ok := res.Parsed.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected parsed type %T", res.Parsed)
+	}
+	block, ok := parsed["continuous"].(map[string]any)
+	if !ok || block["interval"] != "30s" {
+		t.Fatalf("continuous block lost in parse: %v", parsed["continuous"])
+	}
+
+	// compiled form
+	cfg, err := sling.LoadReplicationConfigFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := compiledReplication(cfg)
+	block, ok = compiled["continuous"].(map[string]any)
+	if !ok || block["interval"] != "30s" || block["max_rows"] != float64(500) {
+		t.Fatalf("continuous block lost in compiled form: %v", compiled["continuous"])
+	}
+
+	// no block, no key
+	cfg, err = sling.UnmarshalReplication(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := compiledReplication(cfg)["continuous"]; found {
+		t.Fatal("compiled form has a continuous key without a block")
 	}
 }

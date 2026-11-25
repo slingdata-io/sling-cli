@@ -25,8 +25,9 @@ core:
           select 1 from {temp_table} 
           where {join_where}
       )
-  limit: select {fields} from {table}{where_clause} limit {limit} offset {offset}
-  limit_offset: select {fields} from {table}{where_clause} limit {limit}
+  # Table.Select uses limit when offset is 0, limit_offset when offset > 0
+  limit: select {fields} from {table}{where_clause} limit {limit}
+  limit_offset: select {fields} from {table}{where_clause} limit {limit} offset {offset}
   limit_sql: |
     select * from (
       {sql}

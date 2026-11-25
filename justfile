@@ -62,7 +62,8 @@ test-core:
     (cd core/sling && go test -v -run 'TestReplication')
     (cd core/sling && go test -v -run 'TestColumnCasing')
     (cd core/sling && go test -run 'TestCheck')
-    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestCreateTableIfNotExists|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestMarkdownLines|TestPrepareLegacySQLHooks|TestStateSetConcurrentTasks|TestUnmarshalTaskEnv')
+    (cd core/sling && go test -v -run 'TestArrowLane|TestCompactText|TestCreateTableIfNotExists|TestCreateSchemaIfNotExists|TestProcessWildcardsSchemaless|TestDatasetToCompact|TestErrorHelper|TestExpandSelectColumns|TestGetFormatMapAPISourceStreamTable|TestFormatTargetObjectNameSchemaless|TestFormatMapKeepsConfig|TestFormatMapConcurrentStreamID|TestMarkdownLines|TestPrepareLegacySQLHooks|TestStateSetConcurrentTasks|TestStateSetConcurrentStatusWrites|TestTaskStatusSnapshot|TestTaskDfConcurrentAccess|TestIsFullRefreshCDC|TestValidateFileTargetLimits|TestValidateIncrementalFileTarget|TestCheckIncrementalFileUpdateKey|TestUnmarshalTaskEnv|TestContinuous|TestCDCGroupRunnerSnapshotStreams|TestCDCStreamUnitCopy|TestCDCGroupRunnerKillHook|TestCDCGroupRunnerTaskContexts|TestCDCWriteContextCancel')
+    (cd core/sling && go test -race -run 'TestFormatMapKeepsConfig|TestFormatMapConcurrentStreamID|TestTaskDfConcurrentAccess|TestStateSetConcurrentTasks|TestStateSetConcurrentStatusWrites|TestTaskStatusSnapshot|TestRuntimeStateConcurrentAccess|TestContinuousLeaseDuckDbState')
     (cd core/env && go test -v)
     (cd core/secrets && go test -v)
     (cd core/sling/assist && go test -v)
@@ -78,20 +79,21 @@ test-dbio-connection:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio connection"
-    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestDuckDbConnectionQuackURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs')
+    (cd core/dbio/connection && go test -v -run 'TestConnection|TestDynamoDBConnectionURL|TestLanceDBConnectionURL|TestDuckDbConnectionQuackURL|TestSQLServerNamedInstance|TestEnvVarRefRenders|TestPromoteLiteralSecrets|TestRejectLiteralSecretsNested|TestSetValidated|TestEnvFileConnsSetKeepsFile|TestSecretRef|TestRejectLiteralSecretsAcceptsRefs|TestRejectLiteralSecretsSkipsMask|TestParseConnsInput|TestGetLocalConnsIcebergSQLCatalog|TestResolveIcebergSQLCatalog|TestReadDbtConnections')
 
 # Test dbio iop (input/output processing)
 test-dbio-iop:
     echo "TESTING dbio iop"
-    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestDuckMapLiteral|TestEnsureBinDuckDB|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping|TestRecordStream|TestDatastream|TestConsumeArrowRecords|TestParquetArrowWriter|TestUnwrap|TestApplySelect|TestSelector|TestFlattenRecord|TestCoerceUnsizedDecimalCast|TestDecomposedToRat|TestDecodeJSONIfBase64|TestEncodeRowAsJSONObject|TestCSVSkipLines|TestReaderReadyRetriesFailedOpenAndClose|TestPause|TestParseModifiers|TestTokenizeModifiers|TestCollectInlineIndexes|TestMakeIndexName|TestGenerateCopyStatementEpochPartitionKey|TestRenderStringMethodCallHint|TestOpenTunnelProxy_(ForwardsTraffic|UnreachableProxy)|TestSSHHostKey|TestSSHOptions|TestUntarGz' && cd -
+    infisical-load dev /dbio && cd core/dbio/iop && go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestDuckMapLiteral|TestEnsureBinDuckDB|TestParquetDuckDb|TestIcebergReader|TestDeltaReader|TestPartition|TestExtractPartitionTimeValue|TestGetLowestPartTimeUnit|TestMatchedPartitionMask|TestGeneratePartURIsFromRange|TestDataset|TestValidateNames|TestExcelDateToTime|TestExcelNumFmtKind|TestExcelUseStoredNumbers|TestExcelNumberFormats|TestNormalizeNumberText|TestStreamProcessorCastThousands|TestBinaryToHex|TestBinaryToDecimal|TestArrow|TestFunctions|TestQueue|TestEvaluator|TestTransforms|TestColumnTyping|TestNativeTypeToGeneralClickhouse|TestRecordStream|TestDatastream|TestConsumeArrowRecords|TestParquetArrowWriter|TestUnwrap|TestApplySelect|TestSelector|TestFlattenRecord|TestCoerceUnsizedDecimalCast|TestNativeTypeToGeneralFirebird|TestDecomposedToRat|TestDecodeJSONIfBase64|TestEncodeRowAsJSONObject|TestCSVSkipLines|TestAvroScanEnd|TestReaderReadyRetriesFailedOpenAndClose|TestPause|TestParseModifiers|TestTokenizeModifiers|TestCollectInlineIndexes|TestMakeIndexName|TestGenerateCopyStatementEpochPartitionKey|TestGenerateCopyStatementPartitionSkipsFileSize|TestRenderStringMethodCallHint|TestOpenTunnelProxy_(ForwardsTraffic|UnreachableProxy)|TestSSHHostKey|TestSSHOptions|TestUntarGz|TestCommitChecksum|TestDataflowStats|TestFormatValue' && go test -race -count=1 -run 'TestCommitChecksumKeepsColumnStats|TestDatastreamLimitedConcurrentPush|TestPauseWhileStreamCloses|TestDatastreamStats|TestDataflowStats' . && cd -
 
 # Test dbio database
 test-dbio-database:
     #!/usr/bin/env bash
     set -e
     echo "TESTING dbio database"
-    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestAdbcLaneRead|TestArrowDBConn|TestMySQLArrow|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestDuckDbConn|TestDuckLakeConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestHana|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL|TestStarRocksNewTransactionFailSafe|TestStarRocksStreamLoadTimeout|TestD1StreamRowsPaged|TestSnowflakeStage|TestPgTimeInRange|TestPgCopy')
+    (cd core/dbio/database && go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestStatementRunner|TestBaseConnExecMulti|TestBaseConnStreamRowsContextIterator|TestQueryContextCancelsChildren|TestTrimSQLComments|TestAddPrimaryKeyToDDL|TestTableFinalizeAggregateFields|TestAdbcLaneRead|TestArrowDBConn|TestMySQLArrow|TestArrowLane|TestDbase|TestDynamoDB|TestLanceDBConn|TestDuckDbConn|TestDuckLakeConn|TestIceberg|TestZerobus|TestAlignZerobusSource|TestColumnsToZerobusArrowSchema|TestCopyViaZerobus|TestIsZerobusSchemaLag|TestMapZerobusIPCCompression|TestSerializeRecordToIPC|TestVolumeDeleteRetryOn429|TestRedshift(EnsureAWSCredentials|GetS3Props|MakeCopyCredentialString|RedactCredentials)|TestCleanRedactsSessionToken|TestSoftMergeGuardIsNullSafe|TestClickhouseMergeTemplatesCastPK|TestHana|TestGetSchemataAll|TestIndexDDL|TestParseIndexes|TestTableKeys|TestStarRocks(SchemaMigration|ForeignKeys)DDL|TestStarRocksNewTransactionFailSafe|TestStarRocksStreamLoadTimeout|TestD1StreamRowsPaged|TestSnowflakeStage|TestPgTimeInRange|TestPgCopy|TestTableSelectLimitOffset|TestTableSelectOffsetAllDialects|TestSelectFirebirdLimit|TestTableDropUnsupportedSchema|TestFilterTablesEmptySchema|TestSQLColumnsODBCTextAsNumeric|TestFirebirdSelectLimit|TestFirebirdIncrementalSelectLimit|TestODBCTemplateTypeDetect')
     (cd core/dbio/database && go test -run TestChunkByColumnRange)
+    (cd core/dbio/database && go test -race -run 'TestBaseConnStreamRowsContextIterator')
 
 # Test dbio filesys
 test-dbio-filesys:
@@ -162,6 +164,22 @@ test-cdc-basic:
     #!/usr/bin/env bash
     set -e
     (cd ../sling && bash scripts/test.cdc.sh basic)
+
+test-cdc-continuous-network-drop:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_network_drop)
+
+test-cdc-continuous-restart:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_server_restart)
+
+# 72h soak, a release check. Set CDC_SOAK_HOURS for a shorter run.
+test-cdc-soak:
+    #!/usr/bin/env bash
+    set -e
+    (cd ../sling && bash scripts/test.cdc.sh continuous_soak)
 
 test-cdc-soft-delete:
     #!/usr/bin/env bash

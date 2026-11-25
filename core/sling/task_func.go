@@ -22,6 +22,10 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 		return
 	}
 
+	if conn.GetType().Schemaless() {
+		return false, nil // the schema of the object name is ignored
+	}
+
 	// check schema existence
 	schemasData, err := conn.GetSchemas()
 	if err != nil {
@@ -239,7 +243,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 }
 
 var (
-	getIncrementalValueViaState = func(*TaskExecution) (err error) {
+	getIncrementalValueViaState = func(*TaskExecution, dbio.Type) (err error) {
 		g.Warn("use the official release of sling-cli to use incremental via sling state")
 		return nil
 	}

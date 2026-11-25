@@ -1,6 +1,7 @@
 package dbio
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -121,4 +122,80 @@ func TestExplainTemplatePresentForSQLDatabases(t *testing.T) {
 		assert.NotEmpty(t, val, "%s missing core.explain", td.Value)
 		assert.Contains(t, val, "{sql}", "%s core.explain must include {sql}", td.Value)
 	}
+}
+
+func TestTypeSupportsCDC(t *testing.T) {
+	for _, tp := range []Type{TypeDbPostgres, TypeDbMySQL, TypeDbMariaDB, TypeDbSQLServer, TypeDbOracle, TypeDbMongoDB} {
+		assert.True(t, tp.SupportsCDC(), tp)
+	}
+	for _, tp := range []Type{TypeDbSQLite, TypeDbDuckDb, TypeDbSnowflake} {
+		assert.False(t, tp.SupportsCDC(), tp)
+	}
+}
+
+func TestFirebirdTemplate(t *testing.T) {
+	fb := Type("firebird")
+	tpl, err := fb.Template(true)
+	require.NoError(t, err)
+
+	own, err := fb.Template(false) // keys that firebird.yaml defines itself
+	require.NoError(t, err)
+	require.NotEmpty(t, own.Metadata)
+	ownKeys := map[string]map[string]string{"metadata": own.Metadata, "analysis": own.Analysis}
+
+	reservedAlias := regexp.MustCompile(`(?i)as (position|count|value|year|month|day)\b`)
+	for group, vals := range map[string]map[string]string{"metadata": tpl.Metadata, "analysis": tpl.Analysis} {
+		for key, val := range vals {
+			if _, ok := ownKeys[group][key]; !ok {
+				continue
+			}
+			assert.NotContains(t, val, "'main'", "%s.%s", group, key)
+			assert.False(t, reservedAlias.MatchString(val), "unquoted reserved alias in %s.%s", group, key)
+		}
+	}
+	assert.Contains(t, tpl.Value("metadata.row_count_estimates"), `as "count"`)
+	assert.Contains(t, tpl.Value("metadata.schemata"), `'false'`)
+
+	limitKeys := []string{"limit", "limit_offset", "limit_sql", "incremental_select_limit", "incremental_select_limit_offset"}
+	for _, key := range limitKeys {
+		val := tpl.Value("core." + key)
+		assert.Contains(t, val, "first {limit}", key)
+		assert.NotContains(t, val, " limit {limit}", key)
+		if strings.HasSuffix(key, "_offset") || key == "limit_sql" {
+			assert.Contains(t, val, "skip {offset}", key)
+		}
+	}
+
+	assert.True(t, fb.Schemaless())
+	assert.True(t, fb.DBNameUpperCase())
+	assert.False(t, TypeDbPostgres.Schemaless())
+	assert.False(t, TypeDbSQLite.Schemaless())
+}
+
+func TestFirebirdTemplateWideTypes(t *testing.T) {
+	tpl, err := Type("firebird").Template(true)
+	require.NoError(t, err)
+
+	for _, key := range []string{"columns", "columns_full", "schemata", "ddl_table"} {
+		val := tpl.Metadata[key]
+		for _, want := range []string{
+			"when 23 then 'BOOLEAN'", "when 24 then 'DECFLOAT(16)'", "when 25 then 'DECFLOAT(34)'",
+			"when 26 then", "else 'INT128'", "when 28 then 'TIME WITH TIME ZONE'",
+			"when 29 then 'TIMESTAMP WITH TIME ZONE'",
+			"else 'SMALLINT'", "else 'INTEGER'", "else 'BIGINT'",
+		} {
+			assert.Contains(t, val, want, "metadata.%s", key)
+		}
+		// scaled integers (types 7, 8, 16, 26) report NUMERIC/DECIMAL with precision and scale
+		assert.Equal(t, 4, strings.Count(val, "when 1 then 'NUMERIC('"), "metadata.%s", key)
+		assert.Equal(t, 4, strings.Count(val, "when 2 then 'DECIMAL('"), "metadata.%s", key)
+	}
+
+	assert.Contains(t, tpl.Metadata["columns"], "RDB$FIELD_TYPE = 26 and coalesce(f.RDB$FIELD_PRECISION, 0) = 0 then 38")
+
+	assert.Equal(t, "decimal", tpl.NativeTypeMap["int128"])
+	assert.Equal(t, "float", tpl.NativeTypeMap["decfloat"])
+	assert.Equal(t, "bool", tpl.NativeTypeMap["boolean"])
+	assert.Equal(t, "timez", tpl.NativeTypeMap["time with time zone"])
+	assert.Equal(t, "timestampz", tpl.NativeTypeMap["timestamp with time zone"])
 }

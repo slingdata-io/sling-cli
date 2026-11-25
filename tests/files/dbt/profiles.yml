@@ -1,0 +1,6 @@
+shop:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: tests/files/dbt/warehouse.duckdb

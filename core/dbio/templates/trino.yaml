@@ -12,7 +12,8 @@ core:
     from (select * from {temp_table}) as t2
     where {pk_fields_equal}
   insert: insert into {table} ({fields}) values ({values})
-  limit: select {fields} from {table} offset {offset} limit {limit}
+  limit: select {fields} from {table}{where_clause} limit {limit}
+  limit_offset: select {fields} from {table}{where_clause} offset {offset} limit {limit}
   limit_sql: |
     select * from (
       {sql}

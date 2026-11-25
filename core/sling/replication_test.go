@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -1098,6 +1100,22 @@ func TestReplicationCheckConnections(t *testing.T) {
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "could not find connection(s): MISSING_TGT_X3.")
 	}
+
+	// a connection that failed to load says why
+	t.Setenv("ENV_YAML", `
+connections:
+  CLE_BAD2:
+    type: sqlserver
+    host: ${CLE_UNSET_HOST2}
+    user: ${CLE_UNSET_USER2}
+    password: ${CLE_UNSET_PASS2}
+`)
+	connection.GetLocalConns(true)
+	rd = ReplicationConfig{Source: "CLE_BAD2", Target: "LOCAL"}
+	err = rd.checkConnections()
+	if assert.Error(t, err) {
+		assert.Equal(t, "could not find connection(s): CLE_BAD2 (could not load: could not parse provided credentials / url for CLE_BAD2). Add them to the environment", g.ErrMsgSimple(err))
+	}
 }
 
 // RuntimeState must not race with Env and Store writes (SLING-153).
@@ -1187,6 +1205,59 @@ streams:
 	assert.Equal(t, 2, state.Execution.Status.Count)
 }
 
+// The ticker calls StateSet while the task goroutine sets status, error and
+// end time. Run with -race.
+func TestStateSetConcurrentStatusWrites(t *testing.T) {
+	replication, err := LoadReplicationConfig(`
+source: local
+target: local
+defaults:
+  mode: full-refresh
+streams:
+  file:///tmp/sling_race_e.csv:
+    object: file:///tmp/sling_race_e_out.csv
+`)
+	if !assert.NoError(t, err) || !assert.NoError(t, replication.Compile(nil)) {
+		return
+	}
+
+	te := &TaskExecution{
+		Config:      replication.Tasks[0],
+		Replication: &replication,
+		Context:     g.NewContext(context.Background()),
+		Status:      ExecStatusRunning,
+		StartTime:   g.Ptr(time.Now()),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 300 {
+			te.StateSet()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 300 {
+			te.setStatus(ExecStatusRunning)
+			te.setErr(g.Error("boom"))
+			te.setEndTime(time.Now())
+		}
+	}()
+	wg.Wait()
+
+	te.setStatus(ExecStatusSuccess)
+	te.StateSet()
+
+	state, _ := replication.RuntimeState()
+	if assert.Len(t, state.Runs, 1) {
+		for _, run := range state.Runs {
+			assert.Equal(t, ExecStatusSuccess, run.Status)
+		}
+	}
+}
+
 func TestExecuteReplicationHookSetsError(t *testing.T) {
 	runID := "__sling_replication_hook_end__"
 	cases := []struct {
@@ -1239,4 +1310,231 @@ streams:
 			}
 		})
 	}
+}
+
+func TestReplicationContinuousConfig(t *testing.T) {
+	const base = `
+source: MY_PG
+target: MY_TGT
+defaults:
+  mode: change-capture
+  object: public.{stream_table}
+streams:
+  public.orders:
+`
+
+	// build a compiled replication without connections
+	newReplication := func(t *testing.T, yaml string, srcType, tgtType dbio.Type) *ReplicationConfig {
+		rd, err := UnmarshalReplication(yaml)
+		if !assert.NoError(t, err) {
+			t.FailNow()
+		}
+		for _, name := range rd.StreamsOrdered() {
+			stream := ReplicationStreamConfig{}
+			if rd.Streams[name] != nil {
+				stream = *rd.Streams[name]
+			}
+			SetStreamDefaults(name, &stream, rd)
+			rd.Tasks = append(rd.Tasks, &Config{
+				Mode:              stream.Mode,
+				StreamName:        name,
+				ReplicationStream: &stream,
+				SrcConn:           connection.Connection{Type: srcType},
+				TgtConn:           connection.Connection{Type: tgtType},
+			})
+		}
+		return &rd
+	}
+
+	pg, tgt := dbio.TypeDbPostgres, dbio.TypeDbPostgres
+
+	t.Run("defaults", func(t *testing.T) {
+		rd := newReplication(t, base, pg, tgt)
+		assert.Nil(t, rd.Continuous)
+		s, err := rd.ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, ContinuousSettings{
+			Interval:       time.Minute,
+			StatusInterval: 60 * time.Second,
+			BehindAfter:    5 * time.Minute,
+			MaxSession:     24 * time.Hour,
+			MaxRows:        100000,
+			OnStreamError:  "stop",
+			RetryAttempts:  3,
+			RetryDelay:     5 * time.Second,
+		}, s)
+	})
+
+	t.Run("retry options", func(t *testing.T) {
+		yaml := strings.Replace(base, "  object:", "  change_capture_options:\n    retry_attempts: 5\n    retry_delay: 250ms\n  object:", 1)
+		s, err := newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 5, s.RetryAttempts)
+		assert.Equal(t, 250*time.Millisecond, s.RetryDelay)
+
+		yaml = strings.Replace(base, "  object:", "  change_capture_options:\n    retry_attempts: 0\n    retry_delay: 0s\n  object:", 1)
+		s, err = newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 0, s.RetryAttempts)
+		assert.Equal(t, time.Duration(0), s.RetryDelay)
+
+		yaml = strings.Replace(base, "  object:", "  change_capture_options:\n    retry_delay: soon\n  object:", 1)
+		_, err = newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.ErrorContains(t, err, "invalid retry_delay")
+	})
+
+	t.Run("min_interval auto", func(t *testing.T) {
+		for tgtType, expected := range map[dbio.Type]time.Duration{
+			dbio.TypeDbSnowflake: time.Minute,
+			dbio.TypeDbBigQuery:  5 * time.Minute,
+			dbio.TypeDbPostgres:  0,
+		} {
+			s, err := (*ContinuousConfig)(nil).Resolve(tgtType, 0)
+			assert.NoError(t, err)
+			assert.Equal(t, expected, s.MinInterval, string(tgtType))
+
+			s, err = newReplication(t, base, pg, tgtType).ValidateContinuous()
+			assert.NoError(t, err)
+			assert.Equal(t, expected, s.MinInterval, string(tgtType))
+		}
+
+		s, err := (&ContinuousConfig{MinInterval: g.String("30s")}).Resolve(dbio.TypeDbSnowflake, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, 30*time.Second, s.MinInterval)
+	})
+
+	t.Run("max_rows", func(t *testing.T) {
+		yaml := strings.Replace(base, "  object:", "  change_capture_options:\n    run_max_events: 500\n  object:", 1)
+		s, err := newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 500, s.MaxRows)
+
+		yaml = yaml + "continuous:\n  max_rows: 7\n  max_bytes: 1024\n"
+		s, err = newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, 7, s.MaxRows)
+		assert.Equal(t, int64(1024), s.MaxBytes)
+	})
+
+	t.Run("block is parsed", func(t *testing.T) {
+		yaml := base + "continuous:\n  interval: 30s\n  max_session: 2h\n  on_stream_error: STOP\n"
+		rd := newReplication(t, yaml, pg, tgt)
+		if assert.NotNil(t, rd.Continuous) {
+			s, err := rd.ValidateContinuous()
+			assert.NoError(t, err)
+			assert.Equal(t, 30*time.Second, s.Interval)
+			assert.Equal(t, 2*time.Hour, s.MaxSession)
+			assert.Equal(t, "stop", s.OnStreamError)
+		}
+		assert.Contains(t, rd.JSON(), `"continuous"`)
+	})
+
+	errCases := []struct {
+		name, yaml, errContains string
+		srcType, tgtType        dbio.Type
+	}{
+		{"negative interval", base + "continuous:\n  interval: -1m\n", "continuous.interval", pg, tgt},
+		{"zero interval", base + "continuous:\n  interval: 0s\n", "continuous.interval", pg, tgt},
+		{"bad duration", base + "continuous:\n  status_interval: soon\n", "continuous.status_interval", pg, tgt},
+		{"negative max_rows", base + "continuous:\n  max_rows: -1\n", "continuous.max_rows", pg, tgt},
+		{"negative max_bytes", base + "continuous:\n  max_bytes: -1\n", "continuous.max_bytes", pg, tgt},
+		{"on_stream_error skip", base + "continuous:\n  on_stream_error: skip\n", "continuous.on_stream_error", pg, tgt},
+		{"on_stream_error quarantine", base + "continuous:\n  on_stream_error: quarantine\n", "not supported yet", pg, tgt},
+		{"incremental stream", strings.Replace(base, "mode: change-capture", "mode: incremental", 1), "supports only change-capture streams", pg, tgt},
+		{"file target", base, "needs a database target", pg, dbio.TypeFileLocal},
+		{"stream pre hook", base + "    hooks:\n      pre:\n        - type: log\n          message: hi\n", "stream hooks are not supported yet", pg, tgt},
+		{"defaults post hook", strings.Replace(base, "  object:", "  hooks:\n    post:\n      - type: log\n        message: hi\n  object:", 1), "stream hooks are not supported yet", pg, tgt},
+	}
+	for _, c := range errCases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := newReplication(t, c.yaml, c.srcType, c.tgtType).ValidateContinuous()
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), c.errContains)
+			}
+		})
+	}
+
+	t.Run("no tasks", func(t *testing.T) {
+		_, err := (&ReplicationConfig{}).ValidateContinuous()
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did not match any streams")
+		}
+	})
+
+	t.Run("replication hooks are allowed", func(t *testing.T) {
+		yaml := base + "hooks:\n  start:\n    - type: log\n      message: hi\n"
+		_, err := newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+	})
+
+	t.Run("run_max_duration warns", func(t *testing.T) {
+		yaml := strings.Replace(base, "  object:", "  change_capture_options:\n    run_max_duration: 5m\n  object:", 1)
+		s, err := newReplication(t, yaml, pg, tgt).ValidateContinuous()
+		assert.NoError(t, err)
+		assert.Equal(t, time.Minute, s.Interval)
+	})
+
+	t.Run("JSON without block", func(t *testing.T) {
+		rd := newReplication(t, base, pg, tgt)
+		assert.NotContains(t, rd.JSON(), "continuous")
+	})
+}
+
+func TestProcessWildcardsSchemaless(t *testing.T) {
+	t.Setenv("ENV_YAML", `
+connections:
+  FB_SCHEMALESS_TEST:
+    type: odbc
+    conn_template: firebird
+    conn_string: "Driver={Firebird};Dbname=localhost:/none.fdb;Uid=u;Pwd=p"
+  PG_SCHEMALESS_TEST:
+    type: postgres
+    url: postgres://u:p@localhost:1/db
+`)
+	connection.GetLocalConns(true)
+	t.Cleanup(func() { connection.GetLocalConns(true) })
+
+	newConfig := func(source string, streams ...string) *ReplicationConfig {
+		rd := &ReplicationConfig{Source: source, Streams: map[string]*ReplicationStreamConfig{}}
+		rd.Defaults.Object = "t_{stream_table}"
+		for _, name := range streams {
+			rd.Streams[name] = &ReplicationStreamConfig{}
+			rd.streamsOrdered = append(rd.streamsOrdered, name)
+		}
+		return rd
+	}
+
+	// a schema-less source passes "*" on to discovery
+	rd := newConfig("FB_SCHEMALESS_TEST", "*")
+	err := rd.ProcessWildcards()
+	if assert.Error(t, err, "expects a connection error, since no server runs") {
+		assert.NotContains(t, err.Error(), "Must specify schema")
+	}
+
+	// other sources keep the error
+	rd = newConfig("PG_SCHEMALESS_TEST", "*")
+	err = rd.ProcessWildcards()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "Must specify schema")
+	}
+
+	// any schema is removed from stream names
+	rd = newConfig("FB_SCHEMALESS_TEST", "main.TBL_A", "MAIN.tbl_b", "OTHER", "dbo.TBL_C", `"main"."My.T"`)
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"TBL_A", "tbl_b", "OTHER", "TBL_C", `"My.T"`}, rd.streamsOrdered)
+	for _, name := range rd.streamsOrdered {
+		assert.Contains(t, rd.Streams, name)
+	}
+	assert.NotContains(t, rd.Streams, "main.TBL_A")
+
+	// file and sql streams keep their names
+	rd = newConfig("FB_SCHEMALESS_TEST", "file://q.sql", "custom.label")
+	rd.Streams["custom.label"].SQL = "select 1 from rdb$database"
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"file://q.sql", "custom.label"}, rd.streamsOrdered)
+
+	// the other sources keep "main."
+	rd = newConfig("PG_SCHEMALESS_TEST", "main.t")
+	assert.NoError(t, rd.ProcessWildcards())
+	assert.Equal(t, []string{"main.t"}, rd.streamsOrdered)
 }

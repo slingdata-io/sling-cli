@@ -2,9 +2,11 @@ package iop
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -448,6 +450,34 @@ func (cols Columns) KeepSourcedTypes(described Columns) Columns {
 	return cols
 }
 
+// KeepCatalogTypes sets the catalog type on the Arrow columns that it makes
+// more exact: text or the varchar length of a utf8 column (Arrow has no
+// length), a decimal that the driver gives as utf8, and the precision of a
+// decimal. Other columns keep the Arrow type.
+func (cols Columns) KeepCatalogTypes(catalog Columns) Columns {
+	catMap := catalog.FieldMap(true)
+	for i, col := range cols {
+		j, ok := catMap[strings.ToLower(col.Name)]
+		if !ok {
+			continue
+		}
+		switch cc := catalog[j]; {
+		case col.Type == StringType && g.In(cc.Type, StringType, TextType):
+			cols[i].Type, cols[i].DbType, cols[i].DbPrecision = cc.Type, cc.DbType, cc.DbPrecision
+			// the length can be only in the type name, e.g. character varying(12)
+			if m := g.Matches(cc.DbType, regexExtractPrecisionScale); cc.DbPrecision == 0 && len(m) == 1 {
+				cols[i].Type, cols[i].DbPrecision = StringType, cast.ToInt(m[0].Group[0])
+			}
+		case col.Type == StringType && cc.IsDecimal():
+			cols[i].Type, cols[i].DbType = DecimalType, cc.DbType
+			cols[i].DbPrecision, cols[i].DbScale = cc.DbPrecision, cc.DbScale
+		case col.IsDecimal() && cc.IsDecimal() && cc.DbPrecision > 0:
+			cols[i].DbPrecision, cols[i].DbScale = cc.DbPrecision, cc.DbScale
+		}
+	}
+	return cols
+}
+
 // GetMissing returns the missing columns from newCols
 func (cols Columns) GetMissing(newCols ...Column) (missing Columns) {
 	fm := cols.FieldMap(true)
@@ -522,6 +552,21 @@ func (cols Columns) Clone() (newCols Columns) {
 			Metadata:    col.Metadata,
 			Constraint:  col.Constraint,
 		}
+	}
+	return newCols
+}
+
+// deepClone is Clone with its own Constraint and Metadata. The copy shares no
+// mutable state with the source columns.
+func (cols Columns) deepClone() Columns {
+	newCols := cols.Clone()
+	for j := range newCols {
+		if c := newCols[j].Constraint; c != nil {
+			cc := *c
+			cc.Errors = slices.Clone(c.Errors)
+			newCols[j].Constraint = &cc
+		}
+		newCols[j].Metadata = maps.Clone(newCols[j].Metadata)
 	}
 	return newCols
 }
@@ -780,6 +825,8 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 			if newCols[i].Type.IsDecimal() && col.DbPrecision == 0 {
 				newCols[i].DbPrecision = 0
 				newCols[i].DbScale = 0
+			} else if newCols[i].Type.IsDecimal() {
+				newCols[i].Stats.MaxLen = 0 // user precision wins over source length
 			}
 			newCols[i].mergeDDLMetadata(col)
 			if !newCols[i].Type.IsValid() {
@@ -818,6 +865,8 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 				if newCols[i].Type.IsDecimal() && col.DbPrecision == 0 {
 					newCols[i].DbPrecision = 0
 					newCols[i].DbScale = 0
+				} else if newCols[i].Type.IsDecimal() {
+					newCols[i].Stats.MaxLen = 0 // user precision wins over source length
 				}
 			} else {
 				g.Warn("Provided unknown column type (%s) for column '%s'. Using string.", col.Type, col.Name)
@@ -1770,6 +1819,13 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 
 	switch connType {
 	case dbio.TypeDbClickhouse:
+		// SimpleAggregateFunction(fn, T) stores a plain value of type T
+		if strings.HasPrefix(dbType, "simpleaggregatefunction(") && strings.HasSuffix(dbType, ")") {
+			params := strings.TrimSuffix(strings.TrimPrefix(dbType, "simpleaggregatefunction("), ")")
+			if _, inner, found := strings.Cut(params, ","); found {
+				dbType = strings.TrimSpace(inner)
+			}
+		}
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")

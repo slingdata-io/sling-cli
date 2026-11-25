@@ -95,11 +95,9 @@ func (a *Avro) Columns() Columns {
 
 func (a *Avro) nextFunc(it *Iterator) bool {
 	if !a.Reader.Scan() {
-		return false
-	}
-
-	if err := a.Reader.Err(); err != nil {
-		it.Context.CaptureErr(g.Error(err, "could not read Avro row"))
+		if err := a.Reader.Err(); err != nil {
+			it.Context.CaptureErr(g.Error(err, "could not read Avro row"))
+		}
 		return false
 	}
 

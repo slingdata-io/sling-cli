@@ -967,8 +967,8 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 				return false
 			}
 
-			// Check if we need to fetch next record batch
-			if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
+			// Fetch the next record batch. Skip zero-row batches, which are valid Arrow.
+			for currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
 				select {
 				case record, ok := <-recordChan:
 					if !ok {
