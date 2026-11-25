@@ -357,16 +357,11 @@ func (xls *Excel) normalizeRange(cellRange string, allRows [][]string) (string, 
 			return "", g.Error("row range %d:%d exceeds sheet bounds (max row: %d)", rowStart, rowEnd, len(allRows))
 		}
 
-		// Scan rows to find max column with data (limit to SampleSize rows for performance)
+		// Use the widest selected row to determine the column range.
 		maxCol := 0
-		scannedRows := 0
 		for r := rowStartIdx; r <= rowEndIdx && r < len(allRows); r++ {
 			if len(allRows[r]) > maxCol {
 				maxCol = len(allRows[r])
-			}
-			scannedRows++
-			if scannedRows >= SampleSize {
-				break
 			}
 		}
 
