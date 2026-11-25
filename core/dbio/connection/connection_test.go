@@ -832,3 +832,24 @@ func TestOracleMultiLineTNS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "(DESCRIPTION=(X=y))", c.Data["tns"])
 }
+
+// A cached database connection with a cancelled context must not be reused.
+func TestConnectionCacheSkipsCancelled(t *testing.T) {
+	c, err := NewConnection("TEST_CACHE_SQLITE", dbio.TypeDbSQLite, g.M("instance", filepath.Join(t.TempDir(), "c.db")))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stale, err := c.AsDatabaseContext(ctx, AsConnOptions{UseCache: false})
+	require.NoError(t, err)
+	cancel()
+
+	db, err := c.AsDatabaseContext(context.Background(), AsConnOptions{UseCache: true})
+	require.NoError(t, err)
+	defer db.Close()
+	assert.True(t, stale != db, "the cached connection with a cancelled context is reused")
+	require.NoError(t, db.Connect())
+
+	again, err := c.AsDatabaseContext(context.Background(), AsConnOptions{UseCache: true})
+	require.NoError(t, err)
+	assert.True(t, db == again, "the live cached connection is not reused")
+}

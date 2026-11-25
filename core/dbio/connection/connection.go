@@ -407,9 +407,12 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 
 	// build input data
 
+	// a cached connection with a cancelled context cannot connect again
 	if cc, ok := Cache.Get(c.Hash()); ok && opt.UseCache {
 		if cc.Database != nil {
-			return cc.Database, nil
+			if dctx := cc.Database.Context(); dctx == nil || dctx.Ctx.Err() == nil {
+				return cc.Database, nil
+			}
 		}
 	}
 
