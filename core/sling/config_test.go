@@ -11,6 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -282,4 +283,27 @@ func TestUnmarshalTaskEnv(t *testing.T) {
 
 	var missing Config
 	assert.Error(t, missing.UnmarshalTaskEnv("file://"+path+".missing"))
+}
+
+func TestValidateFileTargetLimits(t *testing.T) {
+	newCfg := func(url string, rows, bytes int64) *Config {
+		opts := &TargetOptions{Format: dbio.FileTypeParquet}
+		if rows > 0 {
+			opts.FileMaxRows = g.Ptr(rows)
+		}
+		if bytes > 0 {
+			opts.FileMaxBytes = g.Ptr(bytes)
+		}
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal, Data: g.M("url", url)}
+		cfg.Target = Target{Object: url, Options: opts}
+		return cfg
+	}
+
+	partitioned := "file://out/{part_year}/{part_month}"
+	assert.ErrorContains(t, newCfg(partitioned, 100, 0).validateFileTargetLimits(), "not supported with partitioned file targets")
+	assert.ErrorContains(t, newCfg(partitioned, 0, 1000).validateFileTargetLimits(), "not supported with partitioned file targets")
+	assert.NoError(t, newCfg(partitioned, 0, 0).validateFileTargetLimits())
+	assert.NoError(t, newCfg("file://out/orders/", 100, 1000).validateFileTargetLimits())
+	assert.NoError(t, newCfg("file://out/orders.parquet", 100, 0).validateFileTargetLimits())
 }

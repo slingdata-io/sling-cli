@@ -4592,3 +4592,34 @@
     - 'wrote 1000 rows'
   output_does_not_contain:
     - 'parquet files: 0'
+
+# SLING-503: file_max_rows with a folder target must not nest data_001.parquet inside a folder of the same name.
+- id: 983
+  name: 'file_max_rows with a folder target writes flat parquet files (SLING-503)'
+  run: |
+    rm -rf temp/sling_983
+    sling run --src-stream file://tests/files/test1.csv --tgt-object file://temp/sling_983/ --tgt-options '{format: parquet, file_max_rows: 500}'
+    echo "nested dirs: $(find temp/sling_983 -type d -name '*.parquet' | wc -l | tr -d ' ')"
+    echo "files: $(find temp/sling_983 -type f -name '*.parquet' | wc -l | tr -d ' ')"
+    sling run --src-stream 'file://temp/sling_983/*.parquet' --tgt-object file://temp/sling_983_back.csv
+    rm -rf temp/sling_983 temp/sling_983_back.csv
+  output_contains:
+    - 'nested dirs: 0'
+    - 'wrote 1000 rows'
+
+# SLING-503: size limits with partitions fail before the source read.
+- id: 984
+  name: 'file_max_bytes with a partitioned file target fails before the read (SLING-503)'
+  err: true
+  run: |
+    rm -rf temp/sling_984
+    code=0
+    sling run -d --src-stream file://tests/files/test1.csv --tgt-object 'file://temp/sling_984/{part_year}/' --update-key create_dt --tgt-options '{format: parquet, file_max_bytes: 1000000}' || code=$?
+    echo "files: $(find temp/sling_984 -type f 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf temp/sling_984
+    exit $code
+  output_contains:
+    - 'not supported with partitioned file targets'
+    - 'files: 0'
+  output_does_not_contain:
+    - 'reading from source'

@@ -728,6 +728,25 @@ func TestGenerateCopyStatementEpochPartitionKey(t *testing.T) {
 	assert.NotContains(t, sql, "strftime(_sling_loaded_at,")
 }
 
+func TestGenerateCopyStatementPartitionSkipsFileSize(t *testing.T) {
+	duck := NewDuckDb(context.Background())
+	cols := NewColumnsFromFields("id", "ts")
+	cols[0].Type = IntegerType
+	cols[1].Type = TimestampType
+
+	opts := DuckDbCopyOptions{Format: dbio.FileTypeParquet, PartitionKey: "ts", FileSizeBytes: 1000, Columns: cols}
+	sql, err := duck.GenerateCopyStatement("main.t", "/tmp/out", opts)
+	assert.NoError(t, err)
+	assert.Contains(t, sql, "file_size_bytes 1000")
+
+	opts.PartitionFields = []PartitionLevel{PartitionLevelYear}
+	sql, err = duck.GenerateCopyStatement("main.t", "/tmp/out", opts)
+	assert.NoError(t, err)
+	assert.Contains(t, sql, "partition_by")
+	assert.NotContains(t, sql, "file_size_bytes")
+	assert.NotContains(t, sql, "per_thread_output")
+}
+
 // regression guard for the v1.5.25 OOM: DuckDB sizes its read_csv buffer as
 // 16 × max_line_size and allocates it eagerly. The 256MB raise thus demands a
 // 4 GiB block, which fails on hosts with memory_limit below ~4 GiB. The bridge

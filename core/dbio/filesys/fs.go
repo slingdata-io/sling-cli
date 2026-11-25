@@ -1660,8 +1660,10 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			}
 			if duckSc.FileMaxRows > 0 {
 				copyOptions.FileSizeBytes = 0 // since we are splitting by rows already
-				os.MkdirAll(localPath, 0755)  // make root dir first
-				localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
+				if !asDir {                   // a dir target already has its file name
+					os.MkdirAll(localPath, 0755) // make root dir first
+					localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
+				}
 			}
 
 			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)

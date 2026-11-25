@@ -655,6 +655,31 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 	return rc
 }
 
+// validateFileTargetLimits refuses file size limits for partitioned file targets.
+// The partitioned writer (DuckDB) cannot split files by size or rows.
+func (cfg *Config) validateFileTargetLimits() error {
+	if !cfg.TgtConn.Type.IsFile() || cfg.Target.Options == nil || !env.UseDuckDbCompute() {
+		return nil
+	}
+
+	uri := cfg.TgtConn.URL()
+	if uri == "" {
+		uri = cfg.Target.Object
+	}
+
+	// same condition as the partitioned writer in TaskExecution.WriteToFile
+	format := cfg.Target.ObjectFileFormat()
+	if !g.In(format, dbio.FileTypeParquet, dbio.FileTypeCsv) || len(iop.ExtractPartitionFields(uri)) == 0 {
+		return nil
+	}
+
+	opts := cfg.Target.Options
+	if g.PtrVal(opts.FileMaxRows) > 0 || g.PtrVal(opts.FileMaxBytes) > 0 {
+		return g.Error("file_max_rows and file_max_bytes are not supported with partitioned file targets. Remove the limit or the partition fields.")
+	}
+	return nil
+}
+
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {
@@ -885,6 +910,10 @@ func (cfg *Config) Prepare() (err error) {
 			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
 			// change-capture: the key comes from the source table when not set (resolveCDCPrimaryKey)
 		}
+	}
+
+	if err = cfg.validateFileTargetLimits(); err != nil {
+		return err
 	}
 
 	// validate table keys

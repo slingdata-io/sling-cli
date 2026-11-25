@@ -1858,7 +1858,8 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	}
 
 	fileSizeBytesExpr := ""
-	if options.FileSizeBytes > 0 {
+	// duckdb refuses FILE_SIZE_BYTES and PER_THREAD_OUTPUT with PARTITION_BY
+	if options.FileSizeBytes > 0 && len(options.PartitionFields) == 0 {
 		fileSizeBytesExpr = g.F("per_thread_output true, file_size_bytes %d,", options.FileSizeBytes)
 	}
 
