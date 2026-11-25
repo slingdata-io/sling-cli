@@ -1,0 +1,179 @@
+# SLING-498: DuckDB sessions run in UTC. Run it with TZ=America/Sao_Paulo.
+# A timestamp that goes through DuckDB must not shift by the local zone.
+# Source: SQLite text values in a "timestamp" column (read as timestamp, not datetime).
+
+env:
+  TABLE: tz_ts_498
+  OUT: temp/tz_ts_498
+  STATE_DIR: temp/tz_ts_498_state
+
+steps:
+  - connection: SQLITE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - connection: SQLITE
+    query: CREATE TABLE main.{env.TABLE} (id integer primary key, name text, updated_at timestamp)
+
+  - connection: SQLITE
+    query: |
+      INSERT INTO main.{env.TABLE} VALUES
+        (1, 'a', '2026-01-01 00:07:00'),
+        (2, 'b', '2026-01-15 12:00:00'),
+        (3, 'c', '2026-02-01 00:00:00'),
+        (4, 'd', '2026-03-31 23:30:00'),
+        (5, 'e', '2026-04-01 01:00:00')
+
+  # case A: DuckDB target
+  - connection: DUCKDB
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - replication:
+      source: SQLITE
+      target: DUCKDB
+      streams:
+        main.{env.TABLE}:
+          object: main.{env.TABLE}
+          mode: full-refresh
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKDB
+    query: SELECT strftime(min(updated_at), '%Y-%m-%d %H:%M:%S') AS mn, strftime(max(updated_at), '%Y-%m-%d %H:%M:%S') AS mx FROM main.{env.TABLE}
+    into: duck_range
+
+  - log: "duckdb min {store.duck_range[0].mn}, max {store.duck_range[0].mx}"
+
+  - check: store.duck_range[0].mn == "2026-01-01 00:07:00" && store.duck_range[0].mx == "2026-04-01 01:00:00"
+    failure_message: "DuckDB timestamps shifted: min {store.duck_range[0].mn}, max {store.duck_range[0].mx}"
+
+  - log: "SUCCESS: duckdb timestamps keep the source values"
+
+  # case B: partitioned file target, incremental with state
+  - type: delete
+    location: LOCAL/{env.OUT}
+    recursive: true
+    on_failure: warn
+
+  - type: delete
+    location: LOCAL/{env.STATE_DIR}
+    recursive: true
+    on_failure: warn
+
+  - replication:
+      source: SQLITE
+      target: LOCAL
+      streams:
+        main.{env.TABLE}:
+          object: file://{env.OUT}/{part_year}/{part_month}
+          mode: incremental
+          primary_key: [id]
+          update_key: updated_at
+          target_options:
+            format: parquet
+      env:
+        SLING_STATE: LOCAL/{env.STATE_DIR}
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: SQLITE
+    query: INSERT INTO main.{env.TABLE} VALUES (6, 'f', '2026-04-10 09:00:00')
+
+  - replication:
+      source: SQLITE
+      target: LOCAL
+      streams:
+        main.{env.TABLE}:
+          object: file://{env.OUT}/{part_year}/{part_month}
+          mode: incremental
+          primary_key: [id]
+          update_key: updated_at
+          target_options:
+            format: parquet
+      env:
+        SLING_STATE: LOCAL/{env.STATE_DIR}
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKDB
+    query: SELECT count(*) AS cnt, strftime(min(updated_at), '%Y-%m-%d %H:%M:%S') AS mn FROM read_parquet('{env.OUT}/**/*.parquet')
+    into: file_result
+
+  - connection: SQLITE
+    query: SELECT count(*) AS cnt FROM main.{env.TABLE}
+    into: source_count
+
+  - log: "files rows {store.file_result[0].cnt} of {store.source_count[0].cnt}, min {store.file_result[0].mn}"
+
+  - check: int_parse(store.file_result[0].cnt) == int_parse(store.source_count[0].cnt) && store.file_result[0].mn == "2026-01-01 00:07:00"
+    failure_message: "File target lost or shifted rows: {store.file_result[0].cnt} of {store.source_count[0].cnt}, min {store.file_result[0].mn}"
+
+  - log: "SUCCESS: file target partitions keep the source values"
+
+  # case C: DuckLake target, incremental append (no primary key). A re-read adds duplicates.
+  - connection: DUCKLAKE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - connection: SQLITE
+    query: DELETE FROM main.{env.TABLE} WHERE id = 6
+
+  - replication:
+      source: SQLITE
+      target: DUCKLAKE
+      streams:
+        main.{env.TABLE}:
+          object: main.{env.TABLE}
+          mode: incremental
+          update_key: updated_at
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - replication:
+      source: SQLITE
+      target: DUCKLAKE
+      streams:
+        main.{env.TABLE}:
+          object: main.{env.TABLE}
+          mode: incremental
+          update_key: updated_at
+      env:
+        SLING_RETRIES: 0
+    on_failure: abort
+
+  - connection: DUCKLAKE
+    query: SELECT count(*) AS cnt, strftime(max(updated_at), '%Y-%m-%d %H:%M:%S') AS mx FROM main.{env.TABLE}
+    into: lake_result
+
+  - log: "ducklake rows {store.lake_result[0].cnt}, max {store.lake_result[0].mx}"
+
+  - check: int_parse(store.lake_result[0].cnt) == 5 && store.lake_result[0].mx == "2026-04-01 01:00:00"
+    failure_message: "DuckLake re-read rows or shifted the max: {store.lake_result[0].cnt} rows, max {store.lake_result[0].mx}"
+
+  - log: "SUCCESS: ducklake incremental does not re-read rows"
+
+  # cleanup
+  - connection: SQLITE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - connection: DUCKDB
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - connection: DUCKLAKE
+    on_failure: warn
+    query: DROP TABLE IF EXISTS main.{env.TABLE}
+
+  - type: delete
+    location: LOCAL/{env.OUT}
+    recursive: true
+    on_failure: warn
+
+  - type: delete
+    location: LOCAL/{env.STATE_DIR}
+    recursive: true
+    on_failure: warn

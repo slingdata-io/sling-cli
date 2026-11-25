@@ -732,6 +732,13 @@ func (duck *DuckDb) getSessionSettingsSQL() (sql string) {
 		sql += fmt.Sprintf("SET memory_limit = '%s';", limit)
 	}
 
+	// UTC by default: a TIMESTAMPTZ to TIMESTAMP cast must not use the local zone
+	timeZone := "UTC"
+	if val := duck.GetProp("timezone"); val != "" {
+		timeZone = val
+	}
+	sql += fmt.Sprintf("SET TimeZone = '%s';", strings.ReplaceAll(timeZone, "'", "''"))
+
 	// the 2.0 CLI prints log lines to stdout, which breaks the result parse
 	if duck.version >= 20000 {
 		sql += "SET logging_storage = 'memory';"
@@ -944,9 +951,24 @@ func (duck *DuckDb) Exec(sql string, args ...any) (result sql.Result, err error)
 	return
 }
 
-// ExecMultiContext executes multiple SQL queries with context and returns the result
+// ExecMultiContext executes SQL statements one by one and stops at the first error.
+// Each element must be one statement.
 func (duck *DuckDb) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
-	return duck.ExecContext(ctx, strings.Join(sqls, ";\n"))
+	// the CLI reports a running total_changes, so the last statement holds the total
+	total := duckDbResult{}
+	for i, sql := range sqls {
+		if strings.TrimSpace(sql) == "" {
+			continue
+		}
+		res, err := duck.ExecContext(ctx, sql)
+		if err != nil {
+			return total, g.Error(err, "Error executing statement %d of %d, the next statements did not run", i+1, len(sqls))
+		}
+		if res != nil {
+			total.TotalChanges, _ = res.RowsAffected()
+		}
+	}
+	return total, nil
 }
 
 type duckDbResult struct {
@@ -1836,7 +1858,8 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	}
 
 	fileSizeBytesExpr := ""
-	if options.FileSizeBytes > 0 {
+	// duckdb refuses FILE_SIZE_BYTES and PER_THREAD_OUTPUT with PARTITION_BY
+	if options.FileSizeBytes > 0 && len(options.PartitionFields) == 0 {
 		fileSizeBytesExpr = g.F("per_thread_output true, file_size_bytes %d,", options.FileSizeBytes)
 	}
 

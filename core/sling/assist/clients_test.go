@@ -1090,12 +1090,23 @@ func TestSkillLinksResolve(t *testing.T) {
 	}
 }
 
-// TestRetiredSkillsAreGone guards the prune path: every retired name must be
-// absent from the embed, or agents keep serving stale content forever.
-func TestRetiredSkillsAreGone(t *testing.T) {
+// TestRetiredSkillsAreNotInstalled guards the prune path: setup must not
+// install a retired name, and each embedded topic that setup does not install
+// must be retired, so an upgrade removes its old full copy.
+func TestRetiredSkillsAreNotInstalled(t *testing.T) {
+	installed := InstalledSkillNames()
 	for _, name := range retiredSkillNames {
-		if _, err := SkillsFS.ReadDir("skills/" + name); err == nil {
-			t.Errorf("retired skill %s is still embedded", name)
+		if g.In(name, installed...) {
+			t.Errorf("retired skill %s is still installed", name)
+		}
+	}
+	entries, err := SkillsFS.ReadDir("skills")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && !g.In(e.Name(), installed...) && !g.In(e.Name(), retiredSkillNames...) {
+			t.Errorf("embedded topic %s is not installed and not retired", e.Name())
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func boolToInt(b bool) int {
@@ -1345,4 +1346,157 @@ func TestIsSecretPath(t *testing.T) {
 	for _, path := range public {
 		assert.False(t, IsSecretPath(path), path)
 	}
+}
+
+func TestLoadEnvFileExpandsOwnVariables(t *testing.T) {
+	unset := func(keys ...string) {
+		t.Cleanup(func() {
+			for _, k := range keys {
+				os.Unsetenv(k)
+			}
+		})
+	}
+
+	for _, block := range []string{"variables", "env"} {
+		t.Run(block+" block first load", func(t *testing.T) {
+			key := "ELX_HOST_" + strings.ToUpper(block)
+			unset(key)
+			body := block + ":\n  " + key + ": h1\nconnections:\n  C:\n    type: postgres\n    host: ${" + key + "}\n"
+			ef, err := loadEnvFile(body, "")
+			assert.NoError(t, err)
+			assert.Equal(t, "h1", ef.Connections["C"]["host"])
+			assert.Equal(t, "h1", os.Getenv(key))
+		})
+	}
+
+	t.Run("block value references real env", func(t *testing.T) {
+		t.Setenv("ELX_REAL", "abc")
+		unset("ELX_K")
+		body := "env:\n  ELX_K: ${ELX_REAL}-x\nconnections:\n  C:\n    type: postgres\n    host: ${ELX_K}\n"
+		ef, err := loadEnvFile(body, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "abc-x", ef.Connections["C"]["host"])
+		assert.Equal(t, "abc-x", os.Getenv("ELX_K"))
+	})
+
+	t.Run("block value references other block key", func(t *testing.T) {
+		unset("ELX_A", "ELX_B")
+		body := "env:\n  ELX_A: one\n  ELX_B: ${ELX_A}-two\nconnections:\n  C:\n    type: postgres\n    host: ${ELX_B}\n"
+		ef, err := loadEnvFile(body, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "one-two", ef.Connections["C"]["host"])
+	})
+
+	t.Run("real env var wins", func(t *testing.T) {
+		t.Setenv("ELX_P", "real")
+		body := "env:\n  ELX_P: file\nconnections:\n  C:\n    type: postgres\n    host: ${ELX_P}\n"
+		ef, err := loadEnvFile(body, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "real", ef.Connections["C"]["host"])
+		assert.Equal(t, "real", os.Getenv("ELX_P"))
+	})
+
+	t.Run("unknown ref stays literal", func(t *testing.T) {
+		body := "connections:\n  C:\n    type: postgres\n    host: ${ELX_UNSET}\n"
+		ef, err := loadEnvFile(body, "")
+		assert.NoError(t, err)
+		assert.Equal(t, "${ELX_UNSET}", ef.Connections["C"]["host"])
+	})
+}
+
+func TestLoadEnvFileReloadsEditedVariables(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("ELR_K") })
+	load := func(val string) EnvFile {
+		body := "env:\n  ELR_K: " + val + "\nconnections:\n  C:\n    type: postgres\n    host: ${ELR_K}\n"
+		ef, err := loadEnvFile(body, "")
+		assert.NoError(t, err)
+		return ef
+	}
+
+	assert.Equal(t, "v1", load("v1").Connections["C"]["host"])
+	ef := load("v2")
+	assert.Equal(t, "v2", ef.Connections["C"]["host"])
+	assert.Equal(t, "v2", os.Getenv("ELR_K"))
+}
+
+// TestWriteEnvFileKeepsOwnVariableRefs fails if write materializes a ${VAR}
+// that the file defines in its own variables block, after another load changed
+// the process env.
+func TestWriteEnvFileKeepsOwnVariableRefs(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("EWR_PASS") })
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	original := `variables:
+  EWR_PASS: secretA
+connections:
+  MY_PG:
+    type: postgres
+    host: localhost
+    password: ${EWR_PASS}
+    port: 5432
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ef := LoadEnvFile(path)
+	if got, _ := ef.Connections["MY_PG"]["password"].(string); got != "secretA" {
+		t.Fatalf("load should expand password, got %q", got)
+	}
+
+	// another file load changes the process env
+	if _, err := loadEnvFile("env:\n  EWR_PASS: other\n", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ef.Connections["MY_PG"]["port"] = "5433"
+	if err := ef.WriteEnvFile(); err != nil {
+		t.Fatalf("WriteEnvFile: %v", err)
+	}
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	if !strings.Contains(out, "password: ${EWR_PASS}") {
+		t.Errorf("expected on-disk ${EWR_PASS} ref\n--- got ---\n%s", out)
+	}
+	connBlock := strings.SplitN(out[strings.Index(out, "connections:"):], "\nenv:", 2)[0]
+	if strings.Contains(connBlock, "secretA") {
+		t.Errorf("merge wrote expanded secret\n--- got ---\n%s", out)
+	}
+}
+
+// TestEnvVarSource checks that each of the three sources is named correctly.
+func TestEnvVarSource(t *testing.T) {
+	// a real process env var
+	t.Setenv("SOURCE_TEST_PROCESS", "from-shell")
+	src, _ := EnvVarSource("SOURCE_TEST_PROCESS")
+	assert.Equal(t, "process", src)
+
+	// a key that is not set at all
+	src, path := EnvVarSource("SOURCE_TEST_MISSING")
+	assert.Equal(t, "", src)
+	assert.Equal(t, "", path)
+
+	// a key from the env block of env.yaml
+	t.Setenv("SOURCE_TEST_FILE", "")
+	os.Unsetenv("SOURCE_TEST_FILE")
+	_, err := loadEnvFile("env:\n  SOURCE_TEST_FILE: from-file\n", "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.Unsetenv("SOURCE_TEST_FILE")
+		loadedEnvVars.mu.Lock()
+		delete(loadedEnvVars.set, "SOURCE_TEST_FILE")
+		loadedEnvVars.mu.Unlock()
+	})
+	src, path = EnvVarSource("SOURCE_TEST_FILE")
+	assert.Equal(t, "env.yaml", src)
+	assert.Equal(t, HomeDirEnvFile, path)
+
+	// a key from .env.sling
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env.sling"), []byte("SOURCE_TEST_DOTENV=from-dotenv\n"), 0o644))
+	t.Cleanup(func() { os.Unsetenv("SOURCE_TEST_DOTENV"); dotEnvMap.Remove("SOURCE_TEST_DOTENV") })
+	LoadDotEnvSlingFrom(dir)
+	src, path = EnvVarSource("SOURCE_TEST_DOTENV")
+	assert.Equal(t, ".env.sling", src)
+	assert.Contains(t, path, ".env.sling")
 }

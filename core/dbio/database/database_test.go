@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +43,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -1673,6 +1676,53 @@ func TestSoftMergeGuardIsNullSafe(t *testing.T) {
 				"%s: soft-mark guard is not NULL-safe:\n%s", ty, mark)
 		}
 	}
+}
+
+// ClickHouse 21.x rejects an IN whose two sides have different integer widths
+// ("Types of column 1 in section IN don't match: Int32 on the left, Int64 on
+// the right"). The merge templates must select the source PK through a cast to
+// the target type, so every IN compares equal types.
+func TestClickhouseMergeTemplatesCastPK(t *testing.T) {
+	tmpl, err := dbio.TypeDbClickhouse.Template()
+	assert.NoError(t, err)
+
+	strategies := []string{
+		"merge_insert", "merge_delete_insert",
+		"merge_change_capture", "merge_change_capture_soft",
+	}
+
+	// every IN subquery takes the casted key, never the bare one
+	for _, name := range strategies {
+		sql := tmpl.Core[name]
+		if !assert.NotEmpty(t, sql, "%s is empty", name) {
+			continue
+		}
+		assert.NotContains(t, sql, "{src_pk_fields}",
+			"%s still selects the uncast source PK", name)
+		assert.Contains(t, sql, "{src_pk_fields_casted}",
+			"%s does not select the casted source PK", name)
+	}
+
+	c, err := NewConn("clickhouse://u:p@ch:9000/db")
+	assert.NoError(t, err)
+	conn := c.(*ClickhouseConn)
+
+	// differing widths produce a cast to the target type
+	src := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	tgt := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Int32"}
+	assert.Equal(t, "cast(`id` as Int32)", conn.CastColumnForSelect(src, tgt))
+
+	// a Nullable target keeps Nullable(T), so a NULL does not fail the cast
+	tgtNull := iop.Column{Name: "id", Type: iop.IntegerType, DbType: "Nullable(Int32)"}
+	assert.Equal(t, "cast(`id` as Nullable(Int32))", conn.CastColumnForSelect(src, tgtNull))
+	srcNull := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Nullable(Int64)"}
+	assert.Equal(t, "cast(`id` as Nullable(Int32))", conn.CastColumnForSelect(srcNull, tgtNull))
+
+	// equal types add no cast, so the common case renders as before
+	same := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Int64"}
+	assert.Equal(t, "`id`", conn.CastColumnForSelect(src, same))
+	sameNull := iop.Column{Name: "id", Type: iop.BigIntType, DbType: "Nullable(Int64)"}
+	assert.Equal(t, "`id`", conn.CastColumnForSelect(srcNull, sameNull))
 }
 
 type fakeZerobusStream struct {
@@ -3435,6 +3485,142 @@ func TestAdbcLaneRead_NoLabels(t *testing.T) {
 	assert.Empty(t, r.decimals)
 }
 
+// A driver that sling does not know has no metadata templates, so the
+// metadata comes from ADBC GetObjects (issue #836). SQLite has no schemas.
+func TestArrowDBConnGenericMetadata(t *testing.T) {
+	dir := t.TempDir()
+	drivers := map[string][]string{
+		"duckdb": {"driver=duckdb", "path=" + filepath.Join(dir, "generic.duckdb")},
+		"sqlite": {"driver=sqlite", "uri=file:" + filepath.Join(dir, "generic.sqlite")},
+	}
+
+	for name, props := range drivers {
+		t.Run(name, func(t *testing.T) {
+			conn, err := NewConnContext(context.Background(), "adbc://", append(props, "type=adbc")...)
+			if err == nil {
+				err = conn.Connect()
+			}
+			if err != nil {
+				t.Skipf("ADBC %s driver is not available: %s", name, err)
+			}
+			defer conn.Close()
+
+			ac := conn.(*ArrowDBConn)
+			assert.Equal(t, dbio.TypeDbArrowDBC, ac.driverType)
+			assert.False(t, ac.hasMetadata("columns"))
+			assert.NotEmpty(t, conn.GetTemplateValue("core.rename_table"))
+			cached, _ := dbio.TypeDbArrowDBC.Template()
+			assert.Empty(t, cached.Core["rename_table"], "the template cache is not changed")
+
+			_, err = conn.ExecMulti(`create table generic_t (id integer, label text, amt numeric(18,2), code varchar(12));
+				insert into generic_t values (1, 'a', 12.34, 'x');
+				create view generic_v as select id from generic_t`)
+			require.NoError(t, err)
+
+			table := Table{Schema: "main", Name: "generic_t", Dialect: conn.GetType()}
+			exists, err := conn.TableExists(table)
+			assert.NoError(t, err)
+			assert.True(t, exists)
+			exists, err = conn.TableExists(Table{Schema: "main", Name: "generic_none"})
+			assert.NoError(t, err)
+			assert.False(t, exists)
+
+			tables, err := conn.GetTables("main")
+			assert.NoError(t, err)
+			assert.Equal(t, []any{"generic_t"}, tables.ColValues(1))
+			views, err := conn.GetViews("main")
+			assert.NoError(t, err)
+			assert.Equal(t, []any{"generic_v"}, views.ColValues(1))
+
+			cols, err := conn.GetColumns("main.generic_t")
+			require.NoError(t, err)
+			assert.Equal(t, []string{"id", "label", "amt", "code"}, cols.Names())
+			assert.Equal(t, iop.TextType, cols[1].Type)
+			assert.Equal(t, iop.DecimalType, cols[2].Type)
+			assert.Equal(t, []int{18, 2}, []int{cols[2].DbPrecision, cols[2].DbScale})
+
+			cols, err = conn.GetColumns("main.generic_t", "code", "id")
+			assert.NoError(t, err)
+			assert.Equal(t, []string{"code", "id"}, cols.Names())
+			_, err = conn.GetColumns("main.generic_none")
+			assert.Error(t, err)
+
+			schemata, err := conn.GetSchemata(SchemataLevelColumn, "main", "generic_t")
+			require.NoError(t, err)
+			if tables := lo.Values(schemata.Tables("generic_t")); assert.Len(t, tables, 1) {
+				assert.Len(t, tables[0].Columns, 4)
+			}
+
+			// the read keeps the catalog text type (gap 3 of issue #836)
+			table.Columns, _ = conn.GetColumns("main.generic_t")
+			df, err := conn.BulkExportFlow(table)
+			require.NoError(t, err)
+			data, err := iop.MergeDataflow(df).Collect(0)
+			require.NoError(t, err)
+			assert.Equal(t, 1, len(data.Rows))
+			assert.Equal(t, iop.TextType, data.Columns[1].Type)
+
+			// DuckDB 2.0 casts at most 2048 rows (a data chunk) from one record
+			_, err = conn.Exec("create table generic_big (id integer, ts timestamp)")
+			require.NoError(t, err)
+			big := iop.NewDataset(iop.NewColumnsFromFields("id", "ts"))
+			big.Columns[0].Type, big.Columns[1].Type = iop.IntegerType, iop.DatetimeType
+			for i := 0; i < 5000; i++ {
+				big.Append([]any{i, time.Unix(int64(i), 0).UTC()})
+			}
+			df, err = iop.MakeDataFlow(big.Stream())
+			require.NoError(t, err)
+			count, err := conn.BulkImportFlow("main.generic_big", df)
+			require.NoError(t, err)
+			assert.EqualValues(t, 5000, count)
+			assert.NoError(t, conn.DropTable("main.generic_big"))
+
+			// a missing table is not dropped, an existing one is
+			assert.NoError(t, conn.DropTable("main.generic_none"))
+			_, err = conn.Exec("drop view generic_v")
+			assert.NoError(t, err)
+			assert.NoError(t, conn.DropTable("main.generic_t"))
+			exists, _ = conn.TableExists(table)
+			assert.False(t, exists)
+		})
+	}
+}
+
+func TestArrowDBConn_IngestReaderSlices(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	newRecord := func(rows int) arrow.RecordBatch {
+		b := array.NewInt64Builder(memory.NewGoAllocator())
+		defer b.Release()
+		for i := 0; i < rows; i++ {
+			b.Append(int64(i))
+		}
+		arr := b.NewArray()
+		defer arr.Release()
+		return array.NewRecord(schema, []arrow.Array{arr}, int64(rows))
+	}
+	records := []arrow.RecordBatch{newRecord(5000), newRecord(0), newRecord(10)}
+	reader, err := array.NewRecordReader(schema, records)
+	require.NoError(t, err)
+	for _, rec := range records {
+		rec.Release()
+	}
+
+	conn := &ArrowDBConn{BaseConn: BaseConn{context: g.NewContext(context.Background())}, driverType: dbio.TypeDbPostgres}
+	assert.Equal(t, reader, conn.ingestReader(reader), "other drivers get the records as they are")
+
+	conn.driverType = dbio.TypeDbDuckDb
+	sliced := conn.ingestReader(reader)
+	sliced.Retain()
+	sizes := []int64{}
+	for sliced.Next() {
+		sizes = append(sizes, sliced.RecordBatch().NumRows())
+	}
+	assert.Equal(t, []int64{2048, 2048, 904, 10}, sizes)
+	assert.NoError(t, sliced.Err())
+	sliced.Release()
+	sliced.Release()
+}
+
 func TestArrowDBConn_IngestSchema(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
@@ -4112,6 +4298,41 @@ func TestSummarizeBcpOutput(t *testing.T) {
 
 // A target numeric with no precision takes the type of its values, so no
 // fraction digit is cut (SLING-166).
+// emptyBatchStmt is an adbc.Statement whose only used method is Close.
+type emptyBatchStmt struct{ adbc.Statement }
+
+func (emptyBatchStmt) Close() error { return nil }
+
+// A zero-row record batch is valid Arrow (issue #836: the Redis driver sends one).
+func TestArrowDBConnMakeRecordNextFuncEmptyBatches(t *testing.T) {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "label", Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
+	record := func(vals ...string) arrow.Record {
+		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+		defer b.Release()
+		b.Field(0).(*array.StringBuilder).AppendValues(vals, nil)
+		return b.NewRecord()
+	}
+
+	read := func(records ...arrow.Record) []string {
+		reader, err := array.NewRecordReader(schema, records)
+		require.NoError(t, err)
+		queryContext := g.NewContext(context.Background())
+		conn := &ArrowDBConn{}
+		ds := iop.NewDatastreamIt(queryContext.Ctx, iop.ArrowSchemaToColumns(schema), conn.makeRecordNextFunc(queryContext, reader, emptyBatchStmt{}, 0))
+		require.NoError(t, ds.Start())
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		labels := []string{}
+		for _, row := range data.Rows {
+			labels = append(labels, cast.ToString(row[0]))
+		}
+		return labels
+	}
+
+	assert.Equal(t, []string{}, read(record()))
+	assert.Equal(t, []string{"a", "b", "c"}, read(record(), record("a", "b"), record(), record(), record("c"), record()))
+}
+
 func TestArrowDBConnBatchToRecordReader_OpenDecimal(t *testing.T) {
 	cols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType}}
 	tgtCols := iop.Columns{{Name: "id", Type: iop.IntegerType}, {Name: "d", Type: iop.DecimalType, DbType: "numeric"}}
@@ -4473,4 +4694,302 @@ func TestDuckLakeConnDefaultVersion(t *testing.T) {
 
 	t.Setenv("DUCKDB_VERSION", "2.0.0")
 	assert.Equal(t, "", version(), "the env var wins over the DuckLake default")
+}
+
+type fakeResult struct{ rows int64 }
+
+func (r fakeResult) LastInsertId() (int64, error) { return 0, nil }
+func (r fakeResult) RowsAffected() (int64, error) { return r.rows, nil }
+
+func TestStatementRunner(t *testing.T) {
+	ctx := context.Background()
+	fakeErr := fmt.Errorf("fake failure")
+
+	newRunner := func(failOn string, ran *[]string) statementRunner {
+		return statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			*ran = append(*ran, q)
+			if failOn != "" && strings.Contains(q, failOn) {
+				return nil, fakeErr
+			}
+			return fakeResult{rows: 5}, nil
+		}}
+	}
+
+	t.Run("first fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("a", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fake failure")
+		assert.Contains(t, err.Error(), "statement 1 of 3")
+		assert.Equal(t, []string{"a"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+
+	t.Run("second fails", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("b", &ran).run(ctx, []string{"a", "b", "c"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "statement 2 of 3")
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(5), ra)
+	})
+
+	t.Run("all pass", func(t *testing.T) {
+		ran := []string{}
+		res, err := newRunner("", &ran).run(ctx, []string{"a", "b", "c"})
+		require.NoError(t, err)
+		assert.Len(t, ran, 3)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(15), ra)
+	})
+
+	t.Run("blank statements and nil result", func(t *testing.T) {
+		ran := []string{}
+		runner := statementRunner{exec: func(ctx context.Context, q string) (sql.Result, error) {
+			ran = append(ran, q)
+			return nil, nil
+		}}
+		res, err := runner.run(ctx, []string{"", "a", "  \n", "b"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b"}, ran)
+		ra, _ := res.RowsAffected()
+		assert.Equal(t, int64(0), ra)
+	})
+}
+
+// failingExecConn fails the statements that contain failOn
+type failingExecConn struct {
+	*PostgresConn
+	failOn string
+	ran    []string
+}
+
+func (c *failingExecConn) ExecContext(ctx context.Context, q string, args ...interface{}) (sql.Result, error) {
+	c.ran = append(c.ran, q)
+	if strings.Contains(q, c.failOn) {
+		return nil, fmt.Errorf("fake failure")
+	}
+	return fakeResult{rows: 1}, nil
+}
+
+func TestBaseConnExecMultiStopsAtFirstError(t *testing.T) {
+	newFake := func(t *testing.T) *failingExecConn {
+		conn, err := NewConn("postgres://u:p@localhost:5432/db")
+		require.NoError(t, err)
+		pg := conn.(*PostgresConn)
+		fake := &failingExecConn{PostgresConn: pg, failOn: "DELETE"}
+		var c Connection = fake
+		pg.BaseConn.instance = &c
+		return fake
+	}
+
+	t.Run("one element", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1;\nINSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+
+	t.Run("two elements", func(t *testing.T) {
+		fake := newFake(t)
+		_, err := fake.ExecMultiContext(context.Background(), "DELETE FROM t WHERE 1=1", "INSERT INTO t SELECT 1")
+		require.Error(t, err)
+		require.Len(t, fake.ran, 1)
+		assert.Contains(t, fake.ran[0], "DELETE")
+	})
+}
+
+func TestBaseConnStreamRowsContextIterator(t *testing.T) {
+	conn, err := NewConn("sqlite://" + filepath.Join(t.TempDir(), "iter.db"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	sql := `with recursive seq(n) as (select 1 union all select n+1 from seq where n < 5000)
+		select n, 'v' || n as txt from seq`
+
+	t.Run("all rows", func(t *testing.T) {
+		ds, err := conn.StreamRowsContext(context.Background(), sql)
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, 5000)
+	})
+
+	t.Run("limit", func(t *testing.T) {
+		ds, err := conn.StreamRowsContext(context.Background(), sql, g.M("limit", 10))
+		require.NoError(t, err)
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, 10)
+	})
+}
+
+func TestDuckDbConnExecMultiStopsAtFirstError(t *testing.T) {
+	conn, err := NewConn("duckdb://" + filepath.Join(t.TempDir(), "x.duckdb"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	_, err = conn.ExecMulti("create table t (id int);\ninsert into missing values (1);\ninsert into t values (1)")
+	require.Error(t, err)
+
+	data, err := conn.Query("select count(*) as cnt from t")
+	require.NoError(t, err)
+	require.Len(t, data.Rows, 1)
+	assert.Equal(t, int64(0), cast.ToInt64(data.Rows[0][0]))
+}
+
+func TestSQLServerOrderByOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"plain", "select id from t order by id", "select id from t order by id offset 0 rows"},
+		{"uppercase", "SELECT id FROM t ORDER BY id DESC", "SELECT id FROM t ORDER BY id DESC offset 0 rows"},
+		{"semicolon", "select id from t order by id;  ", "select id from t order by id offset 0 rows"},
+		{"line comment", "select id from t order by id -- sorted", "select id from t order by id offset 0 rows"},
+		{"block comment", "select id from t order by id /* c */ ;", "select id from t order by id offset 0 rows"},
+		{"multiline", "select id\nfrom t\norder by id\n", "select id\nfrom t\norder by id offset 0 rows"},
+		{"over only", "select row_number() over (order by x) as rn from t", "select row_number() over (order by x) as rn from t"},
+		{"over and order by", "select row_number() over (order by x) rn from t order by rn", "select row_number() over (order by x) rn from t order by rn offset 0 rows"},
+		{"subquery only", "select * from (select top 5 * from t order by id) s", "select * from (select top 5 * from t order by id) s"},
+		{"subquery and outer", "select * from (select * from t) s order by id", "select * from (select * from t) s order by id offset 0 rows"},
+		{"top", "select top 5 id from t order by id", "select top 5 id from t order by id"},
+		{"offset", "select id from t order by id offset 10 rows", "select id from t order by id offset 10 rows"},
+		{"offset fetch", "select id from t order by id offset 10 rows fetch next 5 rows only", "select id from t order by id offset 10 rows fetch next 5 rows only"},
+		{"for xml", "select id from t order by id for xml path('')", "select id from t order by id for xml path('')"},
+		{"cte", "with cte as (select id from t) select id from cte order by id", "with cte as (select id from t) select id from cte order by id"},
+		{"cte uppercase", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id", "  WITH cte AS (select 1 as id) SELECT id FROM cte ORDER BY id"},
+		{"string literal", "select 'order by x' as a from t", "select 'order by x' as a from t"},
+		{"string escape", "select 'it''s order by' as a from t", "select 'it''s order by' as a from t"},
+		{"unicode string", "select N'order by' as a from t", "select N'order by' as a from t"},
+		{"bracket identifier", "select [order by] from t", "select [order by] from t"},
+		{"quoted identifier", `select "order by" from t`, `select "order by" from t`},
+		{"order by after string", "select 'a;' as a from t order by a", "select 'a;' as a from t order by a offset 0 rows"},
+		{"top in string", "select 'top' as a from t order by a", "select 'top' as a from t order by a offset 0 rows"},
+		{"order by in comment", "select id from t -- order by id\n", "select id from t -- order by id\n"},
+		{"union", "select id from a union all select id from b order by id", "select id from a union all select id from b order by id offset 0 rows"},
+		{"option", "select id from t order by id option (recompile)", "select id from t order by id offset 0 rows option (recompile)"},
+		{"option semicolon", "select id from t order by id OPTION (maxdop 1);", "select id from t order by id offset 0 rows OPTION (maxdop 1)"},
+		{"no order by", "select id from t where id > 1", "select id from t where id > 1"},
+		{"empty", "", ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, sqlServerOrderByOffset(c.input))
+		})
+	}
+}
+
+// QueryContext must cancel the contexts of its queries, so a long-lived
+// connection does not keep them in its children map.
+func TestQueryContextCancelsChildren(t *testing.T) {
+	conn, err := NewConn("sqlite://" + filepath.Join(t.TempDir(), "q.db"))
+	require.NoError(t, err)
+	require.NoError(t, conn.Connect())
+	defer conn.Close()
+
+	run := func(n int) {
+		for i := 0; i < n; i++ {
+			data, err := conn.Query("select 1")
+			require.NoError(t, err)
+			require.Len(t, data.Rows, 1)
+			require.NoError(t, conn.Context().Ctx.Err())
+		}
+	}
+	heap := func() uint64 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+
+	run(200)
+	before := heap()
+	run(3000)
+	after := heap()
+
+	growth := int64(after) - int64(before)
+	t.Logf("heap growth after 3000 queries: %d bytes", growth)
+	assert.Less(t, growth, int64(1<<20))
+}
+
+func TestSQLColumnsODBCTextAsNumeric(t *testing.T) {
+	newConn := func(connType dbio.Type) Connection {
+		bc := &BaseConn{Type: connType}
+		var inst Connection = bc
+		bc.instance = &inst
+		return bc
+	}
+	fetched := &iop.Column{Name: "n38", Type: iop.DecimalType, DbType: "NUMERIC(38,4)", DbPrecision: 38, DbScale: 4}
+	colTypes := []ColumnType{{Name: "n38", DatabaseTypeName: "VARCHAR", Length: 47, FetchedColumn: fetched}}
+
+	t.Run("odbc uses fetched decimal", func(t *testing.T) {
+		col := SQLColumns(colTypes, newConn(dbio.TypeDbODBC))[0]
+		assert.Equal(t, iop.DecimalType, col.Type)
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 4, col.DbScale)
+		assert.Equal(t, 0, col.Stats.MaxLen)
+		assert.True(t, col.Sourced)
+	})
+
+	t.Run("odbc keeps text when fetched type is text", func(t *testing.T) {
+		fetchedText := &iop.Column{Name: "n38", Type: iop.StringType}
+		cts := []ColumnType{{Name: "n38", DatabaseTypeName: "VARCHAR", Length: 47, FetchedColumn: fetchedText}}
+		col := SQLColumns(cts, newConn(dbio.TypeDbODBC))[0]
+		assert.True(t, col.IsString())
+		assert.Equal(t, 47, col.Stats.MaxLen)
+	})
+
+	t.Run("non-odbc is unchanged", func(t *testing.T) {
+		col := SQLColumns(colTypes, newConn(dbio.TypeDbPostgres))[0]
+		assert.True(t, col.IsString())
+		assert.Equal(t, 47, col.Stats.MaxLen)
+	})
+}
+
+func TestODBCTemplateTypeDetect(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]string
+		want  dbio.Type
+	}{
+		{
+			name:  "firebird driver",
+			props: map[string]string{"conn_string": "Driver={Firebird/InterBase(r) driver};Dbname=mpc.lan/3050:/var/lib/firebird/data/mirror.fdb;Uid=SYSDBA"},
+			want:  dbio.Type("firebird"),
+		},
+		{
+			name:  "sqlserver driver wins over database name",
+			props: map[string]string{"conn_string": "Driver={ODBC Driver 18 for SQL Server};Server=x;Database=firebird_copy"},
+			want:  dbio.TypeDbSQLServer,
+		},
+		{
+			name:  "dsn only",
+			props: map[string]string{"conn_string": "DSN=mydsn"},
+			want:  dbio.TypeDbODBC,
+		},
+		{
+			name:  "explicit template",
+			props: map[string]string{"conn_template": "Firebird"},
+			want:  dbio.Type("firebird"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := &ODBCConn{}
+			conn.BaseConn.context = g.NewContext(context.Background())
+			for k, v := range tc.props {
+				conn.SetProp(k, v)
+			}
+			assert.Equal(t, tc.want, conn.GetODBCTemplateType())
+		})
+	}
 }

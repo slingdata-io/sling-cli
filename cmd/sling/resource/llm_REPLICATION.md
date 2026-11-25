@@ -172,6 +172,7 @@ streams: <streams_map>
 defaults: <default_stream_config>
 hooks: <replication_hooks>
 env: <environment_variables>
+continuous: <continuous_mode_settings>  # change-capture streams only, used with `sling run --continuous`
 ```
 
 ### Stream Configuration Map
@@ -208,6 +209,10 @@ streams:
     # Options
     source_options: <source_options_map>
     target_options: <target_options_map>
+    change_capture_options: <cdc_options_map>  # for change-capture mode
+    
+    # Selection
+    tags: [tag1, tag2]  # select with --streams tag:tag1
     
     # Hooks
     hooks: <stream_hooks>
@@ -410,7 +415,7 @@ streams:
 ```yaml
 defaults:
   target_options:
-    column_casing: snake  # source | target | snake | upper | lower | normalize
+    column_casing: snake  # source | target | snake | camel | upper | lower | normalize
 ```
 
 #### Column Typing
@@ -635,11 +640,11 @@ streams:
       # Stage 1: Clean and normalize
       - first_name: 'trim_space(upper(value))'
         email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9]", "")'
+        phone: 'regex_replace(value, "[^0-9]", "")'
       
       # Stage 2: Create computed fields
       - full_name: 'record.first_name + " " + record.last_name'
-        email_domain: 'substring(record.email, strpos(record.email, "@") + 1)'
+        email_domain: 'split_part(record.email, "@", 1)'
       
       # Stage 3: Business logic
       - customer_type: |
@@ -762,11 +767,17 @@ Match all tables in a schema:
 streams:
   # All tables in public schema
   public.*:
-  
+```
+
+```yaml
+streams:
   # All tables in multiple schemas with prefix/suffix
   sales.marketing_*:   # use a prefix
   inventory.*_latest:  # use a suffix
-  
+```
+
+```yaml
+streams:
   # Exclude specific tables
   public.*:
   public.temp_table:
@@ -1216,9 +1227,6 @@ defaults:
 streams:
   # Partitioned parquet files
   'data/year=*/month=*/*.parquet':
-    transforms:
-      - year: 'int_parse(substring(record._file_path, strpos(record._file_path, "year=") + 5, 4))'
-        month: 'int_parse(substring(record._file_path, strpos(record._file_path, "month=") + 6, 2))'
 
 env:
   SLING_THREADS: 10
@@ -1360,7 +1368,6 @@ env:
 ```yaml
 env:
   SLING_RETRIES: 3           # Retry failed streams 3 times
-  SLING_RETRY_DELAY: 30s     # Wait 30 seconds between retries
 ```
 
 ### Performance Optimization
@@ -1405,7 +1412,7 @@ streams:
     transforms:
       # Stage 1: Data cleansing
       - email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9+]", "")'
+        phone: 'regex_replace(value, "[^0-9+]", "")'
         name: 'trim_space(value)'
       
       # Stage 2: Computed metrics
@@ -1521,7 +1528,9 @@ sling run -r /path/to/replication.yaml
 # Good
 source: prod_postgres_crm
 target: dw_snowflake_analytics
+```
 
+```yaml
 # Avoid
 source: db1
 target: db2
@@ -1873,7 +1882,6 @@ sling run -r /path/to/replication.yaml --streams failed_stream
 ```yaml
 env:
   SLING_RETRIES: 3
-  SLING_RETRY_DELAY: 60s
 ```
 
 This comprehensive guide provides everything needed to effectively use Sling replications: validate with MCP, then execute with `sling run`.

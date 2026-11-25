@@ -1,5 +1,6 @@
 env:
   JOB_ID: job_0vnx9sjkjzmd95nh
+  CONN: HACKERNEWS
 
 steps:
   - log: '=== Platform CLI: jobs list (table default) ==='
@@ -105,6 +106,26 @@ steps:
 
   - check: contains(state.conns_list_json.output.stdout, "database")
     failure_message: 'connections list (json) missing type key'
+
+  - log: '=== Platform CLI: connections test and get ==='
+
+  - id: conns_test
+    command: sling platform connections test {env.CONN}
+
+  - check: 'contains(state.conns_test.output.combined, "valid") && !contains(state.conns_test.output.combined, "invalid")'
+    failure_message: 'connections test did not report a valid connection'
+
+  - id: conns_get_json
+    command: sling platform connections get {env.CONN} -o json
+
+  - check: 'contains(state.conns_get_json.output.stdout, "props")'
+    failure_message: 'connections get (json) missing props'
+
+  - id: conns_get_yaml
+    command: sling platform connections get {env.CONN} -o yaml
+
+  - check: 'contains(state.conns_get_yaml.output.stdout, "connections:")'
+    failure_message: 'connections get (yaml) missing connections key'
 
   - log: '=== Platform CLI: invalid output format rejected ==='
 

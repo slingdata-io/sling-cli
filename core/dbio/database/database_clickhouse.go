@@ -814,6 +814,17 @@ func (conn *ClickhouseConn) insertBatch(tx *chInsertTx, table Table, tableFName 
 	return count, nil
 }
 
+// StreamRowsContext streams the rows of a query. It adds a hint when the
+// driver cannot read an AggregateFunction column.
+func (conn *ClickhouseConn) StreamRowsContext(ctx context.Context, query string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
+	ds, err = conn.BaseConn.StreamRowsContext(ctx, query, options...)
+	if err != nil && strings.Contains(err.Error(), `unsupported column type "AggregateFunction(`) {
+		// a new root error, because the CLI prints only the root message
+		err = g.Error("%s\nThe result has a column of type AggregateFunction. The ClickHouse driver cannot read this type. In custom SQL, wrap the column in finalizeAggregation(col), or use a -Merge combinator with GROUP BY (for example minMerge(col)).", g.ErrMsgSimple(err))
+	}
+	return
+}
+
 // BulkExportStream streams the rows in bulk
 func (conn *ClickhouseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	// append SELECT FORMAT if specified (such as CSVWithNames)
@@ -974,6 +985,17 @@ func (conn *ClickhouseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Co
 		fallthrough
 	case srcCol.IsBool() && tgtCol.IsString():
 		selectStr = g.F("case when %s = 1 then 'true' else 'false' end", qName)
+	case srcCol.IsInteger() && tgtCol.IsInteger():
+		// ClickHouse 21.x rejects an IN whose two sides have different integer
+		// widths (Code: 53). Match the width of the target column. Keep a
+		// Nullable(T) target, else a NULL fails the cast (Code: 349).
+		tgtType := strings.TrimSuffix(strings.TrimPrefix(tgtCol.DbType, "Nullable("), ")")
+		srcType := strings.TrimSuffix(strings.TrimPrefix(srcCol.DbType, "Nullable("), ")")
+		if tgtType == "" || strings.EqualFold(tgtType, srcType) {
+			selectStr = qName
+		} else {
+			selectStr = g.F("cast(%s as %s)", qName, tgtCol.DbType)
+		}
 	default:
 		selectStr = qName
 	}

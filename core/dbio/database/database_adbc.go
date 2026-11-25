@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -1029,8 +1031,11 @@ func (conn *ArrowDBConn) GetTemplateValue(path string) string {
 			return value
 		}
 	}
-	// Fall back to ADBC template
-	return conn.Type.GetTemplateValue(path)
+	// Fall back to ADBC template, then to the defaults of LoadTemplates
+	if value := conn.Type.GetTemplateValue(path); value != "" {
+		return value
+	}
+	return conn.template.Value(path)
 }
 
 // GetNativeType returns the native column type from generic
@@ -1101,6 +1106,13 @@ func (conn *ArrowDBConn) LoadTemplates() error {
 	conn.template, err = conn.Type.Template(true)
 	if err != nil {
 		return g.Error(err, "could not load ADBC template")
+	}
+
+	// a driver that sling does not know gets the ANSI rename. Clone first:
+	// the maps are shared with the template cache.
+	if conn.template.Core["rename_table"] == "" {
+		conn.template.Core = maps.Clone(conn.template.Core)
+		conn.template.Core["rename_table"] = "alter table {table} rename to {new_table}"
 	}
 
 	return nil
@@ -1241,7 +1253,7 @@ func (conn *ArrowDBConn) StreamRowsContext(ctx context.Context, sql string, opti
 		return nil, ErrArrowLaneDeclined
 	}
 
-	columns := iop.ArrowSchemaToColumns(reader.Schema())
+	columns := iop.ArrowSchemaToColumns(reader.Schema()).KeepCatalogTypes(srcCols)
 	ds = iop.NewDatastreamIt(queryContext.Ctx, columns, conn.makeRecordNextFunc(queryContext, reader, stmt, limit))
 	conn.setStreamProps(ds, sql)
 
@@ -1437,10 +1449,14 @@ func (conn *ArrowDBConn) makeRecordNextFunc(queryContext *g.Context, reader arra
 			previousRecord = nil
 		}
 
-		// Check if we need to fetch next record batch
-		if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
-			// Move current to previous (will be released on next iteration)
-			previousRecord = currentRecord
+		// Fetch the next record batch. Skip zero-row batches, which are valid Arrow.
+		for currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
+			if currentRecord != nil && currentRecord.NumRows() == 0 {
+				currentRecord.Release() // no row of it was read
+			} else {
+				// Move current to previous (will be released on next iteration)
+				previousRecord = currentRecord
+			}
 			currentRecord = nil
 
 			select {
@@ -1509,6 +1525,321 @@ func (conn *ArrowDBConn) GetSQLColumns(table Table) (columns iop.Columns, err er
 	return ds.Columns, nil
 }
 
+// adbcCatalog is one row of ADBC GetObjects. Null values decode to zero values.
+type adbcCatalog struct {
+	Name    string `json:"catalog_name"`
+	Schemas []struct {
+		Name   string        `json:"db_schema_name"`
+		Tables []adbcObjects `json:"db_schema_tables"`
+	} `json:"catalog_db_schemas"`
+}
+
+type adbcObjects struct {
+	Catalog string       `json:"-"`
+	Schema  string       `json:"-"`
+	Name    string       `json:"table_name"`
+	Type    string       `json:"table_type"`
+	Columns []adbcColumn `json:"table_columns"`
+}
+
+var adbcTypeSizeRegex = regexp.MustCompile(`\(\s*(\d+)\s*(?:,\s*(\d+))?\s*\)`)
+
+type adbcColumn struct {
+	Name          string `json:"column_name"`
+	Position      int    `json:"ordinal_position"`
+	TypeName      string `json:"xdbc_type_name"`
+	ColumnSize    int    `json:"xdbc_column_size"`
+	DecimalDigits int    `json:"xdbc_decimal_digits"`
+}
+
+func (o adbcObjects) IsView() bool {
+	return strings.Contains(strings.ToUpper(o.Type), "VIEW")
+}
+
+// hasMetadata reports whether the template has the metadata query. A driver
+// that sling does not know has none, so the ADBC catalog calls replace them.
+func (conn *ArrowDBConn) hasMetadata(key string) bool {
+	return strings.TrimSpace(conn.template.Metadata[key]) != ""
+}
+
+// getObjects returns the tables of ADBC GetObjects, at most down to depth.
+// The driver reads the names as search patterns, so the exact names are
+// matched again here. A driver without schemas (e.g. SQLite) finds nothing
+// for a schema name, so then its tables match any schema name.
+func (conn *ArrowDBConn) getObjects(depth adbc.ObjectDepth, catalog, schema, table string) (objects []adbcObjects, schemas []string, err error) {
+	objects, schemas, err = conn.readObjects(depth, catalog, schema, table, false)
+	if err == nil && schema != "" && len(schemas) == 0 {
+		return conn.readObjects(depth, catalog, "", table, true)
+	}
+	return
+}
+
+func (conn *ArrowDBConn) readObjects(depth adbc.ObjectDepth, catalog, schema, table string, noSchema bool) (objects []adbcObjects, schemas []string, err error) {
+	if conn.Conn == nil {
+		return nil, nil, g.Error("ADBC connection is not open")
+	}
+
+	filter := func(s string) *string { return lo.Ternary(s == "", nil, &s) }
+	reader, err := conn.Conn.GetObjects(conn.Context().Ctx, depth, filter(catalog), filter(schema), filter(table), nil, nil)
+	if err != nil {
+		return nil, nil, g.Error(err, "could not get the ADBC objects")
+	}
+	defer reader.Release()
+
+	match := func(name, want string) bool { return want == "" || strings.EqualFold(name, want) }
+	for reader.Next() {
+		var buf strings.Builder
+		if err = array.RecordToJSON(reader.Record(), &buf); err != nil {
+			return nil, nil, g.Error(err, "could not read the ADBC objects")
+		}
+		dec := json.NewDecoder(strings.NewReader(buf.String()))
+		for dec.More() {
+			var cat adbcCatalog
+			if err = dec.Decode(&cat); err != nil {
+				return nil, nil, g.Error(err, "could not decode the ADBC objects")
+			}
+			for _, s := range cat.Schemas {
+				if !match(s.Name, schema) || (noSchema && s.Name != "") {
+					continue
+				}
+				schemas = append(schemas, s.Name)
+				for _, t := range s.Tables {
+					if match(t.Name, table) {
+						t.Catalog, t.Schema = cat.Name, s.Name
+						objects = append(objects, t)
+					}
+				}
+			}
+		}
+	}
+	return objects, schemas, reader.Err()
+}
+
+// GetSchemas returns the schemas
+func (conn *ArrowDBConn) GetSchemas() (iop.Dataset, error) {
+	if conn.hasMetadata("schemas") {
+		return conn.BaseConn.GetSchemas()
+	}
+
+	data := iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
+	_, schemas, err := conn.getObjects(adbc.ObjectDepthDBSchemas, "", "", "")
+	if err != nil {
+		return data, err
+	}
+	for _, name := range lo.Uniq(schemas) {
+		if name != "" {
+			data.Append([]any{name})
+		}
+	}
+	return data, nil
+}
+
+// objectsDataset returns the tables or views (or both) of a schema
+func (conn *ArrowDBConn) objectsDataset(schema string, tables, views bool) (iop.Dataset, error) {
+	data := iop.NewDataset(iop.NewColumnsFromFields("schema_name", "table_name", "is_view"))
+	objects, _, err := conn.getObjects(adbc.ObjectDepthTables, "", schema, "")
+	if err != nil {
+		return data, err
+	}
+	for _, o := range objects {
+		if (o.IsView() && views) || (!o.IsView() && tables) {
+			data.Append([]any{o.Schema, o.Name, o.IsView()})
+		}
+	}
+	return data, nil
+}
+
+// GetTables returns the tables of a schema
+func (conn *ArrowDBConn) GetTables(schema string) (iop.Dataset, error) {
+	if conn.hasMetadata("tables") {
+		return conn.BaseConn.GetTables(schema)
+	}
+	return conn.objectsDataset(schema, true, false)
+}
+
+// GetViews returns the views of a schema
+func (conn *ArrowDBConn) GetViews(schema string) (iop.Dataset, error) {
+	if conn.hasMetadata("views") {
+		return conn.BaseConn.GetViews(schema)
+	}
+	return conn.objectsDataset(schema, false, true)
+}
+
+// GetTablesAndViews returns the tables and views of a schema
+func (conn *ArrowDBConn) GetTablesAndViews(schema string) (iop.Dataset, error) {
+	if conn.hasMetadata("tables") {
+		return conn.BaseConn.GetTablesAndViews(schema)
+	}
+	return conn.objectsDataset(schema, true, true)
+}
+
+// CurrentDatabase returns the current database
+func (conn *ArrowDBConn) CurrentDatabase() (string, error) {
+	if conn.hasMetadata("current_database") {
+		return conn.BaseConn.CurrentDatabase()
+	}
+	return conn.GetProp("database"), nil
+}
+
+// TableExists returns true if the table exists
+func (conn *ArrowDBConn) TableExists(table Table) (bool, error) {
+	if conn.hasMetadata("columns") {
+		return conn.BaseConn.TableExists(table)
+	}
+	objects, _, err := conn.getObjects(adbc.ObjectDepthTables, table.Database, table.Schema, table.Name)
+	if err != nil {
+		return false, g.Error(err, "could not check table existence: "+table.FullName())
+	}
+	return len(objects) > 0, nil
+}
+
+// DropTable drops the tables. A driver without a template gets the ANSI
+// drop table, which fails for a missing table, so it drops only the tables
+// that exist.
+func (conn *ArrowDBConn) DropTable(tableNames ...string) error {
+	if conn.hasMetadata("columns") {
+		return conn.BaseConn.DropTable(tableNames...)
+	}
+	for _, tableName := range tableNames {
+		table, err := ParseTableName(tableName, conn.GetType())
+		if err != nil {
+			return g.Error(err, "could not parse table name: "+tableName)
+		}
+		if exists, err := conn.TableExists(table); err != nil {
+			return err
+		} else if !exists {
+			g.Debug("table %s does not exist", tableName)
+			continue
+		}
+		if err = conn.BaseConn.DropTable(tableName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetTableColumns returns the columns of a table. Without a template, the
+// types come from ADBC GetObjects, else from ADBC GetTableSchema.
+func (conn *ArrowDBConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	if table.IsQuery() {
+		return conn.GetSQLColumns(*table)
+	} else if conn.hasMetadata("columns") {
+		return conn.BaseConn.GetTableColumns(table, fields...)
+	}
+
+	objects, _, err := conn.getObjects(adbc.ObjectDepthColumns, table.Database, table.Schema, table.Name)
+	if err == nil && len(objects) == 0 {
+		return columns, g.Error("did not find any columns for %s. Perhaps it does not exists, or user does not have read permission.", table.FullName())
+	}
+
+	if err == nil && len(objects[0].Columns) > 0 && lo.EveryBy(objects[0].Columns, func(c adbcColumn) bool { return c.TypeName != "" }) {
+		cols := slices.Clone(objects[0].Columns)
+		slices.SortStableFunc(cols, func(a, b adbcColumn) int { return a.Position - b.Position })
+		colTypes := make([]ColumnType, len(cols))
+		for i, c := range cols {
+			// some drivers give the size only in the type name, e.g. numeric(18,2)
+			size, digits := c.ColumnSize, c.DecimalDigits
+			if m := adbcTypeSizeRegex.FindStringSubmatch(c.TypeName); size == 0 && m != nil {
+				size, digits = cast.ToInt(m[1]), cast.ToInt(m[2])
+			}
+			colTypes[i] = ColumnType{Name: c.Name, DatabaseTypeName: c.TypeName, Sourced: true}
+			switch gt := NativeTypeToGeneral(c.Name, c.TypeName, conn); {
+			case gt.IsString():
+				colTypes[i].Length = size
+			case gt == iop.DecimalType:
+				colTypes[i].Precision, colTypes[i].Scale = size, digits
+			}
+		}
+		columns = SQLColumns(colTypes, conn)
+	} else {
+		// the driver lists no column types, so read the Arrow schema
+		catalog, schema := table.Database, table.Schema
+		if err == nil {
+			catalog, schema = objects[0].Catalog, objects[0].Schema
+		}
+		filter := func(s string) *string { return lo.Ternary(s == "", nil, &s) }
+		arrowSchema, err := conn.Conn.GetTableSchema(conn.Context().Ctx, filter(catalog), filter(schema), table.Name)
+		if err != nil {
+			return columns, g.Error(err, "could not get list of columns for %s", table.FullName())
+		}
+		columns = iop.ArrowSchemaToColumns(arrowSchema)
+	}
+
+	if len(fields) > 0 {
+		selected := iop.Columns{}
+		for _, field := range fields {
+			col := columns.GetColumn(field)
+			if col == nil {
+				return nil, g.Error("provided field '%s' not found in table %s", strings.ToLower(field), table.FullName())
+			}
+			selected = append(selected, *col)
+		}
+		columns = selected
+	}
+
+	for i := range columns {
+		columns[i].Position = i + 1
+		columns[i].Database = table.Database
+		columns[i].Schema = table.Schema
+		columns[i].Table = table.Name
+	}
+	table.Columns = columns
+
+	if len(columns) == 0 {
+		err = g.Error("unable to obtain columns for " + table.FullName())
+	}
+	return
+}
+
+// GetSchemata returns the schemata. Without a template, the column level
+// comes from ADBC GetObjects.
+func (conn *ArrowDBConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
+	if level != SchemataLevelColumn || conn.hasMetadata("schemata") {
+		return conn.BaseConn.GetSchemata(level, schemaName, tableNames...)
+	}
+
+	currDatabase, _ := conn.CurrentDatabase()
+	if currDatabase == "" {
+		currDatabase = conn.GetType().String()
+	}
+	schemata := Schemata{Databases: map[string]Database{}, conn: conn}
+
+	objects, _, err := conn.getObjects(adbc.ObjectDepthColumns, "", schemaName, "")
+	if err != nil {
+		return schemata, g.Error(err, "Could not get schemata at %s level", level)
+	}
+
+	tableNames = lo.Filter(tableNames, func(s string, _ int) bool { return strings.TrimSpace(s) != "" })
+	schemas := map[string]Schema{}
+	for _, o := range objects {
+		if len(tableNames) > 0 && !lo.ContainsBy(tableNames, func(n string) bool { return strings.EqualFold(n, o.Name) }) {
+			continue
+		}
+		key := strings.ToLower(o.Schema)
+		schema, ok := schemas[key]
+		if !ok {
+			schema = Schema{Name: o.Schema, Database: currDatabase, Tables: map[string]Table{}}
+		}
+		table := Table{Name: o.Name, Schema: o.Schema, Database: currDatabase, IsView: o.IsView(), Dialect: conn.GetType()}
+		for i, c := range o.Columns {
+			table.Columns = append(table.Columns, iop.Column{
+				Name:     c.Name,
+				Type:     NativeTypeToGeneral(c.Name, c.TypeName, conn),
+				Table:    o.Name,
+				Schema:   o.Schema,
+				Database: currDatabase,
+				Position: lo.Ternary(c.Position > 0, c.Position, i+1),
+				DbType:   c.TypeName,
+			})
+		}
+		schema.Tables[strings.ToLower(o.Name)] = table
+		schemas[key] = schema
+	}
+
+	schemata.Databases[strings.ToLower(currDatabase)] = Database{Name: currDatabase, Schemas: schemas}
+	return schemata, nil
+}
+
 // ExecuteSchema returns the result schema of a query without running it, when
 // the driver implements StatementExecuteSchema.
 func (conn *ArrowDBConn) ExecuteSchema(sql string) (schema *arrow.Schema, err error) {
@@ -1552,7 +1883,8 @@ func (conn *ArrowDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 		sql = table.SQL
 	}
 
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true))
+	// the catalog columns keep text, varchar lengths and decimal precision
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, sql, g.M("arrow_records", true, "columns", table.Columns))
 	if err != nil {
 		return nil, g.Error(err, "could not stream rows")
 	}
@@ -1640,6 +1972,7 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 				return g.Error(err, "error converting batch to Arrow")
 			}
 
+			reader = conn.ingestReader(reader)
 			ingested, err := adbc.IngestStream(ctx, c, reader, table.Name, ingestMode, opts)
 			reader.Release()
 
@@ -1659,6 +1992,66 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 
 	return total.Load(), err
 }
+
+// duckDbVectorSize is the maximum rows of a DuckDB data chunk. The DuckDB 2.0
+// ADBC ingest fails with "Vector::SetSize out of range" on a larger record.
+const duckDbVectorSize = 2048
+
+// ingestReader cuts the records for drivers that limit the rows of a record.
+func (conn *ArrowDBConn) ingestReader(reader array.RecordReader) array.RecordReader {
+	driver := strings.ToLower(filepath.Base(conn.GetProp("driver")))
+	if conn.driverType != dbio.TypeDbDuckDb && !strings.Contains(driver, "duckdb") {
+		return reader
+	}
+	r := &slicedRecordReader{RecordReader: reader, size: duckDbVectorSize}
+	r.refs.Store(1)
+	return r
+}
+
+// slicedRecordReader gives the records of a reader in slices of at most size rows.
+type slicedRecordReader struct {
+	array.RecordReader
+	size   int64
+	refs   atomic.Int64
+	source arrow.RecordBatch
+	offset int64
+	cur    arrow.RecordBatch
+}
+
+func (r *slicedRecordReader) Retain() { r.refs.Add(1) }
+
+func (r *slicedRecordReader) Release() {
+	if r.refs.Add(-1) != 0 {
+		return
+	}
+	if r.cur != nil {
+		r.cur.Release()
+		r.cur = nil
+	}
+	r.RecordReader.Release()
+}
+
+func (r *slicedRecordReader) Next() bool {
+	if r.cur != nil {
+		r.cur.Release()
+		r.cur = nil
+	}
+	for r.source == nil || r.offset >= r.source.NumRows() {
+		if !r.RecordReader.Next() {
+			r.source = nil
+			return false
+		}
+		r.source, r.offset = r.RecordReader.RecordBatch(), 0
+	}
+	end := min(r.offset+r.size, r.source.NumRows())
+	r.cur = r.source.NewSlice(r.offset, end)
+	r.offset = end
+	return true
+}
+
+func (r *slicedRecordReader) RecordBatch() arrow.RecordBatch { return r.cur }
+
+func (r *slicedRecordReader) Record() arrow.RecordBatch { return r.cur }
 
 // insertConcurrency returns the number of concurrent ingests (target option
 // insert_concurrency). A driver whose staging table lives in one session
@@ -1748,6 +2141,13 @@ func (conn *ArrowDBConn) ingestOptions(table Table) adbc.IngestStreamOptions {
 		if strings.HasSuffix(table.Name, "_sling_duckdb_tmp") {
 			return adbc.IngestStreamOptions{Temporary: true}
 		}
+	case dbio.TypeDbArrowDBC:
+		// a driver with no schemas (SQLite) rejects the schema option
+		if table.Schema != "" {
+			if _, schemas, err := conn.readObjects(adbc.ObjectDepthDBSchemas, "", table.Schema, "", false); err == nil && len(schemas) == 0 {
+				table.Schema = ""
+			}
+		}
 	}
 
 	opts := adbc.IngestStreamOptions{
@@ -1800,7 +2200,7 @@ func (conn *ArrowDBConn) ingestRecordStream(tableFName string, ds *iop.Datastrea
 	readers := rs.Readers(n)
 	var ingested atomic.Int64
 	err = conn.withIngestConns(ds.Context.Ctx, n, func(ctx context.Context, i int, c adbc.Connection) error {
-		reader := readers[i]
+		reader := conn.ingestReader(readers[i])
 		defer reader.Release()
 
 		cnt, err := adbc.IngestStream(ctx, c, reader, table.Name, conn.getIngestMode(), conn.ingestOptions(table))

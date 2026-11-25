@@ -18,7 +18,7 @@ assert_files:
   - path: "$HOME/.agents/skills/sling/SKILL.md"
     contains:
       - "name: sling"
-      - "Sling - Data Integration Platform"
+      - "sling skills sling-replications"
     md5_matches_embedded: true
   - path: "$HOME/.claude/skills/sling/SKILL.md"
     is_redirect_to: "$HOME/.agents/skills/sling/SKILL.md"

@@ -243,6 +243,15 @@ func (t Type) DBNameUpperCase() bool {
 	return g.In(t, TypeDbOracle, TypeDbSnowflake, TypeDbExasol, TypeDbHana)
 }
 
+// Schemaless returns true if the template declares no schema concept
+func (t Type) Schemaless() bool {
+	tp, err := t.Template()
+	if err != nil {
+		return false
+	}
+	return cast.ToBool(tp.Value("variable.schemaless"))
+}
+
 // Kind returns the kind of connection
 func (t Type) Kind() Kind {
 	switch t {
@@ -299,6 +308,11 @@ func (t Type) IsPostgresLike() bool {
 // IsSQLServer returns true is sql server flavor
 func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)
+}
+
+// SupportsCDC returns true if the type can be a CDC source
+func (t Type) SupportsCDC() bool {
+	return t.IsMySQLLike() || t.IsPostgresLike() || t.IsSQLServer() || g.In(t, TypeDbOracle, TypeDbMongoDB)
 }
 
 // IsColumnStore is true for columnar engines where COUNT(*) is cheap

@@ -1,0 +1,78 @@
+# CDC from MySQL: a run that stops inside a big transaction saves the last
+# commit boundary. The next run reads the full transaction again.
+# PHASE: setup, run1 (stops in the transaction), run2 (reads it again), check.
+# Needs MYSQL_GTID (binlog on) and SLING_STATE=POSTGRES/sling_state_cdc_txn.
+
+env:
+  PHASE: ${PHASE}
+
+steps:
+  - if: env.PHASE == "setup"
+    connection: MYSQL_GTID
+    query: |
+      DROP TABLE IF EXISTS test_db.cdc_txn_boundary;
+      CREATE TABLE test_db.cdc_txn_boundary (id INT PRIMARY KEY, payload VARCHAR(2000)) DEFAULT CHARSET=utf8mb4;
+      INSERT INTO test_db.cdc_txn_boundary VALUES (1, 'snapshot');
+
+  - if: env.PHASE == "setup"
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS public.cdc_txn_boundary;
+      DROP TABLE IF EXISTS sling_state_cdc_txn._sling_state;
+
+  # snapshot, then one small transaction and one big transaction
+  - if: env.PHASE == "setup"
+    type: replication
+    replication:
+      source: MYSQL_GTID
+      target: POSTGRES
+      defaults:
+        mode: change-capture
+        object: public.{stream_table}
+        change_capture_options:
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_txn_boundary:
+
+  - if: env.PHASE == "setup"
+    connection: MYSQL_GTID
+    query: |
+      INSERT INTO test_db.cdc_txn_boundary VALUES (2, 'small');
+      SET SESSION cte_max_recursion_depth = 100000;
+      INSERT INTO test_db.cdc_txn_boundary
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50000)
+        SELECT i + 100, REPEAT('x', 1000) FROM n;
+
+  # run1 has SLING_TEST_CDC_TXN_DRAIN_LIMIT=1ms in the suite entry
+  - if: env.PHASE == "run1" || env.PHASE == "run2"
+    type: replication
+    replication:
+      source: MYSQL_GTID
+      target: POSTGRES
+      defaults:
+        mode: change-capture
+        object: public.{stream_table}
+        change_capture_options:
+          run_max_events: 100
+          run_max_duration: 15s
+      streams:
+        test_db.cdc_txn_boundary:
+
+  - if: env.PHASE == "check"
+    type: query
+    connection: POSTGRES
+    query: SELECT count(*) AS cnt, count(DISTINCT id) AS ids FROM public.cdc_txn_boundary
+    into: rows
+
+  - if: env.PHASE == "check"
+    type: log
+    message: 'cdc_txn_boundary rows={store.rows}'
+
+  - if: env.PHASE == "check"
+    type: check
+    check: int_parse(store.rows[0].cnt) == 50002 && int_parse(store.rows[0].ids) == 50002
+    failure_message: 'expected 50002 rows, got {store.rows}'
+
+  - if: env.PHASE == "check"
+    type: log
+    message: 'CDC txn boundary PASSED'

@@ -47,7 +47,7 @@ require (
 	github.com/exasol/exasol-driver-go v1.0.14
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.2.5
+	github.com/flarco/g v0.2.7
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gobwas/glob v0.2.3
@@ -95,7 +95,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
-	github.com/slingdata-io/godbc v0.0.9
+	github.com/slingdata-io/godbc v0.0.11
 	github.com/slingdata-io/golyglot v1.0.20
 	github.com/slingdata-io/sling v0.0.0-00010101000000-000000000000
 	github.com/snowflakedb/gosnowflake v1.19.1

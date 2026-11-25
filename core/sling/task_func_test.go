@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,11 +26,29 @@ type createTableConn struct {
 	creates int
 	gap     time.Duration
 	hidden  bool
+
+	typ        dbio.Type // defaults to ClickHouse
+	props      map[string]string
+	getSchemas atomic.Int32
+	execs      atomic.Int32
 }
 
-func (c *createTableConn) GetType() dbio.Type { return dbio.TypeDbClickhouse }
+func (c *createTableConn) GetType() dbio.Type {
+	if c.typ != "" {
+		return c.typ
+	}
+	return dbio.TypeDbClickhouse
+}
+
+func (c *createTableConn) GetProp(key ...string) string { return c.props[strings.Join(key, "")] }
+
+func (c *createTableConn) Exec(sql string, args ...any) (sql.Result, error) {
+	c.execs.Add(1)
+	return nil, nil
+}
 
 func (c *createTableConn) GetSchemas() (iop.Dataset, error) {
+	c.getSchemas.Add(1)
 	data := iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
 	data.Append([]any{"main"})
 	return data, nil
@@ -131,4 +150,26 @@ func TestCreateTableIfNotExists_Chunks(t *testing.T) {
 	})
 
 	assert.Empty(t, tableCreates.entries, "an entry stays after its last holder")
+}
+
+func TestCreateSchemaIfNotExists_Schemaless(t *testing.T) {
+	fb := &createTableConn{typ: dbio.Type("firebird")}
+
+	created, err := createSchemaIfNotExists(fb, "")
+	require.NoError(t, err)
+	assert.False(t, created)
+	assert.Zero(t, fb.getSchemas.Load())
+	assert.Zero(t, fb.execs.Load())
+
+	created, err = createSchemaIfNotExists(fb, "main")
+	require.NoError(t, err, "the schema is ignored")
+	assert.False(t, created)
+	assert.Zero(t, fb.getSchemas.Load())
+	assert.Zero(t, fb.execs.Load())
+
+	// other types still need a schema
+	pg := &createTableConn{typ: dbio.TypeDbPostgres}
+	_, err = createSchemaIfNotExists(pg, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not specify schema")
 }

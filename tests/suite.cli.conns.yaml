@@ -1,4 +1,4 @@
-- id: 526
+- id: 1
   name: 'sling conns test --debug redacts password'
   err: true
   run: |
@@ -10,7 +10,7 @@
   output_does_not_contain:
     - 'DistinctivePassXYZ'
 
-- id: 527
+- id: 2
   name: 'sling conns set stores argv password literal'
   run: |
     HOME_DIR=$(mktemp -d)
@@ -19,3 +19,33 @@
   output_contains:
     - 'connection `MY_PG` has been set'
     - 'password: hunter2-ARGV'
+
+- id: 3
+  name: 'sling conns list with two Iceberg connections that use sql_catalog_conn'
+  run: |
+    DIR=$(mktemp -d)
+    export ICE_A='{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_A}'
+    export ICE_B='{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_B}'
+    export CAT_A="sqlite://$DIR/a.db"
+    export CAT_B="sqlite://$DIR/b.db"
+    sling conns list
+  output_contains:
+    - 'ICE_A'
+    - 'ICE_B'
+    - 'CAT_A'
+    - 'CAT_B'
+
+- id: 4
+  name: 'sling conns list loads a dbt-duckdb output with path'
+  run: 'sling conns list'
+  env:
+    DBT_PROFILES_DIR: tests/files/dbt
+  output_contains:
+    - 'SHOP_DEV'
+
+# SLING-570: conns exec uses the ODBC template type for the limit wrapper
+- id: 5
+  name: 'sling conns exec --limit on an ODBC connection uses the template limit syntax'
+  run: sling conns exec MSSQL_ODBC "select 1 as a" --limit 5
+  output_does_not_contain:
+    - 'Incorrect syntax'
