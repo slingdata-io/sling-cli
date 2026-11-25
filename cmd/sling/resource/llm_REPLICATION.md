@@ -863,7 +863,7 @@ hooks:
     
     - type: query
       connection: MY_DB
-      sql: 'UPDATE job_status SET status = "running" WHERE job_id = "repl_001"'
+      query: 'UPDATE job_status SET status = "running" WHERE job_id = "repl_001"'
   
   end:
     - type: command
@@ -879,19 +879,19 @@ defaults:
     pre:
       - type: query
         connection: TARGET_DB
-        sql: 'CREATE SCHEMA IF NOT EXISTS {target_schema}'
+        query: 'CREATE SCHEMA IF NOT EXISTS {target.schema}'
     
     post:
       - type: query
         connection: TARGET_DB
-        sql: 'ANALYZE TABLE {object_name}'
+        query: 'ANALYZE TABLE {object.full_name}'
 
 streams:
   important_table:
     hooks:
       post:
         - type: command
-          command: 'python validate_data.py {object_name}'
+          command: 'python validate_data.py {object.full_name}'
 ```
 
 ### Available Hook Types
@@ -916,7 +916,7 @@ hooks:
       method: POST
       headers:
         Authorization: 'Bearer ${SLACK_TOKEN}'
-      body: |
+      payload: |
         {
           "channel": "#data-pipeline",
           "text": "Starting data replication"
@@ -930,7 +930,7 @@ hooks:
     # Update status
     - type: query
       connection: METADATA_DB
-      sql: |
+      query: |
         INSERT INTO replication_log (job_id, status, completed_at)
         VALUES ('repl_001', 'completed', NOW())
 ```
@@ -1617,8 +1617,7 @@ streams:
 #### Data Encryption
 ```yaml
 target_options:
-  encryption: true        # Enable if supported by target
-  compression: gzip       # Compress sensitive data
+  compression: gzip       # File targets only; there is no encryption target option
 ```
 
 ### Monitoring and Observability
@@ -1636,12 +1635,12 @@ hooks:
   start:
     - type: http
       url: 'https://monitoring.company.com/api/jobs/start'
-      body: '{"job": "data_replication", "status": "started"}'
+      payload: '{"job": "data_replication", "status": "started"}'
   
   end:
     - type: http
       url: 'https://monitoring.company.com/api/jobs/complete'
-      body: '{"job": "data_replication", "status": "completed"}'
+      payload: '{"job": "data_replication", "status": "completed"}'
 ```
 
 ### Testing Strategies
@@ -1666,14 +1665,9 @@ streams:
   critical_table:
     hooks:
       post:
-        - type: query
-          connection: TARGET_DB
-          sql: |
-            SELECT 
-              COUNT(*) as row_count,
-              COUNT(DISTINCT id) as unique_ids
-            FROM {object_name}
-            HAVING COUNT(*) < 1000  -- Fail if too few rows
+        - type: check
+          check: 'run.total_rows >= 1000'  # Fail if too few rows
+          failure_message: 'only {run.total_rows} rows loaded'
 ```
 
 ---
