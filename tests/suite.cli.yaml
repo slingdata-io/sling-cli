@@ -4553,3 +4553,42 @@
     - 'inserted 3 rows'
   output_does_not_contain:
     - 'CDC mode is currently'
+
+# SLING-501: incremental with SLING_STATE and no valid CLI Pro token must fail before the read. Full-refresh keeps working.
+- id: 981
+  name: 'incremental with SLING_STATE and no CLI Pro token fails, no file written (SLING-501)'
+  err: true
+  env:
+    SRC_STATE_981: 'sqlite:///tmp/sling_981/src.db'
+    SLING_STATE: 'LOCAL/tmp/sling_981/state'
+    SLING_CLI_TOKEN: ''
+    SLING_PROJECT_TOKEN: ''
+  run: |
+    rm -rf /tmp/sling_981 temp/sling_981 && mkdir -p /tmp/sling_981
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_STATE_981 --tgt-object main.state_token_981 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_STATE_981 --src-stream main.state_token_981 --tgt-object 'file://temp/sling_981/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key update_dt || code=$?
+    echo "parquet files: $(find temp/sling_981 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_981 temp/sling_981
+    exit $code
+  output_contains:
+    - 'unable to validate CLI Pro token'
+    - 'parquet files: 0'
+
+- id: 982
+  name: 'full-refresh with SLING_STATE and no CLI Pro token still runs (SLING-501)'
+  env:
+    SRC_STATE_982: 'sqlite:///tmp/sling_982/src.db'
+    SLING_STATE: 'LOCAL/tmp/sling_982/state'
+    SLING_CLI_TOKEN: ''
+    SLING_PROJECT_TOKEN: ''
+  run: |
+    rm -rf /tmp/sling_982 temp/sling_982 && mkdir -p /tmp/sling_982
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_STATE_982 --tgt-object main.state_token_982 --mode full-refresh
+    sling run --src-conn SRC_STATE_982 --src-stream main.state_token_982 --tgt-object file://temp/sling_982/out.parquet --mode full-refresh --update-key update_dt
+    echo "parquet files: $(find temp/sling_982 -name '*.parquet' | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_982 temp/sling_982
+  output_contains:
+    - 'wrote 1000 rows'
+  output_does_not_contain:
+    - 'parquet files: 0'
