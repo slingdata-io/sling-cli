@@ -138,10 +138,9 @@ func (ce ConnEntries) withSpecFile(name, specFile string) (ConnEntries, error) {
 }
 
 var (
-	localConns        ConnEntries
-	localConnsTs      time.Time
-	localConnsExclude string
-	envFileWarned     sync.Map // env file paths already warned as invalid or repaired
+	localConns    ConnEntries
+	localConnsTs  time.Time
+	envFileWarned sync.Map // env file paths already warned as invalid or repaired
 )
 
 // localConnsLoadErrs holds the load failures of the last cached GetLocalConns
@@ -159,18 +158,12 @@ func LocalConnLoadError(name string) error {
 	return localConnsLoadErrs.m[strings.ToUpper(name)]
 }
 
-type LocalConnsExclude string
-
 func GetLocalConns(options ...any) ConnEntries {
-	defer func() { localConnsExclude = "" }() // clear if set
 	force := false
 
 	for _, option := range options {
-		switch opt := option.(type) {
-		case bool:
+		if opt, ok := option.(bool); ok {
 			force = opt
-		case LocalConnsExclude:
-			localConnsExclude = string(opt)
 		}
 	}
 
@@ -351,17 +344,14 @@ func GetLocalConns(options ...any) ConnEntries {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
 	})
 
-	// only cache if no exclusion
-	if localConnsExclude == "" {
-		localConnsTs = time.Now()
-		localConns = connArr
-		localConnsLoadErrs.Lock()
-		localConnsLoadErrs.m = failed
-		localConnsLoadErrs.Unlock()
-		iop.LocalConnections = cmap.New[map[string]any]()
-		for name, entry := range connsMap {
-			iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
-		}
+	localConnsTs = time.Now()
+	localConns = connArr
+	localConnsLoadErrs.Lock()
+	localConnsLoadErrs.m = failed
+	localConnsLoadErrs.Unlock()
+	iop.LocalConnections = cmap.New[map[string]any]()
+	for name, entry := range connsMap {
+		iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
 	}
 
 	return connArr

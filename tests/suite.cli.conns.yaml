@@ -19,3 +19,18 @@
   output_contains:
     - 'connection `MY_PG` has been set'
     - 'password: hunter2-ARGV'
+
+- id: 3
+  name: 'sling conns list with two Iceberg connections that use sql_catalog_conn'
+  run: |
+    DIR=$(mktemp -d)
+    export ICE_A='{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_A}'
+    export ICE_B='{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_B}'
+    export CAT_A="sqlite://$DIR/a.db"
+    export CAT_B="sqlite://$DIR/b.db"
+    sling conns list
+  output_contains:
+    - 'ICE_A'
+    - 'ICE_B'
+    - 'CAT_A'
+    - 'CAT_B'

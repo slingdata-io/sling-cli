@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 func writeEnvFile(t *testing.T, body string) (path string, ec *EnvFileConns) {
@@ -721,12 +723,6 @@ connections:
 		t.Fatalf("want error with %q, got %v", want, err)
 	}
 
-	// an uncached call does not touch the record
-	GetLocalConns(true, LocalConnsExclude("X"))
-	if LocalConnLoadError("CLE_BAD") == nil {
-		t.Error("the error should stay after an uncached call")
-	}
-
 	t.Setenv("ENV_YAML", `
 connections:
   CLE_BAD:
@@ -739,5 +735,69 @@ connections:
 	GetLocalConns(true)
 	if err := LocalConnLoadError("CLE_BAD"); err != nil {
 		t.Errorf("the error should clear after a valid load, got %v", err)
+	}
+}
+
+func setIcebergCatalogEnv(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("ICE_A", "{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_A}")
+	t.Setenv("ICE_B", "{type: iceberg, catalog_type: sql, sql_catalog_conn: CAT_B}")
+	t.Setenv("CAT_A", "sqlite://"+dir+"/a.db")
+	t.Setenv("CAT_B", "sqlite://"+dir+"/b.db")
+}
+
+func TestGetLocalConnsIcebergSQLCatalog(t *testing.T) {
+	setIcebergCatalogEnv(t)
+
+	done := make(chan ConnEntries, 1)
+	go func() { done <- GetLocalConns(true) }()
+
+	select {
+	case entries := <-done:
+		for _, name := range []string{"ICE_A", "ICE_B", "CAT_A", "CAT_B"} {
+			if entries.Get(name).Name == "" {
+				t.Errorf("connection %s did not load", name)
+			}
+		}
+		if entries.Get("ICE_A").Connection.Data["sql_conn_payload"] != nil {
+			t.Error("loading must not set sql_conn_payload")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetLocalConns did not return in 5s")
+	}
+}
+
+func TestResolveIcebergSQLCatalog(t *testing.T) {
+	setIcebergCatalogEnv(t)
+	t.Setenv("ICE_MISSING", "{type: iceberg, catalog_type: sql, sql_catalog_conn: NO_SUCH_CONN}")
+	t.Setenv("ICE_SELF", "{type: iceberg, catalog_type: sql, sql_catalog_conn: ICE_SELF}")
+	GetLocalConns(true)
+
+	t.Run("sets payload", func(t *testing.T) {
+		entry := GetLocalConns().Get("ICE_A")
+		conn := entry.Connection
+		if err := conn.ResolveIcebergSQLCatalog(); err != nil {
+			t.Fatal(err)
+		}
+		payload := g.AsMap(conn.Data["sql_conn_payload"])
+		cat := GetLocalConns().Get("CAT_A").Connection
+		want := cat.URL()
+		if got := cast.ToString(payload["url"]); got == "" || got != want {
+			t.Errorf("payload url = %q, want %q", got, want)
+		}
+	})
+
+	for name, want := range map[string]string{
+		"ICE_MISSING": "did not find provided sql_catalog_conn: NO_SUCH_CONN",
+		"ICE_SELF":    "sql_catalog_conn cannot refer to its own connection: ICE_SELF",
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn := GetLocalConns().Get(name).Connection
+			err := conn.ResolveIcebergSQLCatalog()
+			if err == nil || !strings.Contains(g.ErrMsgSimple(err), want) {
+				t.Errorf("want error with %q, got %v", want, err)
+			}
+		})
 	}
 }

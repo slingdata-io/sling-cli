@@ -70,11 +70,6 @@ type Connection struct {
 
 // NewConnection creates a new connection
 func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn Connection, err error) {
-	// prevent infinite recursion
-	if localConnsExclude != "" && strings.EqualFold(Name, localConnsExclude) {
-		return
-	}
-
 	conn = Connection{
 		Name:    strings.TrimLeft(Name, "$"),
 		Type:    t,
@@ -353,6 +348,32 @@ func (c *Connection) Close() error {
 
 var Cache = cmap.New[*Connection]()
 
+// ResolveIcebergSQLCatalog sets sql_conn_payload from the sql_catalog_conn
+// connection. It runs when the connection opens, not when Sling loads it,
+// so that loading one connection never loads another.
+func (c *Connection) ResolveIcebergSQLCatalog() error {
+	if c.Type != dbio.TypeDbIceberg || !strings.EqualFold(cast.ToString(c.Data["catalog_type"]), "sql") {
+		return nil
+	}
+	connName := cast.ToString(c.Data["sql_catalog_conn"])
+	if connName == "" || c.Data["sql_conn_payload"] != nil {
+		return nil
+	}
+	if strings.EqualFold(connName, c.Name) {
+		return g.Error("sql_catalog_conn cannot refer to its own connection: %s", connName)
+	}
+
+	entry := GetLocalConns().Get(connName)
+	if entry.Name == "" {
+		return g.Error("did not find provided sql_catalog_conn: %s", connName)
+	}
+	c.Data["sql_conn_payload"] = g.M(
+		"url", entry.Connection.URL(),
+		"data", entry.Connection.DataS(),
+	)
+	return nil
+}
+
 type AsConnOptions struct {
 	UseCache bool
 	Expire   int // in seconds
@@ -375,6 +396,10 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 	opt := AsConnOptions{UseCache: true, Extra: g.M()}
 	if len(options) > 0 {
 		opt = options[0]
+	}
+
+	if err = c.ResolveIcebergSQLCatalog(); err != nil {
+		return nil, err
 	}
 
 	// build input data
@@ -1237,18 +1262,6 @@ func (c *Connection) setURL() (err error) {
 		if c.Data["catalog_type"] == "sql" {
 			setIfMissing("sql_catalog_name", c.Data["sql_catalog_name"])
 			setIfMissing("sql_catalog_init", "true")
-		}
-
-		if connName := c.Data["sql_catalog_conn"]; connName != nil {
-			// create database object and pass for connection
-			exclude := LocalConnsExclude(c.Name)
-			entry := GetLocalConns(exclude).Get(cast.ToString(connName))
-			if entry.Name != "" {
-				c.Data["sql_conn_payload"] = g.M(
-					"url", entry.Connection.URL(),
-					"data", entry.Connection.DataS(),
-				)
-			}
 		}
 
 		template = "iceberg://{catalog_type}"
