@@ -19,6 +19,9 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// CsvCleanupMaxLineSize is the max line size when \r line breaks are cleaned up.
+var CsvCleanupMaxLineSize = 256 * 1024 * 1024
+
 // CSV is a csv object
 type CSV struct {
 	Path            string
@@ -219,12 +222,12 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 		// needs clean up
 		g.Warn("end of line carriage returns detected. Cleaning up")
 		scanner := bufio.NewScanner(reader2)
+		scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), CsvCleanupMaxLineSize)
 		scanner.Split(ScanCarrRet)
 
 		var pw *io.PipeWriter
 		reader3, pw = io.Pipe()
 		go func() {
-			defer pw.Close()
 			for scanner.Scan() {
 				lineByte := append(scanner.Bytes(), '\n')
 				// g.P(string(lineByte))
@@ -232,9 +235,9 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 					pw.Write(lineByte)
 				}
 			}
-			if scanner.Err() != nil {
-				g.LogError(g.Error(scanner.Err()))
-			}
+			// surface scan errors to the reader, otherwise it sees a clean EOF.
+			// A nil error closes the pipe normally.
+			pw.CloseWithError(scanner.Err())
 		}()
 	} else {
 		reader3 = reader2
@@ -477,57 +480,40 @@ func (c *CSV) NewReader() (*io.PipeReader, error) {
 	return pipeR, nil
 }
 
-// dropCR drops a terminal \r from the data.
-func dropCR(data []byte) []byte {
-	if len(data) > 0 && data[len(data)-1] == '\r' {
-		return data[0 : len(data)-1]
-	}
-	return data
-}
-
-// ScanCarrRet removes the \r runes that are without \n rightafter
+// ScanCarrRet splits lines on \r, \n or \r\n.
 func ScanCarrRet(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	if atEOF && len(data) == 0 {
 		return 0, nil, nil
 	}
-	if i := bytes.IndexByte(data, '\r'); i >= 0 {
-		if len(data) > i+1 && data[i+1] != '\n' {
-			return i + 1, data[0:i], nil
-		} else if len(data) > i+1 && data[i+1] == '\n' {
-			return i + 2, dropCR(data[0 : i+1]), nil
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if data[i] == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+			return i + 2, data[:i], nil
 		}
-		return i + 1, dropCR(data[0:i]), nil
+		return i + 1, data[:i], nil
 	}
 	// If we're at EOF, we have a final, non-terminated line. Return it.
 	if atEOF {
-		return len(data), dropCR(data), nil
+		return len(data), data, nil
 	}
 	// Request more data.
 	return 0, nil, nil
 }
 
-func detectCarrRet(testBytes []byte) (needsCleanUp bool) {
-	testBuf := bytes.NewBuffer(testBytes)
-	line, err := testBuf.ReadString('\r')
-	if err == io.EOF {
-		return
-	} else if err != nil {
-		g.LogError(err)
-		return
+// detectCarrRet reports if lone \r is the line break. A few \r in quoted
+// values of a \n file do not count.
+func detectCarrRet(testBytes []byte) bool {
+	loneCR, lf := 0, 0
+	for i, b := range testBytes {
+		switch b {
+		case '\n':
+			lf++
+		case '\r':
+			if i+1 < len(testBytes) && testBytes[i+1] != '\n' {
+				loneCR++
+			}
+		}
 	}
-
-	// get next line, \n should be in there
-	line, err = testBuf.ReadString('\r')
-	if err != io.EOF && err != nil {
-		g.LogError(err)
-		return
-	}
-
-	if !strings.Contains(line, "\n") {
-		needsCleanUp = true
-		return
-	}
-	return
+	return loneCR > 0 && loneCR >= lf
 }
 
 func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols int, err error) {
