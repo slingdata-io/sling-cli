@@ -4691,3 +4691,16 @@
     - "got incremental value from state => cast('"
   output_does_not_contain:
     - 'Incorrect syntax'
+
+- id: 988
+  name: 'copy keeps the cause when it cannot init from or to'
+  run: sling run -d -p tests/pipelines/p.68.copy_init_error_cause.yaml
+  env:
+    P68_GCS: '{"type":"gs","bucket":"p68-bucket","key_file":"/tmp/sling/p68/missing-key.json"}'
+  err: true
+  output_contains:
+    - "connection 'POSTGRES' is not a file/storage connection"
+    - "could not init 'to': P68_GCS/out/a.csv"
+    - 'could not init file connection: P68_GCS'
+    - 'could not read google cloud key file'
+    - 'missing-key.json: no such file or directory'
