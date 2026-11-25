@@ -21,7 +21,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -4887,37 +4886,43 @@ func TestSQLServerOrderByOffset(t *testing.T) {
 	}
 }
 
+// childCounter is a parent context that counts the live child contexts
+// that register on it through AfterFunc.
+type childCounter struct {
+	context.Context
+	done chan struct{}
+	live atomic.Int64
+}
+
+func (c *childCounter) Done() <-chan struct{} { return c.done }
+
+func (c *childCounter) AfterFunc(func()) func() bool {
+	c.live.Add(1)
+	var stopped atomic.Bool
+	return func() bool {
+		if stopped.CompareAndSwap(false, true) {
+			c.live.Add(-1)
+			return true
+		}
+		return false
+	}
+}
+
 // QueryContext must cancel the contexts of its queries, so a long-lived
-// connection does not keep them in its children map.
+// parent context does not keep them as children.
 func TestQueryContextCancelsChildren(t *testing.T) {
 	conn, err := NewConn("sqlite://" + filepath.Join(t.TempDir(), "q.db"))
 	require.NoError(t, err)
 	require.NoError(t, conn.Connect())
 	defer conn.Close()
 
-	run := func(n int) {
-		for i := 0; i < n; i++ {
-			data, err := conn.Query("select 1")
-			require.NoError(t, err)
-			require.Len(t, data.Rows, 1)
-			require.NoError(t, conn.Context().Ctx.Err())
-		}
+	parent := &childCounter{Context: context.Background(), done: make(chan struct{})}
+	for i := 0; i < 500; i++ {
+		data, err := conn.QueryContext(parent, "select 1")
+		require.NoError(t, err)
+		require.Len(t, data.Rows, 1)
 	}
-	heap := func() uint64 {
-		runtime.GC()
-		var ms runtime.MemStats
-		runtime.ReadMemStats(&ms)
-		return ms.HeapAlloc
-	}
-
-	run(200)
-	before := heap()
-	run(3000)
-	after := heap()
-
-	growth := int64(after) - int64(before)
-	t.Logf("heap growth after 3000 queries: %d bytes", growth)
-	assert.Less(t, growth, int64(1<<20))
+	assert.Zero(t, parent.live.Load())
 }
 
 func TestSQLColumnsODBCTextAsNumeric(t *testing.T) {
