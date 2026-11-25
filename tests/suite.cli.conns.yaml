@@ -34,3 +34,11 @@
     - 'ICE_B'
     - 'CAT_A'
     - 'CAT_B'
+
+- id: 4
+  name: 'sling conns list loads a dbt-duckdb output with path'
+  run: 'sling conns list'
+  env:
+    DBT_PROFILES_DIR: tests/files/dbt
+  output_contains:
+    - 'SHOP_DEV'

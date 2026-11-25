@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -799,5 +801,56 @@ func TestResolveIcebergSQLCatalog(t *testing.T) {
 				t.Errorf("want error with %q, got %v", want, err)
 			}
 		})
+	}
+}
+
+func TestReadDbtConnections(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DBT_PROFILES_DIR", dir)
+	profiles := `
+shop:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: /tmp/warehouse.duckdb
+    bad_pg:
+      type: postgres
+    odd:
+      type: sparkx
+      host: localhost
+`
+	if err := os.WriteFile(filepath.Join(dir, "profiles.yml"), []byte(profiles), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	conns, failed, err := ReadDbtConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, ok := conns["SHOP/DEV"]
+	if !ok {
+		t.Fatalf("SHOP/DEV did not load: %v", failed)
+	}
+	if conn.Type != dbio.TypeDbDuckDb || !strings.Contains(conn.URL(), "/tmp/warehouse.duckdb") {
+		t.Errorf("want duckdb with the path, got %s %s", conn.Type, conn.URL())
+	}
+
+	if failed["SHOP/BAD_PG"] == nil {
+		t.Error("SHOP/BAD_PG should fail")
+	}
+	var unknown *dbtUnknownAdapterError
+	if !errors.As(failed["SHOP/ODD"], &unknown) {
+		t.Errorf("SHOP/ODD should fail as an unknown adapter, got %v", failed["SHOP/ODD"])
+	}
+
+	// GetLocalConns maps / to _ and records the failures
+	GetLocalConns(true)
+	if GetLocalConns().Get("SHOP_DEV").Name == "" {
+		t.Error("SHOP_DEV should be a local connection")
+	}
+	if LocalConnLoadError("SHOP_BAD_PG") == nil || LocalConnLoadError("SHOP_ODD") == nil {
+		t.Error("failed dbt outputs should have a load error")
 	}
 }

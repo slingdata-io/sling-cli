@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
@@ -141,6 +142,7 @@ var (
 	localConns    ConnEntries
 	localConnsTs  time.Time
 	envFileWarned sync.Map // env file paths already warned as invalid or repaired
+	dbtWarned     sync.Map // dbt output names already warned as failed
 )
 
 // localConnsLoadErrs holds the load failures of the last cached GetLocalConns
@@ -187,7 +189,7 @@ func GetLocalConns(options ...any) ConnEntries {
 	connsMap[c.Name] = c
 
 	// get dbt connections
-	dbtConns, err := ReadDbtConnections()
+	dbtConns, dbtFailed, err := ReadDbtConnections()
 	if !g.LogError(err) {
 		for _, conn := range dbtConns {
 			c := ConnEntry{
@@ -199,6 +201,16 @@ func GetLocalConns(options ...any) ConnEntries {
 			c.Name = strings.ReplaceAll(c.Name, "/", "_")
 			c.Connection.Name = strings.ReplaceAll(c.Connection.Name, "/", "_")
 			connsMap[c.Name] = c
+		}
+		for name, err := range dbtFailed {
+			name = strings.ReplaceAll(strings.ToUpper(name), "/", "_")
+			failed[name] = err
+			var unknown *dbtUnknownAdapterError
+			if errors.As(err, &unknown) {
+				g.Debug("skipped dbt output %s: %s", name, g.ErrMsgSimple(err))
+			} else if _, warned := dbtWarned.LoadOrStore(name, true); !warned {
+				g.Warn("could not load dbt output %s: %s", name, strings.TrimSpace(g.ErrMsgSimple(err)))
+			}
 		}
 	}
 

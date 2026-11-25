@@ -127,7 +127,7 @@ func NewConnectionFromMap(m map[string]interface{}) (c Connection, err error) {
 
 // NewConnectionFromDbt loads a Connection from a DBT Profile
 func NewConnectionFromDbt(name string) (c Connection, err error) {
-	conns, err := ReadDbtConnections()
+	conns, failed, err := ReadDbtConnections()
 	if err != nil {
 		err = g.Error(err)
 		return
@@ -135,6 +135,9 @@ func NewConnectionFromDbt(name string) (c Connection, err error) {
 
 	if conn, ok := conns[name]; ok {
 		return conn, nil
+	}
+	if ferr, ok := failed[name]; ok {
+		return c, g.Error(ferr, "dbt connection '%s' did not load", name)
 	}
 	return c, g.Error("dbt connection '%s' was not found", name)
 }
@@ -1010,6 +1013,10 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("schema", "main")
 		template = "dbase://{path}"
 	case dbio.TypeDbDuckDb:
+		// dbt-duckdb uses path
+		if cast.ToString(c.Data["instance"]) == "" && cast.ToString(c.Data["path"]) != "" {
+			c.Data["instance"] = c.Data["path"]
+		}
 		if val, ok := c.Data["instance"]; ok && strings.HasPrefix(cast.ToString(val), "quack:") {
 			// remote Quack server: keep as-is
 		} else if ok {
@@ -1359,8 +1366,18 @@ func CopyDirect(conn database.Connection, tableFName string, srcFile Connection)
 	return
 }
 
-func ReadDbtConnections() (conns map[string]Connection, err error) {
+// dbtUnknownAdapterError marks a dbt output with a type that Sling does not know.
+type dbtUnknownAdapterError struct{ Adapter string }
+
+func (e *dbtUnknownAdapterError) Error() string {
+	return g.F("dbt adapter type %q is not a Sling connection type", e.Adapter)
+}
+
+// ReadDbtConnections reads the dbt profiles. The failed map holds the outputs
+// that did not load, keyed by name.
+func ReadDbtConnections() (conns map[string]Connection, failed map[string]error, err error) {
 	conns = map[string]Connection{}
+	failed = map[string]error{}
 	envVarRegex := `{{ *env_var\(['"]+([0-9a-zA-Z_-]+)['"]+\) *}}`
 
 	profileDir := strings.TrimSuffix(os.Getenv("DBT_PROFILES_DIR"), "/")
@@ -1419,11 +1436,18 @@ func ReadDbtConnections() (conns map[string]Connection, err error) {
 				}
 			}
 
+			adapter := cast.ToString(data["type"])
+			if _, ok := dbio.ValidateType(adapter); !ok {
+				failed[connName] = &dbtUnknownAdapterError{Adapter: adapter}
+				continue
+			}
+
 			conn, err := NewConnectionFromMap(
 				g.M("name", connName, "data", data, "type", data["type"]),
 			)
 			if err != nil {
-				g.Trace("could not load dbt connection %s, connName: %s", data["type"], connName, err.Error())
+				g.Trace("could not load dbt connection %s (%s): %s", connName, adapter, g.ErrMsgSimple(err))
+				failed[connName] = err
 				continue
 			}
 
