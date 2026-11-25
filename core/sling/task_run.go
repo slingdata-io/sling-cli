@@ -17,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -101,7 +102,7 @@ func (t *TaskExecution) Execute() error {
 		// recover from panic
 		defer func() {
 			if r := recover(); r != nil {
-				t.Err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				t.setErr(g.Error("panic occurred! %#v\n%s", r, string(debug.Stack())))
 			}
 		}()
 
@@ -109,7 +110,7 @@ func (t *TaskExecution) Execute() error {
 			t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 		}
 
-		t.Status = ExecStatusRunning
+		t.setStatus(ExecStatusRunning)
 
 		if t.Err != nil {
 			return
@@ -125,7 +126,7 @@ func (t *TaskExecution) Execute() error {
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
 		// pre-hooks
-		if t.Err = t.ExecuteHooks(HookStagePre); t.Err != nil {
+		if t.setErr(t.ExecuteHooks(HookStagePre)); t.Err != nil {
 			return
 		} else if t.skipStream {
 			t.SetProgress("skipping stream")
@@ -135,22 +136,22 @@ func (t *TaskExecution) Execute() error {
 
 		switch t.Type {
 		case DbSQL:
-			t.Err = t.runDbSQL()
+			t.setErr(t.runDbSQL())
 		case FileToDB:
-			t.Err = t.runFileToDB()
+			t.setErr(t.runFileToDB())
 		case DbToDb:
-			t.Err = t.runDbToDb()
+			t.setErr(t.runDbToDb())
 		case DbToFile:
-			t.Err = t.runDbToFile()
+			t.setErr(t.runDbToFile())
 		case FileToFile:
-			t.Err = t.runFileToFile()
+			t.setErr(t.runFileToFile())
 		case ApiToDB:
-			t.Err = t.runApiToDb()
+			t.setErr(t.runApiToDb())
 		case ApiToFile:
-			t.Err = t.runApiToFile()
+			t.setErr(t.runApiToFile())
 		default:
 			t.SetProgress("task execution configuration is invalid")
-			t.Err = g.Error("Cannot Execute. Task Type is not specified")
+			t.setErr(g.Error("Cannot Execute. Task Type is not specified"))
 		}
 
 		// warn constrains
@@ -182,7 +183,7 @@ func (t *TaskExecution) Execute() error {
 			g.Debug("error after interrupt: %s", t.Err.Error())
 		}
 		newStatus = ExecStatusTerminated
-		t.Err = g.Error("Execution interrupted")
+		t.setErr(g.Error("Execution interrupted"))
 	}
 
 	if t.Err == nil {
@@ -202,22 +203,22 @@ func (t *TaskExecution) Execute() error {
 			t.SetProgress("execution failed")
 			newStatus = ExecStatusError
 		}
-		if t.df != nil {
-			if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
+		if df := t.Df(); df != nil {
+			if err := df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
 				eG := g.ErrorGroup{}
 				eG.Add(err)
 				eG.Add(t.Err)
-				t.Err = g.Error(eG.Err())
+				t.setErr(g.Error(eG.Err()))
 			} else {
-				t.Err = g.Error(t.Err)
+				t.setErr(g.Error(t.Err))
 			}
 		} else {
-			t.Err = g.Error(t.Err)
+			t.setErr(g.Error(t.Err))
 		}
 	}
 
 	now2 := time.Now()
-	t.EndTime = &now2
+	t.setEndTime(now2)
 
 	// since t.Status is still "running", let's use the context.Map for real status
 	t.Context.Map.Set("new_status", newStatus)
@@ -229,12 +230,12 @@ func (t *TaskExecution) Execute() error {
 	// post-hooks
 	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
 		if t.Err == nil {
-			t.Err = hookErr
+			t.setErr(hookErr)
 			newStatus = ExecStatusError
 		}
 	}
 
-	t.Status = newStatus
+	t.setStatus(newStatus)
 
 	return t.Err
 }
@@ -396,7 +397,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	}
 
 	if t.isIncrementalStateWithUpdateKey() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -416,12 +417,19 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("reading from source database")
 	defer t.Cleanup()
-	t.df, err = t.ReadFromDB(t.Config, srcConn)
+	df, err := t.ReadFromDB(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
 	}
 	defer t.df.Close()
+
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = t.checkIncrementalFileUpdateKey(df); err != nil {
+			return err
+		}
+	}
 
 	if t.Config.Options.StdOut {
 		t.SetProgress("writing to target stream (stdout)")
@@ -451,6 +459,19 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 }
 
+// checkIncrementalFileUpdateKey checks that the update key can set the partition
+// state, before the run writes a file.
+func (t *TaskExecution) checkIncrementalFileUpdateKey(df *iop.Dataflow) error {
+	if !t.Config.TgtConn.Type.IsFile() {
+		return nil
+	}
+	col := df.Columns.GetColumn(t.Config.Source.UpdateKey)
+	if col == nil || !(col.Type.IsDatetime() || col.Type.IsDate()) {
+		return g.Error("incremental/update column must be timestamp or date for writing to files")
+	}
+	return nil
+}
+
 func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
@@ -476,7 +497,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	if t.Config.IsFileStreamWithStateAndParts() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -499,7 +520,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config, tgtConn)
+	df, err := t.ReadFromFile(t.Config, tgtConn)
+	t.setDf(df)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
@@ -603,7 +625,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 				goto skipGetState
 			}
 		} else {
-			if err = getIncrementalValueViaState(t); err != nil {
+			if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 				err = g.Error(err, "Could not get incremental value")
 				return err
 			}
@@ -624,7 +646,8 @@ func (t *TaskExecution) runApiToDb() (err error) {
 	}
 skipGetState:
 
-	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	df, err := t.ReadFromApi(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromApi")
 		return
@@ -696,7 +719,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 			}
 			goto skipGetState
 		}
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, t.Config.SrcConn.Type); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -717,7 +740,8 @@ func (t *TaskExecution) runApiToFile() (err error) {
 	}
 skipGetState:
 
-	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	df, err := t.ReadFromApi(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromApi")
 		return
@@ -773,7 +797,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	}
-	t.df, err = t.ReadFromFile(t.Config, nil)
+	df, err := t.ReadFromFile(t.Config, nil)
+	t.setDf(df)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
@@ -858,7 +883,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	// get watermark
 	if t.isIncrementalStateWithUpdateKey() {
-		if err = getIncrementalValueViaState(t); err != nil {
+		if err = getIncrementalValueViaState(t, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -873,7 +898,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(t.Config, srcConn)
+	df, err := t.ReadFromDB(t.Config, srcConn)
+	t.setDf(df)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return

@@ -34,12 +34,20 @@ response:
     jmespath: "data[]"
     # Simple array (jq)
     # jq: ".data[]"
+```
 
+```yaml
+response:
+  records:
     # Nested path (JMESPath)
     jmespath: "response.results.items[]"
     # Nested path (jq)
     # jq: ".response.results.items[]"
+```
 
+```yaml
+response:
+  records:
     # Single object as array
     jmespath: "[user]"
     # jq: "[.user]"
@@ -53,7 +61,11 @@ Field(s) for deduplication:
 records:
   jmespath: "data[]"
   primary_key: ["id"]  # Single key
+```
 
+```yaml
+records:
+  jmespath: "data[]"
   # Composite key
   primary_key: ["id", "location_id"]
 ```
@@ -171,7 +183,9 @@ stop_condition: 'response.status != 200'
 # Access header
 next_state:
   cursor: "{response.headers.x-next-cursor}"
+```
 
+```yaml
 # Access JSON field
 stop_condition: 'response.json.has_more == false'
 

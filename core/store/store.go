@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/flarco/g"
@@ -15,6 +16,9 @@ import (
 )
 
 var Store = cmap.New[*Execution]()
+
+// execMu serializes the update and the sync of a shared *Execution
+var execMu sync.Mutex
 
 func init() {
 
@@ -144,12 +148,13 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	bytes, _ := t.GetBytes()
 
+	st := t.StatusSnapshot()
 	exec := Execution{
 		ExecID:    t.ExecID,
 		StreamID:  t.Config.StreamID(),
-		Status:    t.Status,
-		StartTime: t.StartTime,
-		EndTime:   t.EndTime,
+		Status:    st.Status,
+		StartTime: st.StartTime,
+		EndTime:   st.EndTime,
 		Bytes:     bytes,
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
@@ -160,12 +165,12 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		TaskExec:  t,
 	}
 
-	if t.Err != nil {
-		err, ok := t.Err.(*g.ErrType)
+	if st.Err != nil {
+		err, ok := st.Err.(*g.ErrType)
 		if ok {
 			exec.Err = g.String(err.Debug())
 		} else {
-			exec.Err = g.String(t.Err.Error())
+			exec.Err = g.String(st.Err.Error())
 		}
 	}
 
@@ -247,6 +252,9 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 func StoreSetReplicationExec(t *sling.TaskExecution) {
 	e := ToExecutionObject(t)
 	key := g.F("%s-%s", e.ExecID, e.StreamID)
+
+	execMu.Lock()
+	defer execMu.Unlock()
 	exec, ok := Store.Get(key)
 	if ok {
 		exec.StartTime = e.StartTime

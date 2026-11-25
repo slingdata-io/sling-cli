@@ -82,7 +82,7 @@ Error: cannot convert value to target type
 3. Clean data:
    ```yaml
    transforms:
-     - value: 'replace(value, "[^0-9]", "")'
+     - value: 'regex_replace(value, "[^0-9]", "")'
    ```
 
 ### Primary Key Violations

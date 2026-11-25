@@ -6,4 +6,4 @@ go mod edit -droprequire='github.com/slingdata-io/sling' go.mod
 
 go mod tidy
 
-go build -o sling cmd/sling/*.go
+go build -o sling ./cmd/sling

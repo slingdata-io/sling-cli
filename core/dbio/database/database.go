@@ -931,9 +931,10 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 	query = strings.TrimSpace(query)
 	query = strings.TrimSuffix(query, ";")
 
+	// keep only the last queries: a long-lived conn (CDC state, lease) logs each cycle
 	conn.Log = append(conn.Log, query)
-	if len(conn.Log) > 9000 {
-		conn.Log = conn.Log[1:]
+	if len(conn.Log) > 100 {
+		conn.Log = conn.Log[len(conn.Log)-100:]
 	}
 
 	env.LogSQL(conn.Props(), query, args...)
@@ -1133,9 +1134,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
-		} else if err = result.Err(); err != nil {
+		} else if iterErr := result.Err(); iterErr != nil {
 			// if any error occurs during iteration
-			it.Context.CaptureErr(g.Error(err, "error during row iteration"))
+			it.Context.CaptureErr(g.Error(iterErr, "error during row iteration"))
 			result.Close()
 			return false
 		} else if Limit > 0 && it.Counter >= Limit {
@@ -1146,19 +1147,20 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 		next := result.Next()
 		if next {
+			var scanErr error
 			// add row
 			if conn.Type == dbio.TypeDbHana {
-				it.Row, err = scanHanaRow(result, colTypes)
+				it.Row, scanErr = scanHanaRow(result, colTypes)
 			} else {
-				it.Row, err = result.SliceScan()
+				it.Row, scanErr = result.SliceScan()
 				for _, i := range timetzCols {
 					if val, ok := it.Row[i].(string); ok {
 						it.Row[i] = formatTimetz(val)
 					}
 				}
 			}
-			if err != nil {
-				it.Context.CaptureErr(g.Error(err, "failed to scan"))
+			if scanErr != nil {
+				it.Context.CaptureErr(g.Error(scanErr, "failed to scan"))
 			} else {
 				return true
 			}
@@ -1167,9 +1169,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		// Check for context cancellation when Next() returns false
 		if ctxErr := queryContext.Ctx.Err(); ctxErr != nil {
 			it.Context.CaptureErr(g.Error(ctxErr, "query context canceled"))
-		} else if err = result.Err(); err != nil {
+		} else if iterErr := result.Err(); iterErr != nil {
 			// Double check result.Err() in case error occurred between previous check
-			it.Context.CaptureErr(g.Error(err, "error after row iteration"))
+			it.Context.CaptureErr(g.Error(iterErr, "error after row iteration"))
 		}
 
 		result.Close()
@@ -1429,35 +1431,27 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 	return
 }
 
-// ExecMultiContext runs multiple sql queries with context, returns `error`
+// ExecMultiContext runs multiple sql queries with context, stops at the first error
 func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
-
-	Res := Result{rowsAffected: 0}
-
-	eG := g.ErrorGroup{}
+	stmts := []string{}
 	for _, q := range qs {
 		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
 		for _, sql := range ParseSQLMultiStatements(q, conn.GetType()) {
 			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
 				sql = sql + env.NoDebugKey
 			}
-			res, err := conn.Self().ExecContext(ctx, sql)
-			if err != nil {
-				eG.Capture(g.Error(err, "Error executing query"))
-			} else {
-				ra, _ := res.RowsAffected()
-				g.Trace("RowsAffected: %d", ra)
-				Res.rowsAffected = Res.rowsAffected + ra
-			}
-			delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
-			time.Sleep(time.Duration(delay) * time.Second)
+			stmts = append(stmts, sql)
 		}
 	}
 
-	err = eG.Err()
-	result = Res
-
-	return
+	delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+	runner := statementRunner{
+		exec: func(ctx context.Context, q string) (sql.Result, error) {
+			return conn.Self().ExecContext(ctx, q)
+		},
+		delay: time.Duration(delay) * time.Second,
+	}
+	return runner.run(ctx, stmts)
 }
 
 // MustExec execs the query using e and panics if there was an error.
@@ -1483,9 +1477,13 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 		return
 	}
 
+	// cancel the query contexts after Collect, so a long-lived conn does not keep them
+	qctx := g.NewContext(ctx)
+	defer qctx.Cancel()
+
 	for _, sql := range ParseSQLMultiStatements(sql, conn.GetType()) {
 
-		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
+		ds, err := conn.Self().StreamRowsContext(qctx.Ctx, sql, options...)
 		if err != nil {
 			err = g.Error(err, "Error with StreamRows")
 			return iop.Dataset{SQL: sql}, err
@@ -1684,6 +1682,8 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			Sourced:  colType.IsSourced(),
 		}
 
+		textAsNumeric := false
+
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
 		if fc := colType.FetchedColumn; fc != nil {
@@ -1708,6 +1708,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.Sourced = fc.Sourced
 			}
 
+			// ODBC drivers can report wide numerics (e.g. Firebird INT128) as text
+			textAsNumeric = colType.useFetchedNumeric(&col, conn.Base().Type)
+
 			col.Constraint = fc.Constraint
 
 			// fetch decimal info
@@ -1728,7 +1731,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			}
 		}
 
-		if colType.Length > 0 {
+		if colType.Length > 0 && !textAsNumeric {
 			col.Stats.MaxLen = colType.Length
 		}
 		col.Stats.MaxDecLen = 0
@@ -3162,6 +3165,7 @@ func (conn *BaseConn) GenerateMergeSQLWithStrategy(srcTable string, tgtTable str
 		"src_del_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "del."),
 		"pk_fields", mc.Map["pk_fields"],
 		"src_pk_fields", mc.Map["src_pk_fields"],
+		"src_pk_fields_casted", mc.Map["src_pk_fields_casted"],
 		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		"set_fields", mc.Map["set_fields"],
 		"set_fields_casted", mc.Map["set_fields_casted"],
@@ -3215,7 +3219,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 		return
 	}
 
-	var pkEqualFields, srcPkFields, tgtPkFields []string
+	var pkEqualFields, srcPkFields, srcPkFieldsCasted, tgtPkFields []string
 	pkFields = conn.Template().QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
 	for _, pkField := range pkCols.Names() {
@@ -3236,13 +3240,17 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 
 		// cast src PK to target type when types differ (e.g. CDC staging writes text, target has bigint)
 		srcPkExpr := g.F("src.%s", srcField)
+		srcPkFieldCasted := srcField
 		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
 			castedExpr := conn.Self().CastColumnForSelect(*srcCol, *tgtCol)
 			quotedName := conn.Template().Quote(srcCol.Name)
 			if !strings.EqualFold(castedExpr, quotedName) {
 				srcPkExpr = strings.ReplaceAll(castedExpr, quotedName, g.F("src.%s", srcField))
+				// unaliased form, for a subquery that selects straight from {src_table}
+				srcPkFieldCasted = castedExpr
 			}
 		}
+		srcPkFieldsCasted = append(srcPkFieldsCasted, srcPkFieldCasted)
 		pkEqualField := g.F("%s = tgt.%s", srcPkExpr, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
 		pkFieldMap[pkField] = ""
@@ -3373,6 +3381,7 @@ func (conn *BaseConn) GenerateMergeConfigWithStrategy(srcTable string, tgtTable 
 			"src_insert_fields":    strings.Join(srcInsertFields, ", "),
 			"pk_fields":            strings.Join(pkFields, ", "),
 			"src_pk_fields":        strings.Join(srcPkFields, ", "),
+			"src_pk_fields_casted": strings.Join(srcPkFieldsCasted, ", "),
 			"tgt_pk_fields":        strings.Join(tgtPkFields, ", "),
 			"set_fields":           strings.Join(setFields, ", "),
 			// for templates where `src` is a derived table already projecting {src_fields}

@@ -452,41 +452,6 @@ func (conn *BigTableConn) StreamRowsContext(ctx context.Context, table string, o
 	recChan := make(chan bigtable.Row)
 	doneChan := make(chan struct{})
 
-	go func() {
-		defer close(recChan)
-		defer func() { doneChan <- struct{}{} }()
-
-		it := func(rec bigtable.Row) bool {
-			// https://github.com/GoogleCloudPlatform/golang-samples/blob/782bee75d41682444d6af5e6ff4e08347829fb40/bigtable/filters/filters.go#L185
-			select {
-			case <-ds.Context.Ctx.Done():
-				return false
-			default:
-				recChan <- rec
-				return true
-			}
-		}
-
-		// keys, _ := tbl.SampleRowKeys(queryContext.Ctx)
-
-		err = tbl.ReadRows(
-			queryContext.Ctx,
-			bigtable.RowRange{},
-			it,
-			bigtable.RowFilter(filter),
-		)
-		if err != nil {
-			if strings.Contains(table, noDebugKey) && !g.IsDebugLow() {
-				err = g.Error(err, "Query Error")
-			} else {
-				err = g.Error(err, "Query Error for:\n"+table)
-			}
-			ds.Context.CaptureErr(err)
-			ds.Context.Cancel()
-		}
-
-	}()
-
 	ColumnMap := map[string]*iop.Column{}
 	nextFunc := func(it *iop.Iterator) bool {
 		if Limit > 0 && it.Counter >= Limit {
@@ -583,6 +548,43 @@ func (conn *BigTableConn) StreamRowsContext(ctx context.Context, table string, o
 	}
 
 	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
+	dsCtx := ds.Context
+
+	go func() {
+		defer close(recChan)
+		defer func() { doneChan <- struct{}{} }()
+
+		it := func(rec bigtable.Row) bool {
+			// https://github.com/GoogleCloudPlatform/golang-samples/blob/782bee75d41682444d6af5e6ff4e08347829fb40/bigtable/filters/filters.go#L185
+			select {
+			case <-dsCtx.Ctx.Done():
+				return false
+			default:
+				recChan <- rec
+				return true
+			}
+		}
+
+		// keys, _ := tbl.SampleRowKeys(queryContext.Ctx)
+
+		readErr := tbl.ReadRows(
+			queryContext.Ctx,
+			bigtable.RowRange{},
+			it,
+			bigtable.RowFilter(filter),
+		)
+		if readErr != nil {
+			if strings.Contains(table, noDebugKey) && !g.IsDebugLow() {
+				readErr = g.Error(readErr, "Query Error")
+			} else {
+				readErr = g.Error(readErr, "Query Error for:\n"+table)
+			}
+			dsCtx.CaptureErr(readErr)
+			dsCtx.Cancel()
+		}
+
+	}()
+
 	ds.NoDebug = strings.Contains(table, noDebugKey)
 	// ds.Inferred = !InferDBStream
 	ds.SetMetadata(conn.GetProp("METADATA"))
