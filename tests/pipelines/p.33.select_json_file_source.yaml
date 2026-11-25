@@ -128,5 +128,30 @@ steps:
   - type: check
     check: 'regex_match(store.case4_body, "^\\[\\{\"name\":[^,]*,\"id\":[^,]*,\"email\":[^,]*,\"internal_score\":[^,]*,\"age\":[^}]*\\}")'
 
+  # --- Case 5: a flattened nested field can come before a top-level field.
+  - type: write
+    to: local/{env.WORK}/nested.json
+    content: |
+      [{"created_at": "2026-01-01", "customer": {"id": 1}}]
+
+  - replication:
+      source: local
+      target: local
+      defaults:
+        mode: full-refresh
+        source_options:
+          flatten: true
+      streams:
+        file://{env.WORK}/nested.json:
+          object: "file://{env.WORK}/case5_nested.json"
+          select: [customer__id, created_at]
+
+  - type: read
+    from: local/{env.WORK}/case5_nested.json
+    into: case5_body
+
+  - type: check
+    check: 'regex_match(store.case5_body, "^\\[\\{\"customer__id\":[^,]*,\"created_at\":[^}]*\\}")'
+
   - type: log
     message: "=== select on JSON file source: SUCCESS ==="

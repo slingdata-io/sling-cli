@@ -115,6 +115,7 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	// those run on the parsed payload, which may reshape keys.
 	var payload any
 	var raw json.RawMessage
+	var sourceKeys []string
 	canPeek := js.selector != nil && len(js.OrderedKeys) == 0 && js.jmespath == "" && js.jq == ""
 	if canPeek {
 		if _, ok := js.decoder.(*json.Decoder); !ok {
@@ -151,9 +152,7 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 
 	if canPeek {
 		if len(js.OrderedKeys) == 0 {
-			if sourceKeys, _ := FirstObjectKeysInOrder(raw); len(sourceKeys) > 0 {
-				js.OrderedKeys = js.selector.OrderFields(sourceKeys)
-			}
+			sourceKeys, _ = FirstObjectKeysInOrder(raw)
 		}
 		if js.HasMapPayload {
 			m := g.M()
@@ -248,7 +247,7 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	}
 
 	// parse records
-	js.parseRecords(recordsInterf)
+	js.parseRecords(recordsInterf, sourceKeys)
 
 	if err = it.Context.Err(); err != nil {
 		err = g.Error(err, "error parsing records")
@@ -264,10 +263,10 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	}
 }
 
-// orderKeys returns rec's keys in OrderedKeys order (case-insensitive),
-// then remaining keys alphabetically. Pure alphabetical if OrderedKeys empty.
-func (js *jsonStream) orderKeys(rec map[string]any) []string {
-	if len(js.OrderedKeys) == 0 {
+// orderKeys returns rec's keys in the preferred order (case-insensitive),
+// followed by any remaining keys in alphabetical order.
+func orderKeys(rec map[string]any, preferred []string) []string {
+	if len(preferred) == 0 {
 		keys := lo.Keys(rec)
 		sort.Strings(keys)
 		return keys
@@ -279,7 +278,7 @@ func (js *jsonStream) orderKeys(rec map[string]any) []string {
 	for k := range rec {
 		available[strings.ToLower(k)] = k
 	}
-	for _, k := range js.OrderedKeys {
+	for _, k := range preferred {
 		actual, ok := available[strings.ToLower(k)]
 		if !ok {
 			continue
@@ -328,7 +327,7 @@ func (js *jsonStream) addColumn(cols ...Column) {
 	mux.Unlock()
 }
 
-func (js *jsonStream) parseRecords(records []map[string]any) {
+func (js *jsonStream) parseRecords(records []map[string]any, sourceKeys []string) {
 	if records == nil {
 		js.buffer <- nil
 		return
@@ -342,14 +341,11 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 
 		newRec, _ := flat.Flatten(rec, &flat.Options{Delimiter: "__", Safe: true, MaxDepth: js.flatten})
 
-		// Filter + rename per record. Output order is OrderedKeys (seeded
-		// earlier from raw bytes); the fallback uses alphabetized pre-rename
-		// keys so OrderFields can still resolve renames + pins.
 		if js.selector != nil {
-			var sourceKeys []string
+			// Resolve select against flattened names before applying renames.
+			// Keep the source order for keys that survived flattening.
 			if len(js.OrderedKeys) == 0 {
-				sourceKeys = lo.Keys(newRec)
-				sort.Strings(sourceKeys)
+				js.OrderedKeys = js.selector.OrderFields(orderKeys(newRec, sourceKeys))
 			}
 			renamed := make(map[string]any, len(newRec))
 			for name, val := range newRec {
@@ -358,12 +354,9 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 				}
 			}
 			newRec = renamed
-			if sourceKeys != nil {
-				js.OrderedKeys = js.selector.OrderFields(sourceKeys)
-			}
 		}
 
-		keys := js.orderKeys(newRec)
+		keys := orderKeys(newRec, js.OrderedKeys)
 
 		row := make([]any, len(js.ds.Columns))
 		colsToAdd := Columns{}
