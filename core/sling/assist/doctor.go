@@ -220,7 +220,7 @@ func Doctor(ctx context.Context, opts ...DoctorOptions) (*DoctorReport, error) {
 		return r, err
 	}
 
-	skillNames := listSkillNames()
+	skillNames := InstalledSkillNames()
 	for _, name := range skillNames {
 		if err := ctx.Err(); err != nil {
 			return r, err

@@ -1,0 +1,40 @@
+# SLING-581: a table or view read with limit and offset must skip the offset rows
+source: LIMIT_DUCK
+target: LOCAL
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        drop view if exists main.limit_offset_956_vw;
+        drop table if exists main.limit_offset_956;
+        create table main.limit_offset_956 as select range + 1 as id from range(10);
+        create view main.limit_offset_956_vw as select * from main.limit_offset_956;
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: check
+      name: "limit 5, no offset"
+      check: runs["main_limit_offset_956"].total_rows == 5
+      failure_message: 'expected 5 rows, got: {runs["main_limit_offset_956"].total_rows}'
+
+    - type: check
+      name: "limit 5, offset 8"
+      check: runs["main_limit_offset_956_vw"].total_rows == 2
+      failure_message: 'expected 2 rows, got: {runs["main_limit_offset_956_vw"].total_rows}'
+
+streams:
+  main.limit_offset_956:
+    object: file:///tmp/sling_956/table.csv
+    source_options:
+      limit: 5
+
+  main.limit_offset_956_vw:
+    object: file:///tmp/sling_956/view.csv
+    source_options:
+      limit: 5
+      offset: 8

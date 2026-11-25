@@ -1,10 +1,13 @@
 package sling
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,4 +53,79 @@ func TestErrorHelper(t *testing.T) {
 			assert.Contains(t, ErrorHelper(g.Error(msg), dbio.TypeDbDuckDb), want, msg)
 		}
 	})
+}
+
+func TestTaskDfConcurrentAccess(t *testing.T) {
+	task := &TaskExecution{df: iop.NewDataflow(), StartTime: g.Ptr(time.Now())}
+	last := iop.NewDataflow()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 499; i++ {
+			task.setDf(iop.NewDataflow())
+		}
+		task.setDf(last)
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			_ = task.Df()
+			_ = task.GetCount()
+			_, _ = task.GetBytes()
+		}
+	}()
+	wg.Wait()
+
+	assert.Same(t, last, task.Df())
+}
+
+// GetRate runs on the ticker and the task goroutines while the task ends.
+// Run with -race.
+func TestTaskStatusSnapshotGetRate(t *testing.T) {
+	task := &TaskExecution{df: iop.NewDataflow(), StartTime: g.Ptr(time.Now().Add(-time.Minute))}
+
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				_, _ = task.GetRate(1)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 500 {
+			task.setEndTime(time.Now())
+		}
+	}()
+	wg.Wait()
+
+	st := task.StatusSnapshot()
+	assert.NotNil(t, st.EndTime)
+	assert.Same(t, task.StartTime, st.StartTime)
+}
+
+func TestIsFullRefreshCDC(t *testing.T) {
+	newTask := func(mode Mode, srcType dbio.Type, opts *CDCOptions) *TaskExecution {
+		cfg := &Config{Mode: mode, ReplicationStream: &ReplicationStreamConfig{CDCOptions: opts}}
+		cfg.SrcConn.Type = srcType
+		return &TaskExecution{Config: cfg}
+	}
+	set := &CDCOptions{RunMaxEvents: g.Ptr(10)}
+
+	t.Setenv("SLING_STATE", "LOCAL/state")
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbSQLite, &CDCOptions{}).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, &CDCOptions{}).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, nil).isFullRefreshCDC())
+	assert.True(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbSQLite, set).isFullRefreshCDC())
+	assert.False(t, newTask(IncrementalMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
+
+	t.Setenv("SLING_STATE", "")
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
 }

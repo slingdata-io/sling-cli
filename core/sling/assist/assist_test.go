@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,9 +67,11 @@ func TestPruneRetiredSkillsRemovesStaleDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stale, "SKILL.md"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	keep := filepath.Join(root, "sling-pipelines")
-	if err := os.MkdirAll(keep, 0o755); err != nil {
-		t.Fatal(err)
+	keep := []string{filepath.Join(root, "sling"), filepath.Join(root, "my-own-skill")}
+	for _, k := range keep {
+		if err := os.MkdirAll(k, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	pruneRetiredSkills(context.Background(), ScopeUser)
@@ -75,8 +79,99 @@ func TestPruneRetiredSkillsRemovesStaleDirs(t *testing.T) {
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("retired skill dir %s should be removed", stale)
 	}
-	if _, err := os.Stat(keep); err != nil {
-		t.Fatalf("current skill dir %s should remain: %v", keep, err)
+	for _, k := range keep {
+		if _, err := os.Stat(k); err != nil {
+			t.Fatalf("skill dir %s should remain: %v", k, err)
+		}
+	}
+}
+
+// TestAutoRefreshUpgradesFullBundleToStub: an older version installed every
+// embedded skill in full. The next `sling assist` command must leave only
+// the sling stub and agent-browser, for the canonical tree and for claude.
+func TestAutoRefreshUpgradesFullBundleToStub(t *testing.T) {
+	home := withTempHomeDir(t)
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+
+	root := CanonicalSkillsDir()
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+	err := fs.WalkDir(SkillsFS, "skills", func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
+			return werr
+		}
+		data, err := SkillsFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(p, "skills/")
+		dst := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if path.Base(rel) == "SKILL.md" {
+			if err := writeRedirectFile(filepath.Join(claudeRoot, rel), dst); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile(dst, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userSkill := filepath.Join(root, "my-own-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(userSkill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userSkill, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(AssistDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(VersionFilePath(), []byte("0.0.0-old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	notice, err := AutoRefresh(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notice == "" {
+		t.Fatal("expected a refresh notice")
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "sling", "SKILL.md"))
+	if err != nil || !bytes.Equal(got, SlingSkillStub) {
+		t.Fatalf("sling/SKILL.md is not the stub (err %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sling", "CONNECTIONS.md")); !os.IsNotExist(err) {
+		t.Fatal("old sub-file sling/CONNECTIONS.md should be removed")
+	}
+	for _, name := range []string{"sling-replications", "sling-api-specs", "sling-python"} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Errorf("old skill %s should be removed", name)
+		}
+		if _, err := os.Stat(filepath.Join(claudeRoot, name)); !os.IsNotExist(err) {
+			t.Errorf("old claude redirect %s should be removed", name)
+		}
+	}
+	for _, name := range InstalledSkillNames() {
+		if ok, detail, err := skillMatchesEmbedded(name); err != nil || !ok {
+			t.Errorf("%s does not match after refresh: %s %v", name, detail, err)
+		}
+		if target := readRedirectTarget(filepath.Join(claudeRoot, name, "SKILL.md")); target != canonicalSkillPath(name) {
+			t.Errorf("claude redirect of %s points at %q", name, target)
+		}
+	}
+	if _, err := os.Stat(userSkill); err != nil {
+		t.Fatalf("a skill that Sling does not own must stay: %v", err)
 	}
 }
 
@@ -118,7 +213,7 @@ func TestAutoRefreshNoopsWhenNeverInstalled(t *testing.T) {
 	if notice != "" {
 		t.Fatalf("AutoRefresh with no skills should no-op, got %q", notice)
 	}
-	for _, name := range listSkillNames() {
+	for _, name := range InstalledSkillNames() {
 		if _, err := os.Stat(canonicalSkillPath(name)); !os.IsNotExist(err) {
 			t.Fatalf("should not install %s when no skills exist", name)
 		}
@@ -140,7 +235,7 @@ func TestAutoRefreshNoopsWhenStampStaleButNoSkills(t *testing.T) {
 	if notice != "" {
 		t.Fatalf("AutoRefresh with no skills should no-op, got %q", notice)
 	}
-	for _, name := range listSkillNames() {
+	for _, name := range InstalledSkillNames() {
 		if _, err := os.Stat(canonicalSkillPath(name)); !os.IsNotExist(err) {
 			t.Fatalf("should not install %s from a stale stamp", name)
 		}
@@ -149,7 +244,7 @@ func TestAutoRefreshNoopsWhenStampStaleButNoSkills(t *testing.T) {
 
 func TestAutoRefreshHealsDriftWhenStampCurrent(t *testing.T) {
 	withTempHomeDir(t)
-	names := listSkillNames()
+	names := InstalledSkillNames()
 	if len(names) == 0 {
 		t.Fatal("no embedded skills")
 	}
@@ -181,18 +276,18 @@ func TestAutoRefreshHealsDriftWhenStampCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := SkillsFS.ReadFile(filepath.ToSlash(filepath.Join("skills", name, "SKILL.md")))
+	files, err := InstalledSkillFiles(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
+	if want := files[name+"/SKILL.md"]; !bytes.Equal(got, want) {
 		t.Fatalf("skill %s still drifted after AutoRefresh", name)
 	}
 }
 
 func TestAutoRefreshPrunesRetiredWhenStampCurrent(t *testing.T) {
 	withTempHomeDir(t)
-	names := listSkillNames()
+	names := InstalledSkillNames()
 	if err := writeCanonicalBundle(names); err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +738,7 @@ func TestProjectRootFindsGit(t *testing.T) {
 func TestSyncCanonicalSkillPrunesStale(t *testing.T) {
 	withTempHomeDir(t)
 	// Write bundle then plant a stale file under a skill dir.
-	skills := listSkillNames()
+	skills := InstalledSkillNames()
 	if len(skills) == 0 {
 		t.Fatal("no embedded skills")
 	}

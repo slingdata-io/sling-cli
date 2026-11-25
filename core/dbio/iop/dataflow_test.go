@@ -2,10 +2,12 @@ package iop
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // startFakeStreamConsumer simulates the part of ds.Start()'s row loop
@@ -160,3 +162,104 @@ func TestPauseSucceedsWhenStreamAlreadyRunning(t *testing.T) {
 	df.Unpause()
 }
 
+// TestPauseWhileStreamCloses pauses and unpauses the dataflow while the
+// stream loop ends and closes the stream.
+func TestPauseWhileStreamCloses(t *testing.T) {
+	ds := intRowsDatastream(t, 3000)
+	df, err := MakeDataFlow(ds)
+	require.NoError(t, err)
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range ds.Rows() {
+		}
+	}()
+
+	paused := false
+	for !ds.IsClosed() {
+		if df.Pause() {
+			paused = true
+		}
+		df.Unpause()
+	}
+	<-drained
+
+	assert.True(t, paused)
+	assert.True(t, ds.IsClosed())
+	require.NoError(t, ds.Err())
+}
+
+// TestDataflowStatsSnapshotStreamsAppend reads the dataflow stats while
+// streams are appended and writers add egress bytes. The test appends under
+// df.mux: PushStreamChan calls ds.AddColumns, which races with the stream
+// and is out of scope.
+func TestDataflowStatsSnapshotStreamsAppend(t *testing.T) {
+	enableStatus(t)
+	const nStreams, perStream = 3, 2000
+	cols := NewColumns(Column{Name: "id", Type: BigIntType})
+
+	df := NewDataflow()
+	df.SetReady()
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = df.StatsSnapshot()
+				_ = df.Count()
+				_ = df.DsTotalBytes()
+			}
+		}
+	}()
+	for range 2 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for range 1000 {
+				df.AddEgressBytes(1)
+			}
+		}()
+	}
+
+	for range nStreams {
+		i := 0
+		ds := NewDatastreamIt(context.Background(), cols.Clone(), func(it *Iterator) bool {
+			if i >= perStream {
+				return false
+			}
+			i++
+			it.Row = []any{int64(i)}
+			return true
+		})
+		require.NoError(t, ds.Start())
+
+		df.mux.Lock()
+		ds.setDf(df)
+		df.Streams = append(df.Streams, ds)
+		df.mux.Unlock()
+
+		data, err := ds.Collect(0)
+		require.NoError(t, err)
+		assert.Len(t, data.Rows, perStream)
+	}
+
+	close(stop)
+	readers.Wait()
+
+	snaps := df.StatsSnapshot()
+	require.Len(t, snaps, nStreams)
+	for _, snap := range snaps {
+		assert.Equal(t, uint64(perStream), snap.Count)
+		require.Len(t, snap.Columns, 1)
+		assert.Equal(t, int64(perStream), snap.Columns[0].Stats.TotalCnt)
+	}
+	_, egress := df.Bytes()
+	assert.Equal(t, uint64(2000), egress)
+}

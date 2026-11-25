@@ -4,10 +4,12 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -20,18 +22,22 @@ var StoreSet = func(val any) error { return nil }
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
-	ExecID    string     `json:"exec_id"`
-	Config    *Config    `json:"config"`
-	Type      JobType    `json:"type"`
-	Status    ExecStatus `json:"status"`
-	Err       error      `json:"error"`
+	ExecID string     `json:"exec_id"`
+	Config *Config    `json:"config"`
+	Type   JobType    `json:"type"`
+	Status ExecStatus `json:"status"` // while a ticker can run, write through setStatus
+	Err    error      `json:"error"`  // same: setErr
+	// StartTime is set only before the tickers start.
 	StartTime *time.Time `json:"start_time"`
-	EndTime   *time.Time `json:"end_time"`
+	EndTime   *time.Time `json:"end_time"` // same as Status: setEndTime
 	Bytes     uint64     `json:"bytes"`
 	Context   *g.Context `json:"-"`
 	Progress  string     `json:"progress"`
 
 	df            *iop.Dataflow `json:"-"`
+	dfMu          sync.RWMutex  // guards df; only the task goroutine reads t.df directly, others call Df()
+	statusMu      sync.RWMutex  // guards Status, Err and EndTime for readers on other goroutines; they call StatusSnapshot()
+	rateMu        sync.Mutex    // guards prevRowCount, prevByteCount and lastIncrement
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
@@ -100,7 +106,10 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 			for {
 				select {
 				case <-ticker1s.C:
-					cnt := t.df.Count()
+					cnt := uint64(0)
+					if df := t.Df(); df != nil {
+						cnt = df.Count()
+					}
 					if cnt > 1000 {
 						t.PBar.Start()
 						t.PBar.bar.SetCurrent(cast.ToInt64(cnt))
@@ -112,8 +121,11 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 
 				default:
 					time.Sleep(100 * time.Millisecond)
-					if t.PBar.finished || t.df.Err() != nil {
-						t.PBar.bar.SetCurrent(cast.ToInt64(t.df.Count()))
+					df := t.Df()
+					if t.PBar.finished || (df != nil && df.Err() != nil) {
+						if df != nil {
+							t.PBar.bar.SetCurrent(cast.ToInt64(df.Count()))
+						}
 						t.PBar.Finish()
 						return
 					}
@@ -138,16 +150,51 @@ func (t *TaskExecution) SetProgress(text string, args ...interface{}) {
 			text = env.RedString(text)
 		}
 		t.setLogDetails()
-		g.Info(text, args...)
+		// a continuous run makes a task for each stream in each cycle
+		lo.Ternary(IsContinuousRunMode(), g.Debug, g.Info)(text, args...)
 	} else {
 		t.PBar.SetStatus(progressText)
 	}
 }
 
+// TaskStatusSnapshot is a consistent copy of the status fields
+type TaskStatusSnapshot struct {
+	Status    ExecStatus
+	Err       error
+	StartTime *time.Time
+	EndTime   *time.Time
+}
+
+// StatusSnapshot returns the status fields under the read lock
+func (t *TaskExecution) StatusSnapshot() TaskStatusSnapshot {
+	t.statusMu.RLock()
+	defer t.statusMu.RUnlock()
+	return TaskStatusSnapshot{Status: t.Status, Err: t.Err, StartTime: t.StartTime, EndTime: t.EndTime}
+}
+
+func (t *TaskExecution) setStatus(status ExecStatus) {
+	t.statusMu.Lock()
+	t.Status = status
+	t.statusMu.Unlock()
+}
+
+func (t *TaskExecution) setErr(err error) {
+	t.statusMu.Lock()
+	t.Err = err
+	t.statusMu.Unlock()
+}
+
+func (t *TaskExecution) setEndTime(end time.Time) {
+	t.statusMu.Lock()
+	t.EndTime = &end
+	t.statusMu.Unlock()
+}
+
 func (t *TaskExecution) setLogDetails() {
+	st := t.StatusSnapshot()
 	var duration int
-	if t.StartTime != nil {
-		duration = int(time.Since(*t.StartTime).Seconds())
+	if st.StartTime != nil {
+		duration = int(time.Since(*st.StartTime).Seconds())
 	}
 	rowCount := t.GetCount()
 	rowRate, byteRate := t.GetRate(1)
@@ -165,7 +212,7 @@ func (t *TaskExecution) setLogDetails() {
 		"row_rate", rowRate,
 		"byte_count", bytes,
 		"byte_rate", byteRate,
-		"status", t.Status,
+		"status", st.Status,
 		"duration", duration,
 	)))
 }
@@ -252,11 +299,12 @@ func (t *TaskExecution) IsStalled(window float64) bool {
 
 // GetBytes return the current total of bytes processed
 func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
-	if t.df == nil {
+	df := t.Df()
+	if df == nil {
 		return
 	}
 
-	inBytes, outBytes = t.df.Bytes()
+	inBytes, outBytes = df.Bytes()
 	return
 }
 
@@ -286,12 +334,26 @@ func (t *TaskExecution) GetCount() (count uint64) {
 		return
 	}
 
-	return t.df.Count()
+	df := t.Df()
+	if df == nil {
+		return
+	}
+
+	return df.Count()
 }
 
 // Df return the dataflow object
 func (t *TaskExecution) Df() *iop.Dataflow {
+	t.dfMu.RLock()
+	defer t.dfMu.RUnlock()
 	return t.df
+}
+
+// setDf sets the dataflow object
+func (t *TaskExecution) setDf(df *iop.Dataflow) {
+	t.dfMu.Lock()
+	t.df = df
+	t.dfMu.Unlock()
 }
 
 // Data return the dataset object
@@ -305,15 +367,18 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 	var secElapsed float64
 	count := t.GetCount()
 	bytes, _ := t.GetBytes()
-	if t.StartTime == nil || t.StartTime.IsZero() {
+	st := t.StatusSnapshot()
+	if st.StartTime == nil || st.StartTime.IsZero() {
 		return
-	} else if t.EndTime == nil || t.EndTime.IsZero() {
-		st := *t.StartTime
+	} else if st.EndTime == nil || st.EndTime.IsZero() {
+		start := *st.StartTime
 		if secWindow <= 0 {
-			secElapsed = time.Since(st).Seconds()
+			secElapsed = time.Since(start).Seconds()
 			rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
 			byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 		} else {
+			t.rateMu.Lock()
+			defer t.rateMu.Unlock()
 			rowRate = cast.ToInt64(math.Round(cast.ToFloat64((count - t.prevRowCount) / cast.ToUint64(secWindow))))
 			byteRate = cast.ToInt64(math.Round(cast.ToFloat64((bytes - t.prevByteCount) / cast.ToUint64(secWindow))))
 			if t.prevRowCount < count {
@@ -323,9 +388,9 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 			t.prevByteCount = bytes
 		}
 	} else {
-		st := *t.StartTime
-		et := *t.EndTime
-		secElapsed = cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
+		start := *st.StartTime
+		et := *st.EndTime
+		secElapsed = cast.ToFloat64(et.UnixNano()-start.UnixNano()) / 1000000000.0
 		rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
 		byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 	}
@@ -450,8 +515,8 @@ func (t *TaskExecution) Cleanup() {
 		f()
 		t.cleanupFuncs[i] = func() {} // in case it gets called again
 	}
-	if t.df != nil {
-		t.df.CleanUp()
+	if df := t.Df(); df != nil {
+		df.CleanUp()
 	}
 	t.cleanedUp = true
 }
@@ -470,9 +535,14 @@ func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
 	return g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet)
 }
 
-// isFullRefreshCDC means we should use CDC snapshot mode
+// isFullRefreshCDC means we should use CDC snapshot mode.
+// Needs explicit CDC options and a CDC-capable source.
 func (t *TaskExecution) isFullRefreshCDC() bool {
-	return t.Config.Mode == FullRefreshMode && t.Config.ReplicationStream != nil && t.Config.ReplicationStream.CDCOptions != nil && os.Getenv("SLING_STATE") != ""
+	return t.Config.Mode == FullRefreshMode &&
+		t.Config.ReplicationStream != nil &&
+		!t.Config.ReplicationStream.CDCOptions.IsZero() &&
+		t.Config.SrcConn.Type.SupportsCDC() &&
+		os.Getenv("SLING_STATE") != ""
 }
 
 // IsStateConfigured returns true iff the SLING_STATE environment variable is set.

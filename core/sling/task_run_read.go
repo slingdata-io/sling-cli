@@ -152,6 +152,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// make them return hex WKB so duckdb can parse them at export
 	selectFields = sTable.GeometryWKBFields(selectFields)
 
+	// the driver cannot read AggregateFunction columns; read final values
+	selectFields = sTable.FinalizeAggregateFields(selectFields)
+
 	// a true condition that the lane makes a ctid range for each reader
 	scanCond := t.parallelScanCond(sTable, srcConn)
 	where := cfg.Source.Where

@@ -56,7 +56,9 @@ endpoints:
         - expression: "record.id"
           output: "state.last_id"  # Matches sync key
           aggregation: "last"
+```
 
+```yaml
 # ❌ Invalid - wrong scope
 endpoints:
   invalid:

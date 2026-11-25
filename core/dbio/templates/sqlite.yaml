@@ -252,6 +252,7 @@ function:
 
 variable:
   bool_as: integer
+  timestamp_layout: '2006-01-02 15:04:05.999999'  # no zero fraction: matches stored text
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000

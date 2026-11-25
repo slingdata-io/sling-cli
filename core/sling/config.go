@@ -489,6 +489,12 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 
 	switch cfg.Mode {
 	case IncrementalMode:
+		if srcDbProvided && cfg.TgtConn.Info().Type.IsFile() && os.Getenv("SLING_STATE") != "" {
+			if err = cfg.validateIncrementalFileTarget(); err != nil {
+				return
+			}
+		}
+
 		if cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
 			// use default keys if none are provided
 			if len(cfg.Source.PrimaryKey()) == 0 {
@@ -653,6 +659,43 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 	cfg.StreamName = cfg.Source.Stream
 
 	return rc
+}
+
+// validateFileTargetLimits refuses file size limits for partitioned file targets.
+// The partitioned writer (DuckDB) cannot split files by size or rows.
+func (cfg *Config) validateFileTargetLimits() error {
+	if !cfg.TgtConn.Type.IsFile() || cfg.Target.Options == nil || !env.UseDuckDbCompute() {
+		return nil
+	}
+
+	uri := cfg.TgtConn.URL()
+	if uri == "" {
+		uri = cfg.Target.Object
+	}
+
+	// same condition as the partitioned writer in TaskExecution.WriteToFile
+	format := cfg.Target.ObjectFileFormat()
+	if !g.In(format, dbio.FileTypeParquet, dbio.FileTypeCsv) || len(iop.ExtractPartitionFields(uri)) == 0 {
+		return nil
+	}
+
+	opts := cfg.Target.Options
+	if g.PtrVal(opts.FileMaxRows) > 0 || g.PtrVal(opts.FileMaxBytes) > 0 {
+		return g.Error("file_max_rows and file_max_bytes are not supported with partitioned file targets. Remove the limit or the partition fields.")
+	}
+	return nil
+}
+
+// validateIncrementalFileTarget checks the rules of incremental runs to a file target
+// with state. The target needs partition fields and the source needs an update_key.
+func (cfg *Config) validateIncrementalFileTarget() error {
+	if len(iop.ExtractPartitionFields(cfg.TgtConn.URL())) == 0 {
+		return g.Error("writing to files incrementally needs partition fields, Please see https://docs.slingdata.io/examples/database-to-file")
+	}
+	if !cfg.Source.HasUpdateKey() {
+		return g.Error("writing to files incrementally needs an update_key")
+	}
+	return nil
 }
 
 // Prepare prepares the config
@@ -840,6 +883,16 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.SrcConn = srcConn
 	}
 
+	// ignore the schema of a stream from a source without schemas
+	if cfg.SrcConn.Type.IsDb() && !connection.SchemeType(cfg.Source.Stream).IsFile() {
+		if sTable, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.GetType()); err == nil {
+			if schema := sTable.DropUnsupportedSchema(); schema != "" {
+				g.Warn("stream '%s' has a schema, but %s does not support schemas. The schema '%s' is ignored", cfg.Source.Stream, cfg.SrcConn.GetType(), schema)
+				cfg.Source.Stream = sTable.FullName()
+			}
+		}
+	}
+
 	// Set evaluator
 	cfg.initEvaluator()
 
@@ -885,6 +938,10 @@ func (cfg *Config) Prepare() (err error) {
 			// primary-key is kept: incremental+PK uses Iceberg merge (row delta / DuckDB fallback)
 			// change-capture: the key comes from the source table when not set (resolveCDCPrimaryKey)
 		}
+	}
+
+	if err = cfg.validateFileTargetLimits(); err != nil {
+		return err
 	}
 
 	// validate table keys
@@ -1098,6 +1155,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		} else if table.Schema == "" {
 			table.Schema = cast.ToString(cfg.Target.Data["schema"])
 		}
+		if schema := table.DropUnsupportedSchema(); schema != "" {
+			g.Warn("target object '%s' has a schema, but %s does not support schemas. The schema '%s' is ignored", cfg.Target.Object, dbType, schema)
+		}
 
 		// clean table name as needed
 		table.Clean()
@@ -1117,6 +1177,8 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 						tableTmp.Schema = table.Schema
 					}
 				}
+
+				tableTmp.DropUnsupportedSchema()
 
 				// inherit the object's database so the temp table lands alongside it
 				if tableTmp.Database == "" {
@@ -1163,17 +1225,58 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	return nil
 }
 
-// GetFormatMap returns a map to format a string with provided with variables
+// GetFormatMap returns a map to format a string with provided with variables.
+// It also stores the rendered names in the config.
 func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
-	return cfg.formatMap(false)
+	// the lock guards the state maps and Env against concurrent writers
+	if rs := cfg.runtimeState(); rs != nil {
+		rs.rlock()
+		defer rs.runlock()
+	}
+
+	m, names, err := cfg.formatMap(true)
+	cfg.setFormatNames(names)
+	return m, err
 }
 
-// formatMap builds the format map. Set stateLocked when the caller holds the replication state lock.
-func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
+// formatNames holds the rendered values of the config fields that formatMap renders.
+type formatNames struct {
+	sourceStream, streamName, targetObject, tableTmp string
+}
+
+// setFormatNames writes only the names that changed, so a settled config gets no write.
+func (cfg *Config) setFormatNames(names formatNames) {
+	if cfg.Source.Stream != names.sourceStream {
+		cfg.Source.Stream = names.sourceStream
+	}
+	if cfg.StreamName != names.streamName {
+		cfg.StreamName = names.streamName
+	}
+	if cfg.Target.Object != names.targetObject {
+		cfg.Target.Object = names.targetObject
+	}
+	if cfg.Target.Options != nil && cfg.Target.Options.TableTmp != names.tableTmp {
+		cfg.Target.Options.TableTmp = names.tableTmp
+	}
+}
+
+// formatMap builds the format map. It does not write to the config:
+// the caller applies the returned names with setFormatNames.
+// Set stateLocked when the caller holds the replication state lock.
+func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, names formatNames, err error) {
 	// the lock guards the state maps and Env against concurrent writers
 	if rs := cfg.runtimeState(); rs != nil && !stateLocked {
 		rs.rlock()
 		defer rs.runlock()
+	}
+
+	names = formatNames{
+		sourceStream: cfg.Source.Stream,
+		streamName:   cfg.StreamName,
+		targetObject: cfg.Target.Object,
+	}
+	if cfg.Target.Options != nil {
+		names.tableTmp = cfg.Target.Options.TableTmp
 	}
 
 	m = g.M(
@@ -1222,25 +1325,25 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
-		cfg.Source.Stream, err = cfg.evaluator.RenderString(cfg.Source.Stream, m)
+		names.sourceStream, err = cfg.evaluator.RenderString(names.sourceStream, m)
 		if err != nil {
-			return m, g.Error(err, "could not pre-render source stream")
+			return m, names, g.Error(err, "could not pre-render source stream")
 		}
 
-		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
+		table, err := database.ParseTableName(names.sourceStream, cfg.SrcConn.Type)
 		if err != nil {
-			return m, g.Error(err, "could not parse stream table name")
+			return m, names, g.Error(err, "could not parse stream table name")
 		}
 
-		if table.SQL != "" && cfg.StreamName != "" {
-			cfg.StreamName, err = cfg.evaluator.RenderString(cfg.StreamName, m)
+		if table.SQL != "" && names.streamName != "" {
+			names.streamName, err = cfg.evaluator.RenderString(names.streamName, m)
 			if err != nil {
-				return m, g.Error(err, "could not pre-render stream name")
+				return m, names, g.Error(err, "could not pre-render stream name")
 			}
 
-			table, err = database.ParseTableName(cfg.StreamName, cfg.SrcConn.Type)
+			table, err = database.ParseTableName(names.streamName, cfg.SrcConn.Type)
 			if err != nil {
-				return m, g.Error(err, "could not parse stream name: %s", cfg.StreamName)
+				return m, names, g.Error(err, "could not parse stream name: %s", names.streamName)
 			}
 		}
 		if table.Schema != "" {
@@ -1255,8 +1358,8 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 			m["stream_full_name"] = table.FDQN()
 		}
 
-		if cfg.StreamName != "" {
-			m["stream_name"] = strings.ToLower(cfg.StreamName)
+		if names.streamName != "" {
+			m["stream_name"] = strings.ToLower(names.streamName)
 		}
 		if cfg.Source.UpdateKey != "" {
 			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
@@ -1268,18 +1371,18 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 	if cfg.TgtConn.Type.IsDb() {
 		// pre-render
-		cfg.Target.Object, err = cfg.evaluator.RenderString(cfg.Target.Object, m)
+		names.targetObject, err = cfg.evaluator.RenderString(names.targetObject, m)
 		if err != nil {
-			return m, g.Error(err, "could not pre-render target object")
+			return m, names, g.Error(err, "could not pre-render target object")
 		}
 
-		m["object_name"] = cfg.Target.Object
+		m["object_name"] = names.targetObject
 
-		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		table, err := database.ParseTableName(names.targetObject, cfg.TgtConn.Type)
 		if err != nil {
-			return m, g.Error(err, "could not parse target table name")
+			return m, names, g.Error(err, "could not parse target table name")
 		} else if table.IsQuery() {
-			return m, g.Error("invalid table name: %s", table.Raw)
+			return m, names, g.Error("invalid table name: %s", table.Raw)
 		}
 
 		m["object_schema"] = table.Schema
@@ -1295,13 +1398,13 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 		m["object_full_name"] = table.FDQN()
 
 		// set temp table
-		if tOpts := cfg.Target.Options; tOpts != nil {
-			tOpts.TableTmp, err = cfg.evaluator.RenderString(tOpts.TableTmp, m)
+		if cfg.Target.Options != nil {
+			names.tableTmp, err = cfg.evaluator.RenderString(names.tableTmp, m)
 			if err != nil {
-				return m, g.Error(err, "could not pre-render temp table")
+				return m, names, g.Error(err, "could not pre-render temp table")
 			}
 
-			tableTmp, _ := database.ParseTableName(tOpts.TableTmp, cfg.TgtConn.Type)
+			tableTmp, _ := database.ParseTableName(names.tableTmp, cfg.TgtConn.Type)
 			m["object_temp_schema"] = tableTmp.Schema
 			m["object_temp_table"] = tableTmp.Name
 			m["object_temp_full_name"] = tableTmp.FDQN()
@@ -1312,11 +1415,11 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
+		m["stream_name"] = strings.ToLower(names.streamName)
 
 		fc, err := cfg.SrcConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
-			return m, g.Error(err, "could not init source conn as file")
+			return m, names, g.Error(err, "could not init source conn as file")
 		}
 
 		uri := cfg.SrcConn.URL()
@@ -1324,7 +1427,7 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 		filePath, err := fc.GetPath(uri)
 		if err != nil {
-			return m, g.Error(err, "could not parse file path")
+			return m, names, g.Error(err, "could not parse file path")
 		}
 		if filePath != "" {
 			m["stream_file_path"] = strings.Trim(filePath, "/")
@@ -1378,7 +1481,7 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 				fileFormat = filesys.InferFileFormat(uri, dbio.FileTypeNone)
 			}
 			if fileFormat == dbio.FileTypeNone {
-				g.Warn("%s: stream format is empty, cannot determine stream_scanner", cfg.StreamName)
+				g.Warn("%s: stream format is empty, cannot determine stream_scanner", names.streamName)
 			} else {
 				duck := iop.NewDuckDb(context.Background())
 				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
@@ -1394,11 +1497,11 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 
 		fc, err := cfg.TgtConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
-			return m, g.Error(err, "could not init target conn as file")
+			return m, names, g.Error(err, "could not init target conn as file")
 		}
 
-		m["object_name"] = strings.ToLower(cfg.Target.Object)
-		m["object_full_name"] = filesys.NormalizeURI(fc, cfg.Target.Object)
+		m["object_name"] = strings.ToLower(names.targetObject)
+		m["object_full_name"] = filesys.NormalizeURI(fc, names.targetObject)
 
 		switch t {
 		case dbio.TypeFileS3:
@@ -1412,9 +1515,9 @@ func (cfg *Config) formatMap(stateLocked bool) (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsAPI() {
-		streamName := strings.TrimSpace(cfg.StreamName)
+		streamName := strings.TrimSpace(names.streamName)
 		if streamName == "" {
-			streamName = strings.TrimSpace(cfg.Source.Stream)
+			streamName = strings.TrimSpace(names.sourceStream)
 		}
 		if streamName != "" {
 			m["stream_name"] = strings.ToLower(streamName)
@@ -1953,6 +2056,123 @@ type CDCOptions struct {
 	ChangeFeed *string `json:"change_feed,omitempty" yaml:"change_feed,omitempty"`
 }
 
+// ContinuousConfig is the replication-level `continuous:` block.
+type ContinuousConfig struct {
+	Interval       *string `json:"interval,omitempty" yaml:"interval,omitempty"`               // default "1m"
+	MaxRows        *int    `json:"max_rows,omitempty" yaml:"max_rows,omitempty"`               // default: resolved run_max_events
+	MaxBytes       *int64  `json:"max_bytes,omitempty" yaml:"max_bytes,omitempty"`             // default 0 (none)
+	MinInterval    *string `json:"min_interval,omitempty" yaml:"min_interval,omitempty"`       // default "auto"
+	StatusInterval *string `json:"status_interval,omitempty" yaml:"status_interval,omitempty"` // default "60s"
+	BehindAfter    *string `json:"behind_after,omitempty" yaml:"behind_after,omitempty"`       // default "5m"
+	MaxSession     *string `json:"max_session,omitempty" yaml:"max_session,omitempty"`         // default "24h"
+	OnStreamError  *string `json:"on_stream_error,omitempty" yaml:"on_stream_error,omitempty"` // "stop" | "quarantine"
+}
+
+// ContinuousSettings is the resolved form that the runner uses.
+type ContinuousSettings struct {
+	Interval, MinInterval, StatusInterval, BehindAfter, MaxSession time.Duration
+	MaxRows                                                        int
+	MaxBytes                                                       int64
+	OnStreamError                                                  string
+	RetryAttempts                                                  int           // from change_capture_options
+	RetryDelay                                                     time.Duration // first delay, doubles each attempt
+}
+
+// Resolve applies the defaults and parses the durations.
+// A nil receiver gives the defaults.
+func (cc *ContinuousConfig) Resolve(tgtType dbio.Type, runMaxEvents int) (s ContinuousSettings, err error) {
+	c := ContinuousConfigDefault
+	if cc != nil {
+		if cc.Interval != nil {
+			c.Interval = cc.Interval
+		}
+		if cc.MaxRows != nil {
+			c.MaxRows = cc.MaxRows
+		}
+		if cc.MaxBytes != nil {
+			c.MaxBytes = cc.MaxBytes
+		}
+		if cc.MinInterval != nil {
+			c.MinInterval = cc.MinInterval
+		}
+		if cc.StatusInterval != nil {
+			c.StatusInterval = cc.StatusInterval
+		}
+		if cc.BehindAfter != nil {
+			c.BehindAfter = cc.BehindAfter
+		}
+		if cc.MaxSession != nil {
+			c.MaxSession = cc.MaxSession
+		}
+		if cc.OnStreamError != nil {
+			c.OnStreamError = cc.OnStreamError
+		}
+	}
+
+	// positive: zero is an error. Negative is always an error.
+	parse := func(key, val string, positive bool) (time.Duration, error) {
+		d, err := time.ParseDuration(strings.TrimSpace(val))
+		if err != nil {
+			return 0, g.Error(err, "invalid continuous.%s: %s", key, val)
+		} else if d < 0 || (positive && d == 0) {
+			return 0, g.Error("continuous.%s must be greater than 0 (got %s)", key, val)
+		}
+		return d, nil
+	}
+
+	if s.Interval, err = parse("interval", *c.Interval, true); err != nil {
+		return
+	}
+	if s.StatusInterval, err = parse("status_interval", *c.StatusInterval, true); err != nil {
+		return
+	}
+	if s.MaxSession, err = parse("max_session", *c.MaxSession, true); err != nil {
+		return
+	}
+	if s.BehindAfter, err = parse("behind_after", *c.BehindAfter, false); err != nil {
+		return
+	}
+
+	if minInterval := strings.ToLower(strings.TrimSpace(*c.MinInterval)); minInterval == "auto" {
+		switch tgtType {
+		case dbio.TypeDbSnowflake:
+			s.MinInterval = time.Minute
+		case dbio.TypeDbBigQuery:
+			s.MinInterval = 5 * time.Minute
+		}
+	} else if s.MinInterval, err = parse("min_interval", minInterval, false); err != nil {
+		return
+	}
+
+	// 0 means not set
+	s.MaxRows = runMaxEvents
+	if c.MaxRows != nil && *c.MaxRows != 0 {
+		s.MaxRows = *c.MaxRows
+	}
+	if s.MaxRows == 0 {
+		s.MaxRows = *CDCOptionsDefault.RunMaxEvents
+	}
+	if s.MaxRows < 0 {
+		return s, g.Error("continuous.max_rows must not be negative (got %d)", s.MaxRows)
+	}
+
+	if s.MaxBytes = *c.MaxBytes; s.MaxBytes < 0 {
+		return s, g.Error("continuous.max_bytes must not be negative (got %d)", s.MaxBytes)
+	}
+
+	s.OnStreamError = strings.ToLower(strings.TrimSpace(*c.OnStreamError))
+	if s.OnStreamError != "stop" && s.OnStreamError != "quarantine" {
+		return s, g.Error("invalid continuous.on_stream_error: %s (use stop or quarantine)", *c.OnStreamError)
+	}
+
+	return s, nil
+}
+
+// IsZero returns true if no option is set
+func (o *CDCOptions) IsZero() bool {
+	return o == nil || *o == CDCOptions{}
+}
+
 // SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
 func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o == nil {
@@ -2163,6 +2383,16 @@ var CDCOptionsDefault = CDCOptions{
 	RetryAttempts:     g.Int(3),
 	RetryDelay:        g.String("5s"),
 	SnapshotChunkSize: g.Int(100000),
+}
+
+var ContinuousConfigDefault = ContinuousConfig{
+	Interval:       g.String("1m"),
+	MaxBytes:       g.Int64(0),
+	MinInterval:    g.String("auto"),
+	StatusInterval: g.String("60s"),
+	BehindAfter:    g.String("5m"),
+	MaxSession:     g.String("24h"),
+	OnStreamError:  g.String("stop"),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

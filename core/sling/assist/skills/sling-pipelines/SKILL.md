@@ -164,7 +164,8 @@ Paths are root-relative. Run from the project root.
     Authorization: "Bearer {env.API_TOKEN}"
   payload: |
     {"status": "{state.my_repl.status}"}
-  into: response
+  id: notify
+  # response lands at state.<id>.response (body JSON at .response.json)
 ```
 
 ### command
@@ -172,7 +173,8 @@ Paths are root-relative. Run from the project root.
 - type: command
   command: "python validate.py {store.file_path}"
   working_dir: "/scripts"
-  into: output
+  id: validate
+  # output lands at state.<id>.output.stdout
 ```
 
 ### check

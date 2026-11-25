@@ -2,6 +2,7 @@ package iop
 
 import (
 	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -544,6 +545,42 @@ func TestCoerceUnsizedDecimalCast(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, nt, "decimal(24,6)")
 	})
+
+	t.Run("sized decimal over wide string source keeps user precision", func(t *testing.T) {
+		wide := Columns{{
+			Name:  "code",
+			Type:  StringType,
+			Stats: ColumnStats{MaxLen: 100},
+		}}
+		out := wide.Coerce(Columns{parseCast("decimal(38,4)")}, true, ColumnCasing(""), dbio.TypeDbSQLServer)
+		col := out[0]
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 4, col.DbScale)
+		assert.Equal(t, 0, col.Stats.MaxLen)
+
+		nt, err := col.GetNativeType(dbio.TypeDbSQLServer, ColumnTyping{})
+		require.NoError(t, err)
+		assert.Equal(t, "decimal(38,4)", nt)
+	})
+}
+
+func TestNativeTypeToGeneralFirebird(t *testing.T) {
+	cases := map[string]ColumnType{
+		"INT128":                   DecimalType,
+		"NUMERIC(38,4)":            DecimalType,
+		"DECIMAL(25,2)":            DecimalType,
+		"DECFLOAT(16)":             FloatType,
+		"DECFLOAT(34)":             FloatType,
+		"BOOLEAN":                  BoolType,
+		"TIME WITH TIME ZONE":      TimezType,
+		"TIMESTAMP WITH TIME ZONE": TimestampzType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.Type("firebird"))
+			assert.Equal(t, expected, colType)
+		})
+	}
 }
 
 // Additional test for JSON column typing
@@ -1431,6 +1468,28 @@ func TestFlattenRecord(t *testing.T) {
 	})
 }
 
+func TestNativeTypeToGeneralClickhouse(t *testing.T) {
+	cases := map[string]ColumnType{
+		"SimpleAggregateFunction(max, UInt32)":                                  BigIntType,
+		"SimpleAggregateFunction(any, Nullable(String))":                        TextType,
+		"SimpleAggregateFunction(max, Nullable(DateTime64(6, 'Asia/Jakarta')))": DatetimeType,
+		"SimpleAggregateFunction(sum, Decimal(18, 4))":                          DecimalType,
+		"Nullable(Int32)":                IntegerType,
+		"AggregateFunction(min, UInt32)": TextType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			assert.Equal(t, expected, NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse))
+		})
+	}
+
+	inner := "Nullable(DateTime64(6, 'UTC'))"
+	assert.Equal(t,
+		NativeTypeToGeneral("col", inner, dbio.TypeDbClickhouse),
+		NativeTypeToGeneral("col", "SimpleAggregateFunction(max, "+inner+")", dbio.TypeDbClickhouse),
+	)
+}
+
 func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 	// Databricks reports ShortType and ByteType as "short" and "byte"
 	cases := map[string]ColumnType{
@@ -1445,6 +1504,168 @@ func TestNativeTypeToGeneralDatabricksIntegers(t *testing.T) {
 		t.Run(nativeType, func(t *testing.T) {
 			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbDatabricks)
 			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralClickHouseDateAndDecimal(t *testing.T) {
+	cases := map[string]ColumnType{
+		"Date":           DateType,
+		"Date32":         DateType,
+		"Decimal(10, 2)": DecimalType,
+		"Decimal32(2)":   DecimalType,
+		"Decimal64(4)":   DecimalType,
+		"Decimal128(10)": DecimalType,
+		"Decimal256(20)": DecimalType,
+		"Enum16":         StringType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbClickhouse)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralOracleBinaryFloatAndLocalTZ(t *testing.T) {
+	// go-ora reports BINARY_FLOAT, BINARY_DOUBLE and TIMESTAMP WITH LOCAL
+	// TIME ZONE columns as "IBFloat", "IBDouble" and "TimeStampLTZ_DTY";
+	// all_tab_columns reports the first two as BINARY_FLOAT / BINARY_DOUBLE
+	cases := map[string]ColumnType{
+		"IBFloat":          FloatType,
+		"IBDouble":         FloatType,
+		"BINARY_FLOAT":     FloatType,
+		"BINARY_DOUBLE":    FloatType,
+		"TimeStampLTZ_DTY": TimestampzType,
+		"FLOAT":            FloatType,
+		"TimeStampDTY":     TimestampType,
+		"TimeStampTZ_DTY":  TimestampzType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbOracle)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralClickHouseWideIntegers(t *testing.T) {
+	// ClickHouse and Proton report 128/256-bit integers as Int128, Int256,
+	// UInt128 and UInt256, optionally wrapped in Nullable(...)
+	cases := map[string]ColumnType{
+		"Int128":            ColumnType("decimal(38,0)"),
+		"Int256":            DecimalType,
+		"UInt128":           ColumnType("decimal(38,0)"),
+		"UInt256":           DecimalType,
+		"Nullable(Int128)":  ColumnType("decimal(38,0)"),
+		"Nullable(UInt256)": DecimalType,
+		"Int64":             BigIntType,
+	}
+	for _, connType := range []dbio.Type{dbio.TypeDbClickhouse, dbio.TypeDbProton} {
+		for nativeType, expected := range cases {
+			t.Run(connType.String()+"/"+nativeType, func(t *testing.T) {
+				colType := NativeTypeToGeneral("col", nativeType, connType)
+				assert.Equal(t, expected, colType)
+			})
+		}
+	}
+}
+
+func TestCastValBigIntOutsideInt64(t *testing.T) {
+	sp := NewStreamProcessor()
+	col := &Column{Name: "col", Type: DecimalType, Sourced: true}
+
+	maxU128, _ := new(big.Int).SetString("340282366920938463463374607431768211455", 10)
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, maxU128, col)))
+	assert.Equal(t, "340282366920938463463374607431768211455", cast.ToString(sp.CastVal(0, *maxU128, col)))
+	assert.Equal(t, "-42", cast.ToString(sp.CastVal(0, big.NewInt(-42), col)))
+}
+
+func TestNativeTypeToGeneralProtonDate32(t *testing.T) {
+	cases := map[string]ColumnType{
+		"date":             DateType,
+		"date32":           DateType,
+		"nullable(date32)": DateType,
+	}
+	for nativeType, expected := range cases {
+		t.Run(nativeType, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", nativeType, dbio.TypeDbProton)
+			assert.Equal(t, expected, colType)
+		})
+	}
+}
+
+func TestNativeTypeToGeneralStarRocksLargeInt(t *testing.T) {
+	// StarRocks reports its signed 128-bit integer as LARGEINT. bigint is 64-bit,
+	// so the map uses decimal(38,0), the same precision DuckDB pins for hugeint.
+	cases := []struct {
+		native   string
+		expected ColumnType
+	}{
+		{"largeint", ColumnType("decimal(38,0)")},
+		{"LARGEINT", ColumnType("decimal(38,0)")},
+		{"bigint", BigIntType},
+		{"int", IntegerType},
+		{"decimal", DecimalType},
+	}
+	for _, tc := range cases {
+		t.Run(tc.native, func(t *testing.T) {
+			colType := NativeTypeToGeneral("col", tc.native, dbio.TypeDbStarRocks)
+			assert.Equal(t, tc.expected, colType)
+		})
+	}
+
+	t.Run("precision", func(t *testing.T) {
+		col := Column{Name: "id", Type: NativeTypeToGeneral("id", "largeint", dbio.TypeDbStarRocks)}
+		col.SetLengthPrecisionScale()
+		assert.Equal(t, DecimalType, col.Type)
+		assert.Equal(t, 38, col.DbPrecision)
+		assert.Equal(t, 0, col.DbScale)
+		assert.True(t, col.Sourced)
+	})
+}
+
+func TestFormatValueSQLiteTimestamp(t *testing.T) {
+	ts := func(s string) time.Time {
+		v, err := time.Parse("2006-01-02 15:04:05.999999", s)
+		require.NoError(t, err)
+		return v
+	}
+
+	t.Run("sqlite drops zero fraction", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00'", FormatValue(ts("2026-10-01 00:00:00"), TimestampType, dbio.TypeDbSQLite))
+	})
+	t.Run("sqlite keeps non-zero fraction", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00.5'", FormatValue(ts("2026-10-01 00:00:00.5"), TimestampType, dbio.TypeDbSQLite))
+		assert.Equal(t, "'2026-10-01 00:00:00.123456'", FormatValue(ts("2026-10-01 00:00:00.123456"), TimestampType, dbio.TypeDbSQLite))
+	})
+	t.Run("postgres unchanged", func(t *testing.T) {
+		assert.Equal(t, "'2026-10-01 00:00:00.000000'", FormatValue(ts("2026-10-01 00:00:00"), TimestampType, dbio.TypeDbPostgres))
+	})
+}
+
+func TestFormatValueFirebird(t *testing.T) {
+	utc := time.Date(2026, 11, 16, 13, 50, 10, 0, time.UTC)
+	frac := time.Date(2026, 11, 16, 13, 50, 10, 123_490_000, time.UTC)
+	fracZone := time.Date(2026, 11, 16, 13, 50, 10, 123_490_000, time.FixedZone("", 3600))
+	firebird := dbio.Type("firebird")
+
+	cases := []struct {
+		name     string
+		val      time.Time
+		colType  ColumnType
+		connType dbio.Type
+		expected string
+	}{
+		{"datetime", utc, DatetimeType, firebird, "'2026-11-16 13:50:10.0000'"},
+		{"timestamp truncates", frac, TimestampType, firebird, "'2026-11-16 13:50:10.1234'"},
+		{"timestampz has no zone", fracZone, TimestampzType, firebird, "'2026-11-16 13:50:10.1234'"},
+		{"date", utc, DateType, firebird, "'2026-11-16'"},
+		{"odbc keeps base layout", frac, TimestampType, dbio.TypeDbODBC, "'2026-11-16 13:50:10.123490'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, FormatValue(tc.val, tc.colType, tc.connType))
 		})
 	}
 }

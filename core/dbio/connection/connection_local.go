@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"github.com/flarco/g"
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
@@ -15,6 +16,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -137,24 +139,33 @@ func (ce ConnEntries) withSpecFile(name, specFile string) (ConnEntries, error) {
 }
 
 var (
-	localConns        ConnEntries
-	localConnsTs      time.Time
-	localConnsExclude string
-	envFileWarned     sync.Map // env file paths already warned as invalid or repaired
+	localConns    ConnEntries
+	localConnsTs  time.Time
+	envFileWarned sync.Map // env file paths already warned as invalid or repaired
+	dbtWarned     sync.Map // dbt output names already warned as failed
 )
 
-type LocalConnsExclude string
+// localConnsLoadErrs holds the load failures of the last cached GetLocalConns
+// refresh, keyed by upper-case connection name.
+var localConnsLoadErrs = struct {
+	sync.Mutex
+	m map[string]error
+}{}
+
+// LocalConnLoadError returns why the named connection did not load in the last
+// cached refresh of GetLocalConns, or nil.
+func LocalConnLoadError(name string) error {
+	localConnsLoadErrs.Lock()
+	defer localConnsLoadErrs.Unlock()
+	return localConnsLoadErrs.m[strings.ToUpper(name)]
+}
 
 func GetLocalConns(options ...any) ConnEntries {
-	defer func() { localConnsExclude = "" }() // clear if set
 	force := false
 
 	for _, option := range options {
-		switch opt := option.(type) {
-		case bool:
+		if opt, ok := option.(bool); ok {
 			force = opt
-		case LocalConnsExclude:
-			localConnsExclude = string(opt)
 		}
 	}
 
@@ -165,6 +176,7 @@ func GetLocalConns(options ...any) ConnEntries {
 	}
 
 	connsMap := map[string]ConnEntry{}
+	failed := map[string]error{}
 
 	// local disk connection
 	conn, _ := NewConnection("LOCAL", dbio.TypeFileLocal, g.M("type", "file"))
@@ -177,7 +189,7 @@ func GetLocalConns(options ...any) ConnEntries {
 	connsMap[c.Name] = c
 
 	// get dbt connections
-	dbtConns, err := ReadDbtConnections()
+	dbtConns, dbtFailed, err := ReadDbtConnections()
 	if !g.LogError(err) {
 		for _, conn := range dbtConns {
 			c := ConnEntry{
@@ -189,6 +201,16 @@ func GetLocalConns(options ...any) ConnEntries {
 			c.Name = strings.ReplaceAll(c.Name, "/", "_")
 			c.Connection.Name = strings.ReplaceAll(c.Connection.Name, "/", "_")
 			connsMap[c.Name] = c
+		}
+		for name, err := range dbtFailed {
+			name = strings.ReplaceAll(strings.ToUpper(name), "/", "_")
+			failed[name] = err
+			var unknown *dbtUnknownAdapterError
+			if errors.As(err, &unknown) {
+				g.Debug("skipped dbt output %s: %s", name, g.ErrMsgSimple(err))
+			} else if _, warned := dbtWarned.LoadOrStore(name, true); !warned {
+				g.Warn("could not load dbt output %s: %s", name, strings.TrimSpace(g.ErrMsgSimple(err)))
+			}
 		}
 	}
 
@@ -205,17 +227,16 @@ func GetLocalConns(options ...any) ConnEntries {
 		}
 		m := g.M()
 		g.JSONConvert(ef, &m)
-		profileConns, err := ReadConnections(m)
-		if !g.LogError(err) {
-			for _, conn := range profileConns {
-				c := ConnEntry{
-					Name:        strings.ToUpper(conn.Info().Name),
-					Description: conn.GetType().NameLong(),
-					Source:      "sling env yaml",
-					Connection:  conn,
-				}
-				connsMap[c.Name] = c
+		profileConns, profileFailed := readConnections(m)
+		maps.Copy(failed, profileFailed)
+		for _, conn := range profileConns {
+			c := ConnEntry{
+				Name:        strings.ToUpper(conn.Info().Name),
+				Description: conn.GetType().NameLong(),
+				Source:      "sling env yaml",
+				Connection:  conn,
 			}
+			connsMap[c.Name] = c
 		}
 	}
 
@@ -227,17 +248,16 @@ func GetLocalConns(options ...any) ConnEntries {
 		} else {
 			m := g.M()
 			g.JSONConvert(ef, &m)
-			profileConns, err := ReadConnections(m)
-			if !g.LogError(err) {
-				for _, conn := range profileConns {
-					c := ConnEntry{
-						Name:        strings.ToUpper(conn.Info().Name),
-						Description: conn.GetType().NameLong(),
-						Source:      "env-var env yaml",
-						Connection:  conn,
-					}
-					connsMap[c.Name] = c
+			profileConns, profileFailed := readConnections(m)
+			maps.Copy(failed, profileFailed)
+			for _, conn := range profileConns {
+				c := ConnEntry{
+					Name:        strings.ToUpper(conn.Info().Name),
+					Description: conn.GetType().NameLong(),
+					Source:      "env-var env yaml",
+					Connection:  conn,
 				}
+				connsMap[c.Name] = c
 			}
 		}
 	}
@@ -273,6 +293,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			if err != nil {
 				e := g.F("could not parse env payload %s: %s", key, g.ErrMsgSimple(err))
 				g.Warn(e)
+				failed[strings.ToUpper(key)] = err
 				continue
 			}
 		} else if url, ok := payload["url"]; ok && err == nil {
@@ -281,6 +302,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			if err != nil {
 				e := g.F("could not parse env payload %s: %s", key, g.ErrMsgSimple(err))
 				g.Warn(e)
+				failed[strings.ToUpper(key)] = err
 				continue
 			}
 		} else {
@@ -294,6 +316,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			if err != nil {
 				e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
 				g.Warn(e)
+				failed[strings.ToUpper(key)] = err
 				continue
 			}
 		}
@@ -317,6 +340,13 @@ func GetLocalConns(options ...any) ConnEntries {
 		connsMap[c.Name] = c
 	}
 
+	// a later source may have loaded the connection
+	for name := range failed {
+		if _, ok := connsMap[name]; ok {
+			delete(failed, name)
+		}
+	}
+
 	connArr := ConnEntries(lo.Values(connsMap))
 
 	// inject any additional API OAuth secrets
@@ -326,14 +356,14 @@ func GetLocalConns(options ...any) ConnEntries {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
 	})
 
-	// only cache if no exclusion
-	if localConnsExclude == "" {
-		localConnsTs = time.Now()
-		localConns = connArr
-		iop.LocalConnections = cmap.New[map[string]any]()
-		for name, entry := range connsMap {
-			iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
-		}
+	localConnsTs = time.Now()
+	localConns = connArr
+	localConnsLoadErrs.Lock()
+	localConnsLoadErrs.m = failed
+	localConnsLoadErrs.Unlock()
+	iop.LocalConnections = cmap.New[map[string]any]()
+	for name, entry := range connsMap {
+		iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
 	}
 
 	return connArr

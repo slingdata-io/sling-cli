@@ -1280,9 +1280,9 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		return bw, g.Error("missing update_key in order to partition")
 	}
 
-	// duckdb does not allow limiting by number of rows
-	if g.PtrVal(t.Config.Target.Options.FileMaxRows) > 0 {
-		return bw, g.Error("can no longer use file_max_rows to write to parquet (use file_max_bytes instead).")
+	// duckdb cannot split partitioned output by size or rows
+	if err = t.Config.validateFileTargetLimits(); err != nil {
+		return bw, err
 	}
 
 	// if * is specified, set default FileSizeBytes,

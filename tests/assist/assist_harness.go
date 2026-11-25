@@ -437,7 +437,7 @@ func ApplyFileAsserts(t *testing.T, homeDir string, asserts []FileAssert) {
 				continue
 			}
 			rel = filepath.ToSlash(rel)
-			wantMD5, err := assist.MD5OfEmbeddedSkill(rel)
+			wantMD5, err := assist.MD5OfInstalledSkill(rel)
 			if err != nil {
 				t.Errorf("assert_files md5_matches_embedded: embedded %s: %v", rel, err)
 				continue

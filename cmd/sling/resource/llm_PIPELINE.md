@@ -106,11 +106,15 @@ steps:
 
 ```yaml
 steps:
-  - type: run
-    source: "file://data/users.csv"
-    target: "MY_POSTGRES.public.users"
-    mode: "full-refresh"
+  - type: replication
     id: load_data
+    replication:
+      source: LOCAL
+      target: MY_POSTGRES
+      streams:
+        file://data/users.csv:
+          object: public.users
+          mode: full-refresh
 
   - type: query
     connection: "MY_POSTGRES"
@@ -196,21 +200,6 @@ Prints a message to the console.
 
 [Log Hook Documentation](https://docs.slingdata.io/concepts/hooks/log)
 
-### `run`
-
-Executes a simple data transfer, like a one-off `sling` CLI command.
-
-```yaml
-- type: run
-  source: "MY_POSTGRES.public.users"
-  target: "file://users.csv"
-  mode: "full-refresh"
-  source_options:
-    limit: 100
-```
-
-Note: The `run` type is used for simple data transfers. For complex replications with multiple streams and configurations, use the `replication` type instead.
-
 ### `replication`
 
 Runs a full replication job from a YAML file.
@@ -218,10 +207,26 @@ Runs a full replication job from a YAML file.
 ```yaml
 - type: replication
   path: /path/to/my_replication.yaml
-  select_streams: ["users", "orders"] # Optional
+  streams: ["users", "orders"] # Optional
   mode: "incremental" # Optional
+  working_dir: /path/to/project # Optional: directory to run the replication in
   env: # Optional
     SLING_THREADS: 4
+```
+
+There is no `run` step type. To move data without a separate file, give the replication config inline with `replication:` instead of `path`:
+
+```yaml
+- type: replication
+  replication:
+    source: MY_POSTGRES
+    target: LOCAL
+    streams:
+      public.users:
+        object: file://users.csv
+        mode: full-refresh
+        source_options:
+          limit: 100
 ```
 
 [Replication Hook Documentation](https://docs.slingdata.io/concepts/hooks/replication)
@@ -250,7 +255,7 @@ Makes an HTTP request.
   headers:
     Authorization: "Bearer {env.API_TOKEN}"
   payload: '{"key": "value"}' # For POST/PUT requests
-  into: api_response
+  id: api_call # Response in {state.api_call.response.json}
 ```
 
 [HTTP Hook Documentation](https://docs.slingdata.io/concepts/hooks/http)
@@ -264,7 +269,7 @@ Executes a shell command.
   command: "ls -la /data"
   working_dir: "/app" # Optional
   print: true # Optional: Print command output (default: true)
-  into: command_output
+  id: list_files # Output in {state.list_files.output.stdout}
 ```
 
 [Command Hook Documentation](https://docs.slingdata.io/concepts/hooks/command)
@@ -274,7 +279,7 @@ Executes a shell command.
 Evaluates a condition and fails the pipeline if the condition is not met.
 
 ```yaml
-- name: "Check if row count is greater than 0"
+- id: check_row_count
   type: check
   check: "run.total_rows > threshold"  # Required: The condition to evaluate
   failure_message: '{run.total_rows} is below threshold'  # Optional: the message to use as an error
@@ -292,8 +297,7 @@ Copies files or directories.
 ```yaml
 - type: copy
   from: "file://data/today/"
-  to: "s3://my-bucket/archive/{YYYY}/{MM}/{DD}/"
-  recursive: true
+  to: "s3://my-bucket/archive/{timestamp.YYYY}/{timestamp.MM}/{timestamp.DD}/"
 ```
 
 [Copy Hook Documentation](https://docs.slingdata.io/concepts/hooks/copy)
@@ -396,9 +400,14 @@ Groups a set of steps to be executed together. Useful for looping.
   steps:
     - type: log
       message: "Processing table: {loop.value}"
-    - type: run
-      source: "POSTGRES.public.{loop.value}"
-      target: "SNOWFLAKE.analytics.{loop.value}"
+    - type: replication
+      replication:
+        source: POSTGRES
+        target: SNOWFLAKE
+        streams:
+          "public.{loop.value}":
+            object: "analytics.{loop.value}"
+            mode: full-refresh
 ```
 
 [Group Hook Documentation](https://docs.slingdata.io/concepts/hooks/group)
@@ -478,10 +487,14 @@ Use a `group` step with `loop` to iterate over a list of items. The current item
   steps:
     - type: log
       message: "Processing file {loop.index + 1}: {loop.value}"
-    - type: run
-      source: "file://data/{loop.value}"
-      target: "STAGING.{loop.value.split('.')[0]}"
-      mode: "truncate"
+    - type: replication
+      replication:
+        source: LOCAL
+        target: STAGING
+        streams:
+          "file://data/{loop.value}":
+            object: 'public.{replace(loop.value, ".csv", "")}'
+            mode: truncate
 ```
 
 You can also loop over the results of a previous step:

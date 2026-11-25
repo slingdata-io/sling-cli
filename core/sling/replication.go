@@ -17,6 +17,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -34,6 +35,8 @@ type ReplicationConfig struct {
 	Defaults ReplicationStreamConfig             `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
+
+	Continuous *ContinuousConfig `json:"continuous,omitempty" yaml:"continuous,omitempty"`
 
 	// Tasks are compiled tasks
 	Tasks    []*Config `json:"tasks"`
@@ -74,14 +77,18 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 
 // JSON returns json payload
 func (rd *ReplicationConfig) JSON() string {
-	payload := g.Marshal([]any{
+	items := []any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
 		g.M("hooks", rd.Hooks),
 		g.M("defaults", rd.Defaults),
 		g.M("streams", rd.Streams),
 		g.M("env", rd.Env),
-	})
+	}
+	if rd.Continuous != nil {
+		items = append(items, g.M("continuous", rd.Continuous))
+	}
+	payload := g.Marshal(items)
 
 	// clean up
 	if strings.Contains(rd.Source, "://") {
@@ -166,7 +173,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
-			fMap, err := task.formatMap(true)
+			fMap, _, err := task.formatMap(true)
 			if err != nil {
 				return rd.state, err
 			}
@@ -315,6 +322,41 @@ type Wildcard struct {
 	EndpointMap map[string]api.Endpoint
 }
 
+// stripUnsupportedSchema removes the schema from the stream names
+// when the source has no schemas (for example "main." of old Firebird configs).
+func (rd *ReplicationConfig) stripUnsupportedSchema(dialect dbio.Type) {
+	ordered := make([]string, 0, len(rd.streamsOrdered))
+	for _, name := range rd.streamsOrdered {
+		cfg := rd.Streams[name]
+		table, err := database.ParseTableName(name, dialect)
+		isQuery := (cfg != nil && cfg.SQL != "") || connection.SchemeType(name).IsFile()
+		if err != nil || isQuery || table.DropUnsupportedSchema() == "" {
+			ordered = append(ordered, name)
+			continue
+		}
+
+		newName := name[strings.LastIndex(name, ".")+1:] // keep the user casing
+		if strings.Contains(name, `"`) {
+			newName = table.FullName()
+		}
+		g.Warn("stream '%s' has a schema, but %s does not support schemas. The schema is ignored: '%s'", name, rd.Source, newName)
+
+		mapEntry, hasMap := rd.maps.Streams[name]
+		delete(rd.Streams, name)
+		delete(rd.maps.Streams, name)
+		if _, exists := rd.Streams[newName]; exists {
+			continue // explicit stream wins
+		}
+
+		rd.Streams[newName] = cfg
+		if hasMap && rd.maps.Streams != nil {
+			rd.maps.Streams[newName] = mapEntry
+		}
+		ordered = append(ordered, newName)
+	}
+	rd.streamsOrdered = ordered
+}
+
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
@@ -329,6 +371,11 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		return strings.Contains(name, "*") || strings.Contains(name, "?")
 	}
 
+	schemaless := conn.Connection.Type.IsDb() && conn.Connection.GetType().Schemaless()
+	if schemaless {
+		rd.stripUnsupportedSchema(conn.Connection.GetType())
+	}
+
 	patterns := []string{}
 	for _, name := range rd.streamsOrdered {
 		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams), will be expand while reading
@@ -341,7 +388,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 			continue
 		}
 
-		if name == "*" && !conn.Connection.Type.IsAPI() {
+		if name == "*" && !conn.Connection.Type.IsAPI() && !schemaless {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) || conn.Connection.Type.IsAPI() {
 			// Always treat API endpoints as patterns to forms the upstream endpoints
@@ -654,7 +701,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 		if r := recover(); r != nil {
 			err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 		}
-		te.EndTime = g.Ptr(time.Now())
+		te.setEndTime(time.Now())
 		te.StateSet()
 	}()
 
@@ -670,20 +717,20 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	switch stage {
 	case HookStageStart:
 		if err = rd.startHooks.Execute(); err != nil {
-			te.Status = ExecStatusError
-			te.Err = g.Error(err, "error executing start hooks")
+			te.setStatus(ExecStatusError)
+			te.setErr(g.Error(err, "error executing start hooks"))
 			return te.Err
 		}
 	case HookStageEnd:
 		if err = rd.endHooks.Execute(); err != nil {
-			te.Status = ExecStatusError
-			te.Err = g.Error(err, "error executing end hooks")
+			te.setStatus(ExecStatusError)
+			te.setErr(g.Error(err, "error executing end hooks"))
 			return te.Err
 		}
 	}
 
 	// set success
-	te.Status = ExecStatusSuccess
+	te.setStatus(ExecStatusSuccess)
 
 	return nil
 }
@@ -1049,6 +1096,9 @@ func (rd *ReplicationConfig) checkConnections() error {
 		if name == "" || strings.Contains(name, "://") || !connection.SchemeType(name).IsUnknown() {
 			continue
 		} else if _, ok := connsMap[strings.ToLower(name)]; !ok {
+			if err := connection.LocalConnLoadError(name); err != nil {
+				name = g.F("%s (could not load: %s)", name, g.ErrMsgSimple(err))
+			}
 			missing = append(missing, name)
 		}
 	}
@@ -1077,7 +1127,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 		schemaT, err := database.ParseTableName(pattern, c.Type)
 		if err != nil {
 			return wildcards, g.Error(err, "could not parse stream name: %s", pattern)
-		} else if schemaT.Schema == "" {
+		} else if schemaT.Schema == "" && !c.GetType().Schemaless() {
 			continue
 		}
 
@@ -1477,6 +1527,86 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 	return
 }
 
+// ValidateContinuous checks the compiled tasks for continuous mode and
+// returns the resolved settings. Run it after Compile.
+func (rd *ReplicationConfig) ValidateContinuous() (settings ContinuousSettings, err error) {
+	if len(rd.Tasks) == 0 {
+		return settings, g.Error("did not match any streams")
+	}
+
+	runMaxEvents := 0
+	hasRunMaxDuration, sharedReaderOnly := false, true
+	var retryAttempts *int
+	var retryDelay time.Duration
+	retryDelaySet := false
+	for _, task := range rd.Tasks {
+		if task.Mode != ChangeCaptureMode {
+			return settings, g.Error("continuous mode supports only change-capture streams in this version (stream %s has mode %s)", task.StreamName, task.Mode)
+		}
+
+		if rs := task.ReplicationStream; rs != nil {
+			if len(rs.Hooks.Pre)+len(rs.Hooks.Post) > 0 {
+				return settings, g.Error("stream hooks are not supported yet in continuous mode (stream %s)", task.StreamName)
+			}
+			if opts := rs.CDCOptions; opts != nil {
+				runMaxEvents = max(runMaxEvents, g.PtrVal(opts.RunMaxEvents))
+				hasRunMaxDuration = hasRunMaxDuration || opts.RunMaxDuration != nil
+				if opts.RetryAttempts != nil && (retryAttempts == nil || *opts.RetryAttempts > *retryAttempts) {
+					retryAttempts = opts.RetryAttempts
+				}
+				if opts.RetryDelay != nil {
+					d, err := time.ParseDuration(strings.TrimSpace(*opts.RetryDelay))
+					if err != nil || d < 0 {
+						return settings, g.Error("invalid retry_delay for stream %s: %s", task.StreamName, *opts.RetryDelay)
+					}
+					retryDelay, retryDelaySet = max(retryDelay, d), true
+				}
+			}
+		}
+
+		if srcType := task.SrcConn.Type; !srcType.IsMySQLLike() && !srcType.IsPostgresLike() {
+			sharedReaderOnly = false
+		}
+	}
+
+	if cc := rd.Continuous; cc != nil && cc.OnStreamError != nil && strings.EqualFold(strings.TrimSpace(*cc.OnStreamError), "quarantine") {
+		return settings, g.Error("on_stream_error: quarantine is not supported yet")
+	}
+
+	if !rd.Tasks[0].TgtConn.Type.IsDb() {
+		return settings, g.Error("continuous mode needs a database target")
+	}
+
+	settings, err = rd.Continuous.Resolve(rd.Tasks[0].TgtConn.Type, runMaxEvents)
+	if err != nil {
+		return settings, err
+	}
+
+	// the retry options of the streams, else the defaults
+	if settings.RetryAttempts = *CDCOptionsDefault.RetryAttempts; retryAttempts != nil {
+		settings.RetryAttempts = max(*retryAttempts, 0)
+	}
+	if settings.RetryDelay = retryDelay; !retryDelaySet {
+		settings.RetryDelay, _ = time.ParseDuration(*CDCOptionsDefault.RetryDelay)
+	}
+
+	if hasRunMaxDuration {
+		interval := *ContinuousConfigDefault.Interval
+		if rd.Continuous != nil && rd.Continuous.Interval != nil {
+			interval = *rd.Continuous.Interval
+		}
+		g.Warn("run_max_duration is ignored in continuous mode, interval (%s) is used", interval)
+	}
+	if settings.MaxBytes > 0 && !sharedReaderOnly {
+		g.Warn("max_bytes applies only to MySQL, MariaDB and PG groups")
+	}
+	if settings.BehindAfter > 0 && settings.BehindAfter <= settings.Interval {
+		g.Warn("behind_after (%s) is not greater than interval (%s), so streams show behind between cycles", settings.BehindAfter, settings.Interval)
+	}
+
+	return settings, nil
+}
+
 // buildCDCRunner scans rd.Tasks for shared-reader-eligible CDC streams and, if
 // any are found, creates a single CDC runner and auto-injects a `read_cdc`
 // start-stage hook attached to it. A replication has exactly one source, so
@@ -1523,6 +1653,11 @@ func (rd *ReplicationConfig) buildCDCRunner() {
 	}
 
 	rd.CDCRunner = newCDCRunner(groupKey, groupTasks, rd)
+
+	// the continuous runner reads in its own cycles
+	if IsContinuousRunMode() {
+		return
+	}
 
 	// inject hook so shared read phase runs before loads
 	rd.startHooks = append(rd.startHooks, Hooks{rd.CDCRunner.NewReadCDCHook()}...)
@@ -1852,6 +1987,14 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	var continuous *ContinuousConfig
+	if val, ok := m["continuous"]; ok && val != nil {
+		if err = g.Unmarshal(g.Marshal(val), &continuous); err != nil {
+			err = g.Error(err, "could not parse 'continuous'")
+			return
+		}
+	}
+
 	maps := replicationConfigMaps{}
 	g.Unmarshal(g.Marshal(defaults), &maps.Defaults)
 	g.Unmarshal(g.Marshal(streams), &maps.Streams)
@@ -1860,6 +2003,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		Source:      cast.ToString(source),
 		Target:      cast.ToString(target),
 		Env:         Env,
+		Continuous:  continuous,
 		maps:        maps,
 		originalCfg: replicYAML, // set originalCfg
 	}

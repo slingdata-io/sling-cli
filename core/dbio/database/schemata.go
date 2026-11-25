@@ -79,6 +79,16 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
+// DropUnsupportedSchema clears the schema when the dialect has no schemas.
+// It returns the removed schema.
+func (t *Table) DropUnsupportedSchema() (dropped string) {
+	if t.Schema == "" || t.IsQuery() || !t.Dialect.Schemaless() {
+		return ""
+	}
+	dropped, t.Schema = t.Schema, ""
+	return dropped
+}
+
 func (t *Table) IsProcedural() bool {
 	// Convert to lowercase for case-insensitive matching
 	sqlLower := strings.ToLower(t.Raw)
@@ -530,7 +540,11 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
+			innerSQL := t.SQL
+			if isSQLServer {
+				innerSQL = sqlServerOrderByOffset(innerSQL)
+			}
+			sql = g.F("select %s from (\n%s\n) t", fieldsStr, innerSQL)
 		} else {
 			sql = t.SQL
 		}
@@ -549,6 +563,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
+			if isSQLServer {
+				sql = sqlServerOrderByOffset(sql)
+			}
 			sql = g.R(
 				template.Core["limit_sql"],
 				"sql", sql,
@@ -645,6 +662,58 @@ func (t *Table) GeometryWKBFields(fields []string) []string {
 		}
 		mapped = append(mapped, g.F("%s as %s", expr(quoted), name))
 	}
+	return mapped
+}
+
+// FinalizeAggregateFields maps ClickHouse AggregateFunction columns of fields
+// to finalizeAggregation expressions. The driver cannot read the state type;
+// the expression returns the final value. Returns fields unchanged for other
+// dialects or with no AggregateFunction column.
+func (t *Table) FinalizeAggregateFields(fields []string) []string {
+	if t.Dialect != dbio.TypeDbClickhouse {
+		return fields
+	}
+
+	aggs := map[string]string{} // lower name -> quoted name
+	for _, col := range t.Columns {
+		if strings.HasPrefix(col.DbType, "AggregateFunction(") {
+			aggs[strings.ToLower(col.Name)] = t.Dialect.Quote(col.Name)
+		}
+	}
+	if len(aggs) == 0 {
+		return fields
+	}
+
+	if len(fields) == 0 || (len(fields) == 1 && fields[0] == "*") {
+		fields = lo.Map(t.Columns, func(col iop.Column, _ int) string { return col.Name })
+	}
+
+	names := []string{}
+	mapped := make([]string, 0, len(fields))
+	for _, field := range fields {
+		original, alias, isExclude, _ := iop.ParseSelectExpr(field)
+		if isExclude {
+			mapped = append(mapped, field)
+			continue
+		}
+		quoted, ok := aggs[strings.ToLower(t.Dialect.Unquote(original))]
+		if !ok {
+			mapped = append(mapped, field)
+			continue
+		}
+		name := quoted
+		if alias != "" {
+			name = t.Dialect.Quote(alias)
+		}
+		names = append(names, t.Dialect.Unquote(original))
+		mapped = append(mapped, g.F("finalizeAggregation(%s) as %s", quoted, name))
+	}
+
+	if len(names) == 0 {
+		return mapped
+	}
+
+	g.Info("reading AggregateFunction columns with finalizeAggregation: %s. Rows that ClickHouse has not merged yet can show as duplicates. For merged values, use custom SQL with a -Merge combinator and GROUP BY.", strings.Join(names, ", "))
 	return mapped
 }
 
@@ -869,7 +938,10 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	}
 
 	matchedTables := lo.Filter(lo.Values(s.Tables()), func(t Table, i int) bool {
-		key := strings.ToLower(g.F("%s.%s", t.Schema, t.Name))
+		key := strings.ToLower(t.Name)
+		if t.Schema != "" {
+			key = strings.ToLower(g.F("%s.%s", t.Schema, t.Name))
+		}
 		if gc != nil {
 			return (*gc).Match(key)
 		}
@@ -922,8 +994,12 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	}
 
 	matchedColumns := lo.Filter(lo.Values(s.Columns()), func(col iop.Column, i int) bool {
-		keyTable := strings.ToLower(g.F("%s.%s", col.Schema, col.Table))
-		keyCol := strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		keyTable := strings.ToLower(col.Table)
+		keyCol := strings.ToLower(g.F("%s.%s", col.Table, col.Name))
+		if col.Schema != "" {
+			keyTable = strings.ToLower(g.F("%s.%s", col.Schema, col.Table))
+			keyCol = strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		}
 		if gc != nil {
 			return (*gc).Match(keyCol)
 		}
@@ -978,6 +1054,23 @@ type ColumnType struct {
 	Nullable         bool
 	CT               *sql.ColumnType
 	Sourced          bool
+}
+
+// useFetchedNumeric takes the type, precision and scale of the fetched column
+// when an ODBC driver reports a numeric column as text.
+func (ct *ColumnType) useFetchedNumeric(col *iop.Column, connType dbio.Type) bool {
+	fc := ct.FetchedColumn
+	if connType != dbio.TypeDbODBC || fc == nil || !g.In(col.Type, iop.StringType, iop.TextType) {
+		return false
+	}
+	if !fc.IsDecimal() && !fc.IsInteger() {
+		return false
+	}
+	col.Type = fc.Type
+	col.DbPrecision = fc.DbPrecision
+	col.DbScale = fc.DbScale
+	col.Sourced = fc.Sourced
+	return true
 }
 
 func (ct *ColumnType) IsSourced() bool {

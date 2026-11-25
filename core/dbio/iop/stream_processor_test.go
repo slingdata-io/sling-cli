@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
@@ -440,4 +441,126 @@ func TestDecomposedToRat(t *testing.T) {
 	assert.Equal(t, DecimalType, sp.CheckType(testDecomposer{}))
 	val := sp.CastVal(0, testDecomposer{coef: big.NewInt(35987).Bytes(), exp: -3}, col)
 	assert.Equal(t, "35.987", cast.ToString(val))
+}
+
+func TestStreamProcessorCastThousands(t *testing.T) {
+	sp := NewStreamProcessor()
+
+	intCol := &Column{Name: "n", Type: BigIntType}
+	assert.Equal(t, int64(1234567), sp.CastVal(0, "1,234,567", intCol))
+	assert.Equal(t, int64(1234567), sp.CastVal(0, []byte("1,234,567"), intCol))
+	assert.Equal(t, BigIntType, intCol.Type)
+
+	decCol := &Column{Name: "d", Type: DecimalType}
+	assert.Equal(t, "1234.50", sp.CastVal(1, "1,234.50", decCol))
+	assert.Equal(t, "1.5", sp.CastVal(1, "1,5", decCol))
+}
+
+func TestNormalizeNumberText(t *testing.T) {
+	tests := []struct{ in, out string }{
+		{"3000", "3000"},
+		{"1,234,567", "1234567"},
+		{"-1,234,567.89", "-1234567.89"},
+		{"1,234.5", "1234.5"},
+		{"+12,345,678", "+12345678"},
+		{"1,5", "1.5"},
+		{"-1,5", "-1.5"},
+		{"45,3828582763672", "45.3828582763672"},
+		{"0,500", "0.500"},
+		{"1234,567", "1234.567"},
+		{"3,000", "3,000"},
+		{"-3,000", "-3,000"},
+		{"1.234,56", "1.234,56"},
+		{"1,23,456", "1,23,456"},
+		{"a,b", "a,b"},
+		{",5", ",5"},
+		{"1,", "1,"},
+		{"1,234,", "1,234,"},
+		{"1,234.", "1,234."},
+		{"1,234.5a", "1,234.5a"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.out, normalizeNumberText(tt.in), tt.in)
+	}
+}
+
+// go test -benchmem -run='^$' -bench '^BenchmarkNormalizeNumberText' ./core/dbio/iop
+func BenchmarkNormalizeNumberText(b *testing.B) {
+	inputs := []struct{ name, val string }{
+		{"no_comma", "1273192311231.9382471941"},
+		{"decimal_comma", "45,3828582763672"},
+		{"thousands", "-1,234,567.89"},
+		{"ambiguous", "3,000"},
+	}
+	for _, in := range inputs {
+		b.Run(in.name+"/current", func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				_ = strings.Replace(in.val, ",", ".", 1)
+			}
+		})
+		b.Run(in.name+"/normalize", func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				_ = normalizeNumberText(in.val)
+			}
+		})
+	}
+}
+
+func TestCastToStringCSVDatetimeUTC(t *testing.T) {
+	sp := NewStreamProcessor()
+	sp.Config.DatetimeFormat = "2006-01-02 15:04:05.000Z"
+	sp.Config.DatetimeUTC = true
+
+	ts := time.Date(2026, 3, 8, 1, 30, 0, 0, time.FixedZone("", -5*3600))
+	assert.Equal(t, "2026-03-08 06:30:00.000Z", sp.CastToStringCSV(0, ts, TimestampzType))
+	ts = time.Date(2026, 11, 14, 9, 0, 0, 0, time.FixedZone("", 5*3600+1800))
+	assert.Equal(t, "2026-11-14 03:30:00.000Z", sp.CastToStringCSV(0, ts, TimestampzType))
+}
+
+func TestStreamProcessor_DatetimeOffsetCSVRoundTrip(t *testing.T) {
+	inputs := []string{
+		"2026-11-14T09:00:00+05:30",
+		"2026-11-14T09:00:00-03:30",
+		"2026-03-08T01:30:00-05:00",
+		"2026-11-14T09:00:00.123456+05:45",
+	}
+
+	for _, input := range inputs {
+		sp := NewStreamProcessor()
+		want, err := time.Parse(time.RFC3339Nano, input)
+		if !assert.NoError(t, err) {
+			continue
+		}
+
+		csvVal := sp.CastToStringCSV(0, want, DatetimeType)
+		got, err := NewStreamProcessor().ParseTime(csvVal)
+		if assert.NoError(t, err, csvVal) {
+			assert.True(t, want.Equal(got), "%s -> %s -> %s", input, csvVal, got.Format(time.RFC3339Nano))
+			_, wantOffset := want.Zone()
+			_, gotOffset := got.Zone()
+			assert.Equal(t, wantOffset, gotOffset, "%s -> %s", input, csvVal)
+		}
+	}
+
+	// whole-hour offsets keep the short form
+	sp := NewStreamProcessor()
+	ts, _ := time.Parse(time.RFC3339, "2026-03-08T01:30:00-05:00")
+	assert.Equal(t, "2026-03-08 01:30:00 -05", sp.CastToStringCSV(0, ts, DatetimeType))
+
+	// CSV values written by earlier versions with an hour-only offset
+	for csvVal, want := range map[string]string{
+		"2026-03-08 01:30:00 -05":   "2026-03-08T06:30:00Z",
+		"2026-11-14 09:00:00 +05":   "2026-11-14T04:00:00Z",
+		"2026-11-14 09:00:00.5 +01": "2026-11-14T08:00:00.5Z",
+		"2026-11-14 09:00:00 +00":   "2026-11-14T09:00:00Z",
+		"2026-11-14 09:00:00 UTC":   "2026-11-14T09:00:00Z",
+	} {
+		got, err := NewStreamProcessor().ParseTime(csvVal)
+		if assert.NoError(t, err, csvVal) {
+			assert.Equal(t, want, got.UTC().Format(time.RFC3339Nano), csvVal)
+		}
+	}
 }

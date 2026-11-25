@@ -1,0 +1,47 @@
+# MySQL 8 source with binlog/GTID and a Postgres target for the continuous mode test.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sling-cdc-cont-mysql
+    ports:
+      - "3398:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: sling_cdc_test
+      MYSQL_DATABASE: cdc_cont_db
+      MYSQL_USER: sling_repl
+      MYSQL_PASSWORD: sling_repl_pass
+    command:
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --binlog-row-metadata=FULL
+      - --expire-logs-days=1
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+    volumes:
+      - ./initdb/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-psling_cdc_test"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  postgres:
+    image: postgres:16
+    container_name: sling-cdc-cont-pg
+    ports:
+      - "55435:5432"
+    environment:
+      POSTGRES_PASSWORD: sling_cdc_test
+      POSTGRES_DB: cdc_cont_db
+      POSTGRES_USER: postgres
+    volumes:
+      - ./initdb/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "cdc_cont_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 30

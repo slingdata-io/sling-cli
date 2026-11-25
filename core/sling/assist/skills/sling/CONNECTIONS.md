@@ -80,7 +80,7 @@ sling conns exec MY_POSTGRES "SELECT 1"       # Execute SQL (query is positional
 
 ### 1. Environment Variable
 ```bash
-export MY_POSTGRES='host=localhost user=postgres dbname=mydb'
+export MY_POSTGRES='{type: postgres, host: localhost, user: postgres, database: mydb}'
 ```
 
 ### 2. URL Format
