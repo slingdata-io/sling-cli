@@ -45,6 +45,13 @@ steps:
   - type: log
     message: "Created initial files: {state.create_files_initial.output.stdout}"
 
+  # The checkpoint and the file mtimes are compared in whole seconds, and the
+  # SFTP host clock can be ahead. Wait, so the initial files are older than the checkpoint.
+  - type: command
+    id: wait_before_full
+    ssh_conn: SFTP
+    command: sleep 2
+
   # --- Step 2: Full-refresh replication (loads all 5 rows) ---
   - id: repl_full
     replication:
