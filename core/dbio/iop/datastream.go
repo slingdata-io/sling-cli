@@ -69,7 +69,8 @@ type Datastream struct {
 	bwRows        chan [][]any // for correct byte written
 	bwMu          sync.Mutex
 	bwClosed      bool
-	bwOn          bool // SLING_PROCESS_BW
+	bwOn          bool                         // SLING_PROCESS_BW
+	bwTypes       atomic.Pointer[[]ColumnType] // copy of the column types for the bytes-written processor
 	readyChn      chan struct{}
 	readyBuffer   [][]any // the Buffer at SetReady: Close can clear Buffer before the dataflow reads it
 	schemaChgChan chan schemaChg
@@ -400,8 +401,12 @@ func (ds *Datastream) processBwRows() {
 
 		for rows := range ds.bwRows {
 			if processBw {
+				var types []ColumnType
+				if p := ds.bwTypes.Load(); p != nil {
+					types = *p
+				}
 				for _, row := range rows {
-					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
+					ds.writeBwCsvSafe(ds.CastToStringSafeMask(row, types))
 				}
 				ds.bwCsv.Flush()
 			}
@@ -455,7 +460,22 @@ func (ds *Datastream) sendBwRows(rows [][]any) {
 // This should be called when creating a datastream that pushes rows
 // directly without calling Start() (e.g., chunked streaming).
 func (ds *Datastream) StartBwProcessor() {
+	ds.publishBwTypes()
 	go ds.processBwRows()
+}
+
+// publishBwTypes stores a copy of the column types for the bytes-written
+// processor, which runs in a different goroutine. Call it on the goroutine
+// that changes ds.Columns, after each change.
+func (ds *Datastream) publishBwTypes() {
+	if !ds.bwOn {
+		return
+	}
+	types := make([]ColumnType, len(ds.Columns))
+	for i, col := range ds.Columns {
+		types[i] = col.Type
+	}
+	ds.bwTypes.Store(&types)
 }
 
 // DrainReprocess returns any row that was sent to the Reprocess channel
@@ -565,11 +585,16 @@ func (ds *Datastream) CastRowToString(row []any) []string {
 	return rowStr
 }
 
-// CastToStringSafeMask returns the row as string mask casted ( evensafer)
-func (ds *Datastream) CastToStringSafeMask(row []any) []string {
+// CastToStringSafeMask returns the row as string mask casted ( evensafer).
+// types are the column types. A value without a type is cast by its value.
+func (ds *Datastream) CastToStringSafeMask(row []any, types []ColumnType) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
-		rowStr[i] = ds.Sp.CastToStringSafeMask(i, val, ds.Columns[i].Type)
+		if i < len(types) {
+			rowStr[i] = ds.Sp.CastToStringSafeMask(i, val, types[i])
+		} else {
+			rowStr[i] = ds.Sp.CastToStringSafeMask(i, val)
+		}
 	}
 	return rowStr
 }
@@ -693,6 +718,7 @@ func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns
 
 	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
 	ds.Columns = mergedCols.ValidateNames(ds.Sp.Config.TargetType)
+	ds.publishBwTypes()
 	added = colsAdded.AddedCols
 
 	ds.schemaChgChan <- colsAdded
@@ -722,6 +748,7 @@ func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
 
 	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, oldType, newType)
 	setChangedType(&ds.Columns[i], newType)
+	ds.publishBwTypes()
 	ds.schemaChgChan <- schemaChg{ChangedIndex: i, ChangedType: newType}
 }
 
@@ -1224,6 +1251,7 @@ skipBuffer:
 		}
 	}
 
+	ds.publishBwTypes()
 	go ds.processBwRows()
 
 	if !ds.NoDebug && ds.Metadata.StreamURL.Value != nil {

@@ -84,6 +84,29 @@ func TestBW(t *testing.T) {
 	}
 }
 
+// The stream changes a column type while the bytes-written processor reads
+// rows. The processor must read only its copy of the types (run with -race).
+func TestBWColumnTypeChange(t *testing.T) {
+	ds := NewDatastream(NewColumns(Column{Name: "v", Type: BigIntType}))
+	ds.StartBwProcessor()
+
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for i := 0; i < 500; i++ {
+			ds.sendBwRows([][]any{{int64(i)}})
+		}
+	}()
+	types := []ColumnType{StringType, BigIntType}
+	for i := 0; i < 500; i++ {
+		ds.ChangeColumn(0, types[i%2])
+	}
+	<-sent
+	ds.Close()
+
+	assert.Equal(t, []ColumnType{ds.Columns[0].Type}, *ds.bwTypes.Load())
+}
+
 // The consumer changes the values of each row in place. The byte count must
 // come from the values that the producer pushed (SLING-128).
 func TestBWConsumerChangesRows(t *testing.T) {
