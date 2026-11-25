@@ -4953,3 +4953,43 @@ func TestSQLColumnsODBCTextAsNumeric(t *testing.T) {
 		assert.Equal(t, 47, col.Stats.MaxLen)
 	})
 }
+
+func TestODBCTemplateTypeDetect(t *testing.T) {
+	cases := []struct {
+		name  string
+		props map[string]string
+		want  dbio.Type
+	}{
+		{
+			name:  "firebird driver",
+			props: map[string]string{"conn_string": "Driver={Firebird/InterBase(r) driver};Dbname=mpc.lan/3050:/var/lib/firebird/data/mirror.fdb;Uid=SYSDBA"},
+			want:  dbio.Type("firebird"),
+		},
+		{
+			name:  "sqlserver driver wins over database name",
+			props: map[string]string{"conn_string": "Driver={ODBC Driver 18 for SQL Server};Server=x;Database=firebird_copy"},
+			want:  dbio.TypeDbSQLServer,
+		},
+		{
+			name:  "dsn only",
+			props: map[string]string{"conn_string": "DSN=mydsn"},
+			want:  dbio.TypeDbODBC,
+		},
+		{
+			name:  "explicit template",
+			props: map[string]string{"conn_template": "Firebird"},
+			want:  dbio.Type("firebird"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := &ODBCConn{}
+			conn.BaseConn.context = g.NewContext(context.Background())
+			for k, v := range tc.props {
+				conn.SetProp(k, v)
+			}
+			assert.Equal(t, tc.want, conn.GetODBCTemplateType())
+		})
+	}
+}
