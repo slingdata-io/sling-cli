@@ -279,6 +279,28 @@ func TestExtractPartitionTimeValue(t *testing.T) {
 	}
 }
 
+func TestExtractPartitionTimeValueLeadingZero(t *testing.T) {
+	// zero-padded values, as produced by GeneratePartURIsFromRange, are decimal
+	tests := []struct {
+		mask string
+		path string
+		want time.Time
+	}{
+		{"ts_year=2024/ts_month={part_month}", "ts_year=2024/ts_month=09", time.Date(0, 9, 1, 0, 0, 0, 0, time.UTC)},
+		{"{part_year_month}", "2024-08", time.Date(2024, 8, 1, 0, 0, 0, 0, time.UTC)},
+		{"{YYYY}/ts_day={part_day}", "2024/ts_day=08", time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC)},
+		{"{YYYY}/ts_hour={part_hour}", "2024/ts_hour=08", time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC)},
+		{"{YYYY}/ts_minute={part_minute}", "2024/ts_minute=09", time.Date(2024, 1, 1, 0, 9, 0, 0, time.UTC)},
+		{"{YYYY}/ts_week={part_week}", "2024/ts_week=09", time.Date(2024, 2, 26, 0, 0, 0, 0, time.UTC)},
+	}
+
+	for _, tt := range tests {
+		got, err := ExtractPartitionTimeValue(tt.mask, tt.path)
+		assert.NoError(t, err, tt.path)
+		assert.Equal(t, tt.want, got, tt.path)
+	}
+}
+
 func TestGetLowestPartTimeUnit(t *testing.T) {
 	tests := []struct {
 		name     string
