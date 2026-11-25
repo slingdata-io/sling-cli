@@ -640,11 +640,11 @@ streams:
       # Stage 1: Clean and normalize
       - first_name: 'trim_space(upper(value))'
         email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9]", "")'
+        phone: 'regex_replace(value, "[^0-9]", "")'
       
       # Stage 2: Create computed fields
       - full_name: 'record.first_name + " " + record.last_name'
-        email_domain: 'substring(record.email, strpos(record.email, "@") + 1)'
+        email_domain: 'split_part(record.email, "@", 1)'
       
       # Stage 3: Business logic
       - customer_type: |
@@ -1227,9 +1227,6 @@ defaults:
 streams:
   # Partitioned parquet files
   'data/year=*/month=*/*.parquet':
-    transforms:
-      - year: 'int_parse(substring(record._file_path, strpos(record._file_path, "year=") + 5, 4))'
-        month: 'int_parse(substring(record._file_path, strpos(record._file_path, "month=") + 6, 2))'
 
 env:
   SLING_THREADS: 10
@@ -1415,7 +1412,7 @@ streams:
     transforms:
       # Stage 1: Data cleansing
       - email: 'lower(trim_space(value))'
-        phone: 'replace(value, "[^0-9+]", "")'
+        phone: 'regex_replace(value, "[^0-9+]", "")'
         name: 'trim_space(value)'
       
       # Stage 2: Computed metrics

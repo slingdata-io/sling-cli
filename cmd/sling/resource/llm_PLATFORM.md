@@ -284,7 +284,7 @@ sling platform jobs delete job_abc123 --force       # no prompt
 Flags:
 - `-f, --force` — skip the Y/N confirmation prompt. Useful in CI.
 
-**Admin-only on the server.** The server enforces admin-user permissions for deleting jobs; a standard project token not tied to an admin user will receive a 403. The CLI surfaces whatever error the server returns — it does not pre-check.
+**Needs the `jobs:write` token scope.** A project token without it receives a 403 that names the scope. The CLI surfaces whatever error the server returns — it does not pre-check.
 
 Uses `POST /project/job/delete` with body `{"job_id": "<id>"}`.
 
@@ -442,7 +442,7 @@ sling platform files rename replications/old.yaml replications/new.yaml
 
 ## 14. `sling platform connections`
 
-Inspect connections configured for the project on the platform (from `env.yaml` and/or `.env.sling`).
+Manage the connections in the project `env.yaml` on the platform. Each subcommand needs a token scope: `list`/`get` need `connections:read`, `test` needs `connections:use`, `save`/`delete` need `connections:write`. The platform masks secret values in all output.
 
 ### `connections list`
 
@@ -451,7 +451,40 @@ sling platform connections list
 sling platform connections list -o json
 ```
 
-Columns (table): `Name`, `Type`, `Kind`, `Source`.
+Columns (table): `Name`, `Type`, `Kind`, `Source`, `Agent`. `Agent` has a value only for a connection that exists only on an agent.
+
+### `connections get <name>`
+
+```bash
+sling platform connections get MY_POSTGRES            # table: name, type, source, read-only, then one row per property
+sling platform connections get MY_POSTGRES -o yaml    # `connections:` map, valid input for `connections save`
+sling platform connections get MY_POSTGRES -o json
+```
+
+A masked secret shows as `********`. `${VAR}` and `ref+` values stay as they are. A connection that exists only on an agent is read-only.
+
+### `connections save [name]`
+
+Create or update connections. `--file`/`-f` is required (a YAML or JSON file, or `-` for stdin).
+
+```bash
+sling platform connections save MY_POSTGRES -f pg.yaml     # file holds the properties of one connection
+sling platform connections save -f connections.yaml        # file has a `connections:` map; saves every entry
+```
+
+- With a name and a `connections:` file, only that entry is saved. Without a name, the file must have a `connections:` map.
+- By default the properties merge into the stored entry. `--replace` replaces the stored entry.
+- A value of `********` keeps the stored value, so `get -o yaml` output can be saved back unchanged.
+- A literal value in a secret field (e.g. `password`) is refused before the request: use `${VAR}` or a `ref+...` value. `--allow-literal` sends it; the platform moves it to the `env:` block and puts a `${VAR}` reference in the connection. `ref+exec`, `ref+file` and `ref+sling://env` are refused.
+- `-o json` prints the platform response (a list for a `connections:` file with no name).
+
+### `connections delete <name>`
+
+```bash
+sling platform connections delete MY_POSTGRES --force   # --force/-f skips the confirmation prompt
+```
+
+`save` and `delete` cannot change a connection that exists only on an agent.
 
 ### `connections test <name>`
 
@@ -459,11 +492,10 @@ Test that a project connection is valid. Requires a running agent for most conne
 
 ```bash
 sling platform connections test MY_POSTGRES
+sling platform connections test MY_POSTGRES --agent agent_abc123 -o json
 ```
 
-On success: prints `Connection MY_POSTGRES: valid`. On failure: exits non-zero with the server/agent's error message.
-
-**Out of scope**: `connections create`/`update`/`delete` — the platform does not expose those via project tokens today.
+On success: prints `Connection MY_POSTGRES: valid` (with `--agent`: `... valid on agent <agent_id>`). `-o json` prints `{"agent":"...","name":"MY_POSTGRES","valid":true}`. On failure: exits non-zero with an error that starts with `Connection MY_POSTGRES: invalid`. Use `--agent` for a `ref+` secret that resolves only on one agent.
 
 ---
 

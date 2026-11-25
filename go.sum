@@ -1044,8 +1044,6 @@ github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 h1:JIAuq3EE
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966/go.mod h1:sUM3LWHvSMaG192sy56D9F7CNvL7jUJVXoqM1QKLnog=
 github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260806214312-6da3e7189c98 h1:HT0E/6EiVUe8wew4uIgYEpUYPHcswmGkxpbbqFges3g=
 github.com/slingdata-io/arrow-adbc/go/adbc v0.0.0-20260806214312-6da3e7189c98/go.mod h1:ikEb6zQgczMp7Alx/RYGaBEn/Mwwz1kfXbirnkbgWUo=
-github.com/slingdata-io/godbc v0.0.9 h1:wh5MSI6l+eyTQ8pSbQcO4j195HwBXrVmNYRnHaGJKK8=
-github.com/slingdata-io/godbc v0.0.9/go.mod h1:oBLg0zDZSK1BhLpcNhZjsvCLdfvB4OiTReAreXCrb3M=
 github.com/slingdata-io/godbc v0.0.10 h1:swR33G/iz/BjdOS+zj43ukxniNeXK+rrZIH/PgMon7Y=
 github.com/slingdata-io/godbc v0.0.10/go.mod h1:oBLg0zDZSK1BhLpcNhZjsvCLdfvB4OiTReAreXCrb3M=
 github.com/slingdata-io/golyglot v1.0.20 h1:qZry5N4xKEOcJWdRStuH7W9zH/Xu5f6YH/rIEBsBttU=

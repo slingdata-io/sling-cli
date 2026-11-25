@@ -44,7 +44,10 @@ sling platform status             # smoke test: project info + counts + token so
 | `sling platform files delete <name>` | Delete a file (`--force` skips confirm)          |
 | `sling platform files rename`      | Rename a file                                      |
 | `sling platform connections list`  | Project-scoped connections                         |
-| `sling platform connections test <name>` | Test a project connection                    |
+| `sling platform connections get <name>` | Show a connection, secrets masked; `-o yaml` round-trips to `save` |
+| `sling platform connections save [name]` | Create/update: `-f <path>` or `-f -`; `--replace`, `--allow-literal` |
+| `sling platform connections delete <name>` | Remove a connection (`--force` skips confirm) |
+| `sling platform connections test <name>` | Test a project connection; `--agent <id>` picks the agent |
 
 Most list/get commands accept `-o json` — prefer it when parsing output.
 
