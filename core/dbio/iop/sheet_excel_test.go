@@ -539,3 +539,45 @@ func TestNewExcelDatasetDeletedFirstSheet(t *testing.T) {
 		t.Fatalf("expected 2 rows (header + 1) from the first remaining sheet, got %d", len(data.Rows))
 	}
 }
+
+func TestNewExcelDatasetRowRangeWidth(t *testing.T) {
+	originalSampleSize := SampleSize
+	SampleSize = 900
+	t.Cleanup(func() { SampleSize = originalSampleSize })
+
+	f := excelize.NewFile()
+	t.Cleanup(func() { _ = f.Close() })
+	for row := 1; row <= 901; row++ {
+		cell, err := excelize.CoordinatesToCellName(1, row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := []interface{}{"left", "right"}
+		if row == 901 {
+			values = append(values, "late value")
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &values); err != nil {
+			t.Fatal(err)
+		}
+	}
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sheetRange := range []string{"1:901", "1:", "A1:C901"} {
+		t.Run(sheetRange, func(t *testing.T) {
+			data, err := NewExcelDataset(bytes.NewReader(buf.Bytes()), map[string]string{"sheet": "Sheet1!" + sheetRange})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data.Rows) != 900 {
+				t.Fatalf("got %d data rows, want 900", len(data.Rows))
+			}
+			lastRow := data.Rows[len(data.Rows)-1]
+			if len(lastRow) != 3 || lastRow[2] != "late value" {
+				t.Fatalf("last row = %v, want third cell to contain %q", lastRow, "late value")
+			}
+		})
+	}
+}
