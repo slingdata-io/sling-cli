@@ -804,6 +804,43 @@ func TestDuckDbHttpTimeout(t *testing.T) {
 	})
 }
 
+// The session time zone must be UTC, not the local OS zone. Otherwise a
+// TIMESTAMPTZ to TIMESTAMP cast (read_arrow into a timestamp column) shifts values.
+func TestDuckDbSessionTimeZone(t *testing.T) {
+	t.Setenv("TZ", "America/Sao_Paulo")
+
+	query := func(t *testing.T, duck *DuckDb, sql string) string {
+		data, err := duck.Query(sql)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(data.Rows))
+		return cast.ToString(data.Rows[0][0])
+	}
+
+	t.Run("SQL defaults to UTC", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		assert.Contains(t, duck.getSessionSettingsSQL(), "SET TimeZone = 'UTC'")
+	})
+
+	t.Run("default is UTC with a local zone set", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
+		defer duck.Close()
+
+		assert.Equal(t, "UTC", query(t, duck, "SELECT current_setting('TimeZone') AS tz"))
+		got := query(t, duck, "SELECT '2026-01-01 00:07:00+00'::timestamptz::timestamp AS ts")
+		assert.Contains(t, got, "2026-01-01 00:07:00")
+	})
+
+	t.Run("timezone prop override", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "timezone=America/Sao_Paulo")
+		defer duck.Close()
+
+		assert.Contains(t, duck.getSessionSettingsSQL(), "SET TimeZone = 'America/Sao_Paulo'")
+		assert.Equal(t, "America/Sao_Paulo", query(t, duck, "SELECT current_setting('TimeZone') AS tz"))
+		got := query(t, duck, "SELECT '2026-01-01 00:07:00+00'::timestamptz::timestamp AS ts")
+		assert.Contains(t, got, "2025-12-31 21:07:00")
+	})
+}
+
 func TestStripSQLComments(t *testing.T) {
 	type testCase struct {
 		name     string

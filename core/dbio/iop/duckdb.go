@@ -732,6 +732,13 @@ func (duck *DuckDb) getSessionSettingsSQL() (sql string) {
 		sql += fmt.Sprintf("SET memory_limit = '%s';", limit)
 	}
 
+	// UTC by default: a TIMESTAMPTZ to TIMESTAMP cast must not use the local zone
+	timeZone := "UTC"
+	if val := duck.GetProp("timezone"); val != "" {
+		timeZone = val
+	}
+	sql += fmt.Sprintf("SET TimeZone = '%s';", strings.ReplaceAll(timeZone, "'", "''"))
+
 	// the 2.0 CLI prints log lines to stdout, which breaks the result parse
 	if duck.version >= 20000 {
 		sql += "SET logging_storage = 'memory';"

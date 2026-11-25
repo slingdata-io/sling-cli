@@ -4503,3 +4503,18 @@
     - 'SUCCESS: sqlite incremental file target keeps all rows'
   output_does_not_contain:
     - 'Row loss'
+
+# SLING-498: DuckDB sessions run in UTC. Timestamps must not shift by the local zone.
+- id: 971
+  name: 'DuckDB, partitioned file and DuckLake targets keep SQLite timestamps under a local time zone (SLING-498)'
+  run: 'sling run -d -p tests/pipelines/p.67.duckdb_utc_session_timestamps.yaml'
+  group: sqlite,duckdb
+  env:
+    TZ: America/Sao_Paulo
+  output_contains:
+    - 'SUCCESS: duckdb timestamps keep the source values'
+    - 'SUCCESS: file target partitions keep the source values'
+    - 'SUCCESS: ducklake incremental does not re-read rows'
+  output_does_not_contain:
+    - 'updated_at_year=2025'
+    - 'shifted'
