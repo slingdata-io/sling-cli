@@ -224,7 +224,6 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 		var pw *io.PipeWriter
 		reader3, pw = io.Pipe()
 		go func() {
-			defer pw.Close()
 			for scanner.Scan() {
 				lineByte := append(scanner.Bytes(), '\n')
 				// g.P(string(lineByte))
@@ -232,9 +231,9 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 					pw.Write(lineByte)
 				}
 			}
-			if scanner.Err() != nil {
-				g.LogError(g.Error(scanner.Err()))
-			}
+			// surface scan errors to the reader, otherwise it sees a clean EOF.
+			// A nil error closes the pipe normally.
+			pw.CloseWithError(scanner.Err())
 		}()
 	} else {
 		reader3 = reader2

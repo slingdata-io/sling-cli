@@ -402,3 +402,28 @@ func TestCSVSkipLines(t *testing.T) {
 	// asset row count
 	assert.Len(t, data.Rows, 6)
 }
+
+func TestCsvCarriageReturnLineTooLong(t *testing.T) {
+	// CR-only line endings go through a line scanner with a 64 KiB limit
+	input := "id,val\r1,a\r2," + strings.Repeat("x", 70*1024) + "\r3,c\r"
+
+	t.Run("ReadStream", func(t *testing.T) {
+		c := CSV{Reader: strings.NewReader(input), NoDebug: true}
+		_, err := c.Read()
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), bufio.ErrTooLong.Error())
+		}
+	})
+
+	t.Run("ConsumeCsvReader", func(t *testing.T) {
+		ds := NewDatastream(nil)
+		ds.SetConfig(map[string]string{"header": "true"})
+		err := ds.ConsumeCsvReader(strings.NewReader(input))
+		if err == nil {
+			_, err = ds.Collect(0)
+		}
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), bufio.ErrTooLong.Error())
+		}
+	})
+}
