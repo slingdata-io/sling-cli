@@ -489,6 +489,12 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 
 	switch cfg.Mode {
 	case IncrementalMode:
+		if srcDbProvided && cfg.TgtConn.Info().Type.IsFile() && os.Getenv("SLING_STATE") != "" {
+			if err = cfg.validateIncrementalFileTarget(); err != nil {
+				return
+			}
+		}
+
 		if cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
 			// use default keys if none are provided
 			if len(cfg.Source.PrimaryKey()) == 0 {
@@ -676,6 +682,18 @@ func (cfg *Config) validateFileTargetLimits() error {
 	opts := cfg.Target.Options
 	if g.PtrVal(opts.FileMaxRows) > 0 || g.PtrVal(opts.FileMaxBytes) > 0 {
 		return g.Error("file_max_rows and file_max_bytes are not supported with partitioned file targets. Remove the limit or the partition fields.")
+	}
+	return nil
+}
+
+// validateIncrementalFileTarget checks the rules of incremental runs to a file target
+// with state. The target needs partition fields and the source needs an update_key.
+func (cfg *Config) validateIncrementalFileTarget() error {
+	if len(iop.ExtractPartitionFields(cfg.TgtConn.URL())) == 0 {
+		return g.Error("writing to files incrementally needs partition fields, Please see https://docs.slingdata.io/examples/database-to-file")
+	}
+	if !cfg.Source.HasUpdateKey() {
+		return g.Error("writing to files incrementally needs an update_key")
 	}
 	return nil
 }

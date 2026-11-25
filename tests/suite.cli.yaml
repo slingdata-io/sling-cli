@@ -4544,11 +4544,11 @@
   env:
     STATE_SQLITE_980: 'sqlite:///tmp/sling_980/src.db'
     STATE_DUCK_980: 'duckdb:///tmp/sling_980/tgt.duckdb'
-    SLING_STATE: 'LOCAL/tmp/sling_980/state'
+    SLING_STATE: 'LOCAL/temp/sling_980/state'
   run: |
-    rm -rf /tmp/sling_980 && mkdir -p /tmp/sling_980
+    rm -rf /tmp/sling_980 temp/sling_980 && mkdir -p /tmp/sling_980
     sling run -d -r tests/replications/r.160.full_refresh_state_sqlite.yaml
-    rm -rf /tmp/sling_980
+    rm -rf /tmp/sling_980 temp/sling_980
   output_contains:
     - 'inserted 3 rows'
   output_does_not_contain:
@@ -4560,7 +4560,7 @@
   err: true
   env:
     SRC_STATE_981: 'sqlite:///tmp/sling_981/src.db'
-    SLING_STATE: 'LOCAL/tmp/sling_981/state'
+    SLING_STATE: 'LOCAL/temp/sling_981/state'
     SLING_CLI_TOKEN: ''
     SLING_PROJECT_TOKEN: ''
   run: |
@@ -4579,7 +4579,7 @@
   name: 'full-refresh with SLING_STATE and no CLI Pro token still runs (SLING-501)'
   env:
     SRC_STATE_982: 'sqlite:///tmp/sling_982/src.db'
-    SLING_STATE: 'LOCAL/tmp/sling_982/state'
+    SLING_STATE: 'LOCAL/temp/sling_982/state'
     SLING_CLI_TOKEN: ''
     SLING_PROJECT_TOKEN: ''
   run: |
@@ -4623,3 +4623,56 @@
     - 'files: 0'
   output_does_not_contain:
     - 'reading from source'
+
+# SLING-504: an incremental run to a file target checks the target rules before the read and the write.
+- id: 985
+  name: 'incremental file target without partition fields fails before the write (SLING-504)'
+  err: true
+  env:
+    SRC_FILE_985: 'sqlite:///tmp/sling_985/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_985/state'
+  run: |
+    rm -rf /tmp/sling_985 temp/sling_985 && mkdir -p /tmp/sling_985
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_FILE_985 --tgt-object main.inc_file_985 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_FILE_985 --src-stream main.inc_file_985 --tgt-object 'file://temp/sling_985/{run_timestamp}.parquet' --mode incremental --update-key update_dt || code=$?
+    echo "parquet files: $(find temp/sling_985 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_985 temp/sling_985
+    exit $code
+  output_contains:
+    - 'needs partition fields'
+    - 'parquet files: 0'
+
+- id: 986
+  name: 'incremental file target with an integer update key fails before the write (SLING-504)'
+  err: true
+  env:
+    SRC_FILE_986: 'sqlite:///tmp/sling_986/src.db'
+    SLING_STATE: 'LOCAL/temp/sling_986/state'
+  run: |
+    rm -rf /tmp/sling_986 temp/sling_986 && mkdir -p /tmp/sling_986
+    sling run --src-stream file://tests/files/test1.csv --tgt-conn SRC_FILE_986 --tgt-object main.inc_file_986 --mode full-refresh
+    code=0
+    sling run --src-conn SRC_FILE_986 --src-stream main.inc_file_986 --tgt-object 'file://temp/sling_986/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key id || code=$?
+    echo "parquet files: $(find temp/sling_986 -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf /tmp/sling_986 temp/sling_986
+    exit $code
+  output_contains:
+    - 'must be timestamp or date'
+    - 'parquet files: 0'
+
+- id: 987
+  name: 'incremental file target with partitions and a timestamp update key still runs (SLING-504)'
+  env:
+    SLING_STATE: 'LOCAL/temp/sling_987/state'
+  run: |
+    rm -rf /tmp/sling_987 temp/sling_987 && mkdir -p /tmp/sling_987
+    sling conns exec POSTGRES "drop table if exists public.inc_file_987; create table public.inc_file_987 (id int, ts timestamp); insert into public.inc_file_987 values (1, '2026-10-01 00:00:00'), (2, '2026-11-05 10:00:00')"
+    sling run --src-conn POSTGRES --src-stream public.inc_file_987 --tgt-object 'file://temp/sling_987/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key ts
+    sling run --src-conn POSTGRES --src-stream public.inc_file_987 --tgt-object 'file://temp/sling_987/{part_year}/{part_month}' --tgt-options '{format: parquet}' --mode incremental --update-key ts
+    echo "parquet files: $(find temp/sling_987 -name '*.parquet' | wc -l | tr -d ' ')"
+    sling conns exec POSTGRES "drop table if exists public.inc_file_987"
+    rm -rf /tmp/sling_987 temp/sling_987
+  output_contains:
+    - 'wrote 2 rows'
+    - 'parquet files: 2'

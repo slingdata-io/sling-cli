@@ -307,3 +307,37 @@ func TestValidateFileTargetLimits(t *testing.T) {
 	assert.NoError(t, newCfg("file://out/orders/", 100, 1000).validateFileTargetLimits())
 	assert.NoError(t, newCfg("file://out/orders.parquet", 100, 0).validateFileTargetLimits())
 }
+
+func TestValidateIncrementalFileTarget(t *testing.T) {
+	newCfg := func(url, updateKey string) *Config {
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal, Data: g.M("url", url)}
+		cfg.Source.UpdateKey = updateKey
+		return cfg
+	}
+
+	assert.ErrorContains(t, newCfg("file://out/{run_timestamp}.parquet", "updated_at").validateIncrementalFileTarget(), "needs partition fields")
+	assert.ErrorContains(t, newCfg("file://out/{part_year}/{part_month}", "").validateIncrementalFileTarget(), "needs an update_key")
+	assert.NoError(t, newCfg("file://out/{part_year}/{part_month}", "updated_at").validateIncrementalFileTarget())
+}
+
+func TestCheckIncrementalFileUpdateKey(t *testing.T) {
+	cols := iop.NewColumnsFromFields("id", "ts", "name")
+	cols[0].Type = iop.IntegerType
+	cols[1].Type = iop.TimestampType
+	cols[2].Type = iop.StringType
+	df := iop.NewDataflow()
+	df.Columns = cols
+
+	newTask := func(updateKey string) *TaskExecution {
+		cfg := &Config{}
+		cfg.TgtConn = connection.Connection{Type: dbio.TypeFileLocal}
+		cfg.Source.UpdateKey = updateKey
+		return &TaskExecution{Config: cfg}
+	}
+
+	assert.NoError(t, newTask("ts").checkIncrementalFileUpdateKey(df))
+	assert.ErrorContains(t, newTask("id").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
+	assert.ErrorContains(t, newTask("name").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
+	assert.ErrorContains(t, newTask("missing").checkIncrementalFileUpdateKey(df), "must be timestamp or date")
+}

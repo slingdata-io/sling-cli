@@ -17,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -424,6 +425,12 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	}
 	defer t.df.Close()
 
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = t.checkIncrementalFileUpdateKey(df); err != nil {
+			return err
+		}
+	}
+
 	if t.Config.Options.StdOut {
 		t.SetProgress("writing to target stream (stdout)")
 	} else {
@@ -450,6 +457,19 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	return
 
+}
+
+// checkIncrementalFileUpdateKey checks that the update key can set the partition
+// state, before the run writes a file.
+func (t *TaskExecution) checkIncrementalFileUpdateKey(df *iop.Dataflow) error {
+	if !t.Config.TgtConn.Type.IsFile() {
+		return nil
+	}
+	col := df.Columns.GetColumn(t.Config.Source.UpdateKey)
+	if col == nil || !(col.Type.IsDatetime() || col.Type.IsDate()) {
+		return g.Error("incremental/update column must be timestamp or date for writing to files")
+	}
+	return nil
 }
 
 func (t *TaskExecution) runFileToDB() (err error) {
