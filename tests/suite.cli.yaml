@@ -4518,3 +4518,22 @@
   output_does_not_contain:
     - 'updated_at_year=2025'
     - 'shifted'
+
+# SLING-505: a first load to a new DuckLake table logged "Catalog Error: Table ... does not exist".
+- id: 972
+  name: 'first DuckLake load to a new table does not log a catalog error (SLING-505)'
+  run: |
+    sling conns exec SQLITE "drop table if exists main.no_cat_err_505"
+    sling conns exec SQLITE "create table main.no_cat_err_505 (id integer primary key, name text, updated_at datetime)"
+    sling conns exec SQLITE "insert into main.no_cat_err_505 values (1, 'a', '2026-10-01 00:00:00'), (2, 'b', '2026-10-02 00:00:00')"
+    sling conns exec DUCKLAKE "drop table if exists main.no_cat_err_505"
+    sling run -d --src-conn SQLITE --src-stream main.no_cat_err_505 --tgt-conn DUCKLAKE --tgt-object main.no_cat_err_505 --mode full-refresh
+    sling conns exec DUCKLAKE "drop table if exists main.no_cat_err_505"
+    sling run -d --src-conn SQLITE --src-stream main.no_cat_err_505 --tgt-conn DUCKLAKE --tgt-object main.no_cat_err_505 --mode incremental --update-key updated_at
+    sling conns exec DUCKLAKE "drop table main.no_cat_err_505"
+    sling conns exec SQLITE "drop table main.no_cat_err_505"
+  group: sqlite,duckdb
+  output_contains:
+    - 'inserted 2 rows into "main"."no_cat_err_505"'
+  output_does_not_contain:
+    - 'Catalog Error'

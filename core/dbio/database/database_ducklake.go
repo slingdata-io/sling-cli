@@ -236,17 +236,25 @@ func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]st
 		return
 	}
 
-	// if no columns returned, use describe to get columns (especially for views)
+	// if no columns returned, use describe to get columns for views.
+	// a missing table is not a view: no describe, so no error is logged.
 	if len(data.Rows) == 0 && name == "columns" && tableName != "" {
-		view := Table{Schema: schemaName, Name: tableName, Dialect: dbio.TypeDbDuckLake}
-		cols, err := conn.duck.Describe("select * from " + view.FullName())
+		isView, err := conn.isView(schemaName, tableName)
 		if err != nil {
-			return data, g.Error(err, "could not describe "+view.FullName())
+			return data, g.Error(err, "could not get views")
 		}
 
-		data.Columns = iop.NewColumnsFromFields("column_name", "data_type", "precision", "scale")
-		for _, col := range cols {
-			data.Rows = append(data.Rows, []any{col.Name, col.DbType, col.DbPrecision, col.DbScale})
+		if isView {
+			view := Table{Schema: schemaName, Name: tableName, Dialect: dbio.TypeDbDuckLake}
+			cols, err := conn.duck.Describe("select * from " + view.FullName())
+			if err != nil {
+				return data, g.Error(err, "could not describe "+view.FullName())
+			}
+
+			data.Columns = iop.NewColumnsFromFields("column_name", "data_type", "precision", "scale")
+			for _, col := range cols {
+				data.Rows = append(data.Rows, []any{col.Name, col.DbType, col.DbPrecision, col.DbScale})
+			}
 		}
 	}
 
@@ -261,18 +269,11 @@ func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]st
 			viewName := strings.Trim(table, "'")
 
 			// check that it is a view
-			viewsData, err := conn.GetViews(schemaName)
+			isView, err := conn.isView(schemaName, viewName)
 			if err != nil {
 				return data, g.Error(err, "could not get views")
-			} else {
-				viewsData = viewsData.Pick("table_name")
-				viewNames := lo.Map(viewsData.ColValues(0), func(v any, i int) string {
-					return cast.ToString(v)
-				})
-
-				if !g.In(viewName, viewNames...) {
-					continue // not a view
-				}
+			} else if !isView {
+				continue
 			}
 
 			view := Table{Schema: schemaName, Name: viewName, Dialect: dbio.TypeDbDuckLake}
@@ -288,6 +289,20 @@ func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]st
 	}
 
 	return
+}
+
+// isView returns true if the named object of the schema is a view
+func (conn *DuckLakeConn) isView(schemaName, name string) (bool, error) {
+	viewsData, err := conn.GetViews(schemaName)
+	if err != nil {
+		return false, err
+	}
+
+	viewsData = viewsData.Pick("table_name")
+	viewNames := lo.Map(viewsData.ColValues(0), func(v any, i int) string {
+		return cast.ToString(v)
+	})
+	return g.In(name, viewNames...), nil
 }
 
 // Close closes the DuckLake connection
