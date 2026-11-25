@@ -109,3 +109,23 @@ func TestTaskStatusSnapshotGetRate(t *testing.T) {
 	assert.NotNil(t, st.EndTime)
 	assert.Same(t, task.StartTime, st.StartTime)
 }
+
+func TestIsFullRefreshCDC(t *testing.T) {
+	newTask := func(mode Mode, srcType dbio.Type, opts *CDCOptions) *TaskExecution {
+		cfg := &Config{Mode: mode, ReplicationStream: &ReplicationStreamConfig{CDCOptions: opts}}
+		cfg.SrcConn.Type = srcType
+		return &TaskExecution{Config: cfg}
+	}
+	set := &CDCOptions{RunMaxEvents: g.Ptr(10)}
+
+	t.Setenv("SLING_STATE", "LOCAL/state")
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbSQLite, &CDCOptions{}).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, &CDCOptions{}).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, nil).isFullRefreshCDC())
+	assert.True(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbSQLite, set).isFullRefreshCDC())
+	assert.False(t, newTask(IncrementalMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
+
+	t.Setenv("SLING_STATE", "")
+	assert.False(t, newTask(FullRefreshMode, dbio.TypeDbPostgres, set).isFullRefreshCDC())
+}

@@ -301,6 +301,11 @@ func (t Type) IsSQLServer() bool {
 	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbFabric)
 }
 
+// SupportsCDC returns true if the type can be a CDC source
+func (t Type) SupportsCDC() bool {
+	return t.IsMySQLLike() || t.IsPostgresLike() || t.IsSQLServer() || g.In(t, TypeDbOracle, TypeDbMongoDB)
+}
+
 // IsColumnStore is true for columnar engines where COUNT(*) is cheap
 // (metadata / projection). Row stores such as Postgres are false.
 func (t Type) IsColumnStore() bool {

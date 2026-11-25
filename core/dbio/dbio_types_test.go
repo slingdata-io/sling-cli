@@ -122,3 +122,12 @@ func TestExplainTemplatePresentForSQLDatabases(t *testing.T) {
 		assert.Contains(t, val, "{sql}", "%s core.explain must include {sql}", td.Value)
 	}
 }
+
+func TestTypeSupportsCDC(t *testing.T) {
+	for _, tp := range []Type{TypeDbPostgres, TypeDbMySQL, TypeDbMariaDB, TypeDbSQLServer, TypeDbOracle, TypeDbMongoDB} {
+		assert.True(t, tp.SupportsCDC(), tp)
+	}
+	for _, tp := range []Type{TypeDbSQLite, TypeDbDuckDb, TypeDbSnowflake} {
+		assert.False(t, tp.SupportsCDC(), tp)
+	}
+}

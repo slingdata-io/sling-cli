@@ -2106,6 +2106,11 @@ func (cc *ContinuousConfig) Resolve(tgtType dbio.Type, runMaxEvents int) (s Cont
 	return s, nil
 }
 
+// IsZero returns true if no option is set
+func (o *CDCOptions) IsZero() bool {
+	return o == nil || *o == CDCOptions{}
+}
+
 // SetDefaults sets default values for CDCOptions from a provided defaults CDCOptions
 func (o *CDCOptions) SetDefaults(cdcOptions CDCOptions) {
 	if o == nil {

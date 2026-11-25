@@ -4537,3 +4537,19 @@
     - 'inserted 2 rows into "main"."no_cat_err_505"'
   output_does_not_contain:
     - 'Catalog Error'
+
+# SLING-499: full-refresh with SLING_STATE and a source without CDC must not enter the CDC snapshot path.
+- id: 980
+  name: 'full-refresh with SLING_STATE on a SQLite source skips the CDC snapshot (SLING-499)'
+  env:
+    STATE_SQLITE_980: 'sqlite:///tmp/sling_980/src.db'
+    STATE_DUCK_980: 'duckdb:///tmp/sling_980/tgt.duckdb'
+    SLING_STATE: 'LOCAL/tmp/sling_980/state'
+  run: |
+    rm -rf /tmp/sling_980 && mkdir -p /tmp/sling_980
+    sling run -d -r tests/replications/r.160.full_refresh_state_sqlite.yaml
+    rm -rf /tmp/sling_980
+  output_contains:
+    - 'inserted 3 rows'
+  output_does_not_contain:
+    - 'CDC mode is currently'

@@ -535,9 +535,14 @@ func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
 	return g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet)
 }
 
-// isFullRefreshCDC means we should use CDC snapshot mode
+// isFullRefreshCDC means we should use CDC snapshot mode.
+// Needs explicit CDC options and a CDC-capable source.
 func (t *TaskExecution) isFullRefreshCDC() bool {
-	return t.Config.Mode == FullRefreshMode && t.Config.ReplicationStream != nil && t.Config.ReplicationStream.CDCOptions != nil && os.Getenv("SLING_STATE") != ""
+	return t.Config.Mode == FullRefreshMode &&
+		t.Config.ReplicationStream != nil &&
+		!t.Config.ReplicationStream.CDCOptions.IsZero() &&
+		t.Config.SrcConn.Type.SupportsCDC() &&
+		os.Getenv("SLING_STATE") != ""
 }
 
 // IsStateConfigured returns true iff the SLING_STATE environment variable is set.
