@@ -397,17 +397,15 @@ func (ggs *GoogleSheet) WriteSheet(shtName string, ds *Datastream, mode string) 
 		outRows = append([][]interface{}{header}, outRows...)
 	}
 
-	// g.Debug("cellRange: %s, outRows: %d, rows: %d", cellRange, len(outRows), len(rows))
-
-	// for overwrite, blank out the remaining rows
-	// TODO: what about the remaining columns (on the right)
-	if mode == "overwrite" && len(outRows) < len(rows)+1 {
-		for j := len(outRows); j <= len(rows); j++ {
-			row := make([]interface{}, len(ds.Columns))
-			for i := range row {
-				row[i] = ""
+	// An empty string clears a cell when updating Sheets values.
+	if mode == "overwrite" {
+		for i, oldRow := range rows {
+			if i == len(outRows) {
+				outRows = append(outRows, []interface{}{})
 			}
-			outRows = append(outRows, row)
+			for len(outRows[i]) < len(oldRow) {
+				outRows[i] = append(outRows[i], "")
+			}
 		}
 	}
 
