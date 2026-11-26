@@ -924,7 +924,7 @@ func (r *promChunkReader) Read() (rows [][]any, err error) {
 			}
 
 			for _, hist := range sample.Histograms {
-				for i, bucket := range hist.Histogram.Buckets {
+				for _, bucket := range hist.Histogram.Buckets {
 					row := make([]any, len(r.columns))
 					for k, v := range metricMap {
 						row[index(k)] = v
@@ -932,7 +932,7 @@ func (r *promChunkReader) Read() (rows [][]any, err error) {
 					row[index("timestamp")] = hist.Timestamp.Unix()
 					row[index("count")] = r.conn.toFloat(hist.Histogram.Count)
 					row[index("sum")] = r.conn.toFloat(hist.Histogram.Sum)
-					row[index("bucket_boundaries")] = i
+					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
 					row[index("bucket_count")] = r.conn.toFloat(bucket.Count)
 					row[index("bucket_lower")] = r.conn.toFloat(bucket.Lower)
 					row[index("bucket_upper")] = r.conn.toFloat(bucket.Upper)
