@@ -31,9 +31,11 @@ func NewExcelDataset(reader io.Reader, props map[string]string) (data Dataset, e
 	sheetName := props["sheet"]
 	sheetRange := ""
 
-	if sheetNameArr := strings.Split(sheetName, "!"); len(sheetNameArr) == 2 {
-		sheetName = sheetNameArr[0]
-		sheetRange = sheetNameArr[1]
+	// "!" separates the range, but is also valid in a sheet name
+	if i := strings.LastIndex(sheetName, "!"); i >= 0 {
+		if idx, _ := xls.File.GetSheetIndex(sheetName); idx == -1 {
+			sheetName, sheetRange = sheetName[:i], sheetName[i+1:]
+		}
 	}
 	if sheetName == "" {
 		sheetName = xls.Sheets[0] // if sheet is blank, use first

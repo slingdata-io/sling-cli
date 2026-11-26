@@ -173,6 +173,44 @@ func TestNewExcelDatasetMissingSheet(t *testing.T) {
 	}
 }
 
+func TestNewExcelDatasetSheetNameWithBang(t *testing.T) {
+	f := excelize.NewFile()
+	f.NewSheet("Sales!Current")
+	for _, sheet := range []string{"Sheet1", "Sales!Current"} {
+		f.SetCellValue(sheet, "A1", "id")
+		f.SetCellValue(sheet, "B1", "name")
+		f.SetCellValue(sheet, "A2", 1)
+		f.SetCellValue(sheet, "B2", "a")
+		f.SetCellValue(sheet, "A3", 2)
+		f.SetCellValue(sheet, "B3", "b")
+	}
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the number of rows returned includes the header row unless it is detected
+	read := func(sheet string) int {
+		data, err := NewExcelDataset(bytes.NewReader(buf.Bytes()), map[string]string{"sheet": sheet})
+		if err != nil {
+			t.Fatalf("unexpected error for sheet %q: %v", sheet, err)
+		}
+		return len(data.Rows)
+	}
+
+	full := read("Sheet1")
+	ranged := read("Sheet1!A1:B2")
+	if ranged >= full {
+		t.Fatalf("expected range to return fewer than %d rows, got %d", full, ranged)
+	}
+	if got := read("Sales!Current"); got != full {
+		t.Fatalf("expected %d rows for literal sheet name, got %d", full, got)
+	}
+	if got := read("Sales!Current!A1:B2"); got != ranged {
+		t.Fatalf("expected %d rows for range on sheet name with '!', got %d", ranged, got)
+	}
+}
+
 // Excel sheets hold at most excelize.TotalRows (1,048,576) rows, header
 // included. Rows past that were silently dropped and the write reported success.
 func TestExcelWriteSheetRowLimit(t *testing.T) {
