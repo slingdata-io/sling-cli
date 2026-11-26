@@ -23,6 +23,8 @@ jobs:
     if: (github.event.pull_request.merged == true && (! contains(github.event.head_commit.message, '[skip ci]'))) || github.event_name == 'workflow_dispatch'
     
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # github-tag-action creates the tag
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
       new_version: ${{ steps.tag_version.outputs.new_version }}

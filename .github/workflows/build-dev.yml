@@ -11,6 +11,8 @@ on:
 jobs:
   trigger:
     runs-on: ubuntu-latest
+    # the dispatch step uses REPO_ACCESS_TOKEN, the job token is not needed
+    permissions: {}
     steps:
 
       - name: Check Version Branch
