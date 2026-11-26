@@ -469,6 +469,37 @@ func TestParquetArrowWriterSmallInt(t *testing.T) {
 	assert.Nil(t, GetValueFromArrowArray(chunk, 1))
 }
 
+func TestParquetArrowWriterRejectsLateIntegerValues(t *testing.T) {
+	columns := NewColumns(Columns{
+		{Name: "id", Type: BigIntType},
+		{Name: "price", Type: BigIntType},
+		{Name: "qty", Type: SmallIntType},
+	}...)
+	var output bytes.Buffer
+	pw, err := NewParquetArrowWriter(&output, columns, compress.Codecs.Snappy)
+	require.NoError(t, err)
+	require.NoError(t, pw.WriteRow([]any{int64(1), int64(0), int16(2)}))
+
+	for _, tc := range []struct {
+		row    []any
+		column string
+	}{
+		{[]any{int64(2), "19.99", int16(2)}, "price"},
+		{[]any{int64(2), "A-1", int16(2)}, "price"},
+		{[]any{int64(2), 2.5, int16(2)}, "price"},
+		{[]any{int64(2), int64(0), int64(32768)}, "qty"},
+	} {
+		err := pw.WriteRow(tc.row)
+		require.ErrorContains(t, err, "column "+tc.column)
+		require.ErrorContains(t, err, "Set a wider type")
+	}
+	for _, builder := range pw.builders {
+		require.Equal(t, 1, builder.Len())
+	}
+	require.NoError(t, pw.WriteRow([]any{int64(3), "49", nil}))
+	require.NoError(t, pw.Close())
+}
+
 func TestParquetArrowWriterTimeAndUUID(t *testing.T) {
 	columns := NewColumns(
 		Columns{
