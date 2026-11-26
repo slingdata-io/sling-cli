@@ -242,7 +242,10 @@ See: https://docs.starrocks.io/docs/table_design/table_types/primary_key_table/`
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
-	batchSize := cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(ds.Columns)
+	batchSize := cast.ToInt64(conn.GetTemplateValue("variable.batch_values")) / int64(len(ds.Columns))
+	if limit := ds.Sp.Config.BatchLimit; limit > 0 && (batchSize <= 0 || limit < batchSize) {
+		batchSize = limit
+	}
 	context := ds.Context
 
 	// in case schema change is needed, cannot alter while inserting
@@ -330,7 +333,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
-			if len(batchRows) == batchSize {
+			if int64(len(batchRows)) == batchSize {
 				context.Wg.Write.Add()
 				select {
 				case <-context.Ctx.Done():
