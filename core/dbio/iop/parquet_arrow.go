@@ -3,6 +3,7 @@ package iop
 import (
 	"context"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"runtime/debug"
@@ -18,6 +19,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 )
 
 // ParquetArrowReader is a parquet reader object using arrow v18
@@ -304,6 +306,20 @@ func (p *ParquetArrowWriter) WriteRow(row []any) error {
 	if err := p.decimals.Check(row); err != nil {
 		return err
 	}
+	// Validate the entire row before appending to any column builder.
+	for i, val := range row {
+		if i >= len(p.builders) || val == nil {
+			continue
+		}
+		dtype := p.builders[i].Type()
+		switch dtype.ID() {
+		case arrow.INT16, arrow.INT32, arrow.INT64:
+			if !fitsParquetInteger(val, dtype.ID()) {
+				name := p.columns[i].Name
+				return g.Error("value %v of column %s does not fit %s. Set a wider type for the column, for example with `columns: {%s: string}`", val, name, dtype, name)
+			}
+		}
+	}
 	for i, val := range row {
 		if i >= len(p.builders) {
 			continue
@@ -327,6 +343,38 @@ func (p *ParquetArrowWriter) WriteRow(row []any) error {
 	}
 
 	return nil
+}
+
+func fitsParquetInteger(val any, dtype arrow.Type) bool {
+	n, err := cast.ToInt64E(val)
+	if err != nil {
+		return false
+	}
+
+	// cast accepts fractional floats and wraps unsigned values above MaxInt64.
+	switch v := val.(type) {
+	case float32:
+		if float64(v) >= 1<<63 || float64(v) != float64(n) {
+			return false
+		}
+	case float64:
+		if v >= 1<<63 || v != float64(n) {
+			return false
+		}
+	case uint, uint64:
+		if n < 0 {
+			return false
+		}
+	}
+
+	switch dtype {
+	case arrow.INT16:
+		return n >= math.MinInt16 && n <= math.MaxInt16
+	case arrow.INT32:
+		return n >= math.MinInt32 && n <= math.MaxInt32
+	default:
+		return true
+	}
 }
 
 func (p *ParquetArrowWriter) flushBatch() error {
