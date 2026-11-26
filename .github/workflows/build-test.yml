@@ -29,6 +29,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
       
       - uses: myrotvorets/set-commit-status-action@master
         with:
@@ -87,6 +89,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
       
       - uses: myrotvorets/set-commit-status-action@master
         with:
@@ -142,6 +146,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
 
       - name: Set up GoLang
         uses: actions/setup-go@v3
@@ -194,6 +200,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           path: sling-cli
+          persist-credentials: false
 
       - name: Checkout sling-python
         uses: actions/checkout@v2
@@ -201,6 +208,7 @@ jobs:
           repository: slingdata-io/sling-python
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
           path: sling-python
+          persist-credentials: false
 
       - uses: myrotvorets/set-commit-status-action@master
         with:
@@ -281,6 +289,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
 
       - uses: myrotvorets/set-commit-status-action@master
         if: always()

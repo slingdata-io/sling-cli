@@ -18,6 +18,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
         
       - name: List Connections
         uses: slingdata-io/sling-action@v1

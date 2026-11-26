@@ -11,6 +11,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
         
       - name: Get the version
         id: get_version
@@ -49,6 +51,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          persist-credentials: false
 
   test-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
@@ -59,6 +62,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          persist-credentials: false
 
   test-linux-amd64:
     # runs-on: ubuntu-20.04
@@ -70,5 +74,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          persist-credentials: false
           
   
