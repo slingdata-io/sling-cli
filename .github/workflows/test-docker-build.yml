@@ -23,12 +23,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v1.2.0
         with:
           fetch-depth: 0
       
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -45,7 +45,7 @@ jobs:
         run: bash scripts/ci/prep.mac.sh
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v3.2.0
         with:
           distribution: goreleaser
           version: 'v1.26.2'
@@ -61,13 +61,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v3.7.0
         with:
           fetch-depth: 0
           persist-credentials: false
       
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: true
@@ -95,7 +95,7 @@ jobs:
           .\scripts\ci\prep.win.ps1
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v3.2.0
         with:
           distribution: goreleaser
           version: 'v1.26.2'
@@ -112,13 +112,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v3.7.0
         with:
           fetch-depth: 0
           persist-credentials: false
       
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -139,7 +139,7 @@ jobs:
         run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v3.2.0
         with:
           distribution: goreleaser
           version: 'v1.26.2'
@@ -156,13 +156,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v3.7.0
         with:
           fetch-depth: 0
           persist-credentials: false
       
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -183,7 +183,7 @@ jobs:
         run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v3.2.0
         with:
           distribution: goreleaser
           version: 'v1.26.2'

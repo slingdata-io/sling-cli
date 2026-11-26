@@ -28,7 +28,7 @@ jobs:
 
       - name: Trigger Dev Build on Specific Branch
         if: steps.check_version_branch.outputs.eligible == 'true'
-        uses: benc-uk/workflow-dispatch@v1
+        uses: benc-uk/workflow-dispatch@v1.3.3
         with:
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
           repo: slingdata-io/sling

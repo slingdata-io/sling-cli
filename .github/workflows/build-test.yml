@@ -28,7 +28,7 @@ jobs:
       statuses: write # set-commit-status-action
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.8.0
         with:
           persist-credentials: false
       
@@ -39,7 +39,7 @@ jobs:
           status: pending
 
       - name: Set up GoLang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -88,7 +88,7 @@ jobs:
       statuses: write # set-commit-status-action
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.8.0
         with:
           persist-credentials: false
       
@@ -99,7 +99,7 @@ jobs:
           status: pending
 
       - name: Set up GoLang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -145,12 +145,12 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.8.0
         with:
           persist-credentials: false
 
       - name: Set up GoLang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -197,13 +197,13 @@ jobs:
 
     steps:
       - name: Checkout sling-cli
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.8.0
         with:
           path: sling-cli
           persist-credentials: false
 
       - name: Checkout sling-python
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.8.0
         with:
           repository: slingdata-io/sling-python
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
@@ -217,7 +217,7 @@ jobs:
           status: pending
 
       - name: Set up GoLang
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v3.6.1
         with:
           go-version: "1.25"
           cache: false
@@ -248,7 +248,7 @@ jobs:
           bash scripts/ci/build.linux.sh dev
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v2.3.4
         with:
           python-version: '3.9'
 
@@ -288,7 +288,7 @@ jobs:
       statuses: write # set-commit-status-action
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2.8.0
         with:
           persist-credentials: false
 
