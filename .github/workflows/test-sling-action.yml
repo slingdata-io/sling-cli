@@ -5,6 +5,9 @@ on:
   repository_dispatch:
     types: [test-sling-action]
 
+permissions:
+  contents: read
+
 jobs:
   test-sling-action:
     runs-on: ubuntu-latest

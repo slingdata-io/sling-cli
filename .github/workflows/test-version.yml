@@ -2,6 +2,9 @@ name: Test Version
 
 on: [workflow_dispatch]
 
+permissions:
+  contents: read
+
 jobs:
   test1:
     runs-on: [self-hosted, linux]

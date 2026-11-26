@@ -5,6 +5,9 @@ on:
   repository_dispatch:
     types: [build-test]
 
+permissions:
+  contents: read
+
 env:
   GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
   GOPRIVATE: github.com/slingdata-io/*
@@ -20,6 +23,9 @@ jobs:
 
     runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 60
+    permissions:
+      contents: read
+      statuses: write # set-commit-status-action
 
     steps:
       - uses: actions/checkout@v2
@@ -75,6 +81,9 @@ jobs:
 
     runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 40
+    permissions:
+      contents: read
+      statuses: write # set-commit-status-action
 
     steps:
       - uses: actions/checkout@v2
@@ -176,6 +185,9 @@ jobs:
 
     runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 30
+    permissions:
+      contents: read
+      statuses: write # set-commit-status-action
 
     steps:
       - name: Checkout sling-cli
@@ -263,6 +275,9 @@ jobs:
 
     runs-on: ubuntu-latest
     needs: [ build-test-sling, build-test-dbio, build-test-sling-cli, build-test-python ]
+    permissions:
+      contents: read
+      statuses: write # set-commit-status-action
 
     steps:
       - uses: actions/checkout@v2
