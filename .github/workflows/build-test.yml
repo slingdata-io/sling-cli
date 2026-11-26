@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
       
-      - uses: myrotvorets/set-commit-status-action@master
+      - uses: myrotvorets/set-commit-status-action@v2.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           sha: ${{ github.sha }}
@@ -92,7 +92,7 @@ jobs:
         with:
           persist-credentials: false
       
-      - uses: myrotvorets/set-commit-status-action@master
+      - uses: myrotvorets/set-commit-status-action@v2.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           sha: ${{ github.sha }}
@@ -210,7 +210,7 @@ jobs:
           path: sling-python
           persist-credentials: false
 
-      - uses: myrotvorets/set-commit-status-action@master
+      - uses: myrotvorets/set-commit-status-action@v2.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           sha: ${{ github.sha }}
@@ -272,7 +272,7 @@ jobs:
           SLING_USE_ARROW=false python -m pytest tests/test_sling_class.py -v
           SLING_USE_ARROW=true python -m pytest tests/test_sling_class.py -v
 
-      - uses: myrotvorets/set-commit-status-action@master
+      - uses: myrotvorets/set-commit-status-action@v2.0.1
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -292,7 +292,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: myrotvorets/set-commit-status-action@master
+      - uses: myrotvorets/set-commit-status-action@v2.0.1
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
