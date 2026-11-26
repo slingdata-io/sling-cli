@@ -455,6 +455,11 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
 		}
 
+		// A queued batch may already contain more rows than the target limit.
+		if limit := ds.Sp.Config.BatchLimit; limit > 0 && limit < int64(batchSize) {
+			batchSize = int(limit)
+		}
+
 		for row := range batch.Rows() {
 			batchRows = append(batchRows, row)
 			count++
