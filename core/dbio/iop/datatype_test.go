@@ -1669,3 +1669,25 @@ func TestFormatValueFirebird(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTypeToGeneralTimestampPrecisionWithTimeZone(t *testing.T) {
+	// Oracle (all_tab_columns) and Trino (information_schema) report the
+	// precision in the middle of the type name
+	cases := []struct {
+		connType   dbio.Type
+		nativeType string
+		expected   ColumnType
+	}{
+		{dbio.TypeDbOracle, "TIMESTAMP(6) WITH TIME ZONE", TimestampzType},
+		{dbio.TypeDbOracle, "TIMESTAMP(9) WITH LOCAL TIME ZONE", TimestampzType},
+		{dbio.TypeDbOracle, "TIMESTAMP(6)", TimestampType},
+		{dbio.TypeDbTrino, "timestamp(3) with time zone", TimestampzType},
+		{dbio.TypeDbTrino, "timestamp(3)", TimestampType},
+		{dbio.TypeDbPostgres, "timestamp(3) without time zone", TimestampType},
+	}
+	for _, c := range cases {
+		t.Run(string(c.connType)+" "+c.nativeType, func(t *testing.T) {
+			assert.Equal(t, c.expected, NativeTypeToGeneral("col", c.nativeType, c.connType))
+		})
+	}
+}

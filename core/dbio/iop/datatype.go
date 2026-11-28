@@ -1814,6 +1814,8 @@ remap:
 	return
 }
 
+var timestampPrecisionRegex = regexp.MustCompile(`^timestamp\s*\(\s*\d+\s*\)\s*(with)`)
+
 func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType ColumnType) {
 	dbType = strings.ToLower(dbType)
 
@@ -1875,6 +1877,8 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 	// to distinguish tinyint(1) (boolean) from tinyint (small integer).
 	dbTypeFull := strings.Split(dbType, "<")[0]
 	dbTypeFull = strings.TrimRight(dbTypeFull, " ")
+	// Oracle and Trino put the precision mid-name: "timestamp(6) with time zone"
+	dbTypeFull = timestampPrecisionRegex.ReplaceAllString(dbTypeFull, "timestamp ${1}")
 	if matchedType, ok := template.NativeTypeMap[dbTypeFull]; ok {
 		return ColumnType(matchedType)
 	}
