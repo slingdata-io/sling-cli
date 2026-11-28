@@ -521,6 +521,7 @@ native_type_map:
   raw: binary
   rowid: bigint
   timestamp: timestamp
+  "timestamp with local time zone": timestampz
   timestampdty: timestamp
   timestampltz_dty: timestampz
   timestamptz: timestampz
